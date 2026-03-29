@@ -41,7 +41,7 @@ client/
 2. Move WebSocket login/session flow and session token handling
 3. Replace placeholder world rendering with real map/entity rendering from server assets
 4. Keep debug-only tools behind a dev overlay instead of making them the whole client
-5. Continue UI phases from `client/CLIENT_ROADMAP.md`
+5. Continue UI phases from `CLIENT_ROADMAP.md` (at repo root)
 
 ## Commands
 

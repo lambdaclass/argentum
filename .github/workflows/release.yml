@@ -1,3 +1,6 @@
+# TODO: Release artifact is not self-contained — it needs resources/raw/ and
+# client/dist/ alongside the Elixir release. Before production use, either
+# bundle those into the tarball or make asset paths configurable via env vars.
 name: Release
 
 on:

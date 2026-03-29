@@ -436,9 +436,9 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 - Starting cities: Ullathorpe (map 1, 56/44), Nix (map 34, 40/86), Arghal (map 151, 52/36)
 
 ### Static data loading
-- `recursos/Dat/Razas.dat` → ETS race attribute modifiers
-- `recursos/Dat/Clases.dat` → ETS class modifiers (mana multiplier, HP range, skill points per level)
-- `recursos/Dat/obj.dat` → ETS item definitions
+- `resources/raw/Dat/Razas.dat` → ETS race attribute modifiers
+- `resources/raw/Dat/Clases.dat` → ETS class modifiers (mana multiplier, HP range, skill points per level)
+- `resources/raw/Dat/obj.dat` → ETS item definitions
 
 **VB6 reference:** `TCP.bas:ConnectNewUser()`, `CharacterPersistence.bas`, `Modulo_UsUaRiOs.bas`
 
@@ -677,7 +677,7 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 **Goal:** Players can cast offensive, healing, and buff/debuff spells.
 
 **What to build:**
-- Spell data: parse `recursos/Dat/Hechizos.dat` into ETS
+- Spell data: parse `resources/raw/Dat/Hechizos.dat` into ETS
 - Cast spell processed immediately in MapServer:
   - Mana check → cooldown check → skill check → target resolution → apply effect
 - Spell damage: `random(min, max) + 3% per level`, mages 0.7x modifier
@@ -715,7 +715,7 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 **Goal:** NPCs walk around, attack players, sell items, give quests.
 
 **What to build:**
-- NPC data: parse `recursos/Dat/npcs.dat` into ETS (stats, AI type, loot tables, hostility)
+- NPC data: parse `resources/raw/Dat/npcs.dat` into ETS (stats, AI type, loot tables, hostility)
 - NPC entities live in MapServer state: `%{npc_id => %NpcEntity{}}`
 - AI ticked every 100ms via `Process.send_after(self(), :npc_ai_tick, 100)`:
   - Static: don't move (shopkeepers, quest givers)
