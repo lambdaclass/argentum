@@ -9,10 +9,10 @@ import {
 } from "pixi.js";
 import type {
   ChatBubble,
-  ClientState,
   Direction,
   GroundObject,
-  WorldMapData
+  WorldMapData,
+  WorldState
 } from "../app/types";
 import {
   bodyGrhForDirection,
@@ -494,22 +494,78 @@ export class WorldRenderer {
   private resizeObserver: ResizeObserver | null = null;
   private renderedMap: WorldMapData | null = null;
   private renderedCatalog: AssetCatalog | null = null;
-  private renderedGroundObjects: ClientState["world"]["groundObjects"] | null = null;
+  private renderedGroundObjects: WorldState["groundObjects"] | null = null;
   private renderedShowTileDebug = false;
-  private lastState: ClientState | null = null;
+  private lastWorld: WorldState | null = null;
   private selfNode: CharacterNode | null = null;
   private otherNodes = new Map<number, CharacterNode>();
   private staticSceneCache = new Map<string, StaticSceneLayers>();
   private adjacentSceneWarmupTimer: number | null = null;
+  private transferInProgress = false;
+  /**
+   * Imperative fast path: immediately start a motion animation for the self
+   * character without waiting for React to commit state and trigger render().
+   * Called directly from SessionClient on predicted walks and blocked turns.
+   */
+  pushSelfMovement(x: number, y: number, walkIntervalMs: number, speed: number) {
+    if (!this.selfNode) {
+      return;
+    }
+
+    const durationMs = walkIntervalForSpeed(walkIntervalMs, speed);
+    animateMotionToTile(this.selfNode.motion, x, y, durationMs);
+    this.selfNode.desiredX = x;
+    this.selfNode.desiredY = y;
+
+    const now = performance.now();
+    const position = sampleMotion(this.selfNode.motion, now);
+    this.selfNode.motion.renderX = position.x;
+    this.selfNode.motion.renderY = position.y;
+    this.selfNode.container.x = position.x;
+    this.selfNode.container.y = position.y;
+  }
+
+  /**
+   * Imperative fast path: snap self character position without animation.
+   * Used for server corrections where the step wasn't in the pending queue.
+   */
+  snapSelfPosition(x: number, y: number) {
+    if (!this.selfNode) {
+      return;
+    }
+
+    snapMotionToTile(this.selfNode.motion, x, y);
+    this.selfNode.desiredX = x;
+    this.selfNode.desiredY = y;
+    this.selfNode.container.x = this.selfNode.motion.renderX;
+    this.selfNode.container.y = this.selfNode.motion.renderY;
+  }
+
+  setSelfHeading(heading: number) {
+    if (!this.selfNode || this.selfNode.heading === heading) {
+      return;
+    }
+
+    this.selfNode = this.rebuildCharacterVisual(this.selfNode, heading);
+  }
+
+  beginMapTransfer() {
+    this.transferInProgress = true;
+  }
+
+  finishMapTransfer() {
+    this.transferInProgress = false;
+  }
+
   private readonly tick = () => {
-    if (!this.lastState) {
+    if (!this.lastWorld) {
       return;
     }
 
     const now = performance.now();
     this.updateCharacterMotions(now);
-    this.updateCamera(this.lastState);
-    this.updateHud(this.lastState);
+    this.updateCamera(this.lastWorld);
+    this.updateHud(this.lastWorld);
   };
 
   mount(node: HTMLDivElement) {
@@ -572,7 +628,7 @@ export class WorldRenderer {
     this.canvas.style.height = `${Math.floor(VIEWPORT_HEIGHT * scale)}px`;
   }
 
-  render(state: ClientState, assetCatalog: AssetCatalog | null = null, showTileDebug = false) {
+  render(world: WorldState, assetCatalog: AssetCatalog | null = null, showTileDebug = false) {
     if (
       !this.worldLayer ||
       !this.belowCharactersLayer ||
@@ -586,33 +642,33 @@ export class WorldRenderer {
       return;
     }
 
-    this.lastState = state;
+    this.lastWorld = world;
     const assetCatalogChanged = assetCatalog !== this.renderedCatalog;
     if (assetCatalogChanged) {
       this.clearStaticSceneCache();
     }
 
     const staticSceneChanged =
-      state.world.map !== this.renderedMap ||
+      world.map !== this.renderedMap ||
       assetCatalogChanged ||
       showTileDebug !== this.renderedShowTileDebug;
 
     if (staticSceneChanged) {
-      this.renderedMap = state.world.map;
+      this.renderedMap = world.map;
       this.renderedCatalog = assetCatalog;
       this.renderedShowTileDebug = showTileDebug;
       this.renderedGroundObjects = null;
-      this.swapStaticScene(state.world.map, assetCatalog, showTileDebug);
-      this.scheduleAdjacentSceneWarmup(state.world.map, assetCatalog, showTileDebug);
+      this.swapStaticScene(world.map, assetCatalog, showTileDebug);
+      this.scheduleAdjacentSceneWarmup(world.map, assetCatalog, showTileDebug);
     }
 
-    if (state.world.groundObjects !== this.renderedGroundObjects || staticSceneChanged) {
-      this.renderedGroundObjects = state.world.groundObjects;
-      this.rebuildGroundObjects(state, assetCatalog);
+    if (world.groundObjects !== this.renderedGroundObjects || staticSceneChanged) {
+      this.renderedGroundObjects = world.groundObjects;
+      this.rebuildGroundObjects(world, assetCatalog);
     }
 
-    this.syncCharacters(state, assetCatalog);
-    this.rebuildChatBubbles(state.world.chatBubbles);
+    this.syncCharacters(world, assetCatalog);
+    this.rebuildChatBubbles(world.chatBubbles);
 
     this.tick();
   }
@@ -830,38 +886,38 @@ export class WorldRenderer {
     };
   }
 
-  private rebuildGroundObjects(state: ClientState, assetCatalog: AssetCatalog | null) {
+  private rebuildGroundObjects(world: WorldState, assetCatalog: AssetCatalog | null) {
     if (!this.dynamicObjectLayer) {
       return;
     }
 
     this.dynamicObjectLayer.removeChildren();
 
-    for (const object of Object.values(state.world.groundObjects)) {
+    for (const object of Object.values(world.groundObjects)) {
       this.dynamicObjectLayer.addChild(createObjectNode(assetCatalog, object));
     }
   }
 
-  private syncCharacters(state: ClientState, assetCatalog: AssetCatalog | null) {
+  private syncCharacters(world: WorldState, assetCatalog: AssetCatalog | null) {
     if (!this.charactersLayer) {
       return;
     }
 
     const now = performance.now();
-    const shouldSnapAll = state.world.mapStatus !== "ready";
+    const shouldSnapAll = world.mapStatus !== "ready" || this.transferInProgress;
 
-    if (state.world.self.x != null && state.world.self.y != null) {
+    if (world.self.x != null && world.self.y != null) {
       this.selfNode = this.syncCharacterNode(
         this.selfNode,
         "self",
-        state.world.self.name || "You",
-        state.world.self.bodyId,
-        state.world.self.headId,
-        state.world.self.heading,
-        state.world.self.speed,
-        state.world.self.x,
-        state.world.self.y,
-        state.world.walkIntervalMs,
+        world.self.name || "You",
+        world.self.bodyId,
+        world.self.headId,
+        world.self.heading,
+        world.self.speed,
+        world.self.x,
+        world.self.y,
+        world.walkIntervalMs,
         assetCatalog,
         now,
         shouldSnapAll
@@ -872,7 +928,7 @@ export class WorldRenderer {
     }
 
     const presentOthers = new Set<number>();
-    for (const other of Object.values(state.world.others)) {
+    for (const other of Object.values(world.others)) {
       presentOthers.add(other.charIndex);
       const current = this.otherNodes.get(other.charIndex) ?? null;
       const next = this.syncCharacterNode(
@@ -885,7 +941,7 @@ export class WorldRenderer {
         other.speed,
         other.x,
         other.y,
-        state.world.walkIntervalMs,
+        world.walkIntervalMs,
         assetCatalog,
         now,
         shouldSnapAll
@@ -994,6 +1050,41 @@ export class WorldRenderer {
     return next;
   }
 
+  private rebuildCharacterVisual(current: CharacterNode, heading: number) {
+    if (!this.charactersLayer) {
+      return current;
+    }
+
+    const visual = createCharacterVisual(
+      this.renderedCatalog,
+      current.name,
+      current.bodyId,
+      current.headId,
+      heading,
+      current.kind
+    );
+    const next: CharacterNode = {
+      ...current,
+      container: visual.container,
+      bodySprite: visual.bodySprite,
+      bodyFrames: visual.bodyFrames,
+      frameVelocity: visual.frameVelocity,
+      frameIndex: 0,
+      lastFrameAt: performance.now(),
+      heading
+    };
+
+    if (current.motion.initialized) {
+      next.container.x = current.motion.renderX;
+      next.container.y = current.motion.renderY;
+    }
+
+    const childIndex = this.charactersLayer.getChildIndex(current.container);
+    this.charactersLayer.removeChild(current.container);
+    this.charactersLayer.addChildAt(next.container, Math.min(childIndex, this.charactersLayer.children.length));
+    return next;
+  }
+
   private rebuildChatBubbles(chatBubbles: ChatBubble[]) {
     if (!this.chatLayer) {
       return;
@@ -1034,7 +1125,7 @@ export class WorldRenderer {
     }
   }
 
-  private updateCamera(state: ClientState) {
+  private updateCamera(world: WorldState) {
     if (!this.worldLayer) {
       return;
     }
@@ -1043,8 +1134,8 @@ export class WorldRenderer {
       this.selfNode?.motion.initialized
         ? { x: this.selfNode.motion.renderX, y: this.selfNode.motion.renderY }
         : {
-            x: worldX(state.world.self.x ?? 50),
-            y: worldY(state.world.self.y ?? 50)
+            x: worldX(world.self.x ?? 50),
+            y: worldY(world.self.y ?? 50)
           };
 
     const centerX = Math.round(VIEWPORT_WIDTH / 2 - playerPosition.x - TILE_SIZE / 2);
@@ -1054,20 +1145,20 @@ export class WorldRenderer {
     this.worldLayer.y = centerY;
   }
 
-  private updateHud(state: ClientState) {
+  private updateHud(world: WorldState) {
     if (!this.hudText) {
       return;
     }
 
-    const mapName = state.world.map?.name ?? "--";
-    const playerX = state.world.self.x ?? "--";
-    const playerY = state.world.self.y ?? "--";
+    const mapName = world.map?.name ?? "--";
+    const playerX = world.self.x ?? "--";
+    const playerY = world.self.y ?? "--";
 
     this.hudText.text =
-      `Map ${state.world.mapId ?? "--"} · ${mapName}\n` +
-      `Map state ${state.world.mapStatus}${state.world.mapError ? ` · ${state.world.mapError}` : ""}\n` +
-      `Pos ${playerX},${playerY} · CharIdx ${state.world.self.charIndex ?? "--"}\n` +
-      `Others ${Object.keys(state.world.others).length} · Ground ${Object.keys(state.world.groundObjects).length}`;
+      `Map ${world.mapId ?? "--"} · ${mapName}\n` +
+      `Map state ${world.mapStatus}${world.mapError ? ` · ${world.mapError}` : ""}\n` +
+      `Pos ${playerX},${playerY} · CharIdx ${world.self.charIndex ?? "--"}\n` +
+      `Others ${Object.keys(world.others).length} · Ground ${Object.keys(world.groundObjects).length}`;
   }
 
   destroy() {
@@ -1093,9 +1184,10 @@ export class WorldRenderer {
     this.renderedMap = null;
     this.renderedCatalog = null;
     this.renderedGroundObjects = null;
-    this.lastState = null;
+    this.lastWorld = null;
     this.selfNode = null;
     this.otherNodes.clear();
+    this.transferInProgress = false;
     this.clearStaticSceneCache();
   }
 }

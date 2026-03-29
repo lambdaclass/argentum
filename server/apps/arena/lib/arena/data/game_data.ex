@@ -13,7 +13,6 @@ defmodule Arena.Data.GameData do
   alias Arena.Data.ItemDef
 
   @table :arena_game_data
-  @dat_dir Application.compile_env(:arena, :dat_dir, "../resources/raw/Dat")
 
   # Race name mapping (VB6 uses Spanish names in Balance.dat)
   @race_names %{
@@ -175,7 +174,7 @@ defmodule Arena.Data.GameData do
   # ---- Private loaders ----
 
   defp load_balance_dat do
-    path = Path.join(@dat_dir, "Balance.dat")
+    path = Path.join(dat_dir(), "Balance.dat")
 
     case IniParser.parse_file(path) do
       {:ok, sections} ->
@@ -230,7 +229,7 @@ defmodule Arena.Data.GameData do
   end
 
   defp load_ciudades_dat do
-    path = Path.join(@dat_dir, "Ciudades.Dat")
+    path = Path.join(dat_dir(), "Ciudades.Dat")
 
     case IniParser.parse_file(path) do
       {:ok, sections} ->
@@ -265,7 +264,7 @@ defmodule Arena.Data.GameData do
   end
 
   defp load_obj_dat do
-    path = Path.join(@dat_dir, "obj.dat")
+    path = Path.join(dat_dir(), "obj.dat")
 
     case IniParser.parse_file(path) do
       {:ok, sections} ->
@@ -319,5 +318,9 @@ defmodule Arena.Data.GameData do
       {val, _} -> val
       :error -> 0
     end
+  end
+
+  defp dat_dir do
+    Application.get_env(:arena, :dat_dir, "../resources/raw/Dat")
   end
 end

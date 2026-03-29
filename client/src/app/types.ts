@@ -133,6 +133,8 @@ export interface ClientState {
   log: PacketLogEntry[];
 }
 
+export type WorldState = ClientState["world"];
+
 export interface CharacterCreatePacket {
   charIndex: number;
   bodyId: number;

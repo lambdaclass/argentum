@@ -17,7 +17,6 @@ defmodule Arena.Map.MapServer do
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
-  @maps_dir Application.compile_env(:arena, :maps_dir, "../resources/raw/Mapas")
   @map_width 100
   @map_height 100
   @autosave_interval_ms 60_000
@@ -140,7 +139,7 @@ defmodule Arena.Map.MapServer do
         @benchmark_map_id -> {:ok, benchmark_map_data()}
         @crowd_arena_map_id -> {:ok, crowd_arena_map_data()}
         _ ->
-          csm_path = Path.join(@maps_dir, "mapa#{map_id}.csm")
+          csm_path = Path.join(maps_dir(), "mapa#{map_id}.csm")
           CsmParser.parse_file(csm_path)
       end
 
@@ -1198,5 +1197,9 @@ defmodule Arena.Map.MapServer do
       y = :rand.uniform(@map_height)
       if TileGrid.is_walkable(map_id, x, y), do: {x, y}
     end)
+  end
+
+  defp maps_dir do
+    Application.get_env(:arena, :maps_dir, "../resources/raw/Mapas")
   end
 end

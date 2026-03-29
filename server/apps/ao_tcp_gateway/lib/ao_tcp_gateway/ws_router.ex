@@ -12,98 +12,7 @@ defmodule AoTcpGateway.WsRouter do
 
   use Plug.Router
 
-  @static_dir Application.compile_env(:ao_tcp_gateway, :static_dir,
-               Path.expand("../../priv/static", __DIR__))
-
-  # Repo root is 5 levels up from __DIR__ (server/apps/ao_tcp_gateway/lib/ao_tcp_gateway/)
-  @repo_root Path.expand("../../../../..", __DIR__)
-
-  @webclient_dir Application.compile_env(:ao_tcp_gateway, :webclient_dir,
-                   Path.join(@repo_root, "old/clients/webclient/ao-web-client/client"))
-
-  @graphics_dir Application.compile_env(:ao_tcp_gateway, :graphics_dir,
-                  Path.join(@repo_root, "resources/raw/Graficos"))
-
-  @char_graphics_dir Application.compile_env(:ao_tcp_gateway, :char_graphics_dir,
-                       Path.join(@repo_root, "resources/graficos_char"))
-
-  @indices_dir Application.compile_env(:ao_tcp_gateway, :indices_dir,
-                Path.join(@repo_root, "resources/indices"))
-
-  @midi_dir Application.compile_env(:ao_tcp_gateway, :midi_dir,
-             Path.join(@repo_root, "resources/raw/midi"))
-
-  @sounds_dir Application.compile_env(:ao_tcp_gateway, :sounds_dir,
-               Path.join(@repo_root, "resources/raw/SoundsOgg"))
-
-  @serious_client_dir Application.compile_env(:ao_tcp_gateway, :serious_client_dir,
-                        Path.join(@repo_root, "client/dist"))
-
-  @serious_client_assets_dir Path.join(@serious_client_dir, "assets")
-  @serious_client_data_dir Path.join(@serious_client_dir, "data")
-  @serious_client_pack_dir Path.join(@serious_client_data_dir, "packs")
-
-  # Serve legacy ao-web-client assets (css, js, fonts, imagenes, etc.)
-  plug Plug.Static,
-    at: "/",
-    from: @webclient_dir,
-    only: ~w(css js fonts imagenes graficos indices audio)
-
-  plug Plug.Static,
-    at: "/graficos",
-    from: @graphics_dir
-
-  plug Plug.Static,
-    at: "/graficos_char",
-    from: @char_graphics_dir
-
-  plug Plug.Static,
-    at: "/indices",
-    from: @indices_dir
-
-  plug Plug.Static,
-    at: "/midi",
-    from: @midi_dir
-
-  plug Plug.Static,
-    at: "/sounds",
-    from: @sounds_dir
-
-  plug Plug.Static,
-    at: "/client/assets",
-    from: @serious_client_assets_dir,
-    headers: [{"cache-control", "public, max-age=31536000, immutable"}]
-
-  plug Plug.Static,
-    at: "/client/data/packs",
-    from: @serious_client_pack_dir,
-    gzip: true,
-    headers: [{"cache-control", "public, max-age=31536000, immutable"}]
-
-  plug Plug.Static,
-    at: "/client/data",
-    from: @serious_client_data_dir,
-    only: ~w(map-pack.json),
-    headers: [{"cache-control", "public, max-age=60, must-revalidate"}]
-
-  plug Plug.Static,
-    at: "/data/packs",
-    from: @serious_client_pack_dir,
-    gzip: true,
-    headers: [{"cache-control", "public, max-age=31536000, immutable"}]
-
-  plug Plug.Static,
-    at: "/data",
-    from: @serious_client_data_dir,
-    only: ~w(map-pack.json),
-    headers: [{"cache-control", "public, max-age=60, must-revalidate"}]
-
-  # Serve gateway static assets (test client, fallback files)
-  plug Plug.Static,
-    at: "/",
-    from: @static_dir,
-    only: ~w()
-
+  plug :serve_runtime_static
   plug Plug.Parsers, parsers: [:json], json_decoder: Jason
   plug :match
   plug :dispatch
@@ -169,7 +78,7 @@ defmodule AoTcpGateway.WsRouter do
   end
 
   defp serve_serious_client(conn) do
-    path = Path.join(@serious_client_dir, "index.html")
+    path = Path.join(serious_client_dir(), "index.html")
 
     case File.read(path) do
       {:ok, body} ->
@@ -180,5 +89,98 @@ defmodule AoTcpGateway.WsRouter do
       {:error, _} ->
         send_resp(conn, 503, "Serious client not built. Run `make client.build`.")
     end
+  end
+
+  defp serve_runtime_static(conn, _opts) do
+    Enum.reduce_while(runtime_static_opts(), conn, fn opts, acc ->
+      served = Plug.Static.call(acc, Plug.Static.init(opts))
+
+      if served.halted do
+        {:halt, served}
+      else
+        {:cont, served}
+      end
+    end)
+  end
+
+  defp runtime_static_opts do
+    [
+      [at: "/", from: webclient_dir(), only: ~w(css js fonts imagenes graficos indices audio)],
+      [at: "/graficos", from: graphics_dir()],
+      [at: "/graficos_char", from: char_graphics_dir()],
+      [at: "/indices", from: indices_dir()],
+      [at: "/midi", from: midi_dir()],
+      [at: "/sounds", from: sounds_dir()],
+      [
+        at: "/client/assets",
+        from: serious_client_assets_dir(),
+        headers: [{"cache-control", "public, max-age=31536000, immutable"}]
+      ],
+      [
+        at: "/client/data/packs",
+        from: serious_client_pack_dir(),
+        gzip: true,
+        headers: [{"cache-control", "public, max-age=31536000, immutable"}]
+      ],
+      [
+        at: "/client/data",
+        from: serious_client_data_dir(),
+        only: ~w(map-pack.json),
+        headers: [{"cache-control", "public, max-age=60, must-revalidate"}]
+      ],
+      [
+        at: "/data/packs",
+        from: serious_client_pack_dir(),
+        gzip: true,
+        headers: [{"cache-control", "public, max-age=31536000, immutable"}]
+      ],
+      [
+        at: "/data",
+        from: serious_client_data_dir(),
+        only: ~w(map-pack.json),
+        headers: [{"cache-control", "public, max-age=60, must-revalidate"}]
+      ]
+    ]
+    |> Enum.filter(fn opts -> File.dir?(Keyword.fetch!(opts, :from)) end)
+  end
+
+  defp webclient_dir do
+    Application.get_env(:ao_tcp_gateway, :webclient_dir, Path.join(project_root(), "old/clients/webclient/ao-web-client/client"))
+  end
+
+  defp graphics_dir do
+    Application.get_env(:ao_tcp_gateway, :graphics_dir, Path.join(project_root(), "resources/raw/Graficos"))
+  end
+
+  defp char_graphics_dir do
+    Application.get_env(:ao_tcp_gateway, :char_graphics_dir, Path.join(project_root(), "resources/graficos_char"))
+  end
+
+  defp indices_dir do
+    Application.get_env(:ao_tcp_gateway, :indices_dir, Path.join(project_root(), "resources/indices"))
+  end
+
+  defp midi_dir do
+    Application.get_env(:ao_tcp_gateway, :midi_dir, Path.join(project_root(), "resources/raw/midi"))
+  end
+
+  defp sounds_dir do
+    Application.get_env(:ao_tcp_gateway, :sounds_dir, Path.join(project_root(), "resources/raw/SoundsOgg"))
+  end
+
+  defp serious_client_dir do
+    Application.get_env(:ao_tcp_gateway, :serious_client_dir, Path.join(project_root(), "client/dist"))
+  end
+
+  defp serious_client_assets_dir, do: Path.join(serious_client_dir(), "assets")
+  defp serious_client_data_dir, do: Path.join(serious_client_dir(), "data")
+  defp serious_client_pack_dir, do: Path.join(serious_client_data_dir(), "packs")
+
+  defp project_root do
+    System.get_env("ARGENTUM_PROJECT_ROOT") ||
+      case System.get_env("RELEASE_ROOT") do
+        nil -> Path.expand("..", File.cwd!())
+        release_root -> Path.expand("..", release_root)
+      end
   end
 end

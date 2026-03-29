@@ -1,15 +1,17 @@
 import { useEffect, useRef } from "react";
-import type { ClientState } from "../app/types";
+import type { WorldState } from "../app/types";
+import type { SessionClient } from "../net/SessionClient";
 import type { AssetCatalog } from "./assetCatalog";
 import { WorldRenderer } from "./WorldRenderer";
 
 interface WorldCanvasProps {
-  state: ClientState;
+  world: WorldState;
   assetCatalog: AssetCatalog | null;
   showTileDebug: boolean;
+  session: SessionClient;
 }
 
-export function WorldCanvas({ state, assetCatalog, showTileDebug }: WorldCanvasProps) {
+export function WorldCanvas({ world, assetCatalog, showTileDebug, session }: WorldCanvasProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<WorldRenderer | null>(null);
 
@@ -20,18 +22,20 @@ export function WorldCanvas({ state, assetCatalog, showTileDebug }: WorldCanvasP
 
     const renderer = new WorldRenderer();
     renderer.mount(rootRef.current);
-    renderer.render(state, assetCatalog, showTileDebug);
+    renderer.render(world, assetCatalog, showTileDebug);
     rendererRef.current = renderer;
+    session.setRenderer(renderer);
 
     return () => {
+      session.setRenderer(null);
       renderer.destroy();
       rendererRef.current = null;
     };
-  }, []);
+  }, [session]);
 
   useEffect(() => {
-    rendererRef.current?.render(state, assetCatalog, showTileDebug);
-  }, [assetCatalog, showTileDebug, state]);
+    rendererRef.current?.render(world, assetCatalog, showTileDebug);
+  }, [assetCatalog, showTileDebug, world]);
 
   return <div className="world-canvas" ref={rootRef} />;
 }

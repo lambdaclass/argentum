@@ -1,5 +1,7 @@
 import type { Dispatch } from "react";
 import type { ClientAction, ClientState, Direction, ServerPacket } from "../app/types";
+import type { WorldRenderer } from "../render/WorldRenderer";
+import { GameRuntime, type MovementDebugSnapshot } from "../runtime/GameRuntime";
 import { fetchMapData } from "./mapApi";
 import {
   encodeChangeHeading,
@@ -15,42 +17,56 @@ import {
   encodeWalk
 } from "../protocol/clientPackets";
 import { decodeServerPackets } from "../protocol/serverPackets";
-
-export interface MovementDebugSnapshot {
-  predictedX: number | null;
-  predictedY: number | null;
-  authorityX: number | null;
-  authorityY: number | null;
-  pendingSteps: number;
-  requestCount: number;
-  lastRequestAt: number | null;
-  correctionCount: number;
-  lastCorrectionAt: number | null;
-}
+export type { MovementDebugSnapshot } from "../runtime/GameRuntime";
 
 export class SessionClient {
   private ws: WebSocket | null = null;
   private readonly dispatch: Dispatch<ClientAction>;
   private getState: () => ClientState;
+  private readonly runtime: GameRuntime;
   private mapRequestId = 0;
-  private movementKeys: Direction[] = [];
-  private lastWalkAt = Number.NEGATIVE_INFINITY;
-  private pendingWalkSteps: Array<{ x: number; y: number; timeoutId: number }> = [];
   private selfCharIndex: number | null = null;
-  private authorityX: number | null = null;
-  private authorityY: number | null = null;
-  private requestCount = 0;
-  private lastRequestAt: number | null = null;
-  private correctionCount = 0;
-  private lastCorrectionAt: number | null = null;
-  private predictionEnabled = false;
-  private transferTargetMapId: number | null = null;
-  private transferBootstrapReceived = false;
-  private transferMapDataReady = false;
 
   constructor(dispatch: Dispatch<ClientAction>, getState: () => ClientState) {
     this.dispatch = dispatch;
     this.getState = getState;
+    this.runtime = new GameRuntime(
+      {
+        sendWalk: (direction) => {
+          this.sendRaw(encodeWalk(direction));
+          this.dispatch({ type: "log/add", level: "packet-out", message: `WALK ${direction}` });
+        },
+        sendHeading: (direction) => {
+          this.sendRaw(encodeChangeHeading(direction));
+          this.dispatch({
+            type: "log/add",
+            level: "packet-out",
+            message: `HEADING ${direction}`
+          });
+        },
+        requestPositionUpdate: () => {
+          this.sendRaw(encodeRequestPositionUpdate());
+          this.dispatch({
+            type: "log/add",
+            level: "packet-out",
+            message: "REQUEST_POSITION"
+          });
+        }
+      },
+      {
+        getState: () => this.getState(),
+        setSelfPosition: (x, y) => {
+          this.dispatch({ type: "world/setSelfPosition", x, y });
+        },
+        setSelfHeading: (heading) => {
+          this.dispatch({ type: "world/setSelfHeading", heading });
+        }
+      }
+    );
+  }
+
+  setRenderer(renderer: WorldRenderer | null) {
+    this.runtime.setRenderer(renderer);
   }
 
   connect(endpoint: string, characterName: string) {
@@ -59,11 +75,7 @@ export class SessionClient {
       return;
     }
 
-    this.resetDebugTracking();
-    this.predictionEnabled = false;
-    this.transferTargetMapId = null;
-    this.transferBootstrapReceived = false;
-    this.transferMapDataReady = false;
+    this.runtime.resetConnection();
     this.selfCharIndex = null;
     this.dispatch({ type: "connection/setStatus", status: "connecting" });
     this.dispatch({
@@ -116,14 +128,7 @@ export class SessionClient {
 
     this.ws.addEventListener("close", () => {
       this.mapRequestId += 1;
-      this.clearMovementKeys();
-      this.clearPendingWalkSteps();
-      this.lastWalkAt = Number.NEGATIVE_INFINITY;
-      this.resetDebugTracking();
-      this.predictionEnabled = false;
-      this.transferTargetMapId = null;
-      this.transferBootstrapReceived = false;
-      this.transferMapDataReady = false;
+      this.runtime.resetConnection();
       this.selfCharIndex = null;
       this.dispatch({ type: "connection/setStatus", status: "offline" });
       this.dispatch({ type: "session/resetRuntime" });
@@ -155,13 +160,7 @@ export class SessionClient {
 
   destroy() {
     this.mapRequestId += 1;
-    this.clearMovementKeys();
-    this.clearPendingWalkSteps();
-    this.resetDebugTracking();
-    this.predictionEnabled = false;
-    this.transferTargetMapId = null;
-    this.transferBootstrapReceived = false;
-    this.transferMapDataReady = false;
+    this.runtime.resetConnection();
     this.selfCharIndex = null;
     this.ws?.close();
   }
@@ -214,48 +213,27 @@ export class SessionClient {
   }
 
   requestPositionUpdate() {
-    this.requestCount += 1;
-    this.lastRequestAt = Date.now();
-    this.sendRaw(encodeRequestPositionUpdate());
-    this.dispatch({ type: "log/add", level: "packet-out", message: "REQUEST_POSITION" });
+    this.runtime.requestPositionUpdate();
   }
 
   getDebugSnapshot(): MovementDebugSnapshot {
-    const self = this.getState().world.self;
-
-    return {
-      predictedX: self.x,
-      predictedY: self.y,
-      authorityX: this.authorityX,
-      authorityY: this.authorityY,
-      pendingSteps: this.pendingWalkSteps.length,
-      requestCount: this.requestCount,
-      lastRequestAt: this.lastRequestAt,
-      correctionCount: this.correctionCount,
-      lastCorrectionAt: this.lastCorrectionAt
-    };
+    return this.runtime.getDebugSnapshot();
   }
 
   rememberMovementKey(direction: Direction) {
-    this.movementKeys = this.movementKeys.filter((key) => key !== direction);
-    this.movementKeys.push(direction);
+    this.runtime.rememberMovementKey(direction);
   }
 
   releaseMovementKey(direction: Direction) {
-    this.movementKeys = this.movementKeys.filter((key) => key !== direction);
+    this.runtime.releaseMovementKey(direction);
   }
 
   clearMovementKeys() {
-    this.movementKeys = [];
+    this.runtime.clearMovementKeys();
   }
 
   tick(now: number) {
-    const direction = this.activeMovementDirection();
-    if (!direction) {
-      return;
-    }
-
-    this.tryPredictedWalk(direction, now);
+    this.runtime.tick(now);
   }
 
   private sendRaw(payload: Uint8Array) {
@@ -281,12 +259,7 @@ export class SessionClient {
 
       this.dispatch({ type: "world/setMapData", map, groundObjects });
 
-      if (this.transferTargetMapId == null) {
-        this.predictionEnabled = true;
-      } else {
-        this.transferMapDataReady = true;
-        this.tryFinishTransferBootstrap(mapId);
-      }
+      this.runtime.onMapLoaded(mapId);
       this.dispatch({
         type: "log/add",
         level: "info",
@@ -298,136 +271,10 @@ export class SessionClient {
       }
 
       const message = error instanceof Error ? error.message : "Map fetch failed.";
-      this.predictionEnabled = false;
-      this.transferMapDataReady = false;
+      this.runtime.onMapLoadError();
       this.dispatch({ type: "world/setMapError", mapId, message });
       this.dispatch({ type: "log/add", level: "error", message });
     }
-  }
-
-  private clearPendingWalkSteps() {
-    for (const step of this.pendingWalkSteps) {
-      window.clearTimeout(step.timeoutId);
-    }
-    this.pendingWalkSteps = [];
-  }
-
-  private activeMovementDirection() {
-    return this.movementKeys.length > 0 ? this.movementKeys[this.movementKeys.length - 1] : null;
-  }
-
-  private currentWalkIntervalMs() {
-    const state = this.getState();
-    const speed = state.world.self.speed > 0 ? state.world.self.speed : 1;
-    return Math.max(40, state.world.walkIntervalMs / speed);
-  }
-
-  private tileIndex(x: number, y: number, width: number) {
-    return (y - 1) * width + (x - 1);
-  }
-
-  private isTileBlocked(x: number, y: number) {
-    const map = this.getState().world.map;
-    if (!map) {
-      return false;
-    }
-
-    if (x < 1 || x > map.width || y < 1 || y > map.height) {
-      return true;
-    }
-
-    return (map.tiles[this.tileIndex(x, y, map.width)] ?? 0) !== 0;
-  }
-
-  private predictedDestination(direction: Direction) {
-    const self = this.getState().world.self;
-    if (self.x == null || self.y == null) {
-      return null;
-    }
-
-    switch (direction) {
-      case "north":
-        return { x: self.x, y: self.y - 1, heading: 1 };
-      case "east":
-        return { x: self.x + 1, y: self.y, heading: 2 };
-      case "south":
-        return { x: self.x, y: self.y + 1, heading: 3 };
-      case "west":
-        return { x: self.x - 1, y: self.y, heading: 4 };
-    }
-  }
-
-  private pushPendingWalkStep(x: number, y: number) {
-    const timeoutMs = Math.max(300, Math.round(this.currentWalkIntervalMs() * 2));
-    const step = {
-      x,
-      y,
-      timeoutId: window.setTimeout(() => {
-        if (this.pendingWalkSteps.length > 0 && this.pendingWalkSteps[this.pendingWalkSteps.length - 1] === step) {
-          this.requestPositionUpdate();
-        }
-      }, timeoutMs)
-    };
-
-    this.pendingWalkSteps.push(step);
-  }
-
-  private consumePendingStep(x: number, y: number) {
-    for (let index = 0; index < this.pendingWalkSteps.length; index += 1) {
-      const step = this.pendingWalkSteps[index];
-      if (step.x === x && step.y === y) {
-        for (let consumed = 0; consumed <= index; consumed += 1) {
-          window.clearTimeout(this.pendingWalkSteps[consumed].timeoutId);
-        }
-        this.pendingWalkSteps = this.pendingWalkSteps.slice(index + 1);
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  private tryPredictedWalk(direction: Direction, now: number) {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      return false;
-    }
-
-    const world = this.getState().world;
-    if (!this.predictionEnabled || world.mapStatus !== "ready" || !world.map) {
-      return false;
-    }
-
-    if (now - this.lastWalkAt < this.currentWalkIntervalMs()) {
-      return false;
-    }
-
-    const destination = this.predictedDestination(direction);
-    if (!destination) {
-      return false;
-    }
-
-    if (this.isTileBlocked(destination.x, destination.y)) {
-      if (this.getState().world.self.heading !== destination.heading) {
-        this.sendHeading(direction);
-        this.dispatch({ type: "world/setSelfHeading", heading: destination.heading });
-      }
-      return false;
-    }
-
-    this.sendWalk(direction);
-    this.lastWalkAt = now;
-
-    if (this.getState().world.self.heading !== destination.heading) {
-      this.dispatch({ type: "world/setSelfHeading", heading: destination.heading });
-    }
-
-    this.dispatch({
-      type: "world/setSelfPosition",
-      x: destination.x,
-      y: destination.y
-    });
-    this.pushPendingWalkStep(destination.x, destination.y);
-    return true;
   }
 
   private handlePacket(packet: ServerPacket) {
@@ -443,40 +290,19 @@ export class SessionClient {
       case "change_map":
         {
           const hadActiveMap = this.getState().world.map != null;
-        this.clearPendingWalkSteps();
-        this.authorityX = null;
-        this.authorityY = null;
-        this.predictionEnabled = false;
-        this.transferTargetMapId = hadActiveMap ? packet.mapId : null;
-        this.transferBootstrapReceived = false;
-        this.transferMapDataReady = false;
-        this.dispatch({ type: "world/setMap", mapId: packet.mapId });
-        this.dispatch({
-          type: "log/add",
-          level: "packet-in",
-          message: `MAP ${packet.mapId}`
-        });
-        void this.loadMap(packet.mapId);
-        return;
+          this.runtime.onMapChange(packet.mapId, hadActiveMap);
+          this.dispatch({ type: "world/setMap", mapId: packet.mapId });
+          this.dispatch({
+            type: "log/add",
+            level: "packet-in",
+            message: `MAP ${packet.mapId}`
+          });
+          void this.loadMap(packet.mapId);
+          return;
         }
 
       case "pos_update":
-        if (
-          this.authorityX !== packet.x ||
-          this.authorityY !== packet.y ||
-          this.getState().world.self.x !== packet.x ||
-          this.getState().world.self.y !== packet.y
-        ) {
-          this.lastCorrectionAt = Date.now();
-          this.correctionCount += 1;
-        }
-
-        this.authorityX = packet.x;
-        this.authorityY = packet.y;
-        if (!this.consumePendingStep(packet.x, packet.y)) {
-          this.dispatch({ type: "world/setSelfPosition", x: packet.x, y: packet.y });
-        }
-        this.noteTransferBootstrap();
+        this.runtime.onServerPosition(packet.x, packet.y);
         return;
 
       case "user_char_index_in_server":
@@ -491,10 +317,6 @@ export class SessionClient {
 
       case "character_create": {
         const isSelf = this.selfCharIndex === packet.character.charIndex;
-        if (isSelf) {
-          this.authorityX = packet.character.x;
-          this.authorityY = packet.character.y;
-        }
         this.dispatch({
           type: "world/upsertCharacter",
           character: packet.character,
@@ -506,7 +328,7 @@ export class SessionClient {
           message: `CHAR_CREATE ${packet.character.name} (${packet.character.x},${packet.character.y})`
         });
         if (isSelf) {
-          this.noteTransferBootstrap();
+          this.runtime.onSelfCharacter(packet.character);
         }
         return;
       }
@@ -527,7 +349,7 @@ export class SessionClient {
 
       case "character_change_heading":
         if (packet.charIndex === this.getState().world.self.charIndex) {
-          this.dispatch({ type: "world/setSelfHeading", heading: packet.heading });
+          this.runtime.onSelfHeading(packet.heading);
         } else {
           this.dispatch({
             type: "world/setOtherHeading",
@@ -674,39 +496,5 @@ export class SessionClient {
     if (heading !== other.heading) {
       this.dispatch({ type: "world/setOtherHeading", charIndex, heading });
     }
-  }
-
-  private resetDebugTracking() {
-    this.authorityX = null;
-    this.authorityY = null;
-    this.requestCount = 0;
-    this.lastRequestAt = null;
-    this.correctionCount = 0;
-    this.lastCorrectionAt = null;
-  }
-
-  private tryFinishTransferBootstrap(mapId: number) {
-    if (this.transferTargetMapId == null || this.transferTargetMapId != mapId) {
-      return;
-    }
-
-    if (!this.transferMapDataReady || !this.transferBootstrapReceived) {
-      this.predictionEnabled = false;
-      return;
-    }
-
-    this.transferTargetMapId = null;
-    this.transferBootstrapReceived = false;
-    this.transferMapDataReady = false;
-    this.predictionEnabled = true;
-  }
-
-  private noteTransferBootstrap() {
-    if (this.transferTargetMapId == null) {
-      return;
-    }
-
-    this.transferBootstrapReceived = true;
-    this.tryFinishTransferBootstrap(this.transferTargetMapId);
   }
 }

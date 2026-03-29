@@ -11,6 +11,8 @@ import { HudPanel } from "../ui/HudPanel";
 import { InventoryPanel } from "../ui/InventoryPanel";
 import { PacketLogPanel } from "../ui/PacketLogPanel";
 import { ChatPanel } from "../ui/ChatPanel";
+import { CharacterCard } from "../ui/CharacterCard";
+import { WorldStatusPanel } from "../ui/WorldStatusPanel";
 
 const MOVE_KEYS: Record<string, Direction> = {
   ArrowUp: "north",
@@ -426,9 +428,10 @@ export function App() {
             {assetStatus === "ready" && mapPackStatus === "ready" ? (
               <>
                 <WorldCanvas
-                  state={state}
+                  world={state.world}
                   assetCatalog={assetCatalog}
                   showTileDebug={showTileDebug}
+                  session={session}
                 />
                 {worldOverlay ? (
                   <div className="world-overlay-state">
@@ -479,16 +482,23 @@ export function App() {
         </section>
       </main>
 
-      <aside className="side-panel side-panel-right">
-        <section className="panel sidebar-tabs-panel">
+      <aside className="side-panel side-panel-right game-sidebar">
+        <CharacterCard
+          canConnect={assetStatus === "ready" && mapPackStatus === "ready"}
+          state={state}
+          onConnect={() => session.connect(state.connection.endpoint, state.connection.characterName)}
+          onDisconnect={() => session.disconnect()}
+        />
+
+        <section className="panel sidebar-workbench">
           <div className="panel-header">
             <div>
-              <p className="eyebrow">Sidebar</p>
+              <p className="eyebrow">Workbench</p>
               <h2>Panels</h2>
             </div>
             <span className="panel-tag">Tabbed</span>
           </div>
-          <div className="sidebar-tabs">
+          <div className="sidebar-tabs sidebar-tabs-tight">
             <button
               className={`ghost-button ${activeRightTab === "session" ? "tab-active" : ""}`}
               onClick={() => setActiveRightTab("session")}
@@ -525,88 +535,91 @@ export function App() {
               Debug
             </button>
           </div>
+
+          <div className="sidebar-tab-body">
+            {activeRightTab === "session" ? (
+              <SessionPanel
+                assetError={assetError}
+                assetStatus={assetStatus}
+                canConnect={assetStatus === "ready" && mapPackStatus === "ready"}
+                state={state}
+                title={title}
+                showTileDebug={showTileDebug}
+                onEndpointChange={(endpoint) =>
+                  dispatch({ type: "connection/setEndpoint", endpoint })
+                }
+                onCharacterNameChange={(characterName) =>
+                  dispatch({ type: "connection/setCharacterName", characterName })
+                }
+                onConnect={() => session.connect(state.connection.endpoint, state.connection.characterName)}
+                onDisconnect={() => session.disconnect()}
+                onForgetSession={() =>
+                  dispatch({ type: "connection/setCredentials", credentials: null })
+                }
+              />
+            ) : null}
+
+            {activeRightTab === "hud" ? <HudPanel state={state} /> : null}
+
+            {activeRightTab === "inventory" ? (
+              showInventory ? (
+                <InventoryPanel
+                  assetCatalog={assetCatalog}
+                  state={state}
+                  onSelectSlot={(slotIndex) => dispatch({ type: "inventory/selectSlot", slotIndex })}
+                  onEquip={(slotIndex) => session.sendEquip(slotIndex)}
+                  onUse={(slotIndex) => session.sendUse(slotIndex)}
+                  onDrop={(slotIndex, amount) => session.sendDrop(slotIndex, amount)}
+                />
+              ) : (
+                <section className="panel">
+                  <div className="panel-header">
+                    <h2>Inventory</h2>
+                    <span className="panel-tag">Hidden</span>
+                  </div>
+                  <p className="panel-copy compact">
+                    Press <code>I</code> to show the 24-slot inventory panel.
+                  </p>
+                </section>
+              )
+            ) : null}
+
+            {activeRightTab === "chat" ? (
+              <ChatPanel
+                onSend={(message) => session.sendChat(message)}
+                onPickUp={() => session.sendPickUp()}
+                onRequestPosition={() => session.requestPositionUpdate()}
+              />
+            ) : null}
+
+            {activeRightTab === "debug" ? (
+              <>
+                {showMoveDebug ? (
+                  <section className="panel">
+                    <div className="panel-header">
+                      <h2>Movement Debug</h2>
+                      <span className="panel-tag">F2</span>
+                    </div>
+                    <pre className="debug-panel">{moveDebugText}</pre>
+                  </section>
+                ) : (
+                  <section className="panel">
+                    <div className="panel-header">
+                      <h2>Movement Debug</h2>
+                      <span className="panel-tag">F2</span>
+                    </div>
+                    <p className="panel-copy compact">
+                      Press <code>F2</code> to show the movement debug panel.
+                    </p>
+                  </section>
+                )}
+                <PacketLogPanel state={state} onClear={() => dispatch({ type: "log/clear" })} />
+              </>
+            ) : null}
+          </div>
         </section>
 
-        {activeRightTab === "session" ? (
-          <SessionPanel
-            assetError={assetError}
-            assetStatus={assetStatus}
-            canConnect={assetStatus === "ready" && mapPackStatus === "ready"}
-            state={state}
-            title={title}
-            showTileDebug={showTileDebug}
-            onEndpointChange={(endpoint) =>
-              dispatch({ type: "connection/setEndpoint", endpoint })
-            }
-            onCharacterNameChange={(characterName) =>
-              dispatch({ type: "connection/setCharacterName", characterName })
-            }
-            onConnect={() => session.connect(state.connection.endpoint, state.connection.characterName)}
-            onDisconnect={() => session.disconnect()}
-            onForgetSession={() => dispatch({ type: "connection/setCredentials", credentials: null })}
-          />
-        ) : null}
-
-        {activeRightTab === "hud" ? <HudPanel state={state} /> : null}
-
-        {activeRightTab === "inventory" ? (
-          showInventory ? (
-            <InventoryPanel
-              assetCatalog={assetCatalog}
-              state={state}
-              onSelectSlot={(slotIndex) => dispatch({ type: "inventory/selectSlot", slotIndex })}
-              onEquip={(slotIndex) => session.sendEquip(slotIndex)}
-              onUse={(slotIndex) => session.sendUse(slotIndex)}
-              onDrop={(slotIndex, amount) => session.sendDrop(slotIndex, amount)}
-            />
-          ) : (
-            <section className="panel">
-              <div className="panel-header">
-                <h2>Inventory</h2>
-                <span className="panel-tag">Hidden</span>
-              </div>
-              <p className="panel-copy compact">
-                Press <code>I</code> to show the 24-slot inventory panel.
-              </p>
-            </section>
-          )
-        ) : null}
-
-        {activeRightTab === "chat" ? (
-          <ChatPanel
-            onSend={(message) => session.sendChat(message)}
-            onPickUp={() => session.sendPickUp()}
-            onRequestPosition={() => session.requestPositionUpdate()}
-          />
-        ) : null}
-
-        {activeRightTab === "debug" ? (
-          <>
-            {showMoveDebug ? (
-              <section className="panel">
-                <div className="panel-header">
-                  <h2>Movement Debug</h2>
-                  <span className="panel-tag">F2</span>
-                </div>
-                <pre className="debug-panel">{moveDebugText}</pre>
-              </section>
-            ) : (
-              <section className="panel">
-                <div className="panel-header">
-                  <h2>Movement Debug</h2>
-                  <span className="panel-tag">F2</span>
-                </div>
-                <p className="panel-copy compact">
-                  Press <code>F2</code> to show the movement debug panel.
-                </p>
-              </section>
-            )}
-            <PacketLogPanel
-              state={state}
-              onClear={() => dispatch({ type: "log/clear" })}
-            />
-          </>
-        ) : null}
+        <WorldStatusPanel state={state} />
       </aside>
     </div>
   );

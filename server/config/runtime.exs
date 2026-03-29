@@ -1,5 +1,37 @@
 import Config
 
+project_root =
+  System.get_env("ARGENTUM_PROJECT_ROOT") ||
+    case System.get_env("RELEASE_ROOT") do
+      nil -> Path.expand("..", File.cwd!())
+      release_root -> Path.expand("..", release_root)
+    end
+
+resources_root =
+  System.get_env("ARGENTUM_RESOURCES_DIR") ||
+    Path.join(project_root, "resources")
+
+client_root =
+  System.get_env("ARGENTUM_CLIENT_DIR") ||
+    Path.join(project_root, "client")
+
+old_root =
+  System.get_env("ARGENTUM_OLD_DIR") ||
+    Path.join(project_root, "old")
+
+config :arena,
+  dat_dir: Path.join(resources_root, "raw/Dat"),
+  maps_dir: Path.join(resources_root, "raw/Mapas")
+
+config :ao_tcp_gateway,
+  webclient_dir: Path.join(old_root, "clients/webclient/ao-web-client/client"),
+  graphics_dir: Path.join(resources_root, "raw/Graficos"),
+  char_graphics_dir: Path.join(resources_root, "graficos_char"),
+  indices_dir: Path.join(resources_root, "indices"),
+  midi_dir: Path.join(resources_root, "raw/midi"),
+  sounds_dir: Path.join(resources_root, "raw/SoundsOgg"),
+  serious_client_dir: Path.join(client_root, "dist")
+
 ############################
 # App configuration: arena #
 ############################
