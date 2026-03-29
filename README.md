@@ -1,6 +1,28 @@
-# Argentum Online — Elixir Server
+# Argentum Online
 
-Rewrite of the Argentum Online VB6 MMORPG server in Elixir. The original server is ~93,000 lines of VB6 across 50+ modules; this implementation targets ~12,000 lines of Elixir.
+Rewrite of the Argentum Online VB6 MMORPG in Elixir (server) and TypeScript (web client). The original server is ~93,000 lines of VB6 across 50+ modules; this implementation targets ~12,000 lines of Elixir.
+
+## Repository Structure
+
+```
+argentum/
+├── server/              # Elixir umbrella — game server
+│   ├── apps/
+│   │   ├── arena/       # Game logic, MapServer, entity state, Rust NIF
+│   │   ├── ao_tcp_gateway/  # TCP + WebSocket networking, AO20 protocol
+│   │   ├── ao_protocol/ # Binary packet encode/decode
+│   │   └── game_backend/    # Ecto schemas, DB persistence
+│   ├── scripts/
+│   └── Makefile
+├── client/              # Vite + TypeScript + React + Pixi.js web client
+├── resources/
+│   ├── raw/             # VB6 assets (git submodule → ao-org/Recursos.git)
+│   ├── indices/         # Generated sprite index JSONs
+│   └── graficos_char/   # Generated character sprite PNGs
+├── old/                 # Original VB6 source + old clients (gitignored)
+├── SERVER_ROADMAP.md
+└── CLIENT_ROADMAP.md
+```
 
 ## Architecture
 
@@ -17,7 +39,7 @@ Rewrite of the Argentum Online VB6 MMORPG server in Elixir. The original server 
 - **Periodic timers** handle background-only work: NPC AI (100ms), respawns, buff decay, regen, hunger/thirst drain, autosave.
 - **DB is authoritative only when the player is offline.** Periodic snapshots while online, final save on logout.
 
-See [SERVER_ROADMAP.md](SERVER_ROADMAP.md) for the full implementation plan.
+See [SERVER_ROADMAP.md](SERVER_ROADMAP.md) and [CLIENT_ROADMAP.md](CLIENT_ROADMAP.md) for the full implementation plans.
 
 ## Current State
 
@@ -100,7 +122,7 @@ The grid is maintained inline during movement: `grid_remove(old_x, old_y)` then 
 | Memory | 5.7 GB | 178 MB |
 | RTT p50 | 156ms | 0ms |
 
-Global is unplayable at 1,000 players. AoI grid handles it with room to spare. Full results in [`docs/benchmark_visibility_2026_03_28.md`](docs/benchmark_visibility_2026_03_28.md).
+Global is unplayable at 1,000 players. AoI grid handles it with room to spare. Full results in [`server/docs/benchmark_visibility_2026_03_28.md`](server/docs/benchmark_visibility_2026_03_28.md).
 
 ### Single-node improvements still available
 
@@ -155,28 +177,27 @@ Requires [Nix](https://nixos.org/download) + [devenv](https://devenv.sh/getting-
 devenv provides PostgreSQL 16, Elixir 1.16, Erlang/OTP 26, Rust, and Node.js — no manual installation needed.
 
 ```bash
-# Start services (PostgreSQL) in background
-devenv up -d
-
 # Enter dev shell
 devenv shell
 
 # First time: install deps, create DB, and run
+cd server
 make start
 
 # Subsequent runs (DB already exists)
 make run
 ```
 
-Other useful targets:
+Other useful targets (run from `server/`):
 
 ```bash
-make test       # run all tests
-make check      # format + credo
-make console    # iex -S mix
-make client.dev # run the new Vite web client on :5173
-make clean      # remove build artifacts
-make purge      # full reset (devenv + _build + deps)
+make test          # run all tests
+make check         # format + credo
+make console       # iex -S mix
+make client.dev    # run the Vite web client on :5173
+make client.build  # build web client (served at /client/)
+make clean         # remove build artifacts
+make purge         # full reset (devenv + _build + deps)
 ```
 
 > **Without nix:** Install Elixir, Erlang, Rust, and PostgreSQL manually (see `.tool-versions` for versions). Alternatively, `docker-compose up -d postgres` provides just the database.
@@ -184,41 +205,7 @@ make purge      # full reset (devenv + _build + deps)
 ### Connect
 
 - **TCP client (AO20 protocol):** connect to `localhost:7666`
-- **WebSocket client:** open `http://localhost:7667/test_client.html`
-- **Serious web client:** run `make client.build`, then open `http://localhost:7667/client/`
+- **WebSocket debug client:** open `http://localhost:7667/test_client.html`
+- **Web client:** run `make client.build`, then open `http://localhost:7667/client/`
 - **Map data API:** `http://localhost:7667/api/map/1`
-- **Standalone web client scaffold:** see [`client/README.md`](client/README.md)
-  - `nix develop --command make client.dev`
-
-## Project Structure
-
-```
-apps/
-├── arena/              # Game logic
-│   ├── lib/arena/
-│   │   ├── map/        # MapServer, CsmParser
-│   │   └── ...
-│   └── native/tile_grid/  # Rust NIF for tile collision
-├── ao_tcp_gateway/     # TCP + WebSocket networking
-│   ├── lib/ao_tcp_gateway/
-│   │   ├── tcp_handler.ex
-│   │   ├── ws_handler.ex
-│   │   ├── ws_router.ex
-│   │   └── packet_*.ex
-│   └── priv/static/    # Web client, sprites, indices
-├── game_backend/       # Ecto schemas, persistence
-└── ...
-client/                 # Standalone web client (Vite + TypeScript + React + Pixi)
-```
-
-## Umbrella Apps
-
-- **arena** — MapServer, entity state, gameplay logic, combat formulas, NPC AI, Rust NIF for tile collision
-- **ao_tcp_gateway** — TCP and WebSocket transport, AO20 binary protocol encode/decode, static debug client assets
-- **game_backend** — Ecto schemas, database persistence, migrations
-
-## Web Clients
-
-- [`apps/ao_tcp_gateway/priv/static/test_client.html`](apps/ao_tcp_gateway/priv/static/test_client.html) remains the debug/protocol fallback client.
-- [`client/`](client/) is the new standalone `Vite + TypeScript + React + Pixi` web client where the serious browser client should grow.
-- After `make client.build`, the Elixir gateway serves the web client at `http://localhost:4001/client/`.
+- **Standalone client dev:** `make client.dev` (Vite on `:5173`)
