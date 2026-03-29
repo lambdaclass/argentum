@@ -1,6 +1,5 @@
 # Old VB6 source and clients (large, not needed in repo)
-/old_server/
-/old_clients/
+/old/
 
 # OS
 .DS_Store

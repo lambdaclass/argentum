@@ -19,7 +19,7 @@ defmodule AoTcpGateway.WsRouter do
   @repo_root Path.expand("../../../../..", __DIR__)
 
   @webclient_dir Application.compile_env(:ao_tcp_gateway, :webclient_dir,
-                   Path.join(@repo_root, "old_clients/webclient/ao-web-client/client"))
+                   Path.join(@repo_root, "old/clients/webclient/ao-web-client/client"))
 
   @graphics_dir Application.compile_env(:ao_tcp_gateway, :graphics_dir,
                   Path.join(@repo_root, "resources/raw/Graficos"))
