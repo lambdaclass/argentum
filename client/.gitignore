@@ -1,0 +1,6 @@
+node_modules
+dist
+public/data/maps.pack
+public/data/map-pack.json
+public/data/packs/*.pack
+public/data/packs/*.pack.gz

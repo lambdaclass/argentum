@@ -1,0 +1,12 @@
+[package]
+name = "tile_grid"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "tile_grid"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+rustler = "0.37"

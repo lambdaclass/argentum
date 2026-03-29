@@ -1,0 +1,129 @@
+name: Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      visibility_mode:
+        description: Visibility mode to benchmark
+        required: true
+        default: aoi_grid
+        type: choice
+        options:
+          - aoi_grid
+          - aoi_scan
+          - global
+      scenario:
+        description: Benchmark scenario
+        required: true
+        default: world_spread
+        type: choice
+        options:
+          - world_spread
+          - world_idle
+          - hot_spread
+          - hot_dense
+          - hot_saturated
+          - crowd
+          - crowd_saturated
+      count:
+        description: Number of bots
+        required: true
+        default: "1000"
+        type: string
+      duration:
+        description: Sample duration in seconds
+        required: true
+        default: "30"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: self-hosted
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: server
+
+    env:
+      AO_VISIBILITY_MODE: ${{ inputs.visibility_mode }}
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Elixir and Erlang
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: 1.16.3
+          otp-version: 26.2.5.5
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            server/deps
+            server/_build
+            ~/.hex
+            ~/.mix
+          key: ${{ runner.os }}-bench-mix-${{ hashFiles('server/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bench-mix-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Verify PostgreSQL availability
+        run: |
+          if command -v pg_isready >/dev/null 2>&1; then
+            pg_isready -h 127.0.0.1 -p 5432 -U postgres
+          else
+            echo "pg_isready not found; benchmark runner must provide PostgreSQL on localhost:5432"
+          fi
+
+      - name: Prepare benchmark database
+        run: |
+          mix ecto.create || true
+          mix ecto.migrate
+
+      - name: Compile
+        run: mix compile
+
+      - name: Run benchmark
+        run: |
+          mkdir -p benchmark-artifacts
+          mix bench.visibility \
+            --scenario "${{ inputs.scenario }}" \
+            --count "${{ inputs.count }}" \
+            --duration "${{ inputs.duration }}" \
+            | tee benchmark-artifacts/benchmark.txt
+
+      - name: Publish benchmark summary
+        if: always()
+        run: |
+          echo "## Benchmark" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Mode: \`${{ inputs.visibility_mode }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Scenario: \`${{ inputs.scenario }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Count: \`${{ inputs.count }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Duration: \`${{ inputs.duration }}s\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          tail -n 80 benchmark-artifacts/benchmark.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-${{ inputs.visibility_mode }}-${{ inputs.scenario }}-${{ inputs.count }}
+          path: |
+            server/benchmark-artifacts/benchmark.txt
+            server/docs/benchmark_visibility_*.md

@@ -1,0 +1,1501 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>AO20 Test Client</title>
+<script src="https://cdn.jsdelivr.net/npm/pixi.js@7.4.0/dist/pixi.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/midi-player-js@2.0.16/browser/midiplayer.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/soundfont-player@0.12.0/dist/soundfont-player.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #111; color: #ccc; font-family: monospace; font-size: 14px; overflow: hidden; }
+  #container { display: flex; height: 100vh; }
+  #game { flex: 1; display: flex; flex-direction: column; position: relative; min-width: 0; }
+  #game canvas { display: block; }
+  #log { width: 340px; flex-shrink: 0; background: #0a0a0a; padding: 8px; overflow-y: auto; border-left: 1px solid #333; }
+  #log div { padding: 2px 0; border-bottom: 1px solid #1a1a1a; }
+  .pkt-in { color: #6c6; }
+  .pkt-out { color: #69f; }
+  .error { color: #f66; }
+  .info { color: #fc6; }
+  #pixi-container { flex: 1; overflow: hidden; background: #000; display: flex; align-items: center; justify-content: center; }
+  #pixi-container canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+  #input-bar { display: flex; background: #222; padding: 4px; }
+  #input-bar input { flex: 1; background: #333; color: #fff; border: 1px solid #555; padding: 6px; font-family: monospace; }
+  #input-bar button { background: #444; color: #fff; border: 1px solid #555; padding: 6px 12px; cursor: pointer; margin-left: 4px; }
+  #status { background: #222; padding: 4px 8px; color: #999; }
+  #hud { position: absolute; top: 4px; left: 4px; color: #fff; font: 12px monospace; text-shadow: 1px 1px 2px #000; pointer-events: none; z-index: 10; }
+  #move-debug { position: absolute; bottom: 40px; left: 4px; color: #0f0; font: 11px monospace; background: rgba(0,0,0,0.7); padding: 4px 8px; pointer-events: none; z-index: 10; display: none; white-space: pre; }
+  #inventory-panel {
+    display: none; position: absolute; top: 40px; right: 10px; z-index: 20;
+    background: rgba(20, 20, 30, 0.92); border: 1px solid #555; padding: 8px;
+    font: 12px monospace; color: #ccc; min-width: 220px;
+  }
+  #inventory-panel h3 { margin: 0 0 6px 0; color: #fc6; font-size: 13px; }
+  #inventory-panel .inv-stats { margin-bottom: 6px; font-size: 11px; color: #aaa; }
+  #inventory-panel .inv-stats span { color: #fc6; }
+  .inv-grid { display: grid; grid-template-columns: repeat(6, 34px); gap: 2px; }
+  .inv-slot {
+    width: 34px; height: 34px; background: rgba(40,40,50,0.8); border: 1px solid #444;
+    display: flex; align-items: center; justify-content: center; position: relative;
+    cursor: pointer; font-size: 10px; color: #888;
+  }
+  .inv-slot:hover { border-color: #888; background: rgba(60,60,70,0.9); }
+  .inv-slot.equipped { border-color: #4a4; background: rgba(30,60,30,0.8); }
+  .inv-slot .slot-amount { position: absolute; bottom: 0; right: 1px; font-size: 9px; color: #ccc; }
+  .inv-slot .slot-icon { width: 30px; height: 30px; image-rendering: pixelated; }
+  .inv-slot .slot-name { font-size: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 32px; }
+  #inv-tooltip {
+    display: none; position: absolute; z-index: 25; background: rgba(10,10,20,0.95);
+    border: 1px solid #666; padding: 6px 8px; font: 11px monospace; color: #ddd;
+    pointer-events: none; max-width: 200px;
+  }
+</style>
+</head>
+<body>
+<div id="container">
+  <div id="game">
+    <div id="status">Disconnected</div>
+    <div id="hud"></div>
+    <div id="move-debug"></div>
+    <div id="inventory-panel">
+      <h3>Inventory (I)</h3>
+      <div class="inv-stats">
+        Gold: <span id="inv-gold">0</span> | Hunger: <span id="inv-hunger">100</span> | Thirst: <span id="inv-thirst">100</span>
+      </div>
+      <div class="inv-grid" id="inv-grid"></div>
+      <div style="margin-top:6px;font-size:10px;color:#777">
+        Click=Equip | RClick=Use | Shift+Click=Drop | P=Pickup
+      </div>
+    </div>
+    <div id="inv-tooltip"></div>
+    <div id="pixi-container"></div>
+    <div id="input-bar">
+      <input id="chat" placeholder="Type message and press Enter..." />
+      <button onclick="doConnect()">Connect</button>
+    </div>
+  </div>
+  <div id="log"></div>
+</div>
+
+<script>
+const TILE_SIZE = 32;
+const MAP_SIZE = 100;
+const VIEWPORT_WIDTH = 736;
+const VIEWPORT_HEIGHT = 608;
+let showDebug = false; // Press F1 to toggle tile debug overlays
+let showMoveDebug = false; // Press F2 to toggle movement debug panel
+let ws = null;
+let mapData = null;
+let state = {
+  connected: false, charId: Math.floor(Math.random() * 90000) + 10000,
+  charIndex: 0,
+  x: 0, y: 0, hp: 0, mana: 0, sta: 0,
+  mapId: 0, name: '', speed: 1.0, walkBaseIntervalMs: 210,
+  bodyId: 1, headId: 1, heading: 3,
+  serverX: 0, serverY: 0,
+  gold: 0, hunger: 100, thirst: 100,
+  messages: []
+};
+let inventory = new Array(24).fill(null); // each: {objIndex, amount, equipped, valor} or null
+let showInventory = false;
+let otherChars = {};
+let groundObjects = {}; // "x,y" -> {objIndex, amount}
+
+// Sprite indices
+let grhIndex = null;       // graficos_full.json — complete index from recursos (for map tiles)
+let grhIndexChar = null;   // graficos.json — ao-web-client index (for character body/head)
+let cuerposIndex = null;   // cuerpos.json — body definitions (uses grhIndexChar IDs)
+let cabezasIndex = null;   // cabezas.json — head definitions (uses grhIndexChar IDs)
+let npcsIndex = null;      // npcs.json — NPC definitions (name, body, head, heading)
+let objsIndex = null;      // objs.json — object definitions (name, grh)
+
+// Pixi.js
+let pixiApp = null;
+let mapContainer = null;
+let entityContainer = null;
+let mapOverlayContainer = null;
+let mapEntitiesContainer = null;  // NPCs + ground objects (cleared on map re-render)
+let uiContainer = null;
+let baseTextures = {};     // cache: sheetName -> BaseTexture
+let grhTextures = {};      // cache: "map_grhId" or "char_grhId" -> Texture
+
+// Player and other char sprites
+let playerSprite = null;
+let playerNameText = null;
+let otherCharSprites = {}; // char_index -> {container, body, head, name}
+let playerMotion = createMotionState();
+let otherCharMotions = {};
+let chatTexts = []; // [{text, container, time, ttl}]
+
+// MIDI music
+let midiPlayer = null;
+let audioContext = null;
+let midiInstrument = null;
+let currentMusicId = null;
+
+// Input / movement
+const DEFAULT_WALK_INTERVAL_MS = 210;
+let movementKeys = [];
+let lastWalkTime = Number.NEGATIVE_INFINITY;
+let pendingWalkSteps = []; // queue of {x, y, timerId, requested}
+let moveDebugStats = { lastRpuAt: 0, rpuCount: 0, snaps: 0, lastSnapAt: 0 };
+
+// ---- Asset Loading ----
+
+async function loadIndices() {
+  const base = 'http://' + (location.hostname || 'localhost') + ':7667';
+  try {
+    const [grhResp, grhCharResp, cuerposResp, cabezasResp, npcsResp, objsResp] = await Promise.all([
+      fetch(base + '/indices/graficos_full.json'),
+      fetch(base + '/indices/graficos.json'),
+      fetch(base + '/indices/cuerpos.json'),
+      fetch(base + '/indices/cabezas.json'),
+      fetch(base + '/indices/npcs.json'),
+      fetch(base + '/indices/objs.json')
+    ]);
+    grhIndex = await grhResp.json();
+    grhIndexChar = await grhCharResp.json();
+    cuerposIndex = await cuerposResp.json();
+    cabezasIndex = await cabezasResp.json();
+    npcsIndex = await npcsResp.json();
+    objsIndex = await objsResp.json();
+    log('Loaded indices: ' + grhIndex.length + ' map grh, ' + cuerposIndex.length + ' bodies, ' + cabezasIndex.length + ' heads, ' + npcsIndex.length + ' NPCs, ' + objsIndex.length + ' objects', 'info');
+  } catch (e) {
+    log('Failed to load indices: ' + e.message, 'error');
+  }
+}
+
+// Get texture for a GRH ID. useCharIndex=true uses ao-web-client index (for body/head sprites)
+function getGrhTexture(grhId, useCharIndex) {
+  const cacheKey = (useCharIndex ? 'c_' : 'm_') + grhId;
+  if (grhTextures[cacheKey]) return grhTextures[cacheKey];
+
+  const idx = useCharIndex ? grhIndexChar : grhIndex;
+  if (!idx || grhId <= 0 || grhId >= idx.length) return null;
+
+  let entry = idx[grhId];
+  if (!entry) return null;
+
+  // Animated GRH: resolve to first frame
+  if (entry.frames && entry.frames.length > 0) {
+    const frameId = entry.frames[0];
+    if (frameId <= 0 || frameId >= idx.length) return null;
+    entry = idx[frameId];
+    if (!entry || !entry.grafico) return null;
+  }
+
+  if (!entry.grafico) return null;
+
+  const sheetName = String(entry.grafico);
+  const texKey = (useCharIndex ? 'char_' : 'map_') + sheetName;
+  if (!baseTextures[texKey]) {
+    // ao-web-client sprites use /graficos_char/, recursos sprites use /graficos/
+    const dir = useCharIndex ? '/graficos_char/' : '/graficos/';
+    const url = dir + sheetName + '.png';
+    baseTextures[texKey] = PIXI.BaseTexture.from(url, {
+      scaleMode: PIXI.SCALE_MODES.NEAREST,
+      mipmap: PIXI.MIPMAP_MODES.OFF
+    });
+  }
+
+  const bt = baseTextures[texKey];
+  const rect = new PIXI.Rectangle(entry.offX, entry.offY, entry.width, entry.height);
+  const tex = new PIXI.Texture(bt, rect);
+  grhTextures[cacheKey] = tex;
+  return tex;
+}
+
+// ---- Canvas Scaling ----
+
+function fitCanvas() {
+  if (!pixiApp) return;
+  const container = document.getElementById('pixi-container');
+  const cw = container.clientWidth;
+  const ch = container.clientHeight;
+  const scale = Math.min(cw / VIEWPORT_WIDTH, ch / VIEWPORT_HEIGHT);
+  const canvas = pixiApp.view;
+  canvas.style.width = Math.floor(VIEWPORT_WIDTH * scale) + 'px';
+  canvas.style.height = Math.floor(VIEWPORT_HEIGHT * scale) + 'px';
+}
+
+// ---- Pixi Setup ----
+
+function initPixi() {
+  const container = document.getElementById('pixi-container');
+  const dpr = window.devicePixelRatio || 1;
+  pixiApp = new PIXI.Application({
+    width: VIEWPORT_WIDTH,
+    height: VIEWPORT_HEIGHT,
+    backgroundColor: 0x1a1a2e,
+    antialias: false,
+    resolution: dpr,
+    autoDensity: true,
+    roundPixels: true
+  });
+  container.appendChild(pixiApp.view);
+  fitCanvas();
+  window.addEventListener('resize', fitCanvas);
+
+  mapContainer = new PIXI.Container();          // layers 1-2 (ground + below chars)
+  mapEntitiesContainer = new PIXI.Container();  // NPCs + ground objects (cleared on re-render)
+  entityContainer = new PIXI.Container();       // players
+  mapOverlayContainer = new PIXI.Container();   // layers 3-4 (above chars, roofs)
+  uiContainer = new PIXI.Container();
+
+  pixiApp.stage.addChild(mapContainer);
+  pixiApp.stage.addChild(mapEntitiesContainer);
+  pixiApp.stage.addChild(entityContainer);
+  pixiApp.stage.addChild(mapOverlayContainer);
+  pixiApp.stage.addChild(uiContainer);
+
+  // Player sprite — simple colored square initially, replaced when body/head load
+  playerSprite = new PIXI.Container();
+  const playerRect = new PIXI.Graphics();
+  playerRect.beginFill(0x4488ff);
+  playerRect.drawRect(0, 0, TILE_SIZE, TILE_SIZE);
+  playerRect.endFill();
+  playerRect.name = 'fallback';
+  playerSprite.addChild(playerRect);
+
+  playerNameText = new PIXI.Text('', {
+    fontFamily: 'monospace', fontSize: 10, fill: 0xffffff,
+    stroke: 0x000000, strokeThickness: 2
+  });
+  playerNameText.anchor.set(0.5, 1);
+  playerSprite.addChild(playerNameText);
+
+  entityContainer.addChild(playerSprite);
+
+  pixiApp.ticker.add(gameLoop);
+}
+
+function gameLoop() {
+  const now = performance.now();
+  updateHeldMovement(now);
+  updateMovementAnimations(now);
+  updateCamera();
+  updateChatMessages();
+  updateHud();
+}
+
+function createMotionState() {
+  return {
+    initialized: false,
+    startX: 0,
+    startY: 0,
+    targetX: 0,
+    targetY: 0,
+    renderX: 0,
+    renderY: 0,
+    startedAt: 0,
+    durationMs: 0
+  };
+}
+
+function directionFromKey(key) {
+  switch (key.toLowerCase()) {
+    case 'arrowup': case 'w': return 'north';
+    case 'arrowdown': case 's': return 'south';
+    case 'arrowleft': case 'a': return 'west';
+    case 'arrowright': case 'd': return 'east';
+    default: return null;
+  }
+}
+
+function walkIntervalForSpeed(speed) {
+  const base = state.walkBaseIntervalMs || DEFAULT_WALK_INTERVAL_MS;
+  const actualSpeed = speed > 0 ? speed : 1.0;
+  return Math.max(40, base / actualSpeed);
+}
+
+function currentWalkIntervalMs() {
+  return walkIntervalForSpeed(state.speed);
+}
+
+function rememberMovementKey(direction) {
+  movementKeys = movementKeys.filter(key => key !== direction);
+  movementKeys.push(direction);
+}
+
+function releaseMovementKey(direction) {
+  movementKeys = movementKeys.filter(key => key !== direction);
+}
+
+function activeMovementDirection() {
+  return movementKeys.length > 0 ? movementKeys[movementKeys.length - 1] : null;
+}
+
+// Direction → tile delta and AO heading (north=1, east=2, south=3, west=4)
+const WALK_DELTA = {north: {dx:0,dy:-1,h:1}, east: {dx:1,dy:0,h:2}, south: {dx:0,dy:1,h:3}, west: {dx:-1,dy:0,h:4}};
+
+function mapTileIndex(x, y) {
+  return (y - 1) * MAP_SIZE + (x - 1);
+}
+
+function isInsideMap(x, y) {
+  return x >= 1 && x <= MAP_SIZE && y >= 1 && y <= MAP_SIZE;
+}
+
+function isTileBlocked(x, y) {
+  if (!mapData || !Array.isArray(mapData.tiles)) return false;
+  if (!isInsideMap(x, y)) return true;
+
+  const tile = mapData.tiles[mapTileIndex(x, y)];
+  return tile !== 0;
+}
+
+function predictedDestination(direction) {
+  const delta = WALK_DELTA[direction];
+  if (!delta) return null;
+
+  return {
+    x: state.x + delta.dx,
+    y: state.y + delta.dy,
+    heading: delta.h
+  };
+}
+
+function looksLocallyWalkable(destination) {
+  if (!destination) return false;
+  if (!isInsideMap(destination.x, destination.y)) return false;
+  if (isTileBlocked(destination.x, destination.y)) return false;
+  // Other players are a soft rule — they may be moving away already.
+  // Let the server correct us if we walk through someone.
+  return true;
+}
+
+function clearPendingWalkSteps() {
+  for (const step of pendingWalkSteps) clearTimeout(step.timerId);
+  pendingWalkSteps = [];
+}
+
+function sendRequestPositionUpdate() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(buildPacket(79));
+  moveDebugStats.rpuCount++;
+  moveDebugStats.lastRpuAt = performance.now();
+  log('RPU', 'pkt-out');
+}
+
+function sendChangeHeading(headingInt) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(buildPacket(6, buf => { writeInt8(buf, headingInt); }));
+}
+
+function pushPendingWalkStep(x, y) {
+  const timeoutMs = Math.max(300, Math.round(currentWalkIntervalMs() * 2));
+  const step = {x, y, requested: false, timerId: null};
+  step.timerId = window.setTimeout(() => {
+    // If this step is still the latest unconfirmed, request position
+    if (pendingWalkSteps.length > 0 && pendingWalkSteps[pendingWalkSteps.length - 1] === step) {
+      sendRequestPositionUpdate();
+      step.requested = true;
+    }
+  }, timeoutMs);
+  pendingWalkSteps.push(step);
+}
+
+// Try to consume a pos_update from the pending queue.
+// Returns true if the position matched a pending step.
+function consumePendingStep(sx, sy) {
+  // Search from front — server confirms in order
+  for (let i = 0; i < pendingWalkSteps.length; i++) {
+    if (pendingWalkSteps[i].x === sx && pendingWalkSteps[i].y === sy) {
+      // Clear all steps up to and including this match
+      for (let j = 0; j <= i; j++) clearTimeout(pendingWalkSteps[j].timerId);
+      pendingWalkSteps = pendingWalkSteps.slice(i + 1);
+      return true;
+    }
+  }
+  return false;
+}
+
+function trySendWalk(direction, now) {
+  if (!direction || !state.connected || !ws || ws.readyState !== WebSocket.OPEN) return false;
+  if (now - lastWalkTime < currentWalkIntervalMs()) return false;
+
+  const destination = predictedDestination(direction);
+  if (!destination) return false;
+
+  // Blocked locally: still rotate to face direction (+ tell server)
+  if (!looksLocallyWalkable(destination)) {
+    if (state.heading !== destination.heading) {
+      state.heading = destination.heading;
+      sendChangeHeading(destination.heading);
+      updatePlayerSprite();
+      render();
+    }
+    return false;
+  }
+
+  sendWalk(direction);
+  lastWalkTime = now;
+
+  // Client-side prediction: move locally immediately (like VB6 client)
+  if (state.heading !== destination.heading) {
+    state.heading = destination.heading;
+    updatePlayerSprite();
+  }
+
+  state.x = destination.x;
+  state.y = destination.y;
+  syncPlayerMotion(false);
+  pushPendingWalkStep(destination.x, destination.y);
+  return true;
+}
+
+function updateHeldMovement(now) {
+  const direction = activeMovementDirection();
+  if (direction) trySendWalk(direction, now);
+}
+
+function tileToPixels(x, y) {
+  return {x: (x - 1) * TILE_SIZE, y: (y - 1) * TILE_SIZE};
+}
+
+function sampleMotion(motion, now) {
+  if (!motion.initialized) return {x: 0, y: 0};
+  if (motion.durationMs <= 0) return {x: motion.targetX, y: motion.targetY};
+
+  const t = Math.max(0, Math.min(1, (now - motion.startedAt) / motion.durationMs));
+  return {
+    x: Math.round(motion.startX + (motion.targetX - motion.startX) * t),
+    y: Math.round(motion.startY + (motion.targetY - motion.startY) * t)
+  };
+}
+
+function snapMotionToTile(motion, x, y) {
+  const pos = tileToPixels(x, y);
+  motion.initialized = true;
+  motion.startX = pos.x;
+  motion.startY = pos.y;
+  motion.targetX = pos.x;
+  motion.targetY = pos.y;
+  motion.renderX = pos.x;
+  motion.renderY = pos.y;
+  motion.startedAt = performance.now();
+  motion.durationMs = 0;
+}
+
+function animateMotionToTile(motion, x, y, durationMs) {
+  const pos = tileToPixels(x, y);
+
+  if (!motion.initialized) {
+    snapMotionToTile(motion, x, y);
+    return;
+  }
+
+  if (motion.targetX === pos.x && motion.targetY === pos.y) return;
+
+  const now = performance.now();
+  const current = sampleMotion(motion, now);
+  motion.startX = current.x;
+  motion.startY = current.y;
+  motion.targetX = pos.x;
+  motion.targetY = pos.y;
+  motion.renderX = current.x;
+  motion.renderY = current.y;
+  motion.startedAt = now;
+  motion.durationMs = Math.max(1, durationMs);
+}
+
+function syncPlayerMotion(forceSnap) {
+  if (forceSnap) {
+    snapMotionToTile(playerMotion, state.x, state.y);
+  } else {
+    animateMotionToTile(playerMotion, state.x, state.y, currentWalkIntervalMs());
+  }
+}
+
+function ensureOtherCharMotion(ci) {
+  if (!otherCharMotions[ci]) otherCharMotions[ci] = createMotionState();
+  return otherCharMotions[ci];
+}
+
+function syncOtherCharMotion(ci, forceSnap) {
+  const ch = otherChars[ci];
+  if (!ch) return;
+
+  const motion = ensureOtherCharMotion(ci);
+  if (forceSnap) {
+    snapMotionToTile(motion, ch.x, ch.y);
+  } else {
+    animateMotionToTile(motion, ch.x, ch.y, walkIntervalForSpeed(ch.speed || 1.0));
+  }
+}
+
+function updateMovementAnimations(now) {
+  if (playerSprite && playerMotion.initialized) {
+    const pos = sampleMotion(playerMotion, now);
+    playerMotion.renderX = pos.x;
+    playerMotion.renderY = pos.y;
+    playerSprite.x = pos.x;
+    playerSprite.y = pos.y;
+    updateCharWalkAnim(playerSprite, playerMotion, now);
+  }
+
+  for (const ci in otherCharSprites) {
+    const sprite = otherCharSprites[ci];
+    const motion = otherCharMotions[ci];
+    if (!sprite || !motion || !motion.initialized) continue;
+
+    const pos = sampleMotion(motion, now);
+    motion.renderX = pos.x;
+    motion.renderY = pos.y;
+    sprite.x = pos.x;
+    sprite.y = pos.y;
+    updateCharWalkAnim(sprite, motion, now);
+  }
+}
+
+function updateCamera() {
+  const w = pixiApp.screen.width;
+  const h = pixiApp.screen.height;
+  const playerX = playerMotion.initialized ? playerMotion.renderX : (state.x - 1) * TILE_SIZE;
+  const playerY = playerMotion.initialized ? playerMotion.renderY : (state.y - 1) * TILE_SIZE;
+
+  // Center on player
+  const cx = Math.round(w / 2 - playerX - TILE_SIZE / 2);
+  const cy = Math.round(h / 2 - playerY - TILE_SIZE / 2);
+
+  mapContainer.x = cx;
+  mapContainer.y = cy;
+  mapEntitiesContainer.x = cx;
+  mapEntitiesContainer.y = cy;
+  entityContainer.x = cx;
+  entityContainer.y = cy;
+  mapOverlayContainer.x = cx;
+  mapOverlayContainer.y = cy;
+}
+
+function updateHud() {
+  const mapName = mapData ? mapData.name : '?';
+  const drift = (state.x !== state.serverX || state.y !== state.serverY) ? ' <span style="color:#f44">DRIFT</span>' : '';
+  document.getElementById('hud').innerHTML =
+    'Client: (' + state.x + ', ' + state.y + ')  Server: (' + state.serverX + ', ' + state.serverY + ')' + drift +
+    '  Map: ' + state.mapId + ' - ' + mapName +
+    '<br>HP: ' + state.hp + '  Mana: ' + state.mana + '  Sta: ' + state.sta +
+    '  Gold: ' + state.gold + '  Hunger: ' + state.hunger + '  Thirst: ' + state.thirst;
+
+  // Movement debug panel (toggle with M key)
+  const dbg = document.getElementById('move-debug');
+  if (showMoveDebug) {
+    dbg.style.display = 'block';
+    const now = performance.now();
+    const rpuAgo = moveDebugStats.lastRpuAt > 0 ? Math.round(now - moveDebugStats.lastRpuAt) + 'ms ago' : 'never';
+    const snapAgo = moveDebugStats.lastSnapAt > 0 ? Math.round(now - moveDebugStats.lastSnapAt) + 'ms ago' : 'never';
+    dbg.innerHTML =
+      'Predicted:  (' + state.x + ', ' + state.y + ')\n' +
+      'Authority:  (' + state.serverX + ', ' + state.serverY + ')\n' +
+      'Pending:    ' + pendingWalkSteps.length + ' step(s)\n' +
+      'RPU sent:   ' + moveDebugStats.rpuCount + ' (' + rpuAgo + ')\n' +
+      'Snaps:      ' + moveDebugStats.snaps + ' (' + snapAgo + ')';
+  } else {
+    dbg.style.display = 'none';
+  }
+}
+
+// ---- Map Rendering ----
+
+// AO anchor formula: positions sprites so their bottom-center 32x32 area aligns with the tile
+function aoAnchor(sprite) {
+  const w = sprite.texture.width;
+  const h = sprite.texture.height;
+  sprite.anchor.set(
+    (w - TILE_SIZE) / (2 * w),
+    (h - TILE_SIZE) / h
+  );
+}
+
+function addLayerSprite(container, x, y, grhId) {
+  const tex = getGrhTexture(grhId);
+  if (!tex) return null;
+  const sprite = new PIXI.Sprite(tex);
+  aoAnchor(sprite);
+  sprite.x = (x - 1) * TILE_SIZE;
+  sprite.y = (y - 1) * TILE_SIZE;
+  container.addChild(sprite);
+  return sprite;
+}
+
+function renderMap() {
+  mapContainer.removeChildren();
+  mapEntitiesContainer.removeChildren();
+  mapOverlayContainer.removeChildren();
+
+  if (!mapData) return;
+
+  // Layer 1: ground tiles
+  if (mapData.layers && mapData.layers[0] && grhIndex) {
+    for (const tile of mapData.layers[0]) {
+      addLayerSprite(mapContainer, tile[0], tile[1], tile[2]);
+    }
+  }
+
+  // Layer 2: objects below characters (fences, ground decorations)
+  if (mapData.layers && mapData.layers[1] && grhIndex) {
+    for (const tile of mapData.layers[1]) {
+      addLayerSprite(mapContainer, tile[0], tile[1], tile[2]);
+    }
+  }
+
+  // Ground objects (items on the floor)
+  if (mapData.objects && objsIndex && grhIndex) {
+    for (const obj of mapData.objects) {
+      const def = objsIndex[obj.id];
+      if (def && def.grh > 0) {
+        addLayerSprite(mapEntitiesContainer, obj.x, obj.y, def.grh);
+      }
+    }
+  }
+
+  // NPCs (rendered as character sprites with body/head)
+  if (mapData.npcs && npcsIndex) {
+    for (const npc of mapData.npcs) {
+      const def = npcsIndex[npc.id];
+      if (def) {
+        const sprite = createCharSprite(def.name, def.body, def.head, def.heading || 3);
+        sprite.x = (npc.x - 1) * TILE_SIZE;
+        sprite.y = (npc.y - 1) * TILE_SIZE;
+        mapEntitiesContainer.addChild(sprite);
+      }
+    }
+  }
+
+  // Layer 3: objects above characters (tree canopies, tall structures)
+  if (mapData.layers && mapData.layers[2] && grhIndex) {
+    for (const tile of mapData.layers[2]) {
+      addLayerSprite(mapOverlayContainer, tile[0], tile[1], tile[2]);
+    }
+  }
+
+  // Layer 4: roofs (opaque — in AO they hide when player is indoors)
+  if (mapData.layers && mapData.layers[3] && grhIndex) {
+    for (const tile of mapData.layers[3]) {
+      addLayerSprite(mapOverlayContainer, tile[0], tile[1], tile[2]);
+    }
+  }
+
+  // Debug overlays
+  if (showDebug) {
+    if (mapData.tiles) {
+      for (let y = 1; y <= MAP_SIZE; y++) {
+        for (let x = 1; x <= MAP_SIZE; x++) {
+          const val = mapData.tiles[(y - 1) * MAP_SIZE + (x - 1)];
+          if (val !== 0) {
+            const g = new PIXI.Graphics();
+            g.beginFill(0xff0000, 0.15);
+            g.drawRect((x - 1) * TILE_SIZE, (y - 1) * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+            g.endFill();
+            mapContainer.addChild(g);
+          }
+        }
+      }
+    }
+    if (mapData.exits) {
+      for (const ex of mapData.exits) {
+        const g = new PIXI.Graphics();
+        g.beginFill(0xa06af0, 0.5);
+        g.drawRect((ex.x - 1) * TILE_SIZE + 4, (ex.y - 1) * TILE_SIZE + 4, TILE_SIZE - 8, TILE_SIZE - 8);
+        g.endFill();
+        mapContainer.addChild(g);
+      }
+    }
+  }
+
+  log('Map rendered with ' + mapContainer.children.length + ' sprites', 'info');
+}
+
+// ---- Character Sprite Helpers ----
+
+// Get all frame textures for an animated GRH (walk cycle)
+function getGrhFrameTextures(grhId, useCharIndex) {
+  const idx = useCharIndex ? grhIndexChar : grhIndex;
+  if (!idx || grhId <= 0 || grhId >= idx.length) return null;
+  const entry = idx[grhId];
+  if (!entry || !entry.frames || entry.frames.length === 0) return null;
+
+  const textures = [];
+  for (const frameId of entry.frames) {
+    const frame = idx[frameId];
+    if (!frame || !frame.grafico) continue;
+    const sheetName = String(frame.grafico);
+    const texKey = (useCharIndex ? 'char_' : 'map_') + sheetName;
+    if (!baseTextures[texKey]) {
+      const dir = useCharIndex ? '/graficos_char/' : '/graficos/';
+      baseTextures[texKey] = PIXI.BaseTexture.from(dir + sheetName + '.png', {
+        scaleMode: PIXI.SCALE_MODES.NEAREST, mipmap: PIXI.MIPMAP_MODES.OFF
+      });
+    }
+    const rect = new PIXI.Rectangle(frame.offX, frame.offY, frame.width, frame.height);
+    textures.push(new PIXI.Texture(baseTextures[texKey], rect));
+  }
+  return textures.length > 0 ? {textures, velocidad: entry.velocidad || 333} : null;
+}
+
+function createCharSprite(name, bodyId, headId, heading) {
+  const container = new PIXI.Container();
+
+  // Direction mapping: AO heading 1=north 2=east 3=south 4=west
+  const dirMap = {1: 'up', 2: 'right', 3: 'down', 4: 'left'};
+  const dir = dirMap[heading] || 'down';
+
+  let hasRealSprite = false;
+
+  // Animation data stored on the container for the game loop
+  container._anim = {bodySprite: null, headSprite: null, bodyFrames: null, velocidad: 210, frameIndex: 0, lastFrameAt: 0, offHeadX: 0, offHeadY: 0};
+
+  // Body sprite
+  if (cuerposIndex && bodyId > 0 && bodyId < cuerposIndex.length) {
+    const body = cuerposIndex[bodyId];
+    if (body) {
+      const bodyGrh = body[dir];
+      const bodyTex = getGrhTexture(bodyGrh, true);
+      if (bodyTex) {
+        const bodySprite = new PIXI.Sprite(bodyTex);
+        aoAnchor(bodySprite);
+        container.addChild(bodySprite);
+        hasRealSprite = true;
+
+        // Store animation frames for walk cycle
+        const animData = getGrhFrameTextures(bodyGrh, true);
+        if (animData) {
+          container._anim.bodySprite = bodySprite;
+          container._anim.bodyFrames = animData.textures;
+          container._anim.velocidad = animData.velocidad;
+        }
+
+        // Head sprite — positioned relative to body via offHeadX/offHeadY
+        container._anim.offHeadX = body.offHeadX || 0;
+        container._anim.offHeadY = body.offHeadY || 0;
+
+        if (cabezasIndex && headId > 0 && headId < cabezasIndex.length) {
+          const head = cabezasIndex[headId];
+          if (head) {
+            const headGrh = head[dir];
+            const headTex = getGrhTexture(headGrh, true);
+            if (headTex) {
+              const headSprite = new PIXI.Sprite(headTex);
+              aoAnchor(headSprite);
+              headSprite.x = container._anim.offHeadX;
+              headSprite.y = container._anim.offHeadY;
+              container.addChild(headSprite);
+              container._anim.headSprite = headSprite;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Fallback colored square if no real sprite loaded
+  if (!hasRealSprite) {
+    const rect = new PIXI.Graphics();
+    rect.beginFill(name === state.name ? 0x4488ff : 0xff8800);
+    rect.drawRect(2, 2, TILE_SIZE - 4, TILE_SIZE - 4);
+    rect.endFill();
+    container.addChild(rect);
+  }
+
+  // Name label — centered above the tile
+  const nameText = new PIXI.Text(name, {
+    fontFamily: 'monospace', fontSize: 10,
+    fill: name === state.name ? 0xffffff : 0xffcc66,
+    stroke: 0x000000, strokeThickness: 2
+  });
+  nameText.anchor.set(0.5, 1);
+  nameText.x = TILE_SIZE / 2;
+  nameText.y = -8;
+  container.addChild(nameText);
+
+  return container;
+}
+
+// Cycle walk animation frames when character is moving, show frame 0 when idle
+function updateCharWalkAnim(sprite, motion, now) {
+  if (!sprite || !sprite._anim || !sprite._anim.bodyFrames) return;
+  const anim = sprite._anim;
+  const frames = anim.bodyFrames;
+  const isMoving = motion && motion.initialized && motion.durationMs > 0 &&
+    (now - motion.startedAt) < motion.durationMs;
+
+  if (isMoving) {
+    const msPerFrame = anim.velocidad / frames.length;
+    if (now - anim.lastFrameAt >= msPerFrame) {
+      anim.frameIndex = (anim.frameIndex + 1) % frames.length;
+      anim.lastFrameAt = now;
+      anim.bodySprite.texture = frames[anim.frameIndex];
+    }
+  } else {
+    // Idle — show standing frame (frame 0)
+    if (anim.frameIndex !== 0) {
+      anim.frameIndex = 0;
+      anim.lastFrameAt = now;
+      anim.bodySprite.texture = frames[0];
+    }
+  }
+}
+
+function updatePlayerSprite() {
+  entityContainer.removeChild(playerSprite);
+  playerSprite = createCharSprite(state.name, state.bodyId, state.headId, state.heading);
+  if (!playerMotion.initialized) snapMotionToTile(playerMotion, state.x, state.y);
+  playerSprite.x = playerMotion.renderX;
+  playerSprite.y = playerMotion.renderY;
+  entityContainer.addChild(playerSprite);
+}
+
+function updateOtherCharSprite(ci) {
+  const ch = otherChars[ci];
+  if (!ch) return;
+
+  // Remove old sprite if exists
+  if (otherCharSprites[ci]) {
+    entityContainer.removeChild(otherCharSprites[ci]);
+  }
+
+  const sprite = createCharSprite(ch.name, ch.bodyId || 1, ch.headId || 1, ch.heading || 3);
+  syncOtherCharMotion(ci, true);
+  sprite.x = otherCharMotions[ci].renderX;
+  sprite.y = otherCharMotions[ci].renderY;
+  entityContainer.addChild(sprite);
+  otherCharSprites[ci] = sprite;
+}
+
+function removeOtherCharSprite(ci) {
+  if (otherCharSprites[ci]) {
+    entityContainer.removeChild(otherCharSprites[ci]);
+    delete otherCharSprites[ci];
+  }
+  delete otherCharMotions[ci];
+}
+
+function moveOtherCharSprite(ci) {
+  const ch = otherChars[ci];
+  if (!ch) return;
+  syncOtherCharMotion(ci, false);
+}
+
+// ---- Chat Messages ----
+
+function addChatMessage(text, x, y) {
+  const chatText = new PIXI.Text(text, {
+    fontFamily: 'monospace', fontSize: 12, fill: 0xffff00,
+    stroke: 0x000000, strokeThickness: 2
+  });
+  chatText.anchor.set(0.5, 1);
+  chatText.x = (x - 1) * TILE_SIZE + TILE_SIZE / 2;
+  chatText.y = (y - 1) * TILE_SIZE - 16;
+  entityContainer.addChild(chatText);
+  chatTexts.push({text: chatText, time: Date.now(), ttl: 4000});
+}
+
+function updateChatMessages() {
+  const now = Date.now();
+  chatTexts = chatTexts.filter(ct => {
+    const age = now - ct.time;
+    if (age >= ct.ttl) {
+      entityContainer.removeChild(ct.text);
+      return false;
+    }
+    ct.text.alpha = 1 - age / ct.ttl;
+    return true;
+  });
+}
+
+// ---- render() called on state changes ----
+
+function render() {
+  if (!pixiApp) return;
+  if (playerSprite && playerMotion.initialized) {
+    playerSprite.x = playerMotion.renderX;
+    playerSprite.y = playerMotion.renderY;
+  }
+}
+
+function clearOtherCharacters() {
+  otherChars = {};
+  otherCharMotions = {};
+
+  for (const ci in otherCharSprites) {
+    entityContainer.removeChild(otherCharSprites[ci]);
+  }
+
+  otherCharSprites = {};
+}
+
+// ---- Logging ----
+
+function log(msg, cls) {
+  const el = document.getElementById('log');
+  const div = document.createElement('div');
+  div.className = cls || '';
+  const time = new Date().toLocaleTimeString();
+  div.textContent = '[' + time + '] ' + msg;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+// ---- Binary helpers (little-endian) ----
+
+function writeInt8(buf, val) { buf.push(val & 0xff); }
+function writeInt16(buf, val) { buf.push(val & 0xff); buf.push((val >> 8) & 0xff); }
+function writeInt32(buf, val) {
+  buf.push(val & 0xff); buf.push((val >> 8) & 0xff);
+  buf.push((val >> 16) & 0xff); buf.push((val >> 24) & 0xff);
+}
+function writeString8(buf, str) {
+  writeInt16(buf, str.length);
+  for (let i = 0; i < str.length; i++) buf.push(str.charCodeAt(i) & 0xff);
+}
+
+class BinaryReader {
+  constructor(ab) { this.view = new DataView(ab); this.offset = 0; }
+  get remaining() { return this.view.byteLength - this.offset; }
+  readInt8() { const v = this.view.getUint8(this.offset); this.offset += 1; return v; }
+  readInt16() { const v = this.view.getInt16(this.offset, true); this.offset += 2; return v; }
+  readUInt16() { const v = this.view.getUint16(this.offset, true); this.offset += 2; return v; }
+  readInt32() { const v = this.view.getInt32(this.offset, true); this.offset += 4; return v; }
+  readFloat32() { const v = this.view.getFloat32(this.offset, true); this.offset += 4; return v; }
+  readBool() { return this.readInt8() !== 0; }
+  readString8() {
+    const len = this.readUInt16();
+    let s = '';
+    for (let i = 0; i < len; i++) s += String.fromCharCode(this.view.getUint8(this.offset++));
+    return s;
+  }
+}
+
+function buildPacket(packetId, payloadFn) {
+  const buf = [];
+  writeInt16(buf, packetId);
+  if (payloadFn) payloadFn(buf);
+  return new Uint8Array(buf);
+}
+
+function sendLoginExisting(charId, token) {
+  ws.send(buildPacket(73, buf => {
+    writeString8(buf, token || '');
+    writeInt32(buf, charId);
+    writeInt8(buf, 1); writeInt8(buf, 0); writeInt8(buf, 0);
+    writeString8(buf, 'abcdef1234567890abcdef1234567890');
+  }));
+  log('LOGIN char_id=' + charId, 'pkt-out');
+}
+
+function sendCreateChar(name, race, gender, charClass, head, homeCity) {
+  ws.send(buildPacket(74, buf => {
+    writeString8(buf, 'test_token');
+    writeString8(buf, name);
+    writeInt8(buf, 1); writeInt8(buf, 0); writeInt8(buf, 0);
+    writeString8(buf, 'abcdef1234567890abcdef1234567890');
+    writeInt8(buf, race);
+    writeInt8(buf, gender);
+    writeInt8(buf, charClass);
+    writeInt16(buf, head);
+    writeInt8(buf, homeCity);
+  }));
+  log('CREATE name=' + name + ' race=' + race + ' class=' + charClass, 'pkt-out');
+}
+
+function sendWalk(heading) {
+  const dirs = {north: 1, east: 2, south: 3, west: 4};
+  ws.send(buildPacket(78, buf => {
+    writeInt8(buf, dirs[heading] || heading);
+    writeInt32(buf, 1);
+  }));
+  log('WALK ' + heading, 'pkt-out');
+}
+
+function sendTalk(message) {
+  ws.send(buildPacket(75, buf => { writeString8(buf, message); }));
+  log('TALK "' + message + '"', 'pkt-out');
+}
+
+function sendPickUp() {
+  ws.send(buildPacket(81));
+  log('PICK_UP', 'pkt-out');
+}
+
+function sendDrop(slot, amount) {
+  ws.send(buildPacket(93, buf => { writeInt8(buf, slot); writeInt16(buf, amount); }));
+  log('DROP slot=' + slot + ' amt=' + amount, 'pkt-out');
+}
+
+function sendEquipItem(slot) {
+  ws.send(buildPacket(5, buf => { writeInt8(buf, slot); }));
+  log('EQUIP slot=' + slot, 'pkt-out');
+}
+
+function sendUseItem(slot) {
+  ws.send(buildPacket(99, buf => { writeInt8(buf, slot); }));
+  log('USE slot=' + slot, 'pkt-out');
+}
+
+// ---- Fetch map data ----
+
+async function fetchMapData(mapId) {
+  try {
+    const resp = await fetch('http://' + (location.hostname || 'localhost') + ':7667/api/map/' + mapId);
+    if (!resp.ok) { log('Failed to fetch map data: ' + resp.status, 'error'); return; }
+    mapData = await resp.json();
+    log('Map loaded: "' + mapData.name + '" (' + mapData.npcs.length + ' NPCs, ' + mapData.objects.length + ' objects, ' + mapData.exits.length + ' exits)', 'info');
+    renderMap();
+    render();
+    if (mapData.music_low) playMapMusic(mapData.music_low);
+  } catch (e) {
+    log('Map fetch error: ' + e.message, 'error');
+  }
+}
+
+// ---- Server packet decoders ----
+
+function decodeServerPackets(arrayBuffer) {
+  const r = new BinaryReader(arrayBuffer);
+  while (r.remaining >= 2) {
+    const savedOffset = r.offset;
+    const id = r.readInt16();
+    try { decodeServerPacket(id, r); }
+    catch (e) {
+      r.offset = savedOffset;
+      break;
+    }
+  }
+}
+
+function decodeServerPacket(id, r) {
+  switch (id) {
+    case 2: { const nu = r.readBool(); log('LOGGED new_user=' + nu, 'pkt-in'); break; }
+    case 25: { state.sta = r.readInt16(); log('STA=' + state.sta, 'pkt-in'); break; }
+    case 26: { state.mana = r.readInt16(); log('MANA=' + state.mana, 'pkt-in'); break; }
+    case 27: { state.hp = r.readInt16(); r.readInt32(); log('HP=' + state.hp, 'pkt-in'); break; }
+    case 28: {
+      state.gold = r.readInt32(); r.readInt32(); // gold + billetera
+      document.getElementById('inv-gold').textContent = state.gold;
+      log('GOLD=' + state.gold, 'pkt-in'); break;
+    }
+    case 30: {
+      state.mapId = r.readInt16(); r.readInt16();
+      clearPendingWalkSteps();
+      clearOtherCharacters();
+      log('MAP=' + state.mapId, 'pkt-in');
+      fetchMapData(state.mapId);
+      break;
+    }
+    case 31: {
+      const sx = r.readInt8(); const sy = r.readInt8();
+      state.serverX = sx; state.serverY = sy;
+      const consumed = consumePendingStep(sx, sy);
+
+      // Aggressive reconciliation: if server puts us on a locally-blocked tile, log it
+      if (isTileBlocked(sx, sy)) {
+        log('WARN: server pos (' + sx + ',' + sy + ') is blocked locally — possible map mismatch', 'error');
+      }
+
+      // Reconciliation: snap only when server disagrees with our prediction
+      if (sx !== state.x || sy !== state.y) {
+        moveDebugStats.snaps++;
+        moveDebugStats.lastSnapAt = performance.now();
+        state.x = sx; state.y = sy;
+        // If we consumed a matching step, animate smoothly; otherwise hard snap
+        syncPlayerMotion(consumed ? false : true);
+      }
+      log('POS x=' + sx + ' y=' + sy, 'pkt-in'); render(); break;
+    }
+    case 35: {
+      const msg = r.readString8(); const ci = r.readInt16();
+      r.readInt32(); r.readBool(); r.readInt8(); r.readInt8(); r.readInt16(); r.readInt16();
+      log('CHAT[' + ci + '] "' + msg + '"', 'pkt-in');
+      let chatX = state.x, chatY = state.y;
+      if (ci !== state.charIndex && otherChars[ci]) { chatX = otherChars[ci].x; chatY = otherChars[ci].y; }
+      addChatMessage(msg, chatX, chatY);
+      break;
+    }
+    case 37: {
+      const msg = r.readString8(); const f = r.readInt8();
+      log('MSG[' + f + '] ' + msg, 'info');
+      break;
+    }
+    case 200: {
+      const savedCharId = r.readInt32();
+      const savedToken = r.readString8();
+      localStorage.setItem('ao_char_id', savedCharId);
+      localStorage.setItem('ao_session_token', savedToken);
+      log('Session saved (char_id=' + savedCharId + ')', 'info');
+      break;
+    }
+    case 42: {
+      const ci = r.readInt16(); const bodyId = r.readInt16(); const headId = r.readInt16();
+      const heading = r.readInt8(); const x = r.readInt8(); const y = r.readInt8();
+      r.readInt16(); r.readInt16(); r.readInt16(); r.readInt16(); r.readInt16();
+      r.readInt16(); r.readInt16();
+      const name = r.readString8();
+      r.readInt8(); r.readInt8(); r.readInt8();
+      for (let i = 0; i < 7; i++) r.readString8();
+      const speed = r.readFloat32(); r.readInt8(); r.readInt8();
+      r.readInt16(); r.readInt16(); r.readInt8();
+      const minHp = r.readInt32(); const maxHp = r.readInt32();
+      const minMana = r.readInt32(); const maxMana = r.readInt32();
+      r.readInt8(); r.readInt8(); r.readInt8(); r.readInt8(); r.readInt8(); r.readInt16();
+      if (ci === state.charIndex) {
+        clearPendingWalkSteps();
+        state.name = name; state.x = x; state.y = y; state.speed = speed || 1.0;
+        state.bodyId = bodyId; state.headId = headId; state.heading = heading;
+        syncPlayerMotion(true);
+        updatePlayerSprite();
+      } else {
+        otherChars[ci] = {x: x, y: y, name: name, heading: heading, speed: speed || 1.0, bodyId: bodyId, headId: headId};
+        updateOtherCharSprite(ci);
+      }
+      log('CHAR[' + ci + '] "' + name + '" pos=(' + x + ',' + y + ') hp=' + minHp + '/' + maxHp, 'pkt-in');
+      render(); break;
+    }
+    case 43: {
+      const ci = r.readInt16();
+      delete otherChars[ci];
+      removeOtherCharSprite(ci);
+      log('CHAR_REMOVE[' + ci + ']', 'pkt-in');
+      break;
+    }
+    case 44: {
+      const ci = r.readInt16(); const x = r.readInt8(); const y = r.readInt8();
+      if (otherChars[ci]) {
+        // Infer heading from movement delta
+        const dx = x - otherChars[ci].x, dy = y - otherChars[ci].y;
+        const newHeading = dy < 0 ? 1 : dy > 0 ? 3 : dx > 0 ? 2 : dx < 0 ? 4 : otherChars[ci].heading;
+        if (newHeading !== otherChars[ci].heading) {
+          otherChars[ci].heading = newHeading;
+          otherChars[ci].x = x; otherChars[ci].y = y;
+          updateOtherCharSprite(ci);
+        } else {
+          otherChars[ci].x = x; otherChars[ci].y = y;
+          moveOtherCharSprite(ci);
+        }
+      }
+      log('CHAR_MOVE[' + ci + '] pos=(' + x + ',' + y + ')', 'pkt-in');
+      break;
+    }
+    case 46: { r.readInt16(); log('USER_IDX', 'pkt-in'); break; }
+    case 47: { state.charIndex = r.readInt16(); log('CHAR_IDX=' + state.charIndex, 'pkt-in'); break; }
+    case 50: {
+      const ox = r.readInt8(); const oy = r.readInt8();
+      const oi = r.readInt16(); const oa = r.readInt16(); r.readInt32();
+      groundObjects[ox + ',' + oy] = {objIndex: oi, amount: oa};
+      addGroundObjectSprite(ox, oy, oi);
+      log('OBJ_CREATE (' + ox + ',' + oy + ') obj=' + oi + ' x' + oa, 'pkt-in'); break;
+    }
+    case 52: {
+      const dx = r.readInt8(); const dy = r.readInt8();
+      delete groundObjects[dx + ',' + dy];
+      removeGroundObjectSprite(dx, dy);
+      log('OBJ_DELETE (' + dx + ',' + dy + ')', 'pkt-in'); break;
+    }
+    case 63: {
+      const slot = r.readInt8() - 1; // server sends 1-based
+      const objIndex = r.readInt16();
+      const amount = r.readInt16();
+      const equipped = r.readBool();
+      const valor = r.readFloat32();
+      const puedeUsar = r.readInt8();
+      r.readInt32(); // elemental_tags
+      r.readBool(); // is_bindable
+      if (objIndex === 0 || amount === 0) {
+        inventory[slot] = null;
+      } else {
+        inventory[slot] = {objIndex, amount, equipped, valor, puedeUsar};
+      }
+      renderInventory();
+      log('INV[' + slot + '] obj=' + objIndex + ' x' + amount + (equipped ? ' [E]' : ''), 'pkt-in');
+      break;
+    }
+    case 78: {
+      r.readInt8(); // max_thirst
+      state.thirst = r.readInt8();
+      r.readInt8(); // max_hunger
+      state.hunger = r.readInt8();
+      document.getElementById('inv-hunger').textContent = state.hunger;
+      document.getElementById('inv-thirst').textContent = state.thirst;
+      log('HUNGER=' + state.hunger + ' THIRST=' + state.thirst, 'pkt-in'); break;
+    }
+    case 158: {
+      r.readInt32();
+      state.walkBaseIntervalMs = r.readInt32();
+      r.readInt32(); r.readInt32(); r.readInt32(); r.readInt32(); r.readInt32();
+      r.readInt32(); r.readInt32(); r.readInt32(); r.readInt32(); r.readInt32();
+      log('INTERVALS walk=' + state.walkBaseIntervalMs, 'pkt-in');
+      break;
+    }
+    case 73: { const msg = r.readString8(); log('ERROR: ' + msg, 'error'); break; }
+    default: log('UNKNOWN id=' + id, 'error'); throw new Error('Unknown packet ' + id);
+  }
+}
+
+// ---- Connection ----
+
+function doConnect() {
+  if (ws && ws.readyState === WebSocket.OPEN) { log('Already connected', 'error'); return; }
+  const host = location.hostname || 'localhost';
+  const url = 'ws://' + host + ':7667/ao';
+  log('Connecting to ' + url + '...', 'info');
+  ws = new WebSocket(url);
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = () => {
+    state.connected = true;
+    document.getElementById('status').textContent = 'Connected to ' + url;
+    log('Connected!', 'info');
+
+    // Try reconnecting with saved session, otherwise create new character
+    const savedCharId = localStorage.getItem('ao_char_id');
+    const savedToken = localStorage.getItem('ao_session_token');
+    if (savedCharId && savedToken) {
+      log('Reconnecting with saved session (char_id=' + savedCharId + ')', 'info');
+      sendLoginExisting(parseInt(savedCharId, 10), savedToken);
+    } else {
+      const name = 'Player_' + state.charId;
+      sendCreateChar(name, 1, 1, 6, 1, 1);
+    }
+  };
+  ws.onmessage = (e) => { if (e.data instanceof ArrayBuffer) decodeServerPackets(e.data); };
+  ws.onclose = () => {
+    state.connected = false;
+    clearPendingWalkSteps();
+    movementKeys = [];
+    lastWalkTime = Number.NEGATIVE_INFINITY;
+    otherChars = {};
+    otherCharMotions = {};
+    for (const ci in otherCharSprites) { entityContainer.removeChild(otherCharSprites[ci]); }
+    otherCharSprites = {};
+    inventory = new Array(24).fill(null);
+    groundObjects = {};
+    groundObjectSprites = {};
+    state.gold = 0; state.hunger = 100; state.thirst = 100;
+    renderInventory();
+    document.getElementById('status').textContent = 'Disconnected';
+    log('Disconnected', 'error');
+  };
+  ws.onerror = () => { log('WebSocket error', 'error'); };
+}
+
+// ---- Input ----
+
+document.addEventListener('keydown', (e) => {
+  if (document.activeElement === document.getElementById('chat')) return;
+
+  // Debug toggles (F1 = tile debug, F2 = movement debug)
+  if (e.key === 'F1') {
+    showDebug = !showDebug;
+    renderMap();
+    e.preventDefault();
+    return;
+  }
+  if (e.key === 'F2') {
+    showMoveDebug = !showMoveDebug;
+    e.preventDefault();
+    return;
+  }
+
+  if (e.key === 'i' || e.key === 'I') {
+    toggleInventory();
+    e.preventDefault();
+    return;
+  }
+
+  if (e.key === 'p' || e.key === 'P') {
+    if (ws && ws.readyState === WebSocket.OPEN) sendPickUp();
+    e.preventDefault();
+    return;
+  }
+
+  const direction = directionFromKey(e.key);
+  if (!direction) return;
+
+  rememberMovementKey(direction);
+  trySendWalk(direction, performance.now());
+  e.preventDefault();
+});
+
+document.addEventListener('keyup', (e) => {
+  const direction = directionFromKey(e.key);
+  if (!direction) return;
+
+  releaseMovementKey(direction);
+  e.preventDefault();
+});
+window.addEventListener('blur', () => {
+  movementKeys = [];
+});
+document.getElementById('chat').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.value.trim()) { sendTalk(e.target.value); e.target.value = ''; }
+});
+
+// ---- MIDI Music ----
+
+async function initMusic() {
+  try {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    midiInstrument = await Soundfont.instrument(audioContext, 'acoustic_grand_piano');
+    midiPlayer = new MidiPlayer.Player(function(event) {
+      if (event.name === 'Note on' && event.velocity > 0) {
+        midiInstrument.play(event.noteName, audioContext.currentTime, {
+          gain: event.velocity / 127 * 0.5
+        });
+      }
+    });
+    midiPlayer.on('endOfFile', function() {
+      // Loop the music
+      if (currentMusicId) {
+        midiPlayer.play();
+      }
+    });
+    log('MIDI player ready', 'info');
+  } catch (e) {
+    log('MIDI init failed: ' + e.message, 'error');
+  }
+}
+
+async function playMapMusic(musicId) {
+  if (!midiPlayer || !musicId || musicId <= 0) return;
+  if (musicId === currentMusicId) return;
+  currentMusicId = musicId;
+
+  try {
+    // Try .mid extension (case insensitive handled by macOS)
+    const resp = await fetch('/midi/' + musicId + '.mid');
+    if (!resp.ok) {
+      log('MIDI file not found: ' + musicId + '.mid', 'error');
+      return;
+    }
+    const buf = await resp.arrayBuffer();
+    const arr = new Uint8Array(buf);
+    midiPlayer.stop();
+    midiPlayer.loadArrayBuffer(arr);
+    midiPlayer.play();
+    log('Playing music: ' + musicId + '.mid', 'info');
+  } catch (e) {
+    log('Music error: ' + e.message, 'error');
+  }
+}
+
+// ---- Inventory UI ----
+
+function initInventoryGrid() {
+  const grid = document.getElementById('inv-grid');
+  grid.innerHTML = '';
+  for (let i = 0; i < 24; i++) {
+    const slot = document.createElement('div');
+    slot.className = 'inv-slot';
+    slot.dataset.slot = i;
+    slot.innerHTML = '<span class="slot-name">' + (i + 1) + '</span>';
+    slot.addEventListener('click', (e) => {
+      if (!inventory[i]) return;
+      if (e.shiftKey) {
+        const amt = prompt('Drop how many?', inventory[i].amount);
+        if (amt && parseInt(amt) > 0) sendDrop(i, parseInt(amt));
+      } else {
+        sendEquipItem(i);
+      }
+    });
+    slot.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      if (!inventory[i]) return;
+      sendUseItem(i);
+    });
+    slot.addEventListener('mouseenter', (e) => showTooltip(e, i));
+    slot.addEventListener('mouseleave', hideTooltip);
+    grid.appendChild(slot);
+  }
+}
+
+function renderInventory() {
+  const grid = document.getElementById('inv-grid');
+  const slots = grid.children;
+  for (let i = 0; i < 24; i++) {
+    const el = slots[i];
+    if (!el) continue;
+    const item = inventory[i];
+    if (!item) {
+      el.className = 'inv-slot';
+      el.innerHTML = '<span class="slot-name" style="color:#555">' + (i + 1) + '</span>';
+    } else {
+      el.className = 'inv-slot' + (item.equipped ? ' equipped' : '');
+      const name = getObjName(item.objIndex);
+      el.innerHTML = '<span class="slot-name">' + name + '</span>' +
+        (item.amount > 1 ? '<span class="slot-amount">' + item.amount + '</span>' : '');
+    }
+  }
+  document.getElementById('inv-gold').textContent = state.gold;
+}
+
+function getObjName(objIndex) {
+  if (objsIndex && objIndex > 0 && objIndex < objsIndex.length && objsIndex[objIndex]) {
+    return objsIndex[objIndex].name || '#' + objIndex;
+  }
+  return '#' + objIndex;
+}
+
+function showTooltip(e, slotIdx) {
+  const item = inventory[slotIdx];
+  if (!item) return;
+  const tip = document.getElementById('inv-tooltip');
+  const name = getObjName(item.objIndex);
+  let html = '<b>' + name + '</b> (ID: ' + item.objIndex + ')';
+  html += '<br>Amount: ' + item.amount;
+  if (item.valor > 0) html += '<br>Value: ' + Math.floor(item.valor);
+  if (item.equipped) html += '<br><span style="color:#4f4">Equipped</span>';
+  tip.innerHTML = html;
+  tip.style.display = 'block';
+  tip.style.left = (e.pageX + 10) + 'px';
+  tip.style.top = (e.pageY + 10) + 'px';
+}
+
+function hideTooltip() {
+  document.getElementById('inv-tooltip').style.display = 'none';
+}
+
+function toggleInventory() {
+  showInventory = !showInventory;
+  document.getElementById('inventory-panel').style.display = showInventory ? 'block' : 'none';
+  if (showInventory) renderInventory();
+}
+
+// ---- Ground object sprites (dynamic, from object_create/delete packets) ----
+
+let groundObjectSprites = {}; // "x,y" -> PIXI.Sprite
+
+function addGroundObjectSprite(x, y, grhId) {
+  removeGroundObjectSprite(x, y);
+  if (!mapEntitiesContainer || !grhIndex) return;
+  const tex = getGrhTexture(grhId);
+  if (!tex) return;
+  const sprite = new PIXI.Sprite(tex);
+  aoAnchor(sprite);
+  sprite.x = (x - 1) * TILE_SIZE;
+  sprite.y = (y - 1) * TILE_SIZE;
+  mapEntitiesContainer.addChild(sprite);
+  groundObjectSprites[x + ',' + y] = sprite;
+}
+
+function removeGroundObjectSprite(x, y) {
+  const key = x + ',' + y;
+  if (groundObjectSprites[key]) {
+    mapEntitiesContainer.removeChild(groundObjectSprites[key]);
+    delete groundObjectSprites[key];
+  }
+}
+
+// ---- Boot ----
+
+async function boot() {
+  initPixi();
+  initInventoryGrid();
+  await loadIndices();
+  await initMusic();
+  log('WASD/Arrows to move, Enter to chat, I=inventory, P=pickup, F1 tile debug, F2 move debug.', 'info');
+  doConnect();
+}
+
+boot();
+</script>
+</body>
+</html>
