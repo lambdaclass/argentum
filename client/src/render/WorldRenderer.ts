@@ -502,6 +502,7 @@ export class WorldRenderer {
   private staticSceneCache = new Map<string, StaticSceneLayers>();
   private adjacentSceneWarmupTimer: number | null = null;
   private transferInProgress = false;
+  private runtimeTick: ((now: number) => void) | null = null;
   /**
    * Imperative fast path: immediately start a motion animation for the self
    * character without waiting for React to commit state and trigger render().
@@ -557,12 +558,17 @@ export class WorldRenderer {
     this.transferInProgress = false;
   }
 
+  setRuntimeTick(runtimeTick: ((now: number) => void) | null) {
+    this.runtimeTick = runtimeTick;
+  }
+
   private readonly tick = () => {
     if (!this.lastWorld) {
       return;
     }
 
     const now = performance.now();
+    this.runtimeTick?.(now);
     this.updateCharacterMotions(now);
     this.updateCamera(this.lastWorld);
     this.updateHud(this.lastWorld);

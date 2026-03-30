@@ -251,20 +251,6 @@ export function App() {
   }, [session]);
 
   useEffect(() => {
-    let frameId = 0;
-
-    const step = (now: number) => {
-      session.tick(now);
-      frameId = window.requestAnimationFrame(step);
-    };
-
-    frameId = window.requestAnimationFrame(step);
-    return () => {
-      window.cancelAnimationFrame(frameId);
-    };
-  }, [session]);
-
-  useEffect(() => {
     const intervalId = window.setInterval(() => {
       dispatch({ type: "world/pruneChatBubbles", now: Date.now() });
     }, 250);

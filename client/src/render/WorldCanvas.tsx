@@ -22,12 +22,16 @@ export function WorldCanvas({ world, assetCatalog, showTileDebug, session }: Wor
 
     const renderer = new WorldRenderer();
     renderer.mount(rootRef.current);
+    renderer.setRuntimeTick((now) => {
+      session.tick(now);
+    });
     renderer.render(world, assetCatalog, showTileDebug);
     rendererRef.current = renderer;
     session.setRenderer(renderer);
 
     return () => {
       session.setRenderer(null);
+      renderer.setRuntimeTick(null);
       renderer.destroy();
       rendererRef.current = null;
     };
