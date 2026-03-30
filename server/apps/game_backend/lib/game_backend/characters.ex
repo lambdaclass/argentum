@@ -13,6 +13,8 @@ defmodule GameBackend.Characters do
   alias GameBackend.Repo
   alias GameBackend.InventorySlot
   alias GameBackend.CharacterEquipment
+  alias GameBackend.CharacterSkill
+  alias GameBackend.CharacterSpell
 
   @primary_key {:id, :id, autogenerate: true}
   schema "characters" do
@@ -58,16 +60,12 @@ defmodule GameBackend.Characters do
     field :criminal, :boolean, default: false
     field :gm, :boolean, default: false
 
-    # Skills stored as JSON map: %{"mining" => 10, "combat" => 5}
-    field :skills, :map, default: %{}
-
-    # Spells stored as JSON list: [1, 5, 12]
-    field :spells, {:array, :integer}, default: []
-
     field :session_token, :string
 
     has_many :inventory_slots, InventorySlot, foreign_key: :character_id
     has_one :equipment, CharacterEquipment, foreign_key: :character_id
+    has_many :character_skills, CharacterSkill, foreign_key: :character_id
+    has_many :character_spells, CharacterSpell, foreign_key: :character_id
 
     timestamps()
   end
@@ -82,7 +80,7 @@ defmodule GameBackend.Characters do
     :str, :agi, :int, :con, :cha,
     :gold, :bank_gold, :body_id, :head_id,
     :dead, :criminal, :gm,
-    :skills, :spells, :session_token
+    :session_token
   ]
 
   def changeset(character, attrs) do
@@ -93,10 +91,14 @@ defmodule GameBackend.Characters do
     |> unique_constraint(:name)
   end
 
-  @doc "Create a new character with inventory and equipment."
+  @preload_associations [:inventory_slots, :equipment, :character_skills, :character_spells]
+
+  @doc "Create a new character with inventory, equipment, skills, and spells."
   def create(attrs, opts \\ []) do
     inventory = Keyword.get(opts, :inventory, [])
     equipment = Keyword.get(opts, :equipment, %{})
+    skills = Keyword.get(opts, :skills, %{})
+    spells = Keyword.get(opts, :spells, [])
 
     # Generate a session token for the new character
     attrs = Map.put_new(attrs, :session_token, generate_token())
@@ -106,9 +108,11 @@ defmodule GameBackend.Characters do
         {:ok, character} ->
           save_inventory_slots(character.id, inventory)
           save_equipment(character.id, equipment)
+          save_skills(character.id, skills)
+          save_spells(character.id, spells)
 
           character
-          |> Repo.preload([:inventory_slots, :equipment])
+          |> Repo.preload(@preload_associations)
 
         {:error, changeset} ->
           Repo.rollback(changeset)
@@ -131,12 +135,14 @@ defmodule GameBackend.Characters do
   end
 
   defp preload_associations(nil), do: nil
-  defp preload_associations(character), do: Repo.preload(character, [:inventory_slots, :equipment])
+  defp preload_associations(character), do: Repo.preload(character, @preload_associations)
 
   @doc "Save a snapshot of online player state back to DB."
   def save_snapshot(char_id, attrs, opts \\ []) do
     inventory = Keyword.get(opts, :inventory, [])
     equipment = Keyword.get(opts, :equipment, %{})
+    skills = Keyword.get(opts, :skills, %{})
+    spells = Keyword.get(opts, :spells, [])
 
     Repo.transaction(fn ->
       case get(char_id) do
@@ -148,7 +154,9 @@ defmodule GameBackend.Characters do
             {:ok, character} ->
               save_inventory_slots(character.id, inventory)
               save_equipment(character.id, equipment)
-              character |> Repo.preload([:inventory_slots, :equipment], force: true)
+              save_skills(character.id, skills)
+              save_spells(character.id, spells)
+              character |> Repo.preload(@preload_associations, force: true)
 
             {:error, changeset} ->
               Repo.rollback(changeset)
@@ -191,8 +199,8 @@ defmodule GameBackend.Characters do
       gold: c.gold,
       inventory: slots_to_inventory(c.inventory_slots),
       equipment: row_to_equipment(c.equipment),
-      skills: c.skills,
-      spells: c.spells,
+      skills: rows_to_skills(c.character_skills),
+      spells: rows_to_spells(c.character_spells),
       dead: c.dead,
       criminal: c.criminal,
       gm: c.gm,
@@ -231,8 +239,6 @@ defmodule GameBackend.Characters do
       con: e.con,
       cha: e.cha,
       gold: e.gold,
-      skills: e.skills,
-      spells: e.spells,
       dead: e.dead,
       criminal: e.criminal,
       map_id: e.map_id
@@ -244,6 +250,12 @@ defmodule GameBackend.Characters do
 
   @doc "Extract equipment map from entity for saving."
   def equipment_from_entity(%Arena.Entity.PlayerEntity{} = e), do: e.equipment
+
+  @doc "Extract skills map from entity for saving."
+  def skills_from_entity(%Arena.Entity.PlayerEntity{} = e), do: e.skills
+
+  @doc "Extract spells list from entity for saving."
+  def spells_from_entity(%Arena.Entity.PlayerEntity{} = e), do: e.spells
 
   @doc "Validate a session token for a character. Returns true if valid."
   def valid_token?(%__MODULE__{session_token: stored}, token)
@@ -344,5 +356,78 @@ defmodule GameBackend.Characters do
 
   defp row_to_equipment(%CharacterEquipment{} = eq) do
     %{weapon: eq.weapon, armor: eq.armor, shield: eq.shield, helmet: eq.helmet, ring: eq.ring}
+  end
+
+  # ---- Skills ----
+
+  defp save_skills(_character_id, skills) when skills == %{} or skills == nil, do: :ok
+
+  defp save_skills(character_id, skills) do
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+    current_names = Map.keys(skills)
+
+    # Delete skills no longer present
+    from(s in CharacterSkill,
+      where: s.character_id == ^character_id and s.skill_name not in ^current_names
+    )
+    |> Repo.delete_all()
+
+    # Upsert current skills
+    Enum.each(skills, fn {skill_name, level} ->
+      Repo.insert!(
+        %CharacterSkill{
+          character_id: character_id,
+          skill_name: to_string(skill_name),
+          level: level,
+          inserted_at: now,
+          updated_at: now
+        },
+        on_conflict: [set: [level: level, updated_at: now]],
+        conflict_target: [:character_id, :skill_name]
+      )
+    end)
+  end
+
+  defp rows_to_skills(nil), do: %{}
+  defp rows_to_skills(%Ecto.Association.NotLoaded{}), do: %{}
+
+  defp rows_to_skills(rows) do
+    Map.new(rows, fn row -> {row.skill_name, row.level} end)
+  end
+
+  # ---- Spells ----
+
+  defp save_spells(_character_id, spells) when spells == [] or spells == nil, do: :ok
+
+  defp save_spells(character_id, spells) do
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+    # Delete spells no longer known
+    from(s in CharacterSpell,
+      where: s.character_id == ^character_id and s.spell_id not in ^spells
+    )
+    |> Repo.delete_all()
+
+    # Upsert current spells
+    Enum.each(spells, fn spell_id ->
+      Repo.insert!(
+        %CharacterSpell{
+          character_id: character_id,
+          spell_id: spell_id,
+          inserted_at: now,
+          updated_at: now
+        },
+        on_conflict: :nothing,
+        conflict_target: [:character_id, :spell_id]
+      )
+    end)
+  end
+
+  defp rows_to_spells(nil), do: []
+  defp rows_to_spells(%Ecto.Association.NotLoaded{}), do: []
+
+  defp rows_to_spells(rows) do
+    Enum.map(rows, & &1.spell_id)
   end
 end

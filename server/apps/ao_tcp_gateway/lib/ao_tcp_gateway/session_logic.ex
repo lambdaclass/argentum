@@ -48,8 +48,15 @@ defmodule AoTcpGateway.SessionLogic do
           attrs = GameBackend.Characters.from_entity(entity)
           inventory = GameBackend.Characters.inventory_from_entity(entity)
           equipment = GameBackend.Characters.equipment_from_entity(entity)
+          skills = GameBackend.Characters.skills_from_entity(entity)
+          spells = GameBackend.Characters.spells_from_entity(entity)
 
-          case GameBackend.Characters.create(attrs, inventory: inventory, equipment: equipment) do
+          case GameBackend.Characters.create(attrs,
+                 inventory: inventory,
+                 equipment: equipment,
+                 skills: skills,
+                 spells: spells
+               ) do
             {:ok, character} ->
               do_login(state, account_id, character)
 
@@ -258,10 +265,14 @@ defmodule AoTcpGateway.SessionLogic do
             attrs = GameBackend.Characters.from_entity(entity)
             inventory = GameBackend.Characters.inventory_from_entity(entity)
             equipment = GameBackend.Characters.equipment_from_entity(entity)
+            skills = GameBackend.Characters.skills_from_entity(entity)
+            spells = GameBackend.Characters.spells_from_entity(entity)
 
             case GameBackend.Characters.save_snapshot(entity.char_id, attrs,
                    inventory: inventory,
-                   equipment: equipment
+                   equipment: equipment,
+                   skills: skills,
+                   spells: spells
                  ) do
               {:ok, _} -> :ok
               {:error, reason} -> Logger.error("Cleanup save failed for #{entity.char_id}: #{inspect(reason)}")
@@ -288,10 +299,14 @@ defmodule AoTcpGateway.SessionLogic do
       attrs = GameBackend.Characters.from_entity(entity)
       inventory = GameBackend.Characters.inventory_from_entity(entity)
       equipment = GameBackend.Characters.equipment_from_entity(entity)
+      skills = GameBackend.Characters.skills_from_entity(entity)
+      spells = GameBackend.Characters.spells_from_entity(entity)
 
       case GameBackend.Characters.save_snapshot(entity.char_id, attrs,
              inventory: inventory,
-             equipment: equipment
+             equipment: equipment,
+             skills: skills,
+             spells: spells
            ) do
         {:ok, _} -> :ok
         {:error, reason} -> Logger.error("Autosave failed for #{entity.char_id}: #{inspect(reason)}")

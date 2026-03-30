@@ -155,7 +155,15 @@ defmodule Mix.Tasks.Bench.Persistence do
     attrs = Characters.from_entity(entity)
     inventory = Characters.inventory_from_entity(entity)
     equipment = Characters.equipment_from_entity(entity)
-    Characters.save_snapshot(entity.char_id, attrs, inventory: inventory, equipment: equipment)
+    skills = Characters.skills_from_entity(entity)
+    spells = Characters.spells_from_entity(entity)
+
+    Characters.save_snapshot(entity.char_id, attrs,
+      inventory: inventory,
+      equipment: equipment,
+      skills: skills,
+      spells: spells
+    )
   end
 
   defp create_temp_characters(count) do
@@ -191,15 +199,14 @@ defmodule Mix.Tasks.Bench.Persistence do
         int: 15,
         con: 20,
         cha: 12,
-        gold: 1500,
-        skills: %{"mining" => 10, "woodcutting" => 5, "combat" => 20},
-        spells: [1, 5, 12, 25]
+        gold: 1500
       }
 
       {:ok, character} =
-        %GameBackend.Characters{}
-        |> GameBackend.Characters.changeset(attrs)
-        |> Repo.insert()
+        Characters.create(attrs,
+          skills: %{"mining" => 10, "woodcutting" => 5, "combat" => 20},
+          spells: [1, 5, 12, 25]
+        )
 
       character.id
     end)
