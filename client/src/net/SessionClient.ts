@@ -127,12 +127,31 @@ export class SessionClient {
     });
 
     this.ws.addEventListener("close", () => {
+      const currentState = this.getState();
+      const isBootstrapPhase =
+        currentState.world.map == null &&
+        currentState.world.self.charIndex == null;
+      const bootstrapMessage =
+        currentState.connection.lastError ??
+        (isBootstrapPhase ? "Connection closed during bootstrap. Retrying…" : null);
+
       this.mapRequestId += 1;
       this.runtime.resetConnection();
       this.selfCharIndex = null;
-      this.dispatch({ type: "connection/setStatus", status: "offline" });
       this.dispatch({ type: "session/resetRuntime" });
-      this.dispatch({ type: "log/add", level: "warn", message: "Connection closed." });
+      this.dispatch({
+        type: "connection/setStatus",
+        status: "offline",
+        lastError: isBootstrapPhase ? bootstrapMessage : null
+      });
+      this.dispatch({
+        type: "log/add",
+        level: isBootstrapPhase ? "error" : "warn",
+        message:
+          isBootstrapPhase && bootstrapMessage
+            ? bootstrapMessage
+            : "Connection closed."
+      });
       this.ws = null;
     });
 
@@ -367,6 +386,14 @@ export class SessionClient {
         });
         return;
 
+      case "change_spell_slot":
+        this.dispatch({
+          type: "spellbook/setSlot",
+          slotIndex: packet.slotIndex,
+          slot: packet.slot
+        });
+        return;
+
       case "update_hunger_and_thirst":
         this.dispatch({
           type: "stats/setHungerThirst",
@@ -377,6 +404,18 @@ export class SessionClient {
 
       case "update_gold":
         this.dispatch({ type: "stats/setGold", gold: packet.gold });
+        return;
+
+      case "update_exp":
+        this.dispatch({
+          type: "stats/setExp",
+          current: packet.currentXp,
+          next: packet.nextXp
+        });
+        return;
+
+      case "level_up":
+        this.dispatch({ type: "stats/setLevel", level: packet.level });
         return;
 
       case "update_hp":

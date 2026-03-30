@@ -148,6 +148,12 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.update_gold(), payload)
   end
 
+  # eUpdateExp (ID 29) — CurrentXP(Int32) + NextXP(Int32)
+  def encode({:update_exp, %{current_xp: current_xp, next_xp: next_xp}}) do
+    payload = Writer.write_int32(current_xp) <> Writer.write_int32(next_xp)
+    Writer.build_packet(PacketIds.Server.update_exp(), payload)
+  end
+
   # eConsoleMsg (ID 37) — chat(String8) + FontIndex(Int8)
   def encode({:console_msg, %{message: message, font_index: font_index}}) do
     payload = Writer.write_string8(message) <> Writer.write_int8(font_index)
@@ -211,6 +217,16 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.change_inventory_slot(), payload)
   end
 
+  # eChangeSpellSlot (ID 66) — slot(Int8) + spell_id(Int16) + name(String8)
+  def encode({:change_spell_slot, %{slot: slot, spell_id: spell_id, spell_name: spell_name}}) do
+    payload =
+      Writer.write_int8(slot) <>
+        Writer.write_int16(spell_id) <>
+        Writer.write_string8(spell_name)
+
+    Writer.build_packet(PacketIds.Server.change_spell_slot(), payload)
+  end
+
   # eObjectCreate (ID 50) — x(Int8) + y(Int8) + obj_index(Int16) + amount(Int16) + elemental_tags(Int32)
   def encode({:object_create, params}) do
     payload =
@@ -238,6 +254,12 @@ defmodule AoProtocol.Server.Encoder do
         Writer.write_int8(params[:min_hunger] || 0)
 
     Writer.build_packet(PacketIds.Server.update_hunger_and_thirst(), payload)
+  end
+
+  # eLevelUp (ID 80) — level(Int16)
+  def encode({:level_up, %{level: level}}) do
+    payload = Writer.write_int16(level)
+    Writer.build_packet(PacketIds.Server.level_up(), payload)
   end
 
   # eSessionToken (ID 200) — char_id(Int32) + token(String8)

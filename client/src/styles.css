@@ -583,6 +583,45 @@ h3 {
   font-weight: 700;
 }
 
+.character-xp {
+  margin-top: 10px;
+}
+
+.character-xp-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  font-size: 11px;
+  color: var(--text-soft);
+}
+
+.character-xp-row strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.character-xp-track {
+  margin-top: 6px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(8, 12, 18, 0.88);
+  border: 1px solid rgba(154, 129, 85, 0.22);
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.04),
+    inset 0 -1px 2px rgba(0, 0, 0, 0.6);
+}
+
+.character-xp-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(147, 220, 106, 0.95), rgba(205, 233, 116, 0.95));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 0 10px rgba(147, 220, 106, 0.2);
+}
+
 .character-meta {
   min-width: 0;
 }
@@ -625,7 +664,7 @@ h3 {
 .hero-chip-row {
   margin-top: 10px;
   gap: 8px;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
 }
 
 .character-status-track {
@@ -1359,6 +1398,19 @@ h3 {
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 216, 132, 0.1);
+  width: 100%;
+  color: inherit;
+  text-align: left;
+}
+
+.spellbook-row-selected {
+  border-color: rgba(242, 194, 97, 0.52);
+  background: rgba(242, 194, 97, 0.08);
+}
+
+.spellbook-row-empty strong {
+  color: var(--text-soft);
+  font-weight: 500;
 }
 
 .spellbook-row span {
@@ -1369,6 +1421,10 @@ h3 {
 .spellbook-row strong {
   color: var(--text);
   font-weight: 600;
+}
+
+.spellbook-detail-card {
+  margin-top: 10px;
 }
 
 .world-minimap-expanded {

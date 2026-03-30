@@ -88,6 +88,13 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
         walletGoldByLevel: reader.readInt32()
       };
 
+    case 29:
+      return {
+        type: "update_exp",
+        currentXp: reader.readInt32(),
+        nextXp: reader.readInt32()
+      };
+
     case 30:
       return {
         type: "change_map",
@@ -197,6 +204,18 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
       };
     }
 
+    case 66: {
+      const slotIndex = reader.readUint8() - 1;
+      const spellId = reader.readInt16();
+      const name = reader.readString8();
+
+      return {
+        type: "change_spell_slot",
+        slotIndex,
+        slot: spellId <= 0 ? null : { spellId, name }
+      };
+    }
+
     case 73:
       return { type: "error_msg", message: reader.readString8() };
 
@@ -208,6 +227,9 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
 
       return { type: "update_hunger_and_thirst", hunger, thirst };
     }
+
+    case 80:
+      return { type: "level_up", level: reader.readInt16() };
 
     case 158:
     {

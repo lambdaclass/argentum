@@ -15,6 +15,11 @@ export interface InventorySlot {
   canUse: number;
 }
 
+export interface SpellSlot {
+  spellId: number;
+  name: string;
+}
+
 export interface CharacterView {
   charIndex: number | null;
   name: string;
@@ -125,9 +130,16 @@ export interface ClientState {
     hunger: number;
     thirst: number;
     gold: number;
+    level: number;
+    xpCurrent: number;
+    xpNext: number;
   };
   inventory: {
     slots: Array<InventorySlot | null>;
+    selectedSlot: number | null;
+  };
+  spellbook: {
+    slots: Array<SpellSlot | null>;
     selectedSlot: number | null;
   };
   log: PacketLogEntry[];
@@ -174,9 +186,12 @@ export type ServerPacket =
   | { type: "update_mana"; current: number }
   | { type: "update_stamina"; current: number }
   | { type: "update_gold"; gold: number; walletGoldByLevel: number }
+  | { type: "update_exp"; currentXp: number; nextXp: number }
+  | { type: "level_up"; level: number }
   | { type: "intervals"; walk: number }
   | { type: "error_msg"; message: string }
   | { type: "session_token"; credentials: SessionCredentials }
+  | { type: "change_spell_slot"; slotIndex: number; slot: SpellSlot | null }
   | { type: "unknown"; packetId: number };
 
 export type ClientAction =
@@ -205,8 +220,12 @@ export type ClientAction =
   | { type: "stats/setStamina"; current: number; max?: number }
   | { type: "stats/setGold"; gold: number }
   | { type: "stats/setHungerThirst"; hunger: number; thirst: number }
+  | { type: "stats/setLevel"; level: number }
+  | { type: "stats/setExp"; current: number; next: number }
   | { type: "inventory/setSlot"; slotIndex: number; slot: InventorySlot | null }
   | { type: "inventory/selectSlot"; slotIndex: number | null }
+  | { type: "spellbook/setSlot"; slotIndex: number; slot: SpellSlot | null }
+  | { type: "spellbook/selectSlot"; slotIndex: number | null }
   | { type: "log/add"; level: LogLevel; message: string }
   | { type: "log/clear" }
   | { type: "session/resetRuntime" };

@@ -1075,6 +1075,12 @@ function decodeServerPacket(id, r) {
       document.getElementById('inv-gold').textContent = state.gold;
       log('GOLD=' + state.gold, 'pkt-in'); break;
     }
+    case 29: {
+      state.xpCurrent = r.readInt32();
+      state.xpNext = r.readInt32();
+      log('EXP=' + state.xpCurrent + '/' + state.xpNext, 'pkt-in');
+      break;
+    }
     case 30: {
       state.mapId = r.readInt16(); r.readInt16();
       clearPendingWalkSteps();
@@ -1209,6 +1215,15 @@ function decodeServerPacket(id, r) {
       log('INV[' + slot + '] obj=' + objIndex + ' x' + amount + (equipped ? ' [E]' : ''), 'pkt-in');
       break;
     }
+    case 66: {
+      const slot = r.readInt8() - 1;
+      const spellId = r.readInt16();
+      const spellName = r.readString8();
+      state.spells = state.spells || [];
+      state.spells[slot] = { spellId, spellName };
+      log('SPELL[' + slot + '] id=' + spellId + ' "' + spellName + '"', 'pkt-in');
+      break;
+    }
     case 78: {
       r.readInt8(); // max_thirst
       state.thirst = r.readInt8();
@@ -1217,6 +1232,11 @@ function decodeServerPacket(id, r) {
       document.getElementById('inv-hunger').textContent = state.hunger;
       document.getElementById('inv-thirst').textContent = state.thirst;
       log('HUNGER=' + state.hunger + ' THIRST=' + state.thirst, 'pkt-in'); break;
+    }
+    case 80: {
+      state.level = r.readInt16();
+      log('LEVEL=' + state.level, 'pkt-in');
+      break;
     }
     case 158: {
       r.readInt32();

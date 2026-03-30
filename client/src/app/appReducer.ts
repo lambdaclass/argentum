@@ -17,7 +17,8 @@ function defaultEndpoint() {
     return DEFAULT_ENDPOINT;
   }
 
-  const hostname = window.location.hostname || "127.0.0.1";
+  const rawHostname = window.location.hostname || "127.0.0.1";
+  const hostname = rawHostname === "localhost" ? "127.0.0.1" : rawHostname;
   return `ws://${hostname}:7667/ao`;
 }
 
@@ -134,10 +135,17 @@ export function createInitialState(): ClientState {
       staminaMax: 100,
       hunger: 100,
       thirst: 100,
-      gold: 0
+      gold: 0,
+      level: 1,
+      xpCurrent: 0,
+      xpNext: 500
     },
     inventory: {
       slots: Array.from({ length: 24 }, () => null),
+      selectedSlot: null
+    },
+    spellbook: {
+      slots: Array.from({ length: 20 }, () => null),
       selectedSlot: null
     },
     log: [createLogEntry("info", "Client initialized.")]
@@ -498,6 +506,25 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
         }
       };
 
+    case "stats/setLevel":
+      return {
+        ...state,
+        stats: {
+          ...state.stats,
+          level: action.level
+        }
+      };
+
+    case "stats/setExp":
+      return {
+        ...state,
+        stats: {
+          ...state.stats,
+          xpCurrent: action.current,
+          xpNext: action.next
+        }
+      };
+
     case "inventory/setSlot": {
       const slots = [...state.inventory.slots];
       slots[action.slotIndex] = action.slot;
@@ -516,6 +543,38 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
         ...state,
         inventory: {
           ...state.inventory,
+          selectedSlot: action.slotIndex
+        }
+      };
+
+    case "spellbook/setSlot": {
+      const slots =
+        action.slotIndex < state.spellbook.slots.length
+          ? [...state.spellbook.slots]
+          : [
+              ...state.spellbook.slots,
+              ...Array.from(
+                { length: action.slotIndex - state.spellbook.slots.length + 1 },
+                () => null
+              )
+            ];
+
+      slots[action.slotIndex] = action.slot;
+
+      return {
+        ...state,
+        spellbook: {
+          ...state.spellbook,
+          slots
+        }
+      };
+    }
+
+    case "spellbook/selectSlot":
+      return {
+        ...state,
+        spellbook: {
+          ...state.spellbook,
           selectedSlot: action.slotIndex
         }
       };
@@ -560,10 +619,17 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
           staminaMax: 100,
           hunger: 100,
           thirst: 100,
-          gold: 0
+          gold: 0,
+          level: 1,
+          xpCurrent: 0,
+          xpNext: 500
         },
         inventory: {
           slots: Array.from({ length: 24 }, () => null),
+          selectedSlot: null
+        },
+        spellbook: {
+          slots: Array.from({ length: 20 }, () => null),
           selectedSlot: null
         }
       };

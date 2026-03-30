@@ -140,7 +140,9 @@ defmodule AoTcpGateway.SessionLogic do
             min_thirst: entity.thirst
           }}
         ] ++
+          exp_login_packets(entity) ++
           inventory_login_packets(entity) ++
+          spell_login_packets(entity) ++
           for {cid, other} <- all_players, cid != entity.char_id do
             character_create_packet(other)
           end ++
@@ -383,6 +385,49 @@ defmodule AoTcpGateway.SessionLogic do
              valor: valor / 1
            }}
         ]
+    end)
+  end
+
+  def exp_login_packets(entity) do
+    level = max(entity.level || 1, 1)
+    current_xp = max(entity.xp || 0, 0)
+
+    next_xp =
+      case Arena.Data.GameData.exp_for_level(level) do
+        value when is_integer(value) and value > current_xp ->
+          value
+
+        _ ->
+          case Arena.Data.GameData.exp_for_level(level + 1) do
+            value when is_integer(value) and value > 0 -> value
+            _ -> max(current_xp, 1)
+          end
+      end
+
+    [
+      {:level_up, %{level: level}},
+      {:update_exp, %{current_xp: current_xp, next_xp: next_xp}}
+    ]
+  end
+
+  def spell_login_packets(entity) do
+    (entity.spells || [])
+    |> Enum.with_index(1)
+    |> Enum.flat_map(fn
+      {spell_id, slot} when is_integer(spell_id) and spell_id > 0 ->
+        spell_name = Arena.Data.GameData.get_spell_name(spell_id) || "Hechizo #{spell_id}"
+
+        [
+          {:change_spell_slot,
+           %{
+             slot: slot,
+             spell_id: spell_id,
+             spell_name: spell_name
+           }}
+        ]
+
+      _ ->
+        []
     end)
   end
 

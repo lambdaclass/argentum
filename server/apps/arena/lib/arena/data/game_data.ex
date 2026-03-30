@@ -157,6 +157,22 @@ defmodule Arena.Data.GameData do
     end
   end
 
+  @doc "Get spell name by ID. Returns nil if not found."
+  def get_spell_name(spell_id) when is_integer(spell_id) do
+    case :ets.lookup(@table, {:spell_name, spell_id}) do
+      [{_, spell_name}] -> spell_name
+      [] -> nil
+    end
+  end
+
+  @doc "Get XP threshold associated with a level."
+  def exp_for_level(level) when is_integer(level) and level > 0 do
+    case :ets.lookup(@table, {:exp_for_level, level}) do
+      [{_, exp}] -> exp
+      [] -> nil
+    end
+  end
+
   # ---- GenServer ----
 
   @impl true
@@ -166,6 +182,7 @@ defmodule Arena.Data.GameData do
     load_balance_dat()
     load_ciudades_dat()
     load_obj_dat()
+    load_hechizos_dat()
 
     Logger.info("GameData loaded into ETS (#{:ets.info(table, :size)} entries)")
     {:ok, %{}}
@@ -180,6 +197,7 @@ defmodule Arena.Data.GameData do
       {:ok, sections} ->
         load_race_modifiers(sections)
         load_class_stats(sections)
+        load_exp_table(sections)
 
       {:error, reason} ->
         Logger.warning("Could not load Balance.dat: #{inspect(reason)}. Using defaults.")
@@ -226,6 +244,21 @@ defmodule Arena.Data.GameData do
       value = parse_int(Map.get(section, key, to_string(default)))
       :ets.insert(@table, {{ets_prefix, class_id}, value})
     end
+  end
+
+  defp load_exp_table(sections) do
+    exp_section = Map.get(sections, "EXP", %{})
+
+    exp_section
+    |> Enum.each(fn {level_str, exp_str} ->
+      case Integer.parse(String.trim(level_str)) do
+        {level, _} when level > 0 ->
+          :ets.insert(@table, {{:exp_for_level, level}, parse_int(exp_str)})
+
+        _ ->
+          :ok
+      end
+    end)
   end
 
   defp load_ciudades_dat do
@@ -287,6 +320,36 @@ defmodule Arena.Data.GameData do
 
       {:error, reason} ->
         Logger.warning("Could not load obj.dat: #{inspect(reason)}. No item definitions available.")
+    end
+  end
+
+  defp load_hechizos_dat do
+    path = Path.join(dat_dir(), "Hechizos.dat")
+
+    case IniParser.parse_file(path) do
+      {:ok, sections} ->
+        count =
+          sections
+          |> Enum.reduce(0, fn {section_name, fields}, acc ->
+            case Regex.run(~r/^HECHIZO(\d+)$/i, section_name) do
+              [_, id_str] ->
+                spell_id = String.to_integer(id_str)
+                spell_name =
+                  Map.get(fields, "nombre") ||
+                    Map.get(fields, "en_name") ||
+                    "Hechizo #{spell_id}"
+                :ets.insert(@table, {{:spell_name, spell_id}, spell_name})
+                acc + 1
+
+              _ ->
+                acc
+            end
+          end)
+
+        Logger.info("Loaded #{count} spell names from Hechizos.dat")
+
+      {:error, reason} ->
+        Logger.warning("Could not load Hechizos.dat: #{inspect(reason)}. No spell names available.")
     end
   end
 

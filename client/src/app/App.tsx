@@ -60,6 +60,7 @@ export function App() {
   >("hud");
   const [showTileDebug, setShowTileDebug] = useState(false);
   const [showMoveDebug, setShowMoveDebug] = useState(false);
+  const [bootConnectAttempts, setBootConnectAttempts] = useState(0);
   const [movementDebug, setMovementDebug] = useState<MovementDebugSnapshot>({
     predictedX: null,
     predictedY: null,
@@ -72,11 +73,21 @@ export function App() {
     lastCorrectionAt: null
   });
   const stateRef = useRef(state);
-  const hasBootConnectedRef = useRef(false);
+  const manualDisconnectRef = useRef(false);
+  const enteredWorldRef = useRef(false);
 
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  useEffect(() => {
+    if (state.world.mapStatus === "ready" && state.world.map) {
+      enteredWorldRef.current = true;
+      if (bootConnectAttempts !== 0) {
+        setBootConnectAttempts(0);
+      }
+    }
+  }, [bootConnectAttempts, state.world.map, state.world.mapStatus]);
 
   const sessionRef = useRef<SessionClient | null>(null);
   const musicRef = useRef<MapMusicController | null>(null);
@@ -295,10 +306,6 @@ export function App() {
   }, [session]);
 
   useEffect(() => {
-    if (hasBootConnectedRef.current) {
-      return;
-    }
-
     if (
       assetStatus !== "ready" ||
       mapPackStatus !== "ready" ||
@@ -307,15 +314,37 @@ export function App() {
       return;
     }
 
-    hasBootConnectedRef.current = true;
-    session.connect(state.connection.endpoint, state.connection.characterName);
+    if (manualDisconnectRef.current || enteredWorldRef.current) {
+      return;
+    }
+
+    if (state.world.map != null || state.world.self.charIndex != null) {
+      return;
+    }
+
+    const delayMs = bootConnectAttempts === 0 ? 0 : Math.min(5000, 1200 * bootConnectAttempts);
+    const timerId = window.setTimeout(() => {
+      if (manualDisconnectRef.current || enteredWorldRef.current) {
+        return;
+      }
+
+      setBootConnectAttempts((attempts) => attempts + 1);
+      session.connect(state.connection.endpoint, state.connection.characterName);
+    }, delayMs);
+
+    return () => {
+      window.clearTimeout(timerId);
+    };
   }, [
     assetStatus,
+    bootConnectAttempts,
     mapPackStatus,
     session,
     state.connection.characterName,
     state.connection.endpoint,
-    state.connection.status
+    state.connection.status,
+    state.world.map,
+    state.world.self.charIndex
   ]);
 
   useEffect(() => {
@@ -351,6 +380,16 @@ export function App() {
       music.stop();
     }
   }, [music, state.connection.status, state.world.map]);
+
+  const handleConnect = () => {
+    manualDisconnectRef.current = false;
+    session.connect(state.connection.endpoint, state.connection.characterName);
+  };
+
+  const handleDisconnect = () => {
+    manualDisconnectRef.current = true;
+    session.disconnect();
+  };
 
   const title = useMemo(() => {
     const position =
@@ -498,8 +537,8 @@ export function App() {
           <CharacterCard
             canConnect={assetStatus === "ready" && mapPackStatus === "ready"}
             state={state}
-            onConnect={() => session.connect(state.connection.endpoint, state.connection.characterName)}
-            onDisconnect={() => session.disconnect()}
+            onConnect={handleConnect}
+            onDisconnect={handleDisconnect}
           />
 
           <div className="sidebar-tabs sidebar-tabs-top sidebar-tabs-ao">
@@ -536,8 +575,8 @@ export function App() {
                 onCharacterNameChange={(characterName) =>
                   dispatch({ type: "connection/setCharacterName", characterName })
                 }
-                onConnect={() => session.connect(state.connection.endpoint, state.connection.characterName)}
-                onDisconnect={() => session.disconnect()}
+                onConnect={handleConnect}
+                onDisconnect={handleDisconnect}
                 onForgetSession={() =>
                   dispatch({ type: "connection/setCredentials", credentials: null })
                 }
@@ -566,7 +605,13 @@ export function App() {
 
             {activeRightTab === "spells" ? (
               <div className="hud-stack">
-                <HechizosPanel compact />
+                <HechizosPanel
+                  compact
+                  state={state}
+                  onSelectSlot={(slotIndex) =>
+                    dispatch({ type: "spellbook/selectSlot", slotIndex })
+                  }
+                />
                 <HudPanel compact state={state} />
               </div>
             ) : null}
