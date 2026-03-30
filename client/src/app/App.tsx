@@ -13,6 +13,7 @@ import { PacketLogPanel } from "../ui/PacketLogPanel";
 import { ChatPanel } from "../ui/ChatPanel";
 import { CharacterCard } from "../ui/CharacterCard";
 import { WorldStatusPanel } from "../ui/WorldStatusPanel";
+import { HechizosPanel } from "../ui/HechizosPanel";
 
 const MOVE_KEYS: Record<string, Direction> = {
   ArrowUp: "north",
@@ -24,6 +25,15 @@ const MOVE_KEYS: Record<string, Direction> = {
   s: "south",
   a: "west"
 };
+
+const RIGHT_TABS = [
+  { key: "hud", label: "HUD" },
+  { key: "spells", label: "Hechizos" },
+  { key: "world", label: "Mapa" },
+  { key: "session", label: "Sesion" },
+  { key: "chat", label: "Chat" },
+  { key: "debug", label: "Debug" }
+] as const;
 
 export function App() {
   const [state, dispatch] = useReducer(appReducer, undefined, createInitialState);
@@ -38,9 +48,8 @@ export function App() {
     totalBytes: null
   });
   const [activeRightTab, setActiveRightTab] = useState<
-    "session" | "hud" | "inventory" | "chat" | "debug"
-  >("session");
-  const [showInventory, setShowInventory] = useState(true);
+    "hud" | "spells" | "world" | "session" | "chat" | "debug"
+  >("hud");
   const [showTileDebug, setShowTileDebug] = useState(false);
   const [showMoveDebug, setShowMoveDebug] = useState(false);
   const [movementDebug, setMovementDebug] = useState<MovementDebugSnapshot>({
@@ -205,7 +214,7 @@ export function App() {
 
       if (event.key === "i" || event.key === "I") {
         event.preventDefault();
-        setShowInventory((value) => !value);
+        setActiveRightTab("hud");
         return;
       }
 
@@ -485,52 +494,26 @@ export function App() {
         />
 
         <section className="panel sidebar-workbench">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Workbench</p>
-              <h2>Panels</h2>
-            </div>
-            <span className="panel-tag">Tabbed</span>
-          </div>
-          <div className="sidebar-tabs sidebar-tabs-tight">
-            <button
-              className={`ghost-button ${activeRightTab === "session" ? "tab-active" : ""}`}
-              onClick={() => setActiveRightTab("session")}
-              type="button"
-            >
-              Session
-            </button>
-            <button
-              className={`ghost-button ${activeRightTab === "hud" ? "tab-active" : ""}`}
-              onClick={() => setActiveRightTab("hud")}
-              type="button"
-            >
-              HUD
-            </button>
-            <button
-              className={`ghost-button ${activeRightTab === "inventory" ? "tab-active" : ""}`}
-              onClick={() => setActiveRightTab("inventory")}
-              type="button"
-            >
-              Inventory
-            </button>
-            <button
-              className={`ghost-button ${activeRightTab === "chat" ? "tab-active" : ""}`}
-              onClick={() => setActiveRightTab("chat")}
-              type="button"
-            >
-              Chat
-            </button>
-            <button
-              className={`ghost-button ${activeRightTab === "debug" ? "tab-active" : ""}`}
-              onClick={() => setActiveRightTab("debug")}
-              type="button"
-            >
-              Debug
-            </button>
+          <div className="sidebar-tabs sidebar-tabs-top sidebar-tabs-ao">
+            {RIGHT_TABS.map((tab) => (
+              <button
+                className={`ghost-button ${activeRightTab === tab.key ? "tab-active" : ""}`}
+                key={tab.key}
+                onClick={() => setActiveRightTab(tab.key)}
+                type="button"
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
 
-          <div className="sidebar-tab-body">
+          <div
+            className={`sidebar-tab-body ${
+              activeRightTab === "hud" || activeRightTab === "spells"
+                ? "sidebar-tab-body-fixed"
+                : ""
+            }`}
+          >
             {activeRightTab === "session" ? (
               <SessionPanel
                 assetError={assetError}
@@ -553,29 +536,31 @@ export function App() {
               />
             ) : null}
 
-            {activeRightTab === "hud" ? <HudPanel state={state} /> : null}
+            {activeRightTab === "world" ? <WorldStatusPanel state={state} /> : null}
 
-            {activeRightTab === "inventory" ? (
-              showInventory ? (
+            {activeRightTab === "hud" ? (
+              <div className="hud-stack">
                 <InventoryPanel
                   assetCatalog={assetCatalog}
+                  compact
+                  showSelectedDetails={false}
                   state={state}
-                  onSelectSlot={(slotIndex) => dispatch({ type: "inventory/selectSlot", slotIndex })}
+                  onSelectSlot={(slotIndex) =>
+                    dispatch({ type: "inventory/selectSlot", slotIndex })
+                  }
                   onEquip={(slotIndex) => session.sendEquip(slotIndex)}
                   onUse={(slotIndex) => session.sendUse(slotIndex)}
                   onDrop={(slotIndex, amount) => session.sendDrop(slotIndex, amount)}
                 />
-              ) : (
-                <section className="panel">
-                  <div className="panel-header">
-                    <h2>Inventory</h2>
-                    <span className="panel-tag">Hidden</span>
-                  </div>
-                  <p className="panel-copy compact">
-                    Press <code>I</code> to show the 24-slot inventory panel.
-                  </p>
-                </section>
-              )
+                <HudPanel compact state={state} />
+              </div>
+            ) : null}
+
+            {activeRightTab === "spells" ? (
+              <div className="hud-stack">
+                <HechizosPanel compact />
+                <HudPanel compact state={state} />
+              </div>
             ) : null}
 
             {activeRightTab === "chat" ? (
@@ -612,8 +597,6 @@ export function App() {
             ) : null}
           </div>
         </section>
-
-        <WorldStatusPanel state={state} />
       </aside>
     </div>
   );

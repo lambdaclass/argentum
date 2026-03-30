@@ -9,7 +9,10 @@ export function PacketLogPanel({ state, onClear }: PacketLogPanelProps) {
   return (
     <section className="panel">
       <div className="panel-header">
-        <h2>Packet Log</h2>
+        <div>
+          <p className="eyebrow">Activity</p>
+          <h2>Log</h2>
+        </div>
         <button className="ghost-button" onClick={onClear} type="button">
           Clear
         </button>

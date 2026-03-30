@@ -143,6 +143,10 @@ function tileCenterY(tileY: number) {
   return worldY(tileY) + TILE_SIZE / 2;
 }
 
+function worldLabel(name: string) {
+  return name.length > 14 ? `${name.slice(0, 11)}...` : name;
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
@@ -246,6 +250,7 @@ function createFallbackCharacter(
   shape: "circle" | "square" | "diamond"
 ) {
   const container = new Container();
+  const displayName = worldLabel(name);
   const marker = new Graphics();
   const centerX = TILE_SIZE / 2;
   const centerY = TILE_SIZE / 2;
@@ -292,7 +297,7 @@ function createFallbackCharacter(
       break;
   }
 
-  const label = new Text(name, labelStyle);
+  const label = new Text(displayName, labelStyle);
   label.anchor.set(0.5, 1);
   label.x = centerX;
   label.y = centerY - 14;
@@ -367,6 +372,7 @@ function createCharacterVisual(
   kind: "self" | "other" | "npc"
 ): CharacterVisual {
   const direction = headingToDirection(heading);
+  const displayName = worldLabel(name);
   const labelStyle =
     kind === "self" ? selfNameStyle : kind === "npc" ? npcNameStyle : otherNameStyle;
   const fillColor = kind === "self" ? 0x4cb38a : kind === "npc" ? 0xe29c52 : 0xdc8a43;
@@ -438,7 +444,7 @@ function createCharacterVisual(
     };
   }
 
-  const label = new Text(name, labelStyle);
+  const label = new Text(displayName, labelStyle);
   label.anchor.set(0.5, 1);
   label.x = TILE_SIZE / 2;
   label.y = -8;

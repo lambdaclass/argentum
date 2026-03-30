@@ -8,11 +8,12 @@ interface ChatPanelProps {
 
 export function ChatPanel({ onSend, onPickUp, onRequestPosition }: ChatPanelProps) {
   const [message, setMessage] = useState("");
+  const canSend = message.trim().length > 0;
 
   return (
     <section className="panel">
       <div className="panel-header">
-        <h2>Actions</h2>
+        <h2>Chat & Actions</h2>
         <span className="panel-tag">AO20</span>
       </div>
 
@@ -25,21 +26,38 @@ export function ChatPanel({ onSend, onPickUp, onRequestPosition }: ChatPanelProp
         </button>
       </div>
 
-      <label className="field">
+      <div className="field">
         <span>Chat</span>
-        <input
-          type="text"
-          value={message}
-          onChange={(event) => setMessage(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && message.trim().length > 0) {
+        <div className="chat-input-row">
+          <input
+            type="text"
+            value={message}
+            onChange={(event) => setMessage(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && canSend) {
+                onSend(message.trim());
+                setMessage("");
+              }
+            }}
+            placeholder="Type a message and press Enter"
+          />
+          <button
+            className="ghost-button"
+            disabled={!canSend}
+            onClick={() => {
+              if (!canSend) {
+                return;
+              }
+
               onSend(message.trim());
               setMessage("");
-            }
-          }}
-          placeholder="Type a message and press Enter"
-        />
-      </label>
+            }}
+            type="button"
+          >
+            Send
+          </button>
+        </div>
+      </div>
     </section>
   );
 }

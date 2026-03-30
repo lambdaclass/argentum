@@ -56,6 +56,14 @@ export interface GrhAnimation {
   velocidad: number;
 }
 
+export interface GrhFrameDef {
+  url: string;
+  offX: number;
+  offY: number;
+  width: number;
+  height: number;
+}
+
 const catalogCache = new Map<string, Promise<AssetCatalog>>();
 const baseTextureCache = new Map<string, BaseTexture>();
 const textureCache = new Map<string, Texture>();
@@ -135,6 +143,34 @@ function getDirectionalGrh(direction: "north" | "east" | "south" | "west", entry
 function sheetUrl(endpoint: string, sheet: string | number, useCharIndex: boolean) {
   const basePath = useCharIndex ? "/graficos_char" : "/graficos";
   return buildAssetUrl(endpoint, `${basePath}/${sheet}.png`);
+}
+
+export function getGrhFrameDef(
+  catalog: AssetCatalog,
+  grhId: number,
+  useCharIndex = false
+): GrhFrameDef | null {
+  const index = useCharIndex ? catalog.grhChar : catalog.grhMap;
+  let entry = index[grhId];
+  if (!entry) {
+    return null;
+  }
+
+  if (entry.frames && entry.frames.length > 0) {
+    const firstFrame = entry.frames[0];
+    entry = index[firstFrame];
+    if (!entry) {
+      return null;
+    }
+  }
+
+  return {
+    url: sheetUrl(catalog.endpoint, entry.grafico, useCharIndex),
+    offX: entry.offX,
+    offY: entry.offY,
+    width: entry.width,
+    height: entry.height
+  };
 }
 
 export function getGrhTexture(
@@ -231,6 +267,19 @@ export function getObjectName(catalog: AssetCatalog | null, objectId: number) {
 
 export function getObjectGrh(catalog: AssetCatalog | null, objectId: number) {
   return catalog?.objects[objectId]?.grh ?? null;
+}
+
+export function getObjectIconFrame(catalog: AssetCatalog | null, objectId: number) {
+  if (!catalog) {
+    return null;
+  }
+
+  const grhId = getObjectGrh(catalog, objectId);
+  if (!grhId) {
+    return null;
+  }
+
+  return getGrhFrameDef(catalog, grhId, false);
 }
 
 export function getNpcDef(catalog: AssetCatalog | null, npcId: number) {
