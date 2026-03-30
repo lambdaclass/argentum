@@ -2,6 +2,27 @@
 
 Rewrite of the Argentum Online VB6 MMORPG in Elixir (server) and TypeScript (web client). The original server is ~93,000 lines of VB6 across 50+ modules; this implementation targets ~12,000 lines of Elixir.
 
+## Design Improvements over the VB6 Original
+
+### Server
+
+- **One GenServer per map instead of a single-threaded loop.** The VB6 server processed every player action on every map in one thread. Here each map is an independent Elixir process — a busy city doesn't slow down a quiet dungeon, and the BEAM scheduler spreads maps across all CPU cores automatically. No explicit threading or locking.
+- **Area of Interest (AoI) + spatial grid.** VB6 broadcast every movement to every player on the map — O(n) per action. AoI only notifies players within visual range (23x19 tiles), cutting 1,000-player broadcasts from 999 recipients down to ~108. The spatial grid makes the "who is nearby?" lookup O(1) instead of iterating all players.
+- **Pre-encoded broadcasts.** Each outgoing packet is encoded once into raw bytes, then the same binary is sent to every recipient. The VB6 server re-serialized every packet for every recipient.
+- **Cooldowns are real timestamps, not tick counters.** `next_move_at`, `next_attack_at`, etc. are monotonic-clock timestamps. No global tick loop, no accumulation drift. Actions are processed immediately in mailbox order.
+- **PostgreSQL replaces flat files.** Character state, inventory, and world data are stored in Postgres with Ecto. Periodic autosave while online, authoritative DB load on login.
+- **Direct pid sends on the hot path.** MapServer holds `%{char_id => pid}` and sends packets to session pids directly — no pubsub lookup, no routing layer. PubSub is reserved for cross-map features (guild chat, global announcements).
+- **Rust NIF for tile collision only.** The collision grid is a dense bitmap checked via a Rust NIF for speed. All gameplay logic stays in pure Elixir. The Rust boundary is deliberately narrow.
+- **93k lines of VB6 → ~12k lines of Elixir.** Pattern matching, immutable state, and OTP supervision replace thousands of lines of error handling, manual memory management, and global mutable state.
+
+### Client
+
+- **Runs in a browser.** TypeScript + React + Pixi.js replaces the VB6 desktop client. No install, no Wine, no compatibility hacks. Supports both desktop and mobile viewports.
+- **Imperative fast path for movement.** Predicted movement updates Pixi sprites directly on the same frame as the keypress, before React state catches up. The Pixi ticker is the sole animation loop — no duplicate requestAnimationFrame.
+- **Client-side prediction with server reconciliation.** The client predicts walk outcomes using the local tile blockmap, sends the intent to the server, and tracks pending steps. Server corrections snap the sprite back. This eliminates the perceived input lag that the VB6 client had over network.
+- **WebSocket + TCP dual transport.** The web client connects via WebSocket; legacy clients can still use raw TCP. Both speak the same AO20 binary protocol.
+- **Asset pipeline from VB6 resources.** A build script converts the original VB6 .grh/.ind/.csm assets into sprite sheets and map packs served as static files. The 1.3GB raw asset repo is a git submodule — the client downloads only the processed data it needs.
+
 ## Repository Structure
 
 ```
