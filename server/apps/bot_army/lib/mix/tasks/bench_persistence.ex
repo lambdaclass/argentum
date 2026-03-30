@@ -27,7 +27,7 @@ defmodule Mix.Tasks.Bench.Persistence do
   use Mix.Task
 
   require Logger
-  import Ecto.Query
+  require Ecto.Query
 
   alias GameBackend.Characters
   alias GameBackend.Repo
@@ -309,8 +309,8 @@ defmodule Mix.Tasks.Bench.Persistence do
     # Bulk delete is much faster than one-by-one
     char_ids
     |> Enum.chunk_every(500)
-    |> Enum.each(fn batch ->
-      from(c in GameBackend.Characters, where: c.id in ^batch) |> Repo.delete_all()
+    |> Enum.each(fn ids_batch ->
+      Repo.delete_all(Ecto.Query.from(c in GameBackend.Characters, where: c.id in ^ids_batch))
     end)
   end
 end

@@ -35,6 +35,14 @@ const RIGHT_TABS = [
   { key: "debug", label: "Debug" }
 ] as const;
 
+const UTILITY_ACTIONS = [
+  { key: "world" as const, label: "Mapa" },
+  { key: "hud" as const, label: "Estad." },
+  { key: "session" as const, label: "Opc." },
+  { key: "party" as const, label: "Grupo" },
+  { key: "clans" as const, label: "Clanes" }
+];
+
 export function App() {
   const [state, dispatch] = useReducer(appReducer, undefined, createInitialState);
   const [assetCatalog, setAssetCatalog] = useState<AssetCatalog | null>(null);
@@ -486,14 +494,14 @@ export function App() {
       </main>
 
       <aside className="side-panel side-panel-right game-sidebar">
-        <CharacterCard
-          canConnect={assetStatus === "ready" && mapPackStatus === "ready"}
-          state={state}
-          onConnect={() => session.connect(state.connection.endpoint, state.connection.characterName)}
-          onDisconnect={() => session.disconnect()}
-        />
+        <section className="panel ao-sidebar-shell">
+          <CharacterCard
+            canConnect={assetStatus === "ready" && mapPackStatus === "ready"}
+            state={state}
+            onConnect={() => session.connect(state.connection.endpoint, state.connection.characterName)}
+            onDisconnect={() => session.disconnect()}
+          />
 
-        <section className="panel sidebar-workbench">
           <div className="sidebar-tabs sidebar-tabs-top sidebar-tabs-ao">
             {RIGHT_TABS.map((tab) => (
               <button
@@ -595,6 +603,46 @@ export function App() {
                 <PacketLogPanel state={state} onClear={() => dispatch({ type: "log/clear" })} />
               </>
             ) : null}
+          </div>
+
+          <div className="ao-utility-strip">
+            {UTILITY_ACTIONS.map((action) => (
+              <button
+                className={`ghost-button ${
+                  (action.key === "world" ||
+                    action.key === "hud" ||
+                    action.key === "session") &&
+                  activeRightTab === action.key
+                    ? "tab-active"
+                    : ""
+                }`}
+                key={action.key}
+                onClick={() => {
+                  if (action.key === "party") {
+                    dispatch({
+                      type: "log/add",
+                      level: "info",
+                      message: "Grupo panel not wired yet."
+                    });
+                    return;
+                  }
+
+                  if (action.key === "clans") {
+                    dispatch({
+                      type: "log/add",
+                      level: "info",
+                      message: "Clanes panel not wired yet."
+                    });
+                    return;
+                  }
+
+                  setActiveRightTab(action.key);
+                }}
+                type="button"
+              >
+                {action.label}
+              </button>
+            ))}
           </div>
         </section>
       </aside>
