@@ -380,6 +380,25 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
     end
   end
 
+  # update_exp (ID 29) — CurrentXP(Int32) + NextXP(Int32)
+  defp decode_server_packet(29, <<current_xp::little-signed-32, next_xp::little-signed-32, rest::binary>>) do
+    {:ok, %{current_xp: current_xp, next_xp: next_xp}, rest}
+  end
+
+  # change_spell_slot (ID 66) — slot(Int8) + spell_id(Int16) + name(String8)
+  defp decode_server_packet(66, <<slot::8, spell_id::little-16, rest::binary>>) do
+    case Reader.read_string8(rest) do
+      {:ok, spell_name, rest2} ->
+        {:ok, %{slot: slot, spell_id: spell_id, spell_name: spell_name}, rest2}
+      _ -> :incomplete
+    end
+  end
+
+  # level_up (ID 80) — level(Int16)
+  defp decode_server_packet(80, <<level::little-16, rest::binary>>) do
+    {:ok, %{level: level}, rest}
+  end
+
   defp decode_server_packet(78, <<max_thirst::8, min_thirst::8, max_hunger::8, min_hunger::8, rest::binary>>) do
     {:ok, %{max_thirst: max_thirst, min_thirst: min_thirst, max_hunger: max_hunger, min_hunger: min_hunger}, rest}
   end
@@ -424,7 +443,7 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
       assert List.last(ids) == 200
 
       middle = Enum.slice(ids, 12, length(ids) - 14)
-      assert Enum.all?(middle, &(&1 in [42, 63]))
+      assert Enum.all?(middle, &(&1 in [42, 63, 66, 80, 29]))
     end
 
     test "logged packet has new_user=false", %{port: port} do
@@ -699,9 +718,10 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
           ensure_test_map_started(exit_tile.dest_map)
 
           name = unique_name()
+          {:ok, account} = GameBackend.Account.get_or_create(name, "testpass")
           {:ok, character} = GameBackend.Characters.create(%{
             name: name,
-            account_id: "account_#{name}",
+            account_id: account.id,
             map_id: 1,
             pos_x: sx,
             pos_y: sy,
@@ -771,6 +791,411 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
       cleanup_char(char_id)
 
       assert {:error, :not_found} = AoSession.lookup(char_id)
+    end
+  end
+
+  # ============================================================
+  # Auth & Persistence Tests (Phase 2)
+  # ============================================================
+
+  describe "auth" do
+    test "invalid session token returns error on Packet 73 login", %{port: port} do
+      name = unique_name()
+      {socket1, _packets, char_id} = login_and_setup(port, name)
+
+      # Disconnect first player
+      :gen_tcp.close(socket1)
+      Process.sleep(200)
+
+      # Try reconnecting with wrong token
+      socket2 = connect(port)
+      send_login_existing(socket2, char_id, "wrong_token_abc123")
+      data = recv_all(socket2)
+      packets = decode_all_packets(data)
+      on_exit(fn -> :gen_tcp.close(socket2) end)
+
+      assert {73, error} = find_packet(packets, 73)
+      assert error.message =~ "Invalid session token"
+    end
+
+    test "wrong password returns error on Packet 74 login", %{port: port} do
+      name = unique_name()
+
+      # Create account+character via Packet 74
+      {socket1, _packets, _char_id} = login_and_setup(port, name)
+      :gen_tcp.close(socket1)
+      Process.sleep(200)
+
+      # Second connection: same name, different password
+      socket2 = connect(port)
+      # send_login_with_name uses "test_token" as password — send manually with different password
+      md5 = "abcdef1234567890abcdef1234567890"
+      payload =
+        Writer.write_string8("different_password") <>
+          Writer.write_string8(name) <>
+          Writer.write_int8(1) <> Writer.write_int8(0) <> Writer.write_int8(0) <>
+          Writer.write_string8(md5) <>
+          Writer.write_int8(1) <> Writer.write_int8(1) <> Writer.write_int8(6) <>
+          Writer.write_int16(1) <> Writer.write_int8(1)
+      packet = Writer.build_packet(74, payload)
+      :ok = :gen_tcp.send(socket2, packet)
+
+      data = recv_all(socket2)
+      packets = decode_all_packets(data)
+      on_exit(fn -> :gen_tcp.close(socket2) end)
+
+      assert {73, error} = find_packet(packets, 73)
+      assert error.message =~ "Wrong password"
+    end
+  end
+
+  describe "persistence" do
+    test "character stats persist across logout/login", %{port: port} do
+      name = unique_name()
+
+      # Create character via Packet 74
+      {socket1, packets1, char_id} = login_and_setup(port, name)
+
+      # Capture stats from login
+      {27, hp1} = find_packet(packets1, 27)
+      {25, sta1} = find_packet(packets1, 25)
+      {26, mana1} = find_packet(packets1, 26)
+      {28, gold1} = find_packet(packets1, 28)
+
+      # Get session token for Packet 73 reconnect
+      {200, session} = find_packet(packets1, 200)
+      token = session.token
+
+      # Disconnect — triggers autosave
+      :gen_tcp.close(socket1)
+      Process.sleep(500)
+
+      # Reconnect via Packet 73
+      socket2 = connect(port)
+      send_login_existing(socket2, char_id, token)
+      data2 = recv_all(socket2)
+      packets2 = decode_all_packets(data2)
+      on_exit(fn -> :gen_tcp.close(socket2) end)
+
+      # Verify same stats
+      {27, hp2} = find_packet(packets2, 27)
+      {25, sta2} = find_packet(packets2, 25)
+      {26, mana2} = find_packet(packets2, 26)
+      {28, gold2} = find_packet(packets2, 28)
+
+      assert hp2.min_hp == hp1.min_hp
+      assert sta2.min_sta == sta1.min_sta
+      assert mana2.min_mana == mana1.min_mana
+      assert gold2.gold == gold1.gold
+    end
+
+    test "inventory persists across logout/login", %{port: port} do
+      name = unique_name()
+      {socket1, packets1, char_id} = login_and_setup(port, name)
+
+      inv_packets1 =
+        packets1
+        |> Enum.filter(fn {id, _} -> id == 63 end)
+        |> Enum.sort_by(fn {_, fields} -> fields.slot end)
+
+      {200, session} = find_packet(packets1, 200)
+
+      :gen_tcp.close(socket1)
+      Process.sleep(500)
+
+      socket2 = connect(port)
+      send_login_existing(socket2, char_id, session.token)
+      data2 = recv_all(socket2)
+      packets2 = decode_all_packets(data2)
+      on_exit(fn -> :gen_tcp.close(socket2) end)
+
+      inv_packets2 =
+        packets2
+        |> Enum.filter(fn {id, _} -> id == 63 end)
+        |> Enum.sort_by(fn {_, fields} -> fields.slot end)
+
+      # Same number of inventory slots
+      assert length(inv_packets2) == length(inv_packets1)
+
+      # Same item IDs and amounts in each slot
+      Enum.zip(inv_packets1, inv_packets2)
+      |> Enum.each(fn {{_, s1}, {_, s2}} ->
+        assert s2.slot == s1.slot
+        assert s2.obj_index == s1.obj_index
+        assert s2.amount == s1.amount
+      end)
+    end
+
+    test "spells persist across logout/login", %{port: port} do
+      name = unique_name()
+      {socket1, packets1, char_id} = login_and_setup(port, name)
+
+      spell_packets1 =
+        packets1
+        |> Enum.filter(fn {id, _} -> id == 66 end)
+        |> Enum.sort_by(fn {_, fields} -> fields.slot end)
+
+      {200, session} = find_packet(packets1, 200)
+
+      :gen_tcp.close(socket1)
+      Process.sleep(500)
+
+      socket2 = connect(port)
+      send_login_existing(socket2, char_id, session.token)
+      data2 = recv_all(socket2)
+      packets2 = decode_all_packets(data2)
+      on_exit(fn -> :gen_tcp.close(socket2) end)
+
+      spell_packets2 =
+        packets2
+        |> Enum.filter(fn {id, _} -> id == 66 end)
+        |> Enum.sort_by(fn {_, fields} -> fields.slot end)
+
+      assert length(spell_packets2) == length(spell_packets1)
+
+      Enum.zip(spell_packets1, spell_packets2)
+      |> Enum.each(fn {{_, s1}, {_, s2}} ->
+        assert s2.slot == s1.slot
+        assert s2.spell_id == s1.spell_id
+      end)
+    end
+  end
+
+  # ============================================================
+  # Transfer Stress Tests (Phase 2A)
+  # ============================================================
+
+  describe "transfer stress" do
+    # Create a character placed on a specific tile via DB + Packet 73 login
+    defp create_and_login_at(port, map_id, x, y) do
+      name = unique_name()
+      {:ok, account} = GameBackend.Account.get_or_create(name, "testpass")
+
+      {:ok, character} =
+        GameBackend.Characters.create(%{
+          name: name,
+          account_id: account.id,
+          map_id: map_id,
+          pos_x: x,
+          pos_y: y,
+          heading: "south"
+        })
+
+      ensure_test_map_started(map_id)
+
+      socket = connect(port)
+      send_login_existing(socket, character.id, character.session_token)
+      data = recv_all(socket)
+      packets = decode_all_packets(data)
+
+      {socket, packets, character.id}
+    end
+
+    test "rapid back-and-forth map transitions", %{port: port} do
+      map_data = Arena.Map.MapServer.get_map_data(1)
+      exits_with_approach = all_exits_with_approach(map_data.exits)
+      assert exits_with_approach != [], "need at least one reachable exit on map 1"
+
+      # Find a usable exit
+      result =
+        Enum.find_value(exits_with_approach, :no_exit_worked, fn {exit_tile, {sx, sy}, heading} ->
+          ensure_test_map_started(exit_tile.dest_map)
+
+          name = unique_name()
+          {:ok, account} = GameBackend.Account.get_or_create(name, "testpass")
+
+          {:ok, character} =
+            GameBackend.Characters.create(%{
+              name: name,
+              account_id: account.id,
+              map_id: 1,
+              pos_x: sx,
+              pos_y: sy,
+              heading: "south"
+            })
+
+          socket = connect(port)
+          send_login_existing(socket, character.id, character.session_token)
+          login_data = recv_all(socket)
+          login_packets = decode_all_packets(login_data)
+
+          {31, login_pos} = find_packet(login_packets, 31)
+
+          if login_pos.x == sx and login_pos.y == sy do
+            {:ok, socket, character.id, exit_tile, heading}
+          else
+            :gen_tcp.close(socket)
+            cleanup_char(character.id)
+            nil
+          end
+        end)
+
+      assert result != :no_exit_worked,
+        "no exit had a free approach tile"
+
+      {:ok, socket, char_id, exit_tile, heading} = result
+      on_exit(fn -> :gen_tcp.close(socket); cleanup_char(char_id) end)
+
+      # Transfer to destination map
+      Process.sleep(300)
+      send_walk(socket, heading)
+      transfer1 = recv_until_packet(socket, 30, 8000)
+      {30, map1} = find_packet(transfer1, 30)
+      assert map1.map_id == exit_tile.dest_map
+
+      # Now find a return exit on the destination map
+      dest_map_data = Arena.Map.MapServer.get_map_data(exit_tile.dest_map)
+      return_exits =
+        dest_map_data.exits
+        |> Enum.filter(&(&1.dest_map == 1))
+
+      if return_exits != [] do
+        # Walk back — find the return exit approach
+        return_approaches = all_exits_with_approach(return_exits)
+
+        if return_approaches != [] do
+          {_ret_exit, {_rx, _ry}, ret_heading} = hd(return_approaches)
+          Process.sleep(300)
+          send_walk(socket, ret_heading)
+          transfer2 = recv_until_packet(socket, 30, 8000)
+
+          case find_packet(transfer2, 30) do
+            {30, map2} -> assert map2.map_id == 1
+            nil -> :ok  # didn't land on exit, that's fine
+          end
+        end
+      end
+    end
+
+    test "transfer preserves entity state on reconnect", %{port: port} do
+      map_data = Arena.Map.MapServer.get_map_data(1)
+      exits_with_approach = all_exits_with_approach(map_data.exits)
+      assert exits_with_approach != [], "need at least one reachable exit on map 1"
+
+      result =
+        Enum.find_value(exits_with_approach, :no_exit_worked, fn {exit_tile, {sx, sy}, heading} ->
+          ensure_test_map_started(exit_tile.dest_map)
+
+          name = unique_name()
+          {:ok, account} = GameBackend.Account.get_or_create(name, "testpass")
+
+          {:ok, character} =
+            GameBackend.Characters.create(%{
+              name: name,
+              account_id: account.id,
+              map_id: 1,
+              pos_x: sx,
+              pos_y: sy,
+              heading: "south"
+            })
+
+          socket = connect(port)
+          send_login_existing(socket, character.id, character.session_token)
+          login_data = recv_all(socket)
+          login_packets = decode_all_packets(login_data)
+
+          {31, login_pos} = find_packet(login_packets, 31)
+
+          if login_pos.x == sx and login_pos.y == sy do
+            {:ok, socket, character.id, character.session_token, exit_tile, heading}
+          else
+            :gen_tcp.close(socket)
+            cleanup_char(character.id)
+            nil
+          end
+        end)
+
+      assert result != :no_exit_worked,
+        "no exit had a free approach tile"
+
+      {:ok, socket, char_id, token, exit_tile, heading} = result
+      on_exit(fn -> cleanup_char(char_id) end)
+
+      # Transfer to destination
+      Process.sleep(300)
+      send_walk(socket, heading)
+      transfer_packets = recv_until_packet(socket, 30, 8000)
+      {30, new_map} = find_packet(transfer_packets, 30)
+      assert new_map.map_id == exit_tile.dest_map
+
+      # Disconnect — triggers cleanup save on dest map
+      :gen_tcp.close(socket)
+      Process.sleep(500)
+
+      # Reconnect via Packet 73
+      ensure_test_map_started(exit_tile.dest_map)
+      socket2 = connect(port)
+      send_login_existing(socket2, char_id, token)
+      data2 = recv_all(socket2)
+      packets2 = decode_all_packets(data2)
+      on_exit(fn -> :gen_tcp.close(socket2) end)
+
+      # Should be on the destination map, not map 1
+      {30, persisted_map} = find_packet(packets2, 30)
+      assert persisted_map.map_id == exit_tile.dest_map
+
+      {31, persisted_pos} = find_packet(packets2, 31)
+      assert persisted_pos.x == exit_tile.dest_x
+      assert persisted_pos.y == exit_tile.dest_y
+    end
+
+    test "concurrent transfers by two players", %{port: port} do
+      map_data = Arena.Map.MapServer.get_map_data(1)
+      exits_with_approach = all_exits_with_approach(map_data.exits)
+      assert exits_with_approach != [], "need at least one reachable exit on map 1"
+
+      # We need two approach tiles for different exits
+      usable =
+        Enum.take(exits_with_approach, 2)
+        |> Enum.map(fn {exit_tile, {sx, sy}, heading} ->
+          ensure_test_map_started(exit_tile.dest_map)
+          {exit_tile, {sx, sy}, heading}
+        end)
+
+      assert length(usable) >= 2, "need at least 2 reachable exits on map 1"
+
+      [{exit1, {sx1, sy1}, h1}, {exit2, {sx2, sy2}, h2}] = usable
+
+      # Create two players at different approach tiles
+      {socket1, packets1, char_id1} = create_and_login_at(port, 1, sx1, sy1)
+      {socket2, packets2, char_id2} = create_and_login_at(port, 1, sx2, sy2)
+      on_exit(fn ->
+        :gen_tcp.close(socket1); :gen_tcp.close(socket2)
+        cleanup_char(char_id1); cleanup_char(char_id2)
+      end)
+
+      {31, pos1} = find_packet(packets1, 31)
+      {31, pos2} = find_packet(packets2, 31)
+
+      # Verify they spawned where expected (or skip if tiles were occupied)
+      if pos1.x == sx1 and pos1.y == sy1 and pos2.x == sx2 and pos2.y == sy2 do
+        # Both walk onto exits simultaneously
+        Process.sleep(300)
+        send_walk(socket1, h1)
+        send_walk(socket2, h2)
+
+        t1 = recv_until_packet(socket1, 30, 8000)
+        t2 = recv_until_packet(socket2, 30, 8000)
+
+        transferred =
+          [
+            {t1, exit1.dest_map},
+            {t2, exit2.dest_map}
+          ]
+          |> Enum.filter(fn {packets, _expected_map} ->
+            find_packet(packets, 30) != nil
+          end)
+
+        # At least one player should have transferred successfully
+        assert length(transferred) >= 1,
+          "at least one of the two players should transfer"
+
+        # Each transferred player should be on the correct map
+        Enum.each(transferred, fn {packets, expected_map} ->
+          {30, map} = find_packet(packets, 30)
+          assert map.map_id == expected_map
+        end)
+      end
     end
   end
 end

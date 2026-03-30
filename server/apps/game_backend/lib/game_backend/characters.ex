@@ -19,7 +19,7 @@ defmodule GameBackend.Characters do
   @primary_key {:id, :id, autogenerate: true}
   schema "characters" do
     field :name, :string
-    field :account_id, :string
+    belongs_to :account, GameBackend.Account
     field :race, :string, default: "human"
     field :class, :string, default: "warrior"
     field :gender, :string, default: "male"

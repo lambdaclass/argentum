@@ -1,13 +1,24 @@
+import { useEffect, useRef } from "react";
 import type { ClientState } from "../app/types";
+import { getLevelProgress } from "../data/gameData";
+import { drawMinimap } from "./minimap";
 
 interface CharacterCardProps {
   canConnect: boolean;
   state: ClientState;
   onConnect: () => void;
   onDisconnect: () => void;
+  onOpenMap: () => void;
 }
 
-export function CharacterCard({ canConnect, state, onConnect, onDisconnect }: CharacterCardProps) {
+export function CharacterCard({
+  canConnect,
+  state,
+  onConnect,
+  onDisconnect,
+  onOpenMap
+}: CharacterCardProps) {
+  const minimapRef = useRef<HTMLCanvasElement | null>(null);
   const connected = state.connection.status === "connected";
   const characterName = state.world.self.name || state.connection.characterName || "Adventurer";
   const badge = String(state.stats.level);
@@ -19,9 +30,21 @@ export function CharacterCard({ canConnect, state, onConnect, onDisconnect }: Ch
         : "Offline";
   const mapLabel = state.world.map?.name ?? "Mundo";
   const mapSummary = state.world.mapId == null ? "Map --" : `Map ${state.world.mapId}`;
-  const xpCurrent = Math.max(state.stats.xpCurrent, 0);
-  const xpNext = Math.max(state.stats.xpNext, 1);
-  const xpPercent = Math.max(0, Math.min(100, Math.round((xpCurrent / xpNext) * 100)));
+  const position =
+    state.world.self.x != null && state.world.self.y != null
+      ? `${state.world.self.x},${state.world.self.y}`
+      : "--,--";
+  const progression = getLevelProgress(
+    state.stats.level,
+    state.stats.xpCurrent,
+    state.stats.xpNext
+  );
+
+  useEffect(() => {
+    if (minimapRef.current) {
+      drawMinimap(minimapRef.current, state, 108);
+    }
+  }, [state]);
 
   return (
     <section className="character-hero">
@@ -42,16 +65,42 @@ export function CharacterCard({ canConnect, state, onConnect, onDisconnect }: Ch
         </button>
       </div>
 
-      <div className="character-xp">
-        <div className="character-xp-row">
-          <span>Experiencia</span>
-          <strong>
-            {xpCurrent}/{xpNext}
-          </strong>
+      <div className="character-hero-body">
+        <div className="character-progression-card">
+          <div className="character-xp-row">
+            <span>Experiencia de este nivel</span>
+            <strong>
+              {progression.xpIntoLevel}/{progression.xpRequiredThisLevel}
+            </strong>
+          </div>
+          <div className="character-xp-track">
+            <div
+              className="character-xp-fill"
+              style={{ width: `${progression.progressPercent}%` }}
+            />
+          </div>
+          <div className="character-progress-meta">
+            <div className="character-progress-chip">
+              <span>Restante</span>
+              <strong>{progression.xpRemaining} XP</strong>
+            </div>
+            <div className="character-progress-chip">
+              <span>Total</span>
+              <strong>
+                {state.stats.xpCurrent}/{progression.levelCeilXp}
+              </strong>
+            </div>
+          </div>
         </div>
-        <div className="character-xp-track">
-          <div className="character-xp-fill" style={{ width: `${xpPercent}%` }} />
-        </div>
+
+        <button className="character-minimap-card" onClick={onOpenMap} type="button">
+          <canvas className="character-minimap" ref={minimapRef} />
+          <div className="character-minimap-copy">
+            <span className="character-minimap-label">Mapa activo</span>
+            <strong>{mapSummary}</strong>
+            <small>{position}</small>
+          </div>
+        </button>
       </div>
 
       <div className="character-status-track">

@@ -30,44 +30,54 @@ defmodule AoTcpGateway.SessionLogic do
 
   def login_new(state, params) do
     name = params.username
-    account_id = "account_#{name}"
+    password = params.session_token
 
-    if GameBackend.Characters.get_by_name(name) != nil do
-      {state, [{:error_msg, %{message: "Character name already taken."}}]}
-    else
-      case Arena.CharacterCreation.create(%{
-        name: name,
-        race: params.race,
-        gender: params.gender,
-        class: params.class,
-        head: params.head,
-        home_city: params.home_city,
-        account_id: account_id
-      }) do
-        {:ok, entity} ->
-          attrs = GameBackend.Characters.from_entity(entity)
-          inventory = GameBackend.Characters.inventory_from_entity(entity)
-          equipment = GameBackend.Characters.equipment_from_entity(entity)
-          skills = GameBackend.Characters.skills_from_entity(entity)
-          spells = GameBackend.Characters.spells_from_entity(entity)
+    case GameBackend.Account.get_or_create(name, password) do
+      {:error, :wrong_password} ->
+        {state, [{:error_msg, %{message: "Wrong password."}}]}
 
-          case GameBackend.Characters.create(attrs,
-                 inventory: inventory,
-                 equipment: equipment,
-                 skills: skills,
-                 spells: spells
-               ) do
-            {:ok, character} ->
-              do_login(state, account_id, character)
+      {:error, changeset} ->
+        Logger.error("Account creation failed: #{inspect(changeset)}")
+        {state, [{:error_msg, %{message: "Failed to create account."}}]}
 
-            {:error, changeset} ->
-              Logger.error("Failed to save new character: #{inspect(changeset)}")
-              {state, [{:error_msg, %{message: "Failed to create character."}}]}
+      {:ok, account} ->
+        if GameBackend.Characters.get_by_name(name) != nil do
+          {state, [{:error_msg, %{message: "Character name already taken."}}]}
+        else
+          case Arena.CharacterCreation.create(%{
+            name: name,
+            race: params.race,
+            gender: params.gender,
+            class: params.class,
+            head: params.head,
+            home_city: params.home_city,
+            account_id: account.id
+          }) do
+            {:ok, entity} ->
+              attrs = GameBackend.Characters.from_entity(entity)
+              inventory = GameBackend.Characters.inventory_from_entity(entity)
+              equipment = GameBackend.Characters.equipment_from_entity(entity)
+              skills = GameBackend.Characters.skills_from_entity(entity)
+              spells = GameBackend.Characters.spells_from_entity(entity)
+
+              case GameBackend.Characters.create(attrs,
+                     inventory: inventory,
+                     equipment: equipment,
+                     skills: skills,
+                     spells: spells
+                   ) do
+                {:ok, character} ->
+                  do_login(state, account.id, character)
+
+                {:error, changeset} ->
+                  Logger.error("Failed to save new character: #{inspect(changeset)}")
+                  {state, [{:error_msg, %{message: "Failed to create character."}}]}
+              end
+
+            {:error, reason} ->
+              {state, [{:error_msg, %{message: creation_error_message(reason)}}]}
           end
-
-        {:error, reason} ->
-          {state, [{:error_msg, %{message: creation_error_message(reason)}}]}
-      end
+        end
     end
   end
 

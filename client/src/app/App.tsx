@@ -539,6 +539,7 @@ export function App() {
             state={state}
             onConnect={handleConnect}
             onDisconnect={handleDisconnect}
+            onOpenMap={() => setActiveRightTab("world")}
           />
 
           <div className="sidebar-tabs sidebar-tabs-top sidebar-tabs-ao">
@@ -613,7 +614,6 @@ export function App() {
                     dispatch({ type: "spellbook/selectSlot", slotIndex })
                   }
                 />
-                <HudPanel compact state={state} />
               </div>
             ) : null}
 

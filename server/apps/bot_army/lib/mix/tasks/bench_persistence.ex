@@ -70,10 +70,10 @@ defmodule Mix.Tasks.Bench.Persistence do
     """)
 
     Mix.shell().info("Creating #{count} temporary characters...")
-    char_ids = create_temp_characters(count)
+    {account_id, char_ids} = create_temp_characters(count)
     Mix.shell().info("Created #{length(char_ids)} characters")
 
-    entities = Enum.map(char_ids, &build_entity/1)
+    entities = Enum.map(char_ids, &build_entity(&1, account_id))
 
     # Split entities across simulated maps
     entities_by_map =
@@ -167,52 +167,59 @@ defmodule Mix.Tasks.Bench.Persistence do
   end
 
   defp create_temp_characters(count) do
-    Enum.map(1..count, fn i ->
-      name = "_bench_persist_#{i}_#{System.unique_integer([:positive])}"
+    # Create a single bench account for all temp characters
+    {:ok, bench_account} =
+      GameBackend.Account.get_or_create("_bench_account_#{System.unique_integer([:positive])}", "benchpass")
 
-      attrs = %{
-        name: name,
-        account_id: "bench_account_#{i}",
-        race: "humano",
-        class: "warrior",
-        gender: "male",
-        home_city: "ullathorpe",
-        map_id: 1,
-        pos_x: 50,
-        pos_y: 50,
-        heading: "south",
-        body_id: 1,
-        head_id: 1,
-        hp: 100,
-        max_hp: 100,
-        mana: 50,
-        max_mana: 50,
-        stamina: 100,
-        max_stamina: 100,
-        hunger: 80,
-        thirst: 80,
-        level: 10,
-        xp: 5000,
-        skill_points: 5,
-        str: 20,
-        agi: 18,
-        int: 15,
-        con: 20,
-        cha: 12,
-        gold: 1500
-      }
+    char_ids =
+      Enum.map(1..count, fn i ->
+        name = "_bench_persist_#{i}_#{System.unique_integer([:positive])}"
 
-      {:ok, character} =
-        Characters.create(attrs,
-          skills: %{"mining" => 10, "woodcutting" => 5, "combat" => 20},
-          spells: [1, 5, 12, 25]
-        )
+        attrs = %{
+          name: name,
+          account_id: bench_account.id,
+          race: "humano",
+          class: "warrior",
+          gender: "male",
+          home_city: "ullathorpe",
+          map_id: 1,
+          pos_x: 50,
+          pos_y: 50,
+          heading: "south",
+          body_id: 1,
+          head_id: 1,
+          hp: 100,
+          max_hp: 100,
+          mana: 50,
+          max_mana: 50,
+          stamina: 100,
+          max_stamina: 100,
+          hunger: 80,
+          thirst: 80,
+          level: 10,
+          xp: 5000,
+          skill_points: 5,
+          str: 20,
+          agi: 18,
+          int: 15,
+          con: 20,
+          cha: 12,
+          gold: 1500
+        }
 
-      character.id
-    end)
+        {:ok, character} =
+          Characters.create(attrs,
+            skills: %{"mining" => 10, "woodcutting" => 5, "combat" => 20},
+            spells: [1, 5, 12, 25]
+          )
+
+        character.id
+      end)
+
+    {bench_account.id, char_ids}
   end
 
-  defp build_entity(char_id) do
+  defp build_entity(char_id, account_id) do
     inventory =
       Enum.map(0..23, fn slot ->
         if slot < 8 do
@@ -225,7 +232,7 @@ defmodule Mix.Tasks.Bench.Persistence do
     %PlayerEntity{
       char_id: char_id,
       name: "bench_player_#{char_id}",
-      account_id: "bench_account",
+      account_id: account_id,
       x: Enum.random(10..90),
       y: Enum.random(10..90),
       heading: :south,

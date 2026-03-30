@@ -323,6 +323,20 @@ defmodule AoTcpGateway.WsIntegrationTest do
     end
   end
 
+  # level_up (80): Int16 (2 bytes)
+  defp skip_packet_payload(80, <<_::binary-size(2), rest::binary>>), do: {:ok, rest}
+
+  # update_exp (29): Int32 + Int32 (8 bytes)
+  defp skip_packet_payload(29, <<_::binary-size(8), rest::binary>>), do: {:ok, rest}
+
+  # change_spell_slot (66): Int8 + Int16 + String8
+  defp skip_packet_payload(66, <<_slot::8, _spell_id::binary-size(2), rest::binary>>) do
+    case rest do
+      <<len::little-signed-integer-16, _str::binary-size(len), rest::binary>> -> {:ok, rest}
+      _ -> :unknown
+    end
+  end
+
   # intervals (158): 12 * Int32 (48 bytes)
   defp skip_packet_payload(158, <<_::binary-size(48), rest::binary>>), do: {:ok, rest}
 

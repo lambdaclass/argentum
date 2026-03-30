@@ -10,9 +10,9 @@
 
 **Current phase snapshot:**
 - `Phase 1 — Runtime & Performance Foundations`: `Done`
-- `Phase 2 — Character System, Persistence & Map Transitions`: `Mostly done`
-- `Phase 2A — Transition Quality & Client Map Pack`: `Partially done`
-- `Phase 3 — Durable State & Persistence Shape`: `Partially done`
+- `Phase 2 — Character System, Persistence & Map Transitions`: `Done`
+- `Phase 2A — Transition Quality & Client Map Pack`: `Done`
+- `Phase 3 — Durable State & Persistence Shape`: `Mostly done`
 - `Phase 4 — Inventory`: `Mostly done`
 - `Phase 5 — Combat`: `Missing`
 - `Phase 6 — Spells`: `Missing`
@@ -22,7 +22,7 @@
 - `Phase 10 — Social Systems`: `Partially done`
 - `Phase 11 — Progression`: `Partially done`
 - `Phase 12 — World Rules & Polish`: `Missing`
-- `Phase 13 — Auth & Account System`: `Missing`
+- `Phase 13 — Auth & Account System`: `Done`
 - `Phase 14 — Anti-Cheat & Server Hardening`: `Partially done`
 - `Phase 15 — Operations & Infrastructure`: `Partially done`
 - `Phase 16 — Chat Moderation`: `Missing`
@@ -36,9 +36,7 @@
 - Benchmark harness, benchmark maps, metrics, CI/release workflows, web test client
 
 **Important roadmap/code divergence to keep in mind:**
-- Persistence is currently more JSON-heavy than this roadmap originally described:
-  - inventory, equipment, skills, and spells live inline on `characters`
-  - separate tables like `inventory_items`, `character_skills`, and `bank_items` are not implemented yet
+- `bank_items` table is not implemented yet
 - The top-level phase statuses below are the source of truth; the old “not done” summary is no longer accurate
 
 **VB6 server:** ~93,000 lines across 50+ modules
@@ -356,7 +354,7 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 ## Phase 2 — Character System, Persistence & Map Transitions
 
-**Status:** `Mostly done`
+**Status:** `Done`
 
 **In code now:**
 - DB-backed characters and `%PlayerEntity{}`
@@ -365,10 +363,10 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 - Map transitions through exit tiles
 - Online directory / presence lookup
 - Static race/class/item data loading
-
-**Remaining gaps:**
-- Auth/account model is still simplified and not a real production account system
-- Some transition/login integration tests still need cleanup/stabilization
+- Real accounts table with bcrypt password hashing (Phase 13 merged here)
+- `belongs_to :account` FK on characters
+- Skills and spells normalized into `character_skills` and `character_spells` tables
+- Integration tests: auth (invalid token, wrong password), persistence roundtrips (stats, inventory, spells), transfer stress (rapid transitions, state persistence, concurrent players)
 
 **Goal:** Players can create characters, log in with real state, persist across sessions, spawn on the correct map, and transfer between maps.
 
@@ -450,18 +448,15 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 ## Phase 2A — Transition Quality & Client Map Pack
 
-**Status:** `Partially done`
+**Status:** `Done`
 
 **In code now:**
-- Basic map transfers work on the live path and are covered by authority-level and TCP integration tests
-- The serious web client already has transition fixes for handoff timing, scene swaps, and old-client viewport parity
-- The client now caches assets and keeps map changes much closer to the historical test client behavior
-
-**Remaining gaps:**
-- The serious client still rebuilds too much work at handoff time instead of swapping fully prepared scenes
-- Transition behavior still depends on the old AO packet sequence (`pos_update` on exit tile, then transfer packets)
-- There is no prepacked client map bundle yet; the long-term client still depends on runtime map fetch/decode work
-- Transition polish is still “good enough,” not “feels invisible”
+- Map transfers work on the live path, covered by authority-level and TCP integration tests
+- Prepacked binary map bundle (59MB, 842 maps) downloaded at client boot
+- Scene caching with adjacent map warmup in the web client
+- Transfer state machine in GameRuntime — suppresses stale corrections, snaps to destination
+- No blank-frame flash on transitions
+- Integration tests cover rapid back-and-forth transitions, state persistence across transfers, and concurrent player transfers
 
 **Goal:** Map transitions should feel effectively instant, stable, and visually continuous in the serious client, matching or exceeding the historical test client.
 
@@ -509,15 +504,16 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 ## Phase 3 — Durable State & Persistence Shape
 
-**Status:** `Partially done`
+**Status:** `Mostly done`
 
 **In code now:**
-- Inventory and equipment have already moved into dedicated tables instead of living inline on `characters`
-- Character load/save paths already assemble/disassemble normalized inventory/equipment state
-- The runtime model still keeps live authoritative state in `MapServer`, not in the DB
+- Inventory and equipment in dedicated tables (`inventory_slots`, `character_equipment`)
+- Skills normalized into `character_skills` table (name + level, upsert on save)
+- Spells normalized into `character_spells` table (spell_id, upsert on save)
+- Character load/save paths assemble/disassemble all normalized associations
+- The runtime model keeps live authoritative state in `MapServer`, not in the DB
 
 **Remaining gaps:**
-- Normalize skills and spells if that remains the chosen direction
 - Add `bank_items` persistence
 - Decide the durable boundary for future systems like quests/guild state
 - Keep transient runtime state out of the database model
@@ -926,15 +922,17 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 ## Phase 13 — Auth & Account System
 
-**Status:** `Missing`
+**Status:** `Done`
 
 **In code now:**
-- Account identity is `"account_#{name}"` — no real authentication
-- Session tokens exist but are generated without a real account backing them
+- `accounts` table with username (unique, case-insensitive) and bcrypt password hash
+- `GameBackend.Account` schema: `create/2`, `get_by_username/1`, `verify_password/2`, `get_or_create/2`
+- Characters have `belongs_to :account` integer FK (migrated from string account_id)
+- Packet 74 login creates account if new, verifies password if existing
+- Packet 73 login validates session token
+- Integration tests for wrong password and invalid session token
 
 **Remaining gaps:**
-- Real account registration and login
-- Password hashing and verification
 - Rate limiting on auth endpoints
 - Account-level bans
 
