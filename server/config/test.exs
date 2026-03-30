@@ -11,11 +11,12 @@ config :phoenix, :plug_init_mode, :runtime
 # App configuration: arena #
 ############################
 
-# Use global visibility in tests so broadcast tests aren't affected by spawn distance
+# Use global visibility in most tests so broadcast tests aren't affected by spawn distance.
+# AoI ranges use production values (11x9) so the aoi_visibility_test can validate real culling.
 config :arena,
   visibility_mode: :global,
-  aoi_range_x: 100,
-  aoi_range_y: 100
+  aoi_range_x: 11,
+  aoi_range_y: 9
 
 config :arena, ArenaWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],
