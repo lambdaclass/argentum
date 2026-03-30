@@ -261,24 +261,42 @@ defmodule GameBackend.Characters do
   # ---- Private helpers ----
 
   defp save_inventory_slots(character_id, inventory) do
-    # Delete existing slots
-    from(s in InventorySlot, where: s.character_id == ^character_id) |> Repo.delete_all()
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
 
-    # Insert non-nil slots
-    inventory
-    |> Enum.with_index()
-    |> Enum.each(fn
-      {nil, _idx} -> :ok
-      {%{item_id: item_id, amount: amount, equipped: equipped}, idx} ->
-        %InventorySlot{}
-        |> InventorySlot.changeset(%{
+    # Collect occupied and empty slot indices
+    {occupied, empty} =
+      inventory
+      |> Enum.with_index()
+      |> Enum.reduce({[], []}, fn
+        {nil, idx}, {occ, emp} -> {occ, [idx | emp]}
+        {_item, idx}, {occ, emp} -> {[idx | occ], emp}
+      end)
+
+    # Delete slots that are now empty (were occupied before)
+    if empty != [] do
+      from(s in InventorySlot,
+        where: s.character_id == ^character_id and s.slot in ^empty
+      )
+      |> Repo.delete_all()
+    end
+
+    # Upsert occupied slots
+    Enum.each(occupied, fn idx ->
+      %{item_id: item_id, amount: amount, equipped: equipped} = Enum.at(inventory, idx)
+
+      Repo.insert!(
+        %InventorySlot{
           character_id: character_id,
           slot: idx,
           item_id: item_id,
           amount: amount,
-          equipped: equipped
-        })
-        |> Repo.insert!()
+          equipped: equipped,
+          inserted_at: now,
+          updated_at: now
+        },
+        on_conflict: [set: [item_id: item_id, amount: amount, equipped: equipped, updated_at: now]],
+        conflict_target: [:character_id, :slot]
+      )
     end)
   end
 
@@ -286,30 +304,27 @@ defmodule GameBackend.Characters do
     save_equipment(character_id, %{weapon: nil, armor: nil, shield: nil, helmet: nil, ring: nil})
 
   defp save_equipment(character_id, equipment) do
-    case Repo.get_by(CharacterEquipment, character_id: character_id) do
-      nil ->
-        %CharacterEquipment{}
-        |> CharacterEquipment.changeset(%{
-          character_id: character_id,
-          weapon: equipment[:weapon] || equipment["weapon"],
-          armor: equipment[:armor] || equipment["armor"],
-          shield: equipment[:shield] || equipment["shield"],
-          helmet: equipment[:helmet] || equipment["helmet"],
-          ring: equipment[:ring] || equipment["ring"]
-        })
-        |> Repo.insert!()
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+    weapon = equipment[:weapon] || equipment["weapon"]
+    armor = equipment[:armor] || equipment["armor"]
+    shield = equipment[:shield] || equipment["shield"]
+    helmet = equipment[:helmet] || equipment["helmet"]
+    ring = equipment[:ring] || equipment["ring"]
 
-      existing ->
-        existing
-        |> CharacterEquipment.changeset(%{
-          weapon: equipment[:weapon] || equipment["weapon"],
-          armor: equipment[:armor] || equipment["armor"],
-          shield: equipment[:shield] || equipment["shield"],
-          helmet: equipment[:helmet] || equipment["helmet"],
-          ring: equipment[:ring] || equipment["ring"]
-        })
-        |> Repo.update!()
-    end
+    Repo.insert!(
+      %CharacterEquipment{
+        character_id: character_id,
+        weapon: weapon,
+        armor: armor,
+        shield: shield,
+        helmet: helmet,
+        ring: ring,
+        inserted_at: now,
+        updated_at: now
+      },
+      on_conflict: [set: [weapon: weapon, armor: armor, shield: shield, helmet: helmet, ring: ring, updated_at: now]],
+      conflict_target: [:character_id]
+    )
   end
 
   defp slots_to_inventory(nil), do: List.duplicate(nil, 24)
