@@ -503,6 +503,7 @@ export class WorldRenderer {
   private adjacentSceneWarmupTimer: number | null = null;
   private transferInProgress = false;
   private runtimeTick: ((now: number) => void) | null = null;
+  private renderLoopActive = false;
   /**
    * Imperative fast path: immediately start a motion animation for the self
    * character without waiting for React to commit state and trigger render().
@@ -524,6 +525,7 @@ export class WorldRenderer {
     this.selfNode.motion.renderY = position.y;
     this.selfNode.container.x = position.x;
     this.selfNode.container.y = position.y;
+    this.ensureRenderLoop();
   }
 
   /**
@@ -540,6 +542,7 @@ export class WorldRenderer {
     this.selfNode.desiredY = y;
     this.selfNode.container.x = this.selfNode.motion.renderX;
     this.selfNode.container.y = this.selfNode.motion.renderY;
+    this.ensureRenderLoop();
   }
 
   setSelfHeading(heading: number) {
@@ -548,14 +551,17 @@ export class WorldRenderer {
     }
 
     this.selfNode = this.rebuildCharacterVisual(this.selfNode, heading);
+    this.ensureRenderLoop();
   }
 
   beginMapTransfer() {
     this.transferInProgress = true;
+    this.ensureRenderLoop();
   }
 
   finishMapTransfer() {
     this.transferInProgress = false;
+    this.ensureRenderLoop();
   }
 
   setRuntimeTick(runtimeTick: ((now: number) => void) | null) {
@@ -563,15 +569,26 @@ export class WorldRenderer {
   }
 
   private readonly tick = () => {
+    if (!this.app) {
+      this.renderLoopActive = false;
+      return;
+    }
+
     if (!this.lastWorld) {
+      this.stopRenderLoop();
       return;
     }
 
     const now = performance.now();
     this.runtimeTick?.(now);
-    this.updateCharacterMotions(now);
+    const motionsAnimating = this.updateCharacterMotions(now);
     this.updateCamera(this.lastWorld);
     this.updateHud(this.lastWorld);
+
+    const needsContinuousRender = motionsAnimating || this.transferInProgress;
+    if (!needsContinuousRender) {
+      this.stopRenderLoop();
+    }
   };
 
   mount(node: HTMLDivElement) {
@@ -616,6 +633,26 @@ export class WorldRenderer {
     this.hudText.visible = false;
     this.app.stage.addChild(this.hudText);
     this.app.ticker.add(this.tick);
+    this.app.stop();
+    this.renderLoopActive = false;
+  }
+
+  private ensureRenderLoop() {
+    if (!this.app || this.renderLoopActive) {
+      return;
+    }
+
+    this.renderLoopActive = true;
+    this.app.start();
+  }
+
+  private stopRenderLoop() {
+    if (!this.app || !this.renderLoopActive) {
+      return;
+    }
+
+    this.app.stop();
+    this.renderLoopActive = false;
   }
 
   private fitCanvas() {
@@ -678,8 +715,7 @@ export class WorldRenderer {
 
     this.syncCharacters(world, assetCatalog);
     this.rebuildChatBubbles(world.chatBubbles);
-
-    this.tick();
+    this.ensureRenderLoop();
   }
 
   private staticSceneCacheKey(map: WorldMapData | null, showTileDebug: boolean) {
@@ -1124,6 +1160,8 @@ export class WorldRenderer {
       ...this.otherNodes.values()
     ];
 
+    let anyAnimating = false;
+
     for (const entry of entries) {
       const position = sampleMotion(entry.motion, now);
       entry.motion.renderX = position.x;
@@ -1131,7 +1169,18 @@ export class WorldRenderer {
       entry.container.x = position.x;
       entry.container.y = position.y;
       updateCharacterAnimation(entry, now);
+
+      const motionActive =
+        entry.motion.initialized &&
+        entry.motion.durationMs > 0 &&
+        now - entry.motion.startedAt < entry.motion.durationMs;
+
+      if (motionActive) {
+        anyAnimating = true;
+      }
     }
+
+    return anyAnimating;
   }
 
   private updateCamera(world: WorldState) {
@@ -1176,6 +1225,7 @@ export class WorldRenderer {
 
     if (this.app) {
       this.app.ticker.remove(this.tick);
+      this.stopRenderLoop();
       this.app.destroy(true, {
         children: true,
         texture: false,
