@@ -4,12 +4,14 @@ interface HechizosPanelProps {
   compact?: boolean;
   state: ClientState;
   onSelectSlot: (slotIndex: number | null) => void;
+  onCast: (slotIndex: number) => void;
 }
 
 export function HechizosPanel({
   compact = false,
   state,
-  onSelectSlot
+  onSelectSlot,
+  onCast
 }: HechizosPanelProps) {
   const slots = state.spellbook.slots;
   const selectedSlotIndex = state.spellbook.selectedSlot;
@@ -42,6 +44,11 @@ export function HechizosPanel({
         <button
           className="ghost-button"
           disabled={selectedSlot == null}
+          onClick={() => {
+            if (selectedSlotIndex != null) {
+              onCast(selectedSlotIndex);
+            }
+          }}
           title={selectedSlot ? `Lanzar ${selectedSlot.name}` : "Selecciona un hechizo primero"}
           type="button"
         >

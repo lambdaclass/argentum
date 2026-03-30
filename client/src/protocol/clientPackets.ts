@@ -6,6 +6,7 @@ const CLIENT_PACKET = {
   talk: 75,
   walk: 78,
   requestPositionUpdate: 79,
+  castSpell: 94,
   pickUp: 81,
   drop: 93,
   changeHeading: 6,
@@ -101,6 +102,12 @@ export function encodeTalk(message: string) {
 
 export function encodePickUp() {
   return buildPacket(CLIENT_PACKET.pickUp);
+}
+
+export function encodeCastSpell(slotIndex: number) {
+  return buildPacket(CLIENT_PACKET.castSpell, (bytes) => {
+    writeInt8(bytes, slotIndex + 1);
+  });
 }
 
 export function encodeDrop(slotIndex: number, amount: number) {

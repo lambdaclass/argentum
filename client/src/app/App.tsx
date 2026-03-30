@@ -608,6 +608,7 @@ export function App() {
                 <HechizosPanel
                   compact
                   state={state}
+                  onCast={(slotIndex) => session.sendCastSpell(slotIndex)}
                   onSelectSlot={(slotIndex) =>
                     dispatch({ type: "spellbook/selectSlot", slotIndex })
                   }

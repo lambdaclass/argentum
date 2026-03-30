@@ -4,6 +4,7 @@ import type { WorldRenderer } from "../render/WorldRenderer";
 import { GameRuntime, type MovementDebugSnapshot } from "../runtime/GameRuntime";
 import { fetchMapData } from "./mapApi";
 import {
+  encodeCastSpell,
   encodeChangeHeading,
   encodeCreateCharacter,
   encodeDrop,
@@ -202,6 +203,15 @@ export class SessionClient {
   sendPickUp() {
     this.sendRaw(encodePickUp());
     this.dispatch({ type: "log/add", level: "packet-out", message: "PICK_UP" });
+  }
+
+  sendCastSpell(slotIndex: number) {
+    this.sendRaw(encodeCastSpell(slotIndex));
+    this.dispatch({
+      type: "log/add",
+      level: "packet-out",
+      message: `CAST_SPELL slot=${slotIndex + 1}`
+    });
   }
 
   sendUse(slotIndex: number) {
