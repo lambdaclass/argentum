@@ -29,16 +29,22 @@ export function SessionPanel({
 }: SessionPanelProps) {
   const connected = state.connection.status === "connected";
   const credentials = state.connection.credentials;
+  const statusItems = [
+    { label: "Connection", value: state.connection.status },
+    { label: "Map", value: state.world.mapId != null ? String(state.world.mapId) : "--" },
+    { label: "World", value: state.world.mapStatus },
+    { label: "Assets", value: assetStatus }
+  ];
 
   return (
     <section className="panel connection-panel">
       <div className="panel-header">
         <div>
-          <p className="eyebrow">Argentum Online</p>
-          <h2>Web Client</h2>
+          <p className="eyebrow">Connection</p>
+          <h2>Session</h2>
         </div>
         <button
-          className="ghost-button"
+          className="ghost-button session-primary-button"
           disabled={!connected && !canConnect}
           onClick={connected ? onDisconnect : onConnect}
           type="button"
@@ -47,7 +53,16 @@ export function SessionPanel({
         </button>
       </div>
 
-      <p className="panel-copy compact">{title}</p>
+      <p className="panel-copy compact session-title-copy">{title}</p>
+
+      <div className="session-status-grid">
+        {statusItems.map((item) => (
+          <div className="session-status-card" key={item.label}>
+            <span>{item.label}</span>
+            <strong>{item.value}</strong>
+          </div>
+        ))}
+      </div>
 
       <label className="field">
         <span>Endpoint</span>
@@ -67,32 +82,33 @@ export function SessionPanel({
         />
       </label>
 
-      <p className="field-hint">
-        Reconnect uses packet <code>200</code> session credentials. If no saved
-        session exists, the client creates a new character with dev defaults. The
-        web client waits for the sprite/index catalog before connecting, like the
-        old test client boot flow.
-      </p>
-
-      <div className="status-row">
-        <span className="status-pill" data-state={state.connection.status}>
-          {state.connection.status}
-        </span>
-        <span className="status-pill subtle">Map {state.world.mapId ?? "--"}</span>
-        <span className="status-pill subtle">{state.world.mapStatus}</span>
-        <span className="status-pill subtle">Assets {assetStatus}</span>
-        <span className="status-pill subtle">F1 {showTileDebug ? "on" : "off"}</span>
-      </div>
-
       {credentials ? (
-        <div className="session-card">
-          <p className="session-card-title">Saved Session</p>
-          <p>char_id: {credentials.charId}</p>
+        <div className="session-card saved-session-card">
+          <div>
+            <p className="session-card-title">Saved Session</p>
+            <p>char_id: {credentials.charId}</p>
+          </div>
           <button className="ghost-button" onClick={onForgetSession} type="button">
-            Forget Saved Session
+            Forget
           </button>
         </div>
       ) : null}
+
+      <div className="session-note-grid">
+        <div className="session-note">
+          <span>Reconnect</span>
+          <strong>Packet 200 credentials</strong>
+        </div>
+        <div className="session-note">
+          <span>Debug</span>
+          <strong>F1 tile debug {showTileDebug ? "on" : "off"}</strong>
+        </div>
+      </div>
+
+      <p className="field-hint session-help-text">
+        If no saved session exists, the client creates a new character with dev
+        defaults after assets and map data finish loading.
+      </p>
 
       {state.connection.lastError ? (
         <div className="error-banner">{state.connection.lastError}</div>

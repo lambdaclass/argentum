@@ -643,23 +643,26 @@ export class WorldRenderer {
     }
 
     this.lastWorld = world;
+    const sceneMap =
+      world.map ??
+      (world.mapStatus === "loading" || world.mapStatus === "transferring" ? this.renderedMap : null);
     const assetCatalogChanged = assetCatalog !== this.renderedCatalog;
     if (assetCatalogChanged) {
       this.clearStaticSceneCache();
     }
 
     const staticSceneChanged =
-      world.map !== this.renderedMap ||
+      sceneMap !== this.renderedMap ||
       assetCatalogChanged ||
       showTileDebug !== this.renderedShowTileDebug;
 
     if (staticSceneChanged) {
-      this.renderedMap = world.map;
+      this.renderedMap = sceneMap;
       this.renderedCatalog = assetCatalog;
       this.renderedShowTileDebug = showTileDebug;
       this.renderedGroundObjects = null;
-      this.swapStaticScene(world.map, assetCatalog, showTileDebug);
-      this.scheduleAdjacentSceneWarmup(world.map, assetCatalog, showTileDebug);
+      this.swapStaticScene(sceneMap, assetCatalog, showTileDebug);
+      this.scheduleAdjacentSceneWarmup(sceneMap, assetCatalog, showTileDebug);
     }
 
     if (world.groundObjects !== this.renderedGroundObjects || staticSceneChanged) {

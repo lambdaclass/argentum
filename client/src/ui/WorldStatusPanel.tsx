@@ -90,6 +90,11 @@ function StatBar({
 
 export function WorldStatusPanel({ state }: WorldStatusPanelProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const mapLabel = state.world.map?.name ?? `Map ${state.world.mapId ?? "--"}`;
+  const position =
+    state.world.self.x != null && state.world.self.y != null
+      ? `${state.world.self.x},${state.world.self.y}`
+      : "--,--";
 
   useEffect(() => {
     if (canvasRef.current) {
@@ -102,11 +107,10 @@ export function WorldStatusPanel({ state }: WorldStatusPanelProps) {
       <div className="panel-header">
         <div>
           <p className="eyebrow">World</p>
-          <h2>{state.world.map?.name ?? `Map ${state.world.mapId ?? "--"}`}</h2>
+          <h2>{mapLabel}</h2>
+          <p className="world-status-subtitle">Pos {position}</p>
         </div>
-        <span className="panel-tag">
-          {state.world.self.x ?? "--"},{state.world.self.y ?? "--"}
-        </span>
+        <span className="panel-tag">Map {state.world.mapId ?? "--"}</span>
       </div>
 
       <div className="world-status-grid">

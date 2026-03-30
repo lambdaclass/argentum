@@ -390,6 +390,14 @@ export function App() {
       };
     }
 
+    if ((state.world.mapStatus === "loading" || state.world.mapStatus === "transferring") && !state.world.map) {
+      return {
+        eyebrow: "Map",
+        title: state.world.mapStatus === "transferring" ? "Changing Map" : "Loading Map",
+        copy: "Keeping the session alive while the destination map is prepared."
+      };
+    }
+
     return null;
   }, [
     assetStatus,

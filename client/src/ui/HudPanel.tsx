@@ -34,7 +34,10 @@ export function HudPanel({ state }: HudPanelProps) {
   return (
     <section className="panel">
       <div className="panel-header">
-        <h2>HUD</h2>
+        <div>
+          <p className="eyebrow">Vitals</p>
+          <h2>HUD</h2>
+        </div>
         <span className="panel-tag">Live</span>
       </div>
 
@@ -46,22 +49,22 @@ export function HudPanel({ state }: HudPanelProps) {
         max={state.stats.staminaMax}
       />
 
-      <div className="hud-meta-grid">
+      <div className="hud-meta-grid hud-meta-grid-compact">
         <div className="meta-card">
-          <span>Map</span>
-          <strong>{state.world.map?.name ?? state.world.mapId ?? "--"}</strong>
+          <span>Heading</span>
+          <strong>{state.world.self.heading}</strong>
         </div>
         <div className="meta-card">
-          <span>Gold</span>
-          <strong>{state.stats.gold}</strong>
+          <span>Speed</span>
+          <strong>{state.world.self.speed}</strong>
         </div>
         <div className="meta-card">
-          <span>Hunger</span>
-          <strong>{state.stats.hunger}</strong>
+          <span>Char Idx</span>
+          <strong>{state.world.self.charIndex ?? "--"}</strong>
         </div>
         <div className="meta-card">
-          <span>Thirst</span>
-          <strong>{state.stats.thirst}</strong>
+          <span>Others</span>
+          <strong>{Object.keys(state.world.others).length}</strong>
         </div>
       </div>
     </section>

@@ -26,16 +26,17 @@ export function CharacterCard({ canConnect, state, onConnect, onDisconnect }: Ch
       : "--,--";
   const hpWidth = progressWidth(state.stats.hpCurrent, state.stats.hpMax);
 
+  const statusLabel = connected ? "Connected" : state.connection.status;
+
   return (
     <section className="panel character-hero">
       <div className="character-hero-top">
         <div className="character-badge">{badge}</div>
         <div className="character-meta">
           <p className="eyebrow">Character</p>
-          <h2>{characterName}</h2>
-          <p className="character-subtitle">
-            {mapLabel} · Pos {position}
-          </p>
+          <h2 title={characterName}>{characterName}</h2>
+          <p className="character-subtitle">{mapLabel}</p>
+          <p className="character-position">Pos {position}</p>
         </div>
         <button
           className="ghost-button hero-action"
@@ -49,16 +50,29 @@ export function CharacterCard({ canConnect, state, onConnect, onDisconnect }: Ch
 
       <div className="hero-progress-copy">
         <span>Status</span>
-        <strong>{connected ? "Connected" : state.connection.status}</strong>
+        <strong>{statusLabel}</strong>
       </div>
       <div className="hero-progress-track" aria-hidden="true">
         <div className="hero-progress-fill" style={{ width: `${hpWidth}%` }} />
       </div>
 
-      <div className="hero-chip-row">
-        <span className="hero-chip">{mapLabel}</span>
-        <span className="hero-chip">HP {state.stats.hpCurrent}</span>
-        <span className="hero-chip">Mana {state.stats.manaCurrent}</span>
+      <div className="hero-stats-grid">
+        <div className="hero-stat">
+          <span>HP</span>
+          <strong>
+            {state.stats.hpCurrent}/{state.stats.hpMax}
+          </strong>
+        </div>
+        <div className="hero-stat">
+          <span>Mana</span>
+          <strong>
+            {state.stats.manaCurrent}/{state.stats.manaMax}
+          </strong>
+        </div>
+        <div className="hero-stat">
+          <span>Map</span>
+          <strong>{state.world.mapId ?? "--"}</strong>
+        </div>
       </div>
     </section>
   );

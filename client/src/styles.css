@@ -56,7 +56,7 @@ code {
   height: 100vh;
   min-height: 100vh;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr) 332px;
   gap: 14px;
   padding: 12px;
   overflow: hidden;
@@ -484,12 +484,24 @@ h3 {
 
 .character-meta h2 {
   line-height: 1.05;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .character-subtitle {
   margin-top: 6px;
   color: var(--text-soft);
   font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.character-position {
+  margin-top: 2px;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 12px;
 }
 
 .hero-action {
@@ -549,6 +561,15 @@ h3 {
   padding-right: 4px;
 }
 
+.sidebar-tab-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.sidebar-tab-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 216, 132, 0.18);
+  border-radius: 999px;
+}
+
 .sidebar-tab-body > .panel {
   background: transparent;
   border: 0;
@@ -559,6 +580,74 @@ h3 {
 
 .sidebar-tab-body > .panel .panel-header {
   margin-bottom: 12px;
+}
+
+.hero-stats-grid,
+.session-status-grid,
+.session-note-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.session-status-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.session-note-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.hero-stat,
+.session-status-card,
+.session-note {
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: var(--bg-soft);
+  border: 1px solid rgba(255, 216, 132, 0.1);
+}
+
+.hero-stat span,
+.session-status-card span,
+.session-note span {
+  display: block;
+  color: var(--text-soft);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+
+.hero-stat strong,
+.session-status-card strong,
+.session-note strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-title-copy {
+  margin-top: 8px;
+}
+
+.session-primary-button {
+  min-width: 92px;
+}
+
+.saved-session-card {
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.saved-session-card button {
+  flex-shrink: 0;
+}
+
+.session-help-text {
+  margin-top: 12px;
 }
 
 .meta-card {
@@ -697,6 +786,12 @@ h3 {
   padding-bottom: 16px;
 }
 
+.world-status-subtitle {
+  margin-top: 6px;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
 .world-status-grid {
   margin-top: 16px;
   display: grid;
@@ -788,7 +883,7 @@ h3 {
   display: block;
 }
 
-@media (max-width: 1280px) {
+@media (max-width: 1120px) {
   .client-shell {
     grid-template-columns: 1fr;
     height: auto;
@@ -803,5 +898,12 @@ h3 {
 
   .inventory-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .hero-stats-grid,
+  .session-status-grid,
+  .session-note-grid,
+  .world-status-chip-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
