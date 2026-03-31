@@ -424,6 +424,7 @@ defmodule Arena.Map.MapServer do
   def handle_call({:pick_up, char_id}, _from, state) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
+        entity = break_invisibility(entity, state, char_id)
         pos = {entity.x, entity.y}
 
         case Map.get(state.ground_items, pos) do
@@ -610,6 +611,7 @@ defmodule Arena.Map.MapServer do
           entity.dead -> {:reply, {:error, :dead}, state}
           entity.paralyzed -> {:reply, {:error, :paralyzed}, state}
           true ->
+            entity = break_invisibility(entity, state, char_id)
             weapon_id = entity.equipment[:weapon]
             weapon_def = if weapon_id, do: GameData.get_item(weapon_id)
             is_ranged = weapon_def != nil and weapon_def.proyectil > 0
@@ -669,6 +671,7 @@ defmodule Arena.Map.MapServer do
                     {:reply, {:error, :not_enough_stamina}, state}
 
                   true ->
+                    entity = break_invisibility(entity, state, char_id)
                     entity = %{entity |
                       mana: entity.mana - spell_def.mana_required,
                       stamina: max(entity.stamina - spell_def.sta_required, 0),
@@ -1641,7 +1644,8 @@ defmodule Arena.Map.MapServer do
   # --- Ranged attack ---
 
   defp handle_ranged_attack(state, char_id, entity, _weapon_def, target_x, target_y, now) do
-    distance = abs(entity.x - target_x) + abs(entity.y - target_y)
+    # VB6 uses Chebyshev distance (max of dx, dy) for ranged checks
+    distance = max(abs(entity.x - target_x), abs(entity.y - target_y))
 
     cond do
       distance > @ranged_max_distance ->
@@ -2163,7 +2167,7 @@ defmodule Arena.Map.MapServer do
 
   # --- Resurrection ---
 
-  defp apply_spell_resurrect(state, char_id, entity, _spell_def, target_x, target_y) do
+  defp apply_spell_resurrect(state, char_id, entity, spell_def, target_x, target_y) do
     target = if target_x && target_y, do: get_occupancy(state.occupancy, target_x, target_y), else: nil
 
     target_id = case target do
@@ -2174,14 +2178,18 @@ defmodule Arena.Map.MapServer do
     target_player = if target_id, do: Map.get(state.players, target_id)
 
     if target_player && target_player.dead do
+      # VB6: spell min_hp is the % of max_hp to revive at (e.g. 10 → 10%)
+      revive_pct = max(spell_def.min_hp, 10)
+      revive_hp = max(div(target_player.max_hp * revive_pct, 100), 1)
+
       revived = %{target_player |
-        dead: false, hp: 1, mana: 0, hunger: 0, thirst: 0,
+        dead: false, hp: revive_hp, mana: 0, hunger: 0, thirst: 0,
         buffs: [], paralyzed: false, poisoned: false, invisible: false
       }
 
       # Notify revived player
       send_to_session(state.sessions, target_id, {:send_raw,
-        Encoder.encode({:update_hp, %{min_hp: 1}})})
+        Encoder.encode({:update_hp, %{min_hp: revive_hp}})})
       send_to_session(state.sessions, target_id, {:send_raw,
         Encoder.encode({:update_mana, %{min_mana: 0}})})
       send_to_session(state.sessions, target_id, {:send_raw,
@@ -2255,6 +2263,20 @@ defmodule Arena.Map.MapServer do
 
     players = Map.put(state.players, char_id, entity)
     %{state | players: players}
+  end
+
+  # --- Invisibility break (VB6: broken by attack, cast, pick_up) ---
+
+  defp break_invisibility(entity, state, char_id) do
+    if entity.invisible do
+      buffs = Enum.reject(entity.buffs, &(&1.type == :invisible))
+      entity = %{entity | invisible: false, buffs: buffs}
+      send_to_session(state.sessions, char_id, {:send_raw,
+        Encoder.encode({:console_msg, %{message: "Has vuelto a ser visible.", font_index: 0}})})
+      entity
+    else
+      entity
+    end
   end
 
   # --- NPC helpers ---

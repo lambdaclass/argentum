@@ -120,7 +120,7 @@ defmodule Arena.NpcAi do
         case Map.get(state.players, npc.target_id) do
           nil -> %{npc | target_id: nil}
           player ->
-            if player.dead or abs(player.x - npc.x) > @aggro_range or abs(player.y - npc.y) > @aggro_range do
+            if player.dead or player.invisible or abs(player.x - npc.x) > @aggro_range or abs(player.y - npc.y) > @aggro_range do
               %{npc | target_id: nil}
             else
               npc
@@ -140,7 +140,7 @@ defmodule Arena.NpcAi do
   defp find_nearest_player(state, npc) do
     state.players
     |> Enum.filter(fn {_id, p} ->
-      not p.dead and abs(p.x - npc.x) <= @aggro_range and abs(p.y - npc.y) <= @aggro_range
+      not p.dead and not p.invisible and abs(p.x - npc.x) <= @aggro_range and abs(p.y - npc.y) <= @aggro_range
     end)
     |> Enum.min_by(fn {_id, p} -> abs(p.x - npc.x) + abs(p.y - npc.y) end, fn -> nil end)
     |> case do
@@ -223,7 +223,6 @@ defmodule Arena.NpcAi do
 
   # --- NPC Spell Casting ---
 
-  @npc_spell_cooldown 3000
   @npc_spell_range 10
 
   defp maybe_cast_spell(state, instance_id, npc, npc_def, now) do
@@ -233,7 +232,9 @@ defmodule Arena.NpcAi do
       case select_npc_spell(state, npc, npc_def) do
         nil -> {state, npc}
         {spell_def, spell_target} ->
-          npc = %{npc | next_spell_at: now + @npc_spell_cooldown}
+          # VB6: cooldown uses NPC's attack interval, not a fixed constant
+          cooldown = max(npc_def.intervalo_ataque, 2000)
+          npc = %{npc | next_spell_at: now + cooldown}
           state = put_in(state.npcs_live[instance_id], npc)
           state = apply_npc_spell(state, npc, spell_def, spell_target)
           {state, npc}
@@ -244,8 +245,8 @@ defmodule Arena.NpcAi do
   defp select_npc_spell(state, npc, npc_def) do
     spells = Enum.map(npc_def.spells, &GameData.get_spell/1) |> Enum.reject(&is_nil/1)
 
-    # Priority 1: Self-heal if HP below max
-    heal = if npc.hp < npc.max_hp do
+    # Priority 1: Self-heal if HP below 50% (VB6 behavior)
+    heal = if npc.hp < div(npc.max_hp, 2) do
       Enum.find(spells, fn s -> s.sube_hp == 1 or s.sanacion end)
     end
     if heal, do: throw({:found, heal, {:self, npc}})
