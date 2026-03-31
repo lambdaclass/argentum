@@ -1,8 +1,6 @@
 defmodule Arena.Data.ItemDef do
   @moduledoc """
   Struct for a parsed item definition from obj.dat.
-
-  Only fields needed for Phase 2 (inventory operations).
   """
 
   defstruct [
@@ -24,7 +22,11 @@ defmodule Arena.Data.ItemDef do
     max_modificador: 0,
     porcentaje: 0,
     stackable: false,
-    equip_slot: nil
+    equip_slot: nil,
+    forbidden_classes: nil,
+    allowed_races: nil,
+    gender_restriction: :any,
+    destruye: false
   ]
 
   @stackable_types [1, 5, 11, 13, 32, 33, 34]
@@ -33,7 +35,17 @@ defmodule Arena.Data.ItemDef do
     2 => :weapon,
     3 => :armor,
     16 => :shield,
-    17 => :helmet
+    17 => :helmet,
+    35 => :ring
+  }
+
+  @race_key_map %{
+    "razadrow" => :elfo_oscuro,
+    "razaelfa" => :elfo,
+    "razahumana" => :humano,
+    "razaorca" => :orco,
+    "razaenana" => :enano,
+    "razagnoma" => :gnomo
   }
 
   @doc "Build an ItemDef from a parsed INI section (downcased keys)."
@@ -59,7 +71,11 @@ defmodule Arena.Data.ItemDef do
       max_modificador: parse_int(section["maxmodificador"]),
       porcentaje: parse_int(section["porcentaje"]),
       stackable: obj_type in @stackable_types,
-      equip_slot: Map.get(@equip_slots, obj_type)
+      equip_slot: Map.get(@equip_slots, obj_type),
+      forbidden_classes: parse_forbidden_classes(section),
+      allowed_races: parse_allowed_races(section),
+      gender_restriction: parse_gender(section),
+      destruye: parse_int(section["destruye"]) == 1
     }
   end
 
@@ -71,6 +87,39 @@ defmodule Arena.Data.ItemDef do
     case Integer.parse(str) do
       {val, _} -> val
       :error -> 0
+    end
+  end
+
+  # CP1..CP12 list forbidden class names
+  defp parse_forbidden_classes(section) do
+    classes =
+      for i <- 1..12,
+          val = section["cp#{i}"],
+          val != nil,
+          into: MapSet.new() do
+        String.downcase(val)
+      end
+
+    if MapSet.size(classes) == 0, do: nil, else: classes
+  end
+
+  # Raza* keys list allowed races; nil means all allowed
+  defp parse_allowed_races(section) do
+    allowed =
+      for {key, race_atom} <- @race_key_map,
+          section[key] != nil,
+          into: MapSet.new() do
+        race_atom
+      end
+
+    if MapSet.size(allowed) == 0, do: nil, else: allowed
+  end
+
+  defp parse_gender(section) do
+    cond do
+      parse_int(section["mujer"]) == 1 -> :female
+      parse_int(section["hombre"]) == 1 -> :male
+      true -> :any
     end
   end
 end

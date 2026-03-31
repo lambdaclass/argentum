@@ -17,6 +17,7 @@ defmodule Arena.InventoryTest do
 
   @empty_inventory List.duplicate(nil, 24)
   @empty_equipment %{weapon: nil, armor: nil, shield: nil, helmet: nil, ring: nil}
+  @default_char %{level: 50, class: :guerrero, race: :humano, gender: :male}
 
   describe "add_item/3" do
     test "adds item to first empty slot" do
@@ -34,13 +35,6 @@ defmodule Arena.InventoryTest do
     end
 
     test "stacks stackable items on existing slot" do
-      # Item 12 is gold (ObjType 5) — returns {:gold, amount} instead
-      # Use a potion (ObjType 1 is stackable). Item 37 is ObjType 2 (weapon, not stackable).
-      # We need to find a stackable item. Let's check what items have stackable types.
-      # Stackable types: [1, 5, 11, 13, 32, 33, 34]
-      # ObjType 1 = potions. Let's use item 37 first to see its type.
-      # Actually, let's just test with a known stackable item from obj.dat.
-      # Item 38 might be a potion. Let's use a safe approach: find any stackable item.
       stackable_id = find_stackable_item()
 
       if stackable_id do
@@ -85,14 +79,13 @@ defmodule Arena.InventoryTest do
     end
   end
 
-  describe "equip_toggle/3" do
+  describe "equip_toggle/4" do
     test "equips an equippable item" do
-      # Use item 37 if it's a weapon (ObjType 2)
       equippable_id = find_equippable_item(:weapon)
 
       if equippable_id do
         inv = List.replace_at(@empty_inventory, 0, %{item_id: equippable_id, amount: 1, equipped: false})
-        {:ok, inv2, equip2, changed} = Inventory.equip_toggle(inv, @empty_equipment, 0)
+        {:ok, inv2, equip2, changed} = Inventory.equip_toggle(inv, @empty_equipment, 0, @default_char)
         assert Enum.at(inv2, 0).equipped == true
         assert equip2.weapon == equippable_id
         assert 0 in changed
@@ -105,7 +98,7 @@ defmodule Arena.InventoryTest do
       if equippable_id do
         inv = List.replace_at(@empty_inventory, 0, %{item_id: equippable_id, amount: 1, equipped: true})
         equip = %{@empty_equipment | weapon: equippable_id}
-        {:ok, inv2, equip2, changed} = Inventory.equip_toggle(inv, equip, 0)
+        {:ok, inv2, equip2, changed} = Inventory.equip_toggle(inv, equip, 0, @default_char)
         assert Enum.at(inv2, 0).equipped == false
         assert equip2.weapon == nil
         assert 0 in changed
@@ -126,7 +119,7 @@ defmodule Arena.InventoryTest do
             |> List.replace_at(1, %{item_id: weapon2, amount: 1, equipped: false})
 
           equip = %{@empty_equipment | weapon: weapon1}
-          {:ok, inv2, equip2, changed} = Inventory.equip_toggle(inv, equip, 1)
+          {:ok, inv2, equip2, changed} = Inventory.equip_toggle(inv, equip, 1, @default_char)
 
           # Old weapon unequipped
           assert Enum.at(inv2, 0).equipped == false
@@ -140,16 +133,50 @@ defmodule Arena.InventoryTest do
     end
 
     test "returns error on empty slot" do
-      assert {:error, :empty_slot} = Inventory.equip_toggle(@empty_inventory, @empty_equipment, 0)
+      assert {:error, :empty_slot} = Inventory.equip_toggle(@empty_inventory, @empty_equipment, 0, @default_char)
     end
 
     test "returns error for non-equippable item" do
-      # Find a non-equippable item (not weapon/armor/shield/helmet)
       non_equip_id = find_non_equippable_item()
 
       if non_equip_id do
         inv = List.replace_at(@empty_inventory, 0, %{item_id: non_equip_id, amount: 1, equipped: false})
-        assert {:error, :not_equippable} = Inventory.equip_toggle(inv, @empty_equipment, 0)
+        assert {:error, :not_equippable} = Inventory.equip_toggle(inv, @empty_equipment, 0, @default_char)
+      end
+    end
+
+    test "rejects equip when level is too low" do
+      # Find an item with min_elv > 1
+      item_id = find_item_with_level_req()
+
+      if item_id do
+        item_def = Arena.Data.GameData.get_item(item_id)
+        inv = List.replace_at(@empty_inventory, 0, %{item_id: item_id, amount: 1, equipped: false})
+        low_level_char = %{@default_char | level: item_def.min_elv - 1}
+        assert {:error, :level_too_low} = Inventory.equip_toggle(inv, @empty_equipment, 0, low_level_char)
+      end
+    end
+
+    test "allows equip when level meets requirement" do
+      item_id = find_item_with_level_req()
+
+      if item_id do
+        item_def = Arena.Data.GameData.get_item(item_id)
+        inv = List.replace_at(@empty_inventory, 0, %{item_id: item_id, amount: 1, equipped: false})
+        ok_char = %{@default_char | level: item_def.min_elv}
+        {:ok, _inv, _eq, _changed} = Inventory.equip_toggle(inv, @empty_equipment, 0, ok_char)
+      end
+    end
+
+    test "rejects equip when class is forbidden" do
+      item_id = find_item_with_class_restriction()
+
+      if item_id do
+        item_def = Arena.Data.GameData.get_item(item_id)
+        [forbidden_class | _] = MapSet.to_list(item_def.forbidden_classes)
+        inv = List.replace_at(@empty_inventory, 0, %{item_id: item_id, amount: 1, equipped: false})
+        bad_char = %{@default_char | level: 50, class: String.to_atom(forbidden_class)}
+        assert {:error, :class_not_allowed} = Inventory.equip_toggle(inv, @empty_equipment, 0, bad_char)
       end
     end
   end
@@ -168,7 +195,6 @@ defmodule Arena.InventoryTest do
   # --- Helpers to find real items from obj.dat ---
 
   defp find_stackable_item do
-    # Scan ETS for a stackable item that isn't gold (12)
     :ets.foldl(
       fn
         {{:item, id}, %{stackable: true}}, nil when id != 12 -> id
@@ -182,7 +208,9 @@ defmodule Arena.InventoryTest do
   defp find_equippable_item(slot, exclude \\ nil) do
     :ets.foldl(
       fn
-        {{:item, id}, %{equip_slot: ^slot}}, nil when id != exclude -> id
+        {{:item, id}, %{equip_slot: ^slot, forbidden_classes: nil, allowed_races: nil, min_elv: min_elv}}, nil
+        when id != exclude and min_elv <= 1 ->
+          id
         _, acc -> acc
       end,
       nil,
@@ -194,6 +222,32 @@ defmodule Arena.InventoryTest do
     :ets.foldl(
       fn
         {{:item, id}, %{equip_slot: nil, stackable: false}}, nil -> id
+        _, acc -> acc
+      end,
+      nil,
+      :arena_game_data
+    )
+  end
+
+  defp find_item_with_level_req do
+    :ets.foldl(
+      fn
+        {{:item, id}, %{equip_slot: slot, min_elv: min_elv}}, nil
+        when slot != nil and min_elv > 1 ->
+          id
+        _, acc -> acc
+      end,
+      nil,
+      :arena_game_data
+    )
+  end
+
+  defp find_item_with_class_restriction do
+    :ets.foldl(
+      fn
+        {{:item, id}, %{equip_slot: slot, forbidden_classes: classes}}, nil
+        when slot != nil and classes != nil ->
+          id
         _, acc -> acc
       end,
       nil,

@@ -427,10 +427,11 @@ defmodule Arena.Map.MapServer do
 
                 case Inventory.remove_from_slot(entity.inventory, slot, drop_amount) do
                   {:ok, new_inventory, _slot} ->
+                    item_def = Arena.Data.GameData.get_item(item.item_id)
+
                     # If the dropped item was equipped, clear the equipment slot
                     new_equipment =
                       if item.equipped do
-                        item_def = Arena.Data.GameData.get_item(item.item_id)
                         if item_def && item_def.equip_slot do
                           Map.put(entity.equipment, item_def.equip_slot, nil)
                         else
@@ -442,13 +443,19 @@ defmodule Arena.Map.MapServer do
 
                     entity = %{entity | inventory: new_inventory, equipment: new_equipment}
                     players = Map.put(state.players, char_id, entity)
-                    ground_items = Map.put(state.ground_items, pos, %{item_id: item.item_id, amount: drop_amount})
-                    state = %{state | players: players, ground_items: ground_items}
 
-                    send_inventory_slot(state.sessions, char_id, new_inventory, slot)
-                    broadcast_object_create(state, entity.x, entity.y, item.item_id, drop_amount)
-
-                    {:reply, :ok, state}
+                    if item_def && item_def.destruye do
+                      # Destruye items are destroyed on drop, not placed on ground
+                      state = %{state | players: players}
+                      send_inventory_slot(state.sessions, char_id, new_inventory, slot)
+                      {:reply, :ok, state}
+                    else
+                      ground_items = Map.put(state.ground_items, pos, %{item_id: item.item_id, amount: drop_amount})
+                      state = %{state | players: players, ground_items: ground_items}
+                      send_inventory_slot(state.sessions, char_id, new_inventory, slot)
+                      broadcast_object_create(state, entity.x, entity.y, item.item_id, drop_amount)
+                      {:reply, :ok, state}
+                    end
 
                   {:error, reason} ->
                     {:reply, {:error, reason}, state}
@@ -465,7 +472,13 @@ defmodule Arena.Map.MapServer do
   def handle_call({:equip_item, char_id, slot}, _from, state) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
-        case Inventory.equip_toggle(entity.inventory, entity.equipment, slot) do
+        character_info = %{
+          level: entity.level,
+          class: entity.class,
+          race: entity.race,
+          gender: entity.gender
+        }
+        case Inventory.equip_toggle(entity.inventory, entity.equipment, slot, character_info) do
           {:ok, new_inventory, new_equipment, changed_slots} ->
             entity = %{entity | inventory: new_inventory, equipment: new_equipment}
             players = Map.put(state.players, char_id, entity)

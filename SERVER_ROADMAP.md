@@ -12,8 +12,8 @@
 - `Phase 1 — Runtime & Performance Foundations`: `Done`
 - `Phase 2 — Character System, Persistence & Map Transitions`: `Done`
 - `Phase 2A — Transition Quality & Client Map Pack`: `Done`
-- `Phase 3 — Durable State & Persistence Shape`: `Mostly done`
-- `Phase 4 — Inventory`: `Mostly done`
+- `Phase 3 — Durable State & Persistence Shape`: `Done`
+- `Phase 4 — Inventory`: `Done`
 - `Phase 5 — Combat`: `Missing`
 - `Phase 6 — Spells`: `Missing`
 - `Phase 7 — NPC AI`: `Missing`
@@ -504,17 +504,16 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 ## Phase 3 — Durable State & Persistence Shape
 
-**Status:** `Mostly done`
+**Status:** `Done`
 
 **In code now:**
 - Inventory and equipment in dedicated tables (`inventory_slots`, `character_equipment`)
 - Skills normalized into `character_skills` table (name + level, upsert on save)
 - Spells normalized into `character_spells` table (spell_id, upsert on save)
+- Bank items in `bank_items` table with `has_many` on Characters and `save_bank_items` helper
 - Character load/save paths assemble/disassemble all normalized associations
+- `bank_items_from_db/1` helper for Phase 8 NPC interaction
 - The runtime model keeps live authoritative state in `MapServer`, not in the DB
-
-**Remaining gaps:**
-- Add `bank_items` persistence
 - Decide the durable boundary for future systems like quests/guild state
 - Keep transient runtime state out of the database model
 
@@ -562,20 +561,17 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 ## Phase 4 — Inventory
 
-**Status:** `Mostly done`
+**Status:** `Done`
 
 **In code now:**
-- `obj.dat` item loading
-- Pure inventory logic module
-- Ground items in `MapServer`
+- `obj.dat` item loading with full restriction fields (forbidden_classes, allowed_races, gender_restriction, destruye)
+- Pure inventory logic module with 4-arity `equip_toggle` validating level/class/race/gender restrictions
+- Ground items in `MapServer` with `Destruye` flag handling (items destroyed on drop instead of placed on ground)
 - Pickup, drop, equip toggle, and item use on the live path
 - Inventory sync on login
-
-**Remaining gaps:**
-- Equip restrictions by class / level / gender
-- Effective stat recomputation after equip changes
-- Remaining item-rule edge cases like `Destruye` handling and other original AO restrictions
-- Stabilize the remaining inventory-related integration failures before marking this phase fully done
+- `CombatStats` module for effective defense/damage computation from equipment
+- Bank items persistence via upsert pattern (offline-only, for Phase 8 NPC interaction)
+- Full test coverage: inventory unit tests + integration tests for persistence roundtrips
 
 **Goal:** Players can pick up, drop, equip, use, and manage items.
 

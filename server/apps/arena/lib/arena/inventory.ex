@@ -51,8 +51,12 @@ defmodule Arena.Inventory do
     end
   end
 
-  @doc "Toggle equip on an inventory slot. Handles mutual exclusion per equip_slot."
-  def equip_toggle(inventory, equipment, slot) do
+  @doc """
+  Toggle equip on an inventory slot with restriction checking.
+
+  `character_info` is `%{level: int, class: atom, race: atom, gender: atom}`.
+  """
+  def equip_toggle(inventory, equipment, slot, character_info) do
     case get_slot(inventory, slot) do
       nil ->
         {:error, :empty_slot}
@@ -68,11 +72,23 @@ defmodule Arena.Inventory do
             {:error, :not_equippable}
 
           item.equipped ->
-            # Unequip
+            # Unequip — no restrictions
             new_item = %{item | equipped: false}
             new_inventory = List.replace_at(inventory, slot, new_item)
             new_equipment = Map.put(equipment, item_def.equip_slot, nil)
             {:ok, new_inventory, new_equipment, [slot]}
+
+          item_def.min_elv > 0 and character_info.level < item_def.min_elv ->
+            {:error, :level_too_low}
+
+          not class_allowed?(item_def, character_info.class) ->
+            {:error, :class_not_allowed}
+
+          not race_allowed?(item_def, character_info.race) ->
+            {:error, :race_not_allowed}
+
+          not gender_allowed?(item_def, character_info.gender) ->
+            {:error, :gender_not_allowed}
 
           true ->
             # Equip — first unequip any item in the same slot
@@ -100,6 +116,21 @@ defmodule Arena.Inventory do
   end
 
   # --- Private ---
+
+  defp class_allowed?(%{forbidden_classes: nil}, _), do: true
+
+  defp class_allowed?(%{forbidden_classes: classes}, char_class) do
+    not MapSet.member?(classes, to_string(char_class))
+  end
+
+  defp race_allowed?(%{allowed_races: nil}, _), do: true
+
+  defp race_allowed?(%{allowed_races: allowed}, char_race) do
+    MapSet.member?(allowed, char_race)
+  end
+
+  defp gender_allowed?(%{gender_restriction: :any}, _), do: true
+  defp gender_allowed?(%{gender_restriction: required}, char_gender), do: required == char_gender
 
   defp add_stackable(inventory, item_id, amount) do
     case find_stack_slot(inventory, item_id) do

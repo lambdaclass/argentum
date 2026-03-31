@@ -15,6 +15,7 @@ defmodule GameBackend.Characters do
   alias GameBackend.CharacterEquipment
   alias GameBackend.CharacterSkill
   alias GameBackend.CharacterSpell
+  alias GameBackend.BankItems
 
   @primary_key {:id, :id, autogenerate: true}
   schema "characters" do
@@ -66,6 +67,7 @@ defmodule GameBackend.Characters do
     has_one :equipment, CharacterEquipment, foreign_key: :character_id
     has_many :character_skills, CharacterSkill, foreign_key: :character_id
     has_many :character_spells, CharacterSpell, foreign_key: :character_id
+    has_many :bank_items, BankItems, foreign_key: :character_id
 
     timestamps()
   end
@@ -91,7 +93,7 @@ defmodule GameBackend.Characters do
     |> unique_constraint(:name)
   end
 
-  @preload_associations [:inventory_slots, :equipment, :character_skills, :character_spells]
+  @preload_associations [:inventory_slots, :equipment, :character_skills, :character_spells, :bank_items]
 
   @doc "Create a new character with inventory, equipment, skills, and spells."
   def create(attrs, opts \\ []) do
@@ -143,6 +145,7 @@ defmodule GameBackend.Characters do
     equipment = Keyword.get(opts, :equipment, %{})
     skills = Keyword.get(opts, :skills, %{})
     spells = Keyword.get(opts, :spells, [])
+    bank_items = Keyword.get(opts, :bank_items)
 
     Repo.transaction(fn ->
       case get(char_id) do
@@ -156,6 +159,7 @@ defmodule GameBackend.Characters do
               save_equipment(character.id, equipment)
               save_skills(character.id, skills)
               save_spells(character.id, spells)
+              if bank_items, do: save_bank_items(character.id, bank_items)
               character |> Repo.preload(@preload_associations, force: true)
 
             {:error, changeset} ->
@@ -429,5 +433,42 @@ defmodule GameBackend.Characters do
 
   defp rows_to_spells(rows) do
     Enum.map(rows, & &1.spell_id)
+  end
+
+  # ---- Bank items ----
+
+  defp save_bank_items(_character_id, items) when items == [] or items == nil, do: :ok
+
+  defp save_bank_items(character_id, items) do
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+    slot_indices = Enum.map(items, & &1.slot)
+
+    from(b in BankItems,
+      where: b.character_id == ^character_id and b.slot not in ^slot_indices
+    )
+    |> Repo.delete_all()
+
+    Enum.each(items, fn %{slot: slot, item_id: item_id, amount: amount} ->
+      Repo.insert!(
+        %BankItems{
+          character_id: character_id,
+          slot: slot,
+          item_id: item_id,
+          amount: amount,
+          inserted_at: now,
+          updated_at: now
+        },
+        on_conflict: [set: [item_id: item_id, amount: amount, updated_at: now]],
+        conflict_target: [:character_id, :slot]
+      )
+    end)
+  end
+
+  @doc "Extract bank items list from a preloaded character record."
+  def bank_items_from_db(%__MODULE__{bank_items: %Ecto.Association.NotLoaded{}}), do: []
+  def bank_items_from_db(%__MODULE__{bank_items: nil}), do: []
+
+  def bank_items_from_db(%__MODULE__{bank_items: items}) do
+    Enum.map(items, fn b -> %{slot: b.slot, item_id: b.item_id, amount: b.amount} end)
   end
 end
