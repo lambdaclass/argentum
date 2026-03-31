@@ -13,7 +13,10 @@ defmodule Arena.Map.MapServer do
 
   alias Arena.Map.CsmParser
   alias Arena.Entity.PlayerEntity
+  alias Arena.Entity.NpcEntity
   alias Arena.Inventory
+  alias Arena.Combat
+  alias Arena.CombatStats
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
@@ -24,6 +27,9 @@ defmodule Arena.Map.MapServer do
   # Server allows a move if elapsed >= interval (simple timer reset, like VB6).
   # Movement is synchronous (call) — processed inline before next packet.
   @base_walk_interval_ms 210
+  @attack_cooldown_ms 1500
+  @spell_cooldown_ms 2000
+  @npc_ai_tick_ms 500
   # Traditional AO viewport is 23×19 tiles at 32×32, centered on the player.
   # That gives a half-viewport of 11 tiles horizontally and 9 vertically.
   @aoi_range_x Application.compile_env(:arena, :aoi_range_x, 11)
@@ -115,6 +121,21 @@ defmodule Arena.Map.MapServer do
     GenServer.call(via(map_id), {:use_item, char_id, slot})
   end
 
+  @doc "Attack in the direction the player is facing."
+  def attack(map_id, char_id) do
+    GenServer.call(via(map_id), {:attack, char_id})
+  end
+
+  @doc "Cast a spell at the given target coordinates."
+  def cast_spell(map_id, char_id, spell_slot, target_x, target_y) do
+    GenServer.call(via(map_id), {:cast_spell, char_id, spell_slot, target_x, target_y})
+  end
+
+  @doc "Toggle safe mode (PvP protection)."
+  def safe_toggle(map_id, char_id) do
+    GenServer.call(via(map_id), {:safe_toggle, char_id})
+  end
+
   @doc "Get a snapshot of a player entity (for autosave)."
   def snapshot_entity(map_id, char_id) do
     GenServer.call(via(map_id), {:snapshot, char_id})
@@ -164,6 +185,11 @@ defmodule Arena.Map.MapServer do
 
           visibility_mode = Application.get_env(:arena, :visibility_mode, :aoi_grid)
 
+          # Spawn NPC entities from map data
+          occupancy = :array.new(@map_width * @map_height, default: nil)
+          {npcs_live, npc_char_indices, occupancy, next_idx} =
+            spawn_npcs(map_data.npcs, map_id, occupancy)
+
           state = %{
             map_id: map_id,
             loading: false,
@@ -182,8 +208,8 @@ defmodule Arena.Map.MapServer do
             players: %{},
             # Session pids for direct sends: %{char_id => pid()}
             sessions: %{},
-            # Dynamic occupancy: :array of 10000 slots, nil or {:player, char_id}
-            occupancy: :array.new(@map_width * @map_height, default: nil),
+            # Dynamic occupancy: :array of 10000 slots, nil or {:player, char_id}/{:npc, instance_id}
+            occupancy: occupancy,
             # Visibility mode: :global | :aoi_scan | :aoi_grid
             visibility_mode: visibility_mode,
             # Spatial grid: %{cell_key => MapSet.t(char_id)} (only used in :aoi_grid mode)
@@ -193,9 +219,18 @@ defmodule Arena.Map.MapServer do
             visible_sets: if(visibility_mode == :global, do: nil, else: %{}),
             # Ground items: %{{x, y} => %{item_id: int, amount: int}}
             ground_items: build_ground_items(map_data.objects),
-            # Counter for per-map char_index assignment
-            next_char_index: 1
+            # Counter for per-map char_index assignment (continues after NPC indices)
+            next_char_index: next_idx,
+            # Live NPC entities: %{instance_id => %NpcEntity{}}
+            npcs_live: npcs_live,
+            # Reverse map: %{char_index => instance_id}
+            npc_char_indices: npc_char_indices
           }
+
+          # Schedule NPC AI tick if map has live NPCs
+          if map_size(npcs_live) > 0 do
+            Process.send_after(self(), :npc_ai_tick, @npc_ai_tick_ms)
+          end
 
           {:noreply, state}
         end
@@ -537,6 +572,105 @@ defmodule Arena.Map.MapServer do
     end
   end
 
+  # ---- Combat ----
+
+  @impl true
+  def handle_call({:attack, char_id}, _from, state) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        now = System.monotonic_time(:millisecond)
+
+        cond do
+          now < entity.next_attack_at -> {:reply, {:error, :cooldown}, state}
+          entity.dead -> {:reply, {:error, :dead}, state}
+          entity.paralyzed -> {:reply, {:error, :paralyzed}, state}
+          true ->
+            {tx, ty} = facing_tile(entity.x, entity.y, entity.heading)
+            target = get_occupancy(state.occupancy, tx, ty)
+
+            # Update cooldown
+            entity = %{entity | next_attack_at: now + @attack_cooldown_ms}
+
+            # Broadcast swing animation to AoI
+            swing_raw = Encoder.encode({:char_swing, %{char_index: entity.char_index}})
+            broadcast_visible(state, entity.x, entity.y, char_id, fn pid ->
+              send(pid, {:send_raw, swing_raw})
+            end)
+
+            state = handle_attack_target(state, char_id, entity, target)
+            {:reply, :ok, state}
+        end
+
+      :error -> {:reply, {:error, :not_on_map}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:cast_spell, char_id, spell_slot, target_x, target_y}, _from, state) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        now = System.monotonic_time(:millisecond)
+
+        cond do
+          now < entity.next_spell_at -> {:reply, {:error, :cooldown}, state}
+          entity.dead -> {:reply, {:error, :dead}, state}
+          entity.paralyzed -> {:reply, {:error, :paralyzed}, state}
+          true ->
+            spell_idx = spell_slot - 1
+
+            cond do
+              spell_idx < 0 or spell_idx >= length(entity.spells) ->
+                {:reply, {:error, :invalid_slot}, state}
+
+              true ->
+                spell_id = Enum.at(entity.spells, spell_idx)
+                spell_def = GameData.get_spell(spell_id)
+
+                cond do
+                  spell_def == nil ->
+                    {:reply, {:error, :unknown_spell}, state}
+
+                  entity.mana < spell_def.mana_required ->
+                    {:reply, {:error, :not_enough_mana}, state}
+
+                  entity.stamina < spell_def.sta_required ->
+                    {:reply, {:error, :not_enough_stamina}, state}
+
+                  true ->
+                    entity = %{entity |
+                      mana: entity.mana - spell_def.mana_required,
+                      stamina: max(entity.stamina - spell_def.sta_required, 0),
+                      next_spell_at: now + @spell_cooldown_ms
+                    }
+
+                    state = apply_spell(state, char_id, entity, spell_def, target_x, target_y)
+                    {:reply, :ok, state}
+                end
+            end
+        end
+
+      :error -> {:reply, {:error, :not_on_map}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:safe_toggle, char_id}, _from, state) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        new_safe = not entity.safe_mode
+        entity = %{entity | safe_mode: new_safe}
+        players = Map.put(state.players, char_id, entity)
+        state = %{state | players: players}
+
+        packet = if new_safe, do: {:safe_mode_on, %{}}, else: {:safe_mode_off, %{}}
+        send_to_session(state.sessions, char_id, {:send_raw, Encoder.encode(packet)})
+
+        {:reply, :ok, state}
+
+      :error -> {:reply, {:error, :not_on_map}, state}
+    end
+  end
+
   # ---- Info / Map Data ----
 
   @impl true
@@ -722,6 +856,13 @@ defmodule Arena.Map.MapServer do
     end
 
     Process.send_after(self(), :autosave, @autosave_interval_ms)
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info(:npc_ai_tick, state) do
+    state = Arena.NpcAi.tick(state)
+    Process.send_after(self(), :npc_ai_tick, @npc_ai_tick_ms)
     {:noreply, state}
   end
 
@@ -977,8 +1118,11 @@ defmodule Arena.Map.MapServer do
   # Each player has a MapSet of char_ids they can currently see.
   # In :global mode, visible_sets is nil — create/remove go to everyone.
 
-  # Handle enter: compute visible set, send creates both ways
+  # Handle enter: compute visible set, send creates both ways, send nearby NPCs
   defp enter_visibility(state, entity, sessions) do
+    # Send nearby NPC creates to the entering player
+    send_nearby_npcs(state, entity, sessions)
+
     if state.visible_sets == nil do
       # :global mode — broadcast to everyone, no visible set tracking
       create_raw = Encoder.encode(character_create_packet(entity))
@@ -997,6 +1141,18 @@ defmodule Arena.Map.MapServer do
 
       nearby = Map.take(state.players, MapSet.to_list(visible_ids) ++ [entity.char_id])
       {visible_sets, nearby}
+    end
+  end
+
+  defp send_nearby_npcs(state, entity, sessions) do
+    for {_iid, npc} <- state.npcs_live, npc.alive do
+      if abs(npc.x - entity.x) <= @aoi_range_x and abs(npc.y - entity.y) <= @aoi_range_y do
+        npc_def = GameData.get_npc(npc.npc_id)
+        if npc_def do
+          raw = Encoder.encode(npc_create_packet(npc, npc_def))
+          send_to_session(sessions, entity.char_id, {:send_raw, raw})
+        end
+      end
     end
   end
 
@@ -1210,6 +1366,503 @@ defmodule Arena.Map.MapServer do
       y = :rand.uniform(@map_height)
       if TileGrid.is_walkable(map_id, x, y), do: {x, y}
     end)
+  end
+
+  # --- NPC spawning ---
+
+  defp spawn_npcs(npc_spawns, map_id, occupancy) do
+    Enum.reduce(npc_spawns, {%{}, %{}, occupancy, 1}, fn npc_spawn, {live, indices, occ, next_idx} ->
+      case GameData.get_npc(npc_spawn.npc_index) do
+        nil -> {live, indices, occ, next_idx}
+        npc_def ->
+          x = npc_spawn.x
+          y = npc_spawn.y
+
+          if x >= 1 and x <= @map_width and y >= 1 and y <= @map_height and
+             TileGrid.is_walkable(map_id, x, y) and :array.get(occ_index(x, y), occ) == nil do
+            instance_id = next_idx
+            entity = NpcEntity.from_def(npc_def, instance_id, next_idx, x, y)
+            occ = set_occupancy(occ, x, y, {:npc, instance_id})
+            {Map.put(live, instance_id, entity),
+             Map.put(indices, next_idx, instance_id),
+             occ, next_idx + 1}
+          else
+            {live, indices, occ, next_idx}
+          end
+      end
+    end)
+  end
+
+  # --- Combat helpers ---
+
+  defp facing_tile(x, y, :north), do: {x, y - 1}
+  defp facing_tile(x, y, :south), do: {x, y + 1}
+  defp facing_tile(x, y, :east), do: {x + 1, y}
+  defp facing_tile(x, y, :west), do: {x - 1, y}
+  defp facing_tile(x, y, _), do: {x, y + 1}
+
+  defp handle_attack_target(state, char_id, entity, {:npc, instance_id}) do
+    case Map.get(state.npcs_live, instance_id) do
+      nil ->
+        players = Map.put(state.players, char_id, entity)
+        %{state | players: players}
+
+      npc ->
+        if not npc.alive do
+          players = Map.put(state.players, char_id, entity)
+          %{state | players: players}
+        else
+          npc_def = GameData.get_npc(npc.npc_id)
+          {min_weapon, max_weapon} = CombatStats.effective_damage(entity.equipment)
+
+          # Class ID lookup (reverse from atom)
+          class_id = class_atom_to_id(entity.class)
+
+          # Hit/miss — use weapon skill (default 50) vs NPC evasion
+          weapon_skill = Map.get(entity.skills, :combat_weapons, 50)
+          npc_evasion = if npc_def, do: npc_def.poder_evasion, else: 0
+          hit_roll = Combat.hit_chance(weapon_skill, entity.agi, entity.level, class_id,
+                                       npc_evasion, 0, (if npc_def, do: npc_def.npc_level, else: 1), class_id)
+
+          if :rand.uniform(100) <= hit_roll do
+            # Hit! Compute damage
+            raw_damage = Combat.melee_damage(min_weapon, max_weapon, entity.str, class_id)
+            npc_defense = if npc_def, do: npc_def.def, else: 0
+            final_damage = max(raw_damage - npc_defense, 0)
+
+            new_hp = max(npc.hp - final_damage, 0)
+            npc = %{npc | hp: new_hp}
+
+            # Send damage feedback to attacker
+            send_to_session(state.sessions, char_id, {:send_raw,
+              Encoder.encode({:user_hitted_user, %{char_index: npc.char_index, damage: final_damage, hp: new_hp}})})
+
+            if new_hp <= 0 do
+              # NPC died
+              npc = %{npc | alive: false, respawn_at: System.monotonic_time(:millisecond) + ((if npc_def, do: npc_def.intervalo_respawn, else: 60) * 1000)}
+              state = put_in(state.npcs_live[instance_id], npc)
+              occupancy = clear_occupancy(state.occupancy, npc.x, npc.y)
+              state = %{state | occupancy: occupancy}
+
+              # Broadcast NPC removal
+              remove_raw = Encoder.encode({:character_remove, %{char_index: npc.char_index}})
+              broadcast_visible_all(state, npc.x, npc.y, fn pid -> send(pid, {:send_raw, remove_raw}) end)
+
+              # Award XP
+              give_exp = if npc_def, do: npc_def.give_exp, else: 0
+              npc_level = if npc_def, do: npc_def.npc_level, else: 1
+              xp_gained = Combat.xp_gain(final_damage, give_exp, npc.max_hp, entity.level, npc_level)
+              entity = %{entity | xp: entity.xp + xp_gained}
+
+              # Check level up
+              entity = check_level_up(entity, state.sessions, char_id)
+
+              send_to_session(state.sessions, char_id, {:send_raw,
+                Encoder.encode({:update_exp, %{current_xp: entity.xp, next_xp: GameData.exp_for_level(entity.level + 1) || 0}})})
+
+              # Award gold
+              give_gld = if npc_def, do: npc_def.give_gld, else: 0
+              entity = if give_gld > 0, do: %{entity | gold: entity.gold + give_gld}, else: entity
+              if give_gld > 0 do
+                send_to_session(state.sessions, char_id, {:send_raw,
+                  Encoder.encode({:update_gold, %{gold: entity.gold}})})
+              end
+
+              # Drop loot
+              state = drop_npc_loot(state, npc, npc_def)
+
+              players = Map.put(state.players, char_id, entity)
+              %{state | players: players}
+            else
+              state = put_in(state.npcs_live[instance_id], npc)
+              # NPC acquires target on being hit
+              npc = %{npc | target_id: char_id}
+              state = put_in(state.npcs_live[instance_id], npc)
+
+              players = Map.put(state.players, char_id, entity)
+              %{state | players: players}
+            end
+          else
+            # Miss
+            players = Map.put(state.players, char_id, entity)
+            %{state | players: players}
+          end
+        end
+    end
+  end
+
+  defp handle_attack_target(state, char_id, entity, {:player, defender_id}) do
+    case Map.get(state.players, defender_id) do
+      nil ->
+        players = Map.put(state.players, char_id, entity)
+        %{state | players: players}
+
+      defender ->
+        cond do
+          entity.safe_mode ->
+            send_to_session(state.sessions, char_id, {:send_raw,
+              Encoder.encode({:console_msg, %{message: "Tienes el seguro activado.", font_index: 0}})})
+            players = Map.put(state.players, char_id, entity)
+            %{state | players: players}
+
+          state.safe_zone ->
+            send_to_session(state.sessions, char_id, {:send_raw,
+              Encoder.encode({:console_msg, %{message: "Zona segura.", font_index: 0}})})
+            players = Map.put(state.players, char_id, entity)
+            %{state | players: players}
+
+          defender.dead ->
+            players = Map.put(state.players, char_id, entity)
+            %{state | players: players}
+
+          true ->
+            class_id = class_atom_to_id(entity.class)
+            def_class_id = class_atom_to_id(defender.class)
+            {min_weapon, max_weapon} = CombatStats.effective_damage(entity.equipment)
+
+            weapon_skill = Map.get(entity.skills, :combat_weapons, 50)
+            def_tactics = Map.get(defender.skills, :combat_tactics, 50)
+
+            hit_roll = Combat.hit_chance(weapon_skill, entity.agi, entity.level, class_id,
+                                         def_tactics, defender.agi, defender.level, def_class_id)
+
+            if :rand.uniform(100) <= hit_roll do
+              # Check shield block
+              shield_pct = CombatStats.shield_defense_pct(defender.equipment)
+              def_skill = Map.get(defender.skills, :combat_defense, 50)
+
+              if shield_pct > 0 and Combat.shield_block?(shield_pct, def_skill, weapon_skill) do
+                # Blocked
+                send_to_session(state.sessions, defender_id, {:send_raw,
+                  Encoder.encode({:blocked_with_shield_user, %{}})})
+                block_raw = Encoder.encode({:blocked_with_shield_other, %{char_index: defender.char_index}})
+                broadcast_visible(state, defender.x, defender.y, defender_id, fn pid ->
+                  send(pid, {:send_raw, block_raw})
+                end)
+
+                players = Map.put(state.players, char_id, entity)
+                %{state | players: players}
+              else
+                # Hit
+                raw_damage = Combat.melee_damage(min_weapon, max_weapon, entity.str, class_id)
+                {min_def, max_def} = CombatStats.effective_defense(defender.equipment)
+                {final_damage, _location} = Combat.apply_defense(raw_damage, {min_def, max_def})
+
+                new_hp = max(defender.hp - final_damage, 0)
+                defender = %{defender | hp: new_hp}
+
+                # Send to attacker
+                send_to_session(state.sessions, char_id, {:send_raw,
+                  Encoder.encode({:user_hitted_user, %{char_index: defender.char_index, damage: final_damage, hp: entity.hp}})})
+                # Send to defender
+                send_to_session(state.sessions, defender_id, {:send_raw,
+                  Encoder.encode({:user_hitted_by_user, %{char_index: entity.char_index, damage: final_damage, hp: new_hp}})})
+                send_to_session(state.sessions, defender_id, {:send_raw,
+                  Encoder.encode({:update_hp, %{min_hp: new_hp}})})
+
+                # Flag attacker as criminal
+                entity = if not defender.criminal, do: %{entity | criminal: true}, else: entity
+
+                defender = if new_hp <= 0 do
+                  send_to_session(state.sessions, defender_id, {:send_raw,
+                    Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})})
+                  %{defender | dead: true}
+                else
+                  defender
+                end
+
+                players = state.players
+                  |> Map.put(char_id, entity)
+                  |> Map.put(defender_id, defender)
+                %{state | players: players}
+              end
+            else
+              # Miss
+              players = Map.put(state.players, char_id, entity)
+              %{state | players: players}
+            end
+        end
+    end
+  end
+
+  defp handle_attack_target(state, char_id, entity, _no_target) do
+    players = Map.put(state.players, char_id, entity)
+    %{state | players: players}
+  end
+
+  # --- Spell helpers ---
+
+  defp apply_spell(state, char_id, entity, spell_def, target_x, target_y) do
+    # Broadcast FX
+    if spell_def.fx_grh > 0 do
+      target_occ = if target_x && target_y, do: get_occupancy(state.occupancy, target_x, target_y), else: nil
+      fx_char_index = case target_occ do
+        {:player, pid} -> case Map.get(state.players, pid) do nil -> 0; p -> p.char_index end
+        {:npc, iid} -> case Map.get(state.npcs_live, iid) do nil -> 0; n -> n.char_index end
+        _ -> entity.char_index
+      end
+
+      fx_raw = Encoder.encode({:create_fx, %{char_index: fx_char_index, fx: spell_def.fx_grh, loops: spell_def.loops}})
+      broadcast_visible_all(state, entity.x, entity.y, fn pid -> send(pid, {:send_raw, fx_raw}) end)
+    end
+
+    if spell_def.wav > 0 do
+      wav_raw = Encoder.encode({:play_wave, %{wav: spell_def.wav, x: entity.x, y: entity.y}})
+      broadcast_visible_all(state, entity.x, entity.y, fn pid -> send(pid, {:send_raw, wav_raw}) end)
+    end
+
+    # Apply spell effect
+    cond do
+      # Damage spell (sube_hp == 2)
+      spell_def.sube_hp == 2 ->
+        is_mage = entity.class in [:mago]
+        damage = Combat.spell_damage(spell_def.min_hp, spell_def.max_hp, entity.level, is_mage)
+        state = apply_spell_damage(state, char_id, entity, damage, target_x, target_y)
+        state
+
+      # Heal spell (sube_hp == 1 or sanacion)
+      spell_def.sube_hp == 1 or spell_def.sanacion ->
+        heal = if spell_def.max_hp > spell_def.min_hp,
+          do: Enum.random(spell_def.min_hp..spell_def.max_hp),
+          else: spell_def.min_hp
+        state = apply_spell_heal(state, char_id, entity, heal, spell_def, target_x, target_y)
+        state
+
+      # Status effects
+      spell_def.paraliza or spell_def.envenena or spell_def.cura_veneno or spell_def.invisibilidad ->
+        state = apply_spell_status(state, char_id, entity, spell_def, target_x, target_y)
+        state
+
+      # Default: just update mana
+      true ->
+        players = Map.put(state.players, char_id, entity)
+        %{state | players: players}
+    end
+  end
+
+  defp apply_spell_damage(state, char_id, entity, damage, target_x, target_y) do
+    target = if target_x && target_y, do: get_occupancy(state.occupancy, target_x, target_y), else: nil
+
+    case target do
+      {:npc, instance_id} ->
+        case Map.get(state.npcs_live, instance_id) do
+          nil ->
+            players = Map.put(state.players, char_id, entity)
+            %{state | players: players}
+
+          npc when npc.alive ->
+            npc_def = GameData.get_npc(npc.npc_id)
+            magic_res = if npc_def, do: npc_def.magic_resistance, else: 0
+            final_damage = Combat.apply_magic_resistance(damage, magic_res)
+            new_hp = max(npc.hp - final_damage, 0)
+            npc = %{npc | hp: new_hp}
+
+            send_to_session(state.sessions, char_id, {:send_raw,
+              Encoder.encode({:user_hitted_user, %{char_index: npc.char_index, damage: final_damage, hp: new_hp}})})
+
+            if new_hp <= 0 do
+              npc = %{npc | alive: false, respawn_at: System.monotonic_time(:millisecond) + ((if npc_def, do: npc_def.intervalo_respawn, else: 60) * 1000)}
+              state = put_in(state.npcs_live[instance_id], npc)
+              occupancy = clear_occupancy(state.occupancy, npc.x, npc.y)
+              state = %{state | occupancy: occupancy}
+
+              remove_raw = Encoder.encode({:character_remove, %{char_index: npc.char_index}})
+              broadcast_visible_all(state, npc.x, npc.y, fn pid -> send(pid, {:send_raw, remove_raw}) end)
+
+              give_exp = if npc_def, do: npc_def.give_exp, else: 0
+              npc_level = if npc_def, do: npc_def.npc_level, else: 1
+              xp_gained = Combat.xp_gain(final_damage, give_exp, npc.max_hp, entity.level, npc_level)
+              entity = %{entity | xp: entity.xp + xp_gained}
+              entity = check_level_up(entity, state.sessions, char_id)
+
+              send_to_session(state.sessions, char_id, {:send_raw,
+                Encoder.encode({:update_exp, %{current_xp: entity.xp, next_xp: GameData.exp_for_level(entity.level + 1) || 0}})})
+              send_to_session(state.sessions, char_id, {:send_raw,
+                Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+
+              state = drop_npc_loot(state, npc, npc_def)
+              players = Map.put(state.players, char_id, entity)
+              %{state | players: players}
+            else
+              npc = %{npc | target_id: char_id}
+              state = put_in(state.npcs_live[instance_id], npc)
+              send_to_session(state.sessions, char_id, {:send_raw,
+                Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+              players = Map.put(state.players, char_id, entity)
+              %{state | players: players}
+            end
+
+          _ ->
+            players = Map.put(state.players, char_id, entity)
+            %{state | players: players}
+        end
+
+      {:player, target_id} when target_id != char_id ->
+        case Map.get(state.players, target_id) do
+          nil ->
+            players = Map.put(state.players, char_id, entity)
+            %{state | players: players}
+
+          defender ->
+            final_damage = damage
+            new_hp = max(defender.hp - final_damage, 0)
+            defender = %{defender | hp: new_hp}
+
+            send_to_session(state.sessions, char_id, {:send_raw,
+              Encoder.encode({:user_hitted_user, %{char_index: defender.char_index, damage: final_damage, hp: entity.hp}})})
+            send_to_session(state.sessions, target_id, {:send_raw,
+              Encoder.encode({:user_hitted_by_user, %{char_index: entity.char_index, damage: final_damage, hp: new_hp}})})
+            send_to_session(state.sessions, target_id, {:send_raw,
+              Encoder.encode({:update_hp, %{min_hp: new_hp}})})
+            send_to_session(state.sessions, char_id, {:send_raw,
+              Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+
+            entity = if not defender.criminal, do: %{entity | criminal: true}, else: entity
+
+            defender = if new_hp <= 0 do
+              send_to_session(state.sessions, target_id, {:send_raw,
+                Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})})
+              %{defender | dead: true}
+            else
+              defender
+            end
+
+            players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, defender)
+            %{state | players: players}
+        end
+
+      _ ->
+        send_to_session(state.sessions, char_id, {:send_raw,
+          Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+        players = Map.put(state.players, char_id, entity)
+        %{state | players: players}
+    end
+  end
+
+  defp apply_spell_heal(state, char_id, entity, heal, _spell_def, target_x, target_y) do
+    target = if target_x && target_y, do: get_occupancy(state.occupancy, target_x, target_y), else: nil
+
+    case target do
+      {:player, target_id} ->
+        case Map.get(state.players, target_id) do
+          nil ->
+            players = Map.put(state.players, char_id, entity)
+            %{state | players: players}
+
+          target_entity ->
+            new_hp = min(target_entity.hp + heal, target_entity.max_hp)
+            target_entity = %{target_entity | hp: new_hp}
+
+            send_to_session(state.sessions, target_id, {:send_raw,
+              Encoder.encode({:update_hp, %{min_hp: new_hp}})})
+            send_to_session(state.sessions, char_id, {:send_raw,
+              Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+
+            players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, target_entity)
+            %{state | players: players}
+        end
+
+      _ ->
+        # Self-heal
+        new_hp = min(entity.hp + heal, entity.max_hp)
+        entity = %{entity | hp: new_hp}
+
+        send_to_session(state.sessions, char_id, {:send_raw,
+          Encoder.encode({:update_hp, %{min_hp: new_hp}})})
+        send_to_session(state.sessions, char_id, {:send_raw,
+          Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+
+        players = Map.put(state.players, char_id, entity)
+        %{state | players: players}
+    end
+  end
+
+  defp apply_spell_status(state, char_id, entity, spell_def, target_x, target_y) do
+    target = if target_x && target_y, do: get_occupancy(state.occupancy, target_x, target_y), else: nil
+
+    target_id = case target do
+      {:player, tid} -> tid
+      _ -> char_id
+    end
+
+    case Map.get(state.players, target_id) do
+      nil ->
+        players = Map.put(state.players, char_id, entity)
+        %{state | players: players}
+
+      target_entity ->
+        target_entity = cond do
+          spell_def.paraliza -> %{target_entity | paralyzed: true}
+          spell_def.envenena -> %{target_entity | poisoned: true}
+          spell_def.cura_veneno -> %{target_entity | poisoned: false}
+          spell_def.invisibilidad -> %{target_entity | invisible: true}
+          true -> target_entity
+        end
+
+        send_to_session(state.sessions, char_id, {:send_raw,
+          Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+
+        players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, target_entity)
+        %{state | players: players}
+    end
+  end
+
+  # --- NPC helpers ---
+
+  defp drop_npc_loot(state, _npc, nil), do: state
+  defp drop_npc_loot(state, npc, npc_def) do
+    Enum.reduce(npc_def.loot_table, state, fn %{item_id: item_id, amount: amount}, state ->
+      # Simple probability: 1 in 5 chance per loot entry
+      if :rand.uniform(5) == 1 do
+        pos = {npc.x, npc.y}
+        unless Map.has_key?(state.ground_items, pos) do
+          ground_items = Map.put(state.ground_items, pos, %{item_id: item_id, amount: amount})
+          state = %{state | ground_items: ground_items}
+          broadcast_object_create(state, npc.x, npc.y, item_id, amount)
+          state
+        else
+          state
+        end
+      else
+        state
+      end
+    end)
+  end
+
+  defp check_level_up(entity, sessions, char_id) do
+    next_xp = GameData.exp_for_level(entity.level + 1)
+
+    if next_xp && entity.xp >= next_xp do
+      entity = %{entity | level: entity.level + 1, xp: entity.xp - next_xp}
+      send_to_session(sessions, char_id, {:send_raw, Encoder.encode({:level_up, %{level: entity.level}})})
+      # Recursive check for multiple level ups
+      check_level_up(entity, sessions, char_id)
+    else
+      entity
+    end
+  end
+
+  @class_id_map %{
+    mago: 1, clerigo: 2, paladin: 3, cazador: 4, trabajador: 5,
+    guerrero: 6, ladron: 7, bandido: 8, asesino: 9, druida: 10, bardo: 11, pirata: 12
+  }
+
+  defp class_atom_to_id(class_atom), do: Map.get(@class_id_map, class_atom, 6)
+
+  # NPC character_create packet
+  def npc_create_packet(npc_entity, npc_def) do
+    {:character_create, %{
+      char_index: npc_entity.char_index,
+      body_id: npc_def.body,
+      head_id: npc_def.head,
+      heading: npc_def.heading,
+      x: npc_entity.x,
+      y: npc_entity.y,
+      name: npc_def.name || "NPC",
+      min_hp: npc_entity.hp,
+      max_hp: npc_entity.max_hp,
+      es_npc: 1
+    }}
   end
 
   defp maps_dir do

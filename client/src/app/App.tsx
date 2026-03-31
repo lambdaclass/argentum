@@ -13,6 +13,7 @@ import { CharacterCard } from "../ui/CharacterCard";
 import { WorldStatusPanel } from "../ui/WorldStatusPanel";
 import { HechizosPanel } from "../ui/HechizosPanel";
 import { ClassicHudPanel } from "../ui/ClassicHudPanel";
+import { SkillsPanel } from "../ui/SkillsPanel";
 
 const MOVE_KEYS: Record<string, Direction> = {
   ArrowUp: "north",
@@ -27,6 +28,7 @@ const MOVE_KEYS: Record<string, Direction> = {
 
 const RIGHT_TABS = [
   { key: "hud", label: "HUD" },
+  { key: "skills", label: "Skills" },
   { key: "spells", label: "Hechizos" },
   { key: "world", label: "Mapa" },
   { key: "session", label: "Sesion" },
@@ -55,7 +57,7 @@ export function App() {
     totalBytes: null
   });
   const [activeRightTab, setActiveRightTab] = useState<
-    "hud" | "spells" | "world" | "session" | "chat" | "debug"
+    "hud" | "skills" | "spells" | "world" | "session" | "chat" | "debug"
   >("hud");
   const [showTileDebug, setShowTileDebug] = useState(false);
   const [showMoveDebug, setShowMoveDebug] = useState(false);
@@ -421,21 +423,23 @@ export function App() {
 
     if (state.connection.status === "connecting") {
       return {
-        eyebrow: "Session",
+        eyebrow: "Cuenta",
         title: "Connecting",
-        copy: "Opening the AO session flow with saved-token reconnect or packet 74 account auth."
+        copy: state.connection.credentials
+          ? "Reusing the saved session to reconnect this account."
+          : "Opening the account login flow with the current name and password."
       };
     }
 
     if (state.connection.status === "offline" && !state.world.map) {
       return {
-        eyebrow: "Session",
+        eyebrow: "Cuenta",
         title: state.connection.lastError ? "Connection Failed" : "Ready To Enter",
         copy:
           state.connection.lastError ??
           (state.connection.credentials
-            ? "Assets are loaded. The client will reconnect automatically with the saved session token."
-            : "Assets are loaded. Enter a character name and password in Session, then connect.")
+            ? "Assets are loaded. A saved reconnect session is ready in Sesion."
+            : "Assets are loaded. Enter an account name and password in Sesion, then connect.")
       };
     }
 
@@ -616,10 +620,18 @@ export function App() {
               />
             ) : null}
 
+            {activeRightTab === "skills" ? (
+              <SkillsPanel
+                state={state}
+                onSelectSkill={(key) => dispatch({ type: "skills/select", key })}
+              />
+            ) : null}
+
             {activeRightTab === "spells" ? (
               <div className="hud-stack">
                 <HechizosPanel
                   compact
+                  connected={state.connection.status === "connected"}
                   state={state}
                   onCast={(slotIndex) => session.sendCastSpell(slotIndex)}
                   onSelectSlot={(slotIndex) =>

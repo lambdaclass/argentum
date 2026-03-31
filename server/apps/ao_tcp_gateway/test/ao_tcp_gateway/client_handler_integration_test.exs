@@ -438,11 +438,20 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
       core_ids = [2, 46, 30, 47, 42, 31, 158, 27, 26, 25, 28, 78]
       assert Enum.take(ids, 12) == core_ids
 
-      # Sequence ends with welcome(37) then session_token(200)
-      assert Enum.at(ids, -2) == 37
-      assert List.last(ids) == 200
+      # After core: player/NPC creates, ground items, welcome, session_token.
+      # NPC character_creates (42) arrive async so position is non-deterministic.
+      after_core = Enum.drop(ids, 12)
+      assert 37 in after_core
+      assert 200 in after_core
 
-      middle = Enum.slice(ids, 12, length(ids) - 14)
+      # Welcome(37) before session_token(200) ignoring NPC creates
+      non_npc = Enum.reject(after_core, &(&1 == 42))
+      welcome_idx = Enum.find_index(non_npc, &(&1 == 37))
+      token_idx = Enum.find_index(non_npc, &(&1 == 200))
+      assert welcome_idx < token_idx
+
+      # All non-special packets are valid middle types
+      middle = Enum.reject(after_core, &(&1 in [37, 200]))
       assert Enum.all?(middle, &(&1 in [42, 63, 66, 80, 29]))
     end
 

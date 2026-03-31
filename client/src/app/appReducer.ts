@@ -88,6 +88,18 @@ function groundObjectKey(x: number, y: number) {
   return `${x},${y}`;
 }
 
+function normalizeSkills(
+  entries: ClientState["skills"]["entries"]
+): ClientState["skills"]["entries"] {
+  return [...entries].sort((left, right) => {
+    if (right.level !== left.level) {
+      return right.level - left.level;
+    }
+
+    return left.key.localeCompare(right.key);
+  });
+}
+
 function nextMapStatus(world: ClientState["world"]) {
   return world.map != null ? "transferring" : "loading";
 }
@@ -149,6 +161,11 @@ export function createInitialState(): ClientState {
     spellbook: {
       slots: Array.from({ length: 20 }, () => null),
       selectedSlot: null
+    },
+    skills: {
+      entries: [],
+      selectedKey: null,
+      source: "none"
     },
     log: [createLogEntry("info", "Client initialized.")]
   };
@@ -590,6 +607,31 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
         }
       };
 
+    case "skills/setAll": {
+      const entries = normalizeSkills(action.entries);
+      const selectedExists =
+        state.skills.selectedKey != null &&
+        entries.some((entry) => entry.key === state.skills.selectedKey);
+
+      return {
+        ...state,
+        skills: {
+          entries,
+          selectedKey: selectedExists ? state.skills.selectedKey : (entries[0]?.key ?? null),
+          source: action.source ?? "server"
+        }
+      };
+    }
+
+    case "skills/select":
+      return {
+        ...state,
+        skills: {
+          ...state.skills,
+          selectedKey: action.key
+        }
+      };
+
     case "log/add":
       return {
         ...state,
@@ -642,6 +684,11 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
         spellbook: {
           slots: Array.from({ length: 20 }, () => null),
           selectedSlot: null
+        },
+        skills: {
+          entries: [],
+          selectedKey: null,
+          source: "none"
         }
       };
 

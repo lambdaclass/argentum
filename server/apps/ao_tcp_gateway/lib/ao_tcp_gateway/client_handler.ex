@@ -34,6 +34,8 @@ defmodule AoTcpGateway.ClientHandler do
       char_index: nil,
       map_id: nil,
       entity: nil,
+      target_x: nil,
+      target_y: nil,
       flood_guard: FloodGuard.new()
     })
   end

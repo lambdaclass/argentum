@@ -84,12 +84,12 @@ export class SessionClient {
       this.dispatch({
         type: "connection/setStatus",
         status: "offline",
-        lastError: "Character name is required."
+        lastError: "Account or character name is required."
       });
       this.dispatch({
         type: "log/add",
         level: "error",
-        message: "Cannot bootstrap session without a character name."
+        message: "Cannot start account login without a name."
       });
       return;
     }
@@ -103,7 +103,7 @@ export class SessionClient {
       this.dispatch({
         type: "log/add",
         level: "error",
-        message: "Cannot bootstrap session without a password."
+        message: "Cannot start account login without a password."
       });
       return;
     }

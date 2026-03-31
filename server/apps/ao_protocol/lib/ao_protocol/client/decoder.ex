@@ -160,6 +160,14 @@ defmodule AoProtocol.Client.Decoder do
     end
   end
 
+  # LeftClick (ID 95)
+  defp decode_packet(95, rest) do
+    with {:ok, x, rest} <- Reader.read_int8(rest),
+         {:ok, y, rest} <- Reader.read_int8(rest) do
+      {:ok, {:left_click, %{x: x, y: y}}, rest}
+    end
+  end
+
   # Unknown packet
   defp decode_packet(id, _rest), do: {:error, {:unknown_packet, id}}
 end

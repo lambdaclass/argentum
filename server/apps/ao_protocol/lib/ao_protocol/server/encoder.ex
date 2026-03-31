@@ -268,6 +268,68 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.session_token(), payload)
   end
 
+  # eCharSwing (ID 19) — charindex(Int16)
+  def encode({:char_swing, %{char_index: char_index}}) do
+    payload = Writer.write_int16(char_index)
+    Writer.build_packet(PacketIds.Server.char_swing(), payload)
+  end
+
+  # eUserHittedUser (ID 34) — charindex(Int16) + damage(Int32) + hp(Int32)
+  def encode({:user_hitted_user, %{char_index: char_index, damage: damage, hp: hp}}) do
+    payload = Writer.write_int16(char_index) <> Writer.write_int32(damage) <> Writer.write_int32(hp)
+    Writer.build_packet(PacketIds.Server.user_hitted_user(), payload)
+  end
+
+  # eUserHittedByUser (ID 33) — attacker_charindex(Int16) + damage(Int32) + hp(Int32)
+  def encode({:user_hitted_by_user, %{char_index: char_index, damage: damage, hp: hp}}) do
+    payload = Writer.write_int16(char_index) <> Writer.write_int32(damage) <> Writer.write_int32(hp)
+    Writer.build_packet(PacketIds.Server.user_hitted_by_user(), payload)
+  end
+
+  # eNpcHitUser (ID 32) — npc_charindex(Int16) + damage(Int32)
+  def encode({:npc_hit_user, %{char_index: char_index, damage: damage}}) do
+    payload = Writer.write_int16(char_index) <> Writer.write_int32(damage)
+    Writer.build_packet(PacketIds.Server.npc_hit_user(), payload)
+  end
+
+  # eBlockedWithShieldUser (ID 17) — no payload
+  def encode({:blocked_with_shield_user, _params}) do
+    Writer.build_packet(PacketIds.Server.blocked_with_shield_user(), <<>>)
+  end
+
+  # eBlockedWithShieldOther (ID 18) — charindex(Int16)
+  def encode({:blocked_with_shield_other, %{char_index: char_index}}) do
+    payload = Writer.write_int16(char_index)
+    Writer.build_packet(PacketIds.Server.blocked_with_shield_other(), payload)
+  end
+
+  # eNpcKillUser (ID 16) — no payload
+  def encode({:npc_kill_user, _params}) do
+    Writer.build_packet(PacketIds.Server.npc_kill_user(), <<>>)
+  end
+
+  # eCreateFX (ID 60) — charindex(Int16) + fx(Int16) + loops(Int16)
+  def encode({:create_fx, %{char_index: char_index, fx: fx, loops: loops}}) do
+    payload = Writer.write_int16(char_index) <> Writer.write_int16(fx) <> Writer.write_int16(loops)
+    Writer.build_packet(PacketIds.Server.create_fx(), payload)
+  end
+
+  # ePlayWave (ID 55) — wav(Int8) + x(Int8) + y(Int8)
+  def encode({:play_wave, %{wav: wav, x: x, y: y}}) do
+    payload = Writer.write_int8(wav) <> Writer.write_int8(x) <> Writer.write_int8(y)
+    Writer.build_packet(PacketIds.Server.play_wave(), payload)
+  end
+
+  # eSafeModeOn (ID 20) — no payload
+  def encode({:safe_mode_on, _params}) do
+    Writer.build_packet(PacketIds.Server.safe_mode_on(), <<>>)
+  end
+
+  # eSafeModeOff (ID 21) — no payload
+  def encode({:safe_mode_off, _params}) do
+    Writer.build_packet(PacketIds.Server.safe_mode_off(), <<>>)
+  end
+
   # ---- Helpers ----
 
   defp encode_char_flags(params) do

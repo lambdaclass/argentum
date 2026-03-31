@@ -11,6 +11,8 @@ defmodule Arena.Data.GameData do
 
   alias Arena.Data.IniParser
   alias Arena.Data.ItemDef
+  alias Arena.Data.NpcDef
+  alias Arena.Data.SpellDef
 
   @table :arena_game_data
 
@@ -135,6 +137,34 @@ defmodule Arena.Data.GameData do
     end
   end
 
+  def class_attack_mod(class_id) when is_integer(class_id) do
+    case :ets.lookup(@table, {:class_attack_mod, class_id}) do
+      [{_, value}] -> value
+      [] -> 1.0
+    end
+  end
+
+  def class_damage_mod(class_id) when is_integer(class_id) do
+    case :ets.lookup(@table, {:class_damage_mod, class_id}) do
+      [{_, value}] -> value
+      [] -> 1.0
+    end
+  end
+
+  def class_evasion_mod(class_id) when is_integer(class_id) do
+    case :ets.lookup(@table, {:class_evasion_mod, class_id}) do
+      [{_, value}] -> value
+      [] -> 1.0
+    end
+  end
+
+  def class_shield_mod(class_id) when is_integer(class_id) do
+    case :ets.lookup(@table, {:class_shield_mod, class_id}) do
+      [{_, value}] -> value
+      [] -> 1.0
+    end
+  end
+
   @doc "Get city spawn point. Returns %{map: int, x: int, y: int}."
   def city_spawn(city_id) when is_integer(city_id) do
     case :ets.lookup(@table, {:city_spawn, city_id}) do
@@ -157,10 +187,26 @@ defmodule Arena.Data.GameData do
     end
   end
 
+  @doc "Get spell definition by ID. Returns nil if not found."
+  def get_spell(spell_id) when is_integer(spell_id) do
+    case :ets.lookup(@table, {:spell, spell_id}) do
+      [{_, spell_def}] -> spell_def
+      [] -> nil
+    end
+  end
+
   @doc "Get spell name by ID. Returns nil if not found."
   def get_spell_name(spell_id) when is_integer(spell_id) do
     case :ets.lookup(@table, {:spell_name, spell_id}) do
       [{_, spell_name}] -> spell_name
+      [] -> nil
+    end
+  end
+
+  @doc "Get NPC definition by ID. Returns nil if not found."
+  def get_npc(npc_id) when is_integer(npc_id) do
+    case :ets.lookup(@table, {:npc, npc_id}) do
+      [{_, npc_def}] -> npc_def
       [] -> nil
     end
   end
@@ -183,6 +229,7 @@ defmodule Arena.Data.GameData do
     load_ciudades_dat()
     load_obj_dat()
     load_hechizos_dat()
+    load_npcs_dat()
 
     Logger.info("GameData loaded into ETS (#{:ets.info(table, :size)} entries)")
     {:ok, %{}}
@@ -224,6 +271,10 @@ defmodule Arena.Data.GameData do
     load_class_section(sections, "MULT_MANA", :class_mana_mult, 0.0)
     load_class_section(sections, "AUMENTO_STA", :class_sta_growth, 15.0)
     load_class_section_int(sections, "MODSKILLPOINTS", :class_skill_pts, 5)
+    load_class_section(sections, "MODATAQUEARMAS", :class_attack_mod, 1.0)
+    load_class_section(sections, "MODDANOARMAS", :class_damage_mod, 1.0)
+    load_class_section(sections, "MODEVASION", :class_evasion_mod, 1.0)
+    load_class_section(sections, "MODESCUDO", :class_shield_mod, 1.0)
   end
 
   defp load_class_section(sections, section_name, ets_prefix, default) do
@@ -334,11 +385,9 @@ defmodule Arena.Data.GameData do
             case Regex.run(~r/^HECHIZO(\d+)$/i, section_name) do
               [_, id_str] ->
                 spell_id = String.to_integer(id_str)
-                spell_name =
-                  Map.get(fields, "nombre") ||
-                    Map.get(fields, "en_name") ||
-                    "Hechizo #{spell_id}"
-                :ets.insert(@table, {{:spell_name, spell_id}, spell_name})
+                spell_def = SpellDef.from_section(spell_id, fields)
+                :ets.insert(@table, {{:spell, spell_id}, spell_def})
+                :ets.insert(@table, {{:spell_name, spell_id}, spell_def.name})
                 acc + 1
 
               _ ->
@@ -346,10 +395,37 @@ defmodule Arena.Data.GameData do
             end
           end)
 
-        Logger.info("Loaded #{count} spell names from Hechizos.dat")
+        Logger.info("Loaded #{count} spell definitions from Hechizos.dat")
 
       {:error, reason} ->
-        Logger.warning("Could not load Hechizos.dat: #{inspect(reason)}. No spell names available.")
+        Logger.warning("Could not load Hechizos.dat: #{inspect(reason)}. No spell data available.")
+    end
+  end
+
+  defp load_npcs_dat do
+    path = Path.join(dat_dir(), "npcs.dat")
+
+    case IniParser.parse_file(path) do
+      {:ok, sections} ->
+        count =
+          sections
+          |> Enum.reduce(0, fn {section_name, fields}, acc ->
+            case Regex.run(~r/^NPC(\d+)$/i, section_name) do
+              [_, id_str] ->
+                npc_id = String.to_integer(id_str)
+                npc_def = NpcDef.from_section(npc_id, fields)
+                :ets.insert(@table, {{:npc, npc_id}, npc_def})
+                acc + 1
+
+              _ ->
+                acc
+            end
+          end)
+
+        Logger.info("Loaded #{count} NPC definitions from npcs.dat")
+
+      {:error, reason} ->
+        Logger.warning("Could not load npcs.dat: #{inspect(reason)}. No NPC data available.")
     end
   end
 

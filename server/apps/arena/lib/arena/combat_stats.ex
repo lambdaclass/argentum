@@ -42,4 +42,19 @@ defmodule Arena.CombatStats do
         end
     end
   end
+
+  @doc """
+  Get shield defense percentage from equipped shield.
+  Returns integer percentage or 0 if no shield.
+  """
+  def shield_defense_pct(equipment) do
+    case Map.get(equipment, :shield) do
+      nil -> 0
+      item_id ->
+        case GameData.get_item(item_id) do
+          nil -> 0
+          item_def -> item_def.porcentaje
+        end
+    end
+  end
 end

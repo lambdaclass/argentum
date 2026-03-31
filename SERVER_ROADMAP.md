@@ -14,9 +14,9 @@
 - `Phase 2A — Transition Quality & Client Map Pack`: `Done`
 - `Phase 3 — Durable State & Persistence Shape`: `Done`
 - `Phase 4 — Inventory`: `Done`
-- `Phase 5 — Combat`: `Missing`
-- `Phase 6 — Spells`: `Missing`
-- `Phase 7 — NPC AI`: `Missing`
+- `Phase 5 — Combat`: `Done`
+- `Phase 6 — Spells`: `Done`
+- `Phase 7 — NPC AI`: `Done`
 - `Phase 8 — Commerce & Banking`: `Missing`
 - `Phase 9 — Crafting & Gathering`: `Missing`
 - `Phase 10 — Social Systems`: `Partially done`
@@ -27,12 +27,16 @@
 - `Phase 15 — Operations & Infrastructure`: `Partially done`
 - `Phase 16 — Chat Moderation`: `Missing`
 
-**Implemented so far (~5.2k lines of Elixir + 295 lines Rust):**
+**Implemented so far (~6.8k lines of Elixir + 295 lines Rust):**
 - TCP + WebSocket networking with AO20 protocol support for the currently used gameplay packets
 - Authoritative `MapServer` with movement, chat, heading, map transitions, autosave, and direct session delivery
 - AoI visibility lifecycle, `:global` / `:aoi_scan` / `:aoi_grid`, spatial grid, pre-encoded hot-path broadcasts
 - Character creation, login, persistence, online directory, static `.dat` loading
 - Inventory groundwork and most live inventory flows: pickup, drop, equip toggle, item use, ground items
+- Full melee combat (PvP + PvNPC): hit/miss, damage, defense, shield block, XP/gold/loot, death/respawn
+- Spell system: damage, heal, status effects (paralysis, poison, cure, invisibility), mana/stamina costs
+- NPC AI: hostile targeting, pathfinding, attack, random walk, respawning, loot drops
+- Full `.dat` loading: items, spells (Hechizos.dat), NPCs (npcs.dat), class combat modifiers (Balance.dat)
 - Benchmark harness, benchmark maps, metrics, CI/release workflows, web test client
 
 **Important roadmap/code divergence to keep in mind:**
@@ -601,15 +605,20 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 ## Phase 5 — Combat
 
-**Status:** `Missing`
+**Status:** `Done`
 
 **In code now:**
-- Attack packet exists in protocol/session handling, but there is no real combat pipeline on the live path
+- `Arena.Combat` — pure formula module: hit_chance, melee_damage, apply_defense, shield_block?, xp_gain, npc_hit/damage
+- `Arena.CombatStats.shield_defense_pct/1` — shield percentage from equipment
+- Class combat modifiers loaded from Balance.dat (attack, damage, evasion, shield)
+- MapServer `handle_call({:attack, char_id})` — full PvNPC and PvP melee pipeline
+- PvNPC: hit/miss, damage with defense, NPC death (respawn timer, XP, gold, loot drops), target acquisition on retaliation
+- PvP: safe_mode/safe_zone checks, hit/miss, shield block, damage, criminal flag, death
+- Combat packet encoders: char_swing, user_hitted_user/by_user, npc_hit_user, shield block, npc_kill_user, safe_mode_on/off
+- 22 unit tests covering all combat formulas
 
 **Remaining gaps:**
-- Combat formulas
-- Target resolution from map state
-- Damage / defense / death / XP flow
+- Ranged attacks (bows/arrows)
 - Player-vs-player and player-vs-NPC integration tests
 - Golden-value / VB6 compatibility verification
 
@@ -654,16 +663,20 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 ## Phase 6 — Spells
 
-**Status:** `Missing`
+**Status:** `Done`
 
 **In code now:**
-- Spell storage fields exist in persisted character state
+- `Arena.Data.SpellDef` — full spell definition struct parsed from Hechizos.dat (293 spells)
+- `GameData.get_spell/1` — ETS lookup for spell definitions
+- MapServer `handle_call({:cast_spell, ...})` — cooldown, mana/stamina, target resolution
+- Spell effects: damage (with magic resistance), heal (self/other), status (paralysis, poison, cure, invisibility)
+- FX/WAV broadcast to nearby players via create_fx and play_wave packets
+- Left-click target tracking in session state for spell targeting
 
 **Remaining gaps:**
-- `Hechizos.dat` loading
-- Cast flow, mana/cooldown checks, and target resolution
-- Buff/debuff runtime model
-- Healing / damage / summon / resurrection effects
+- Buff/debuff duration timers (paralysis/poison wear off)
+- Summon spells (invoca)
+- Resurrection spells
 - Spell verification against VB6 behavior
 
 **Goal:** Players can cast offensive, healing, and buff/debuff spells.
@@ -692,17 +705,23 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 ## Phase 7 — NPC AI
 
-**Status:** `Missing`
+**Status:** `Done`
 
 **In code now:**
-- NPCs are loaded as map data for rendering/bootstrap purposes
+- `Arena.Data.NpcDef` — full NPC definition struct parsed from npcs.dat (1404 NPCs) with loot tables, spells, shop items
+- `Arena.Entity.NpcEntity` — runtime NPC state struct (HP, position, target, cooldowns, respawn timer)
+- `Arena.NpcAi` — pure tick function called every 500ms from MapServer
+- NPC spawning in MapServer from CSM map data, with occupancy grid integration
+- AI behaviors: hostile target acquisition (nearest player in 10-tile range), chase pathfinding, random walk (movement=2)
+- NPC attacks: hit chance, damage with player defense, death handling
+- Respawn system: dead NPCs respawn at spawn point after configurable interval
+- NPC visibility: character_create packets sent to entering players
+- Loot drops on NPC death (probabilistic from loot table)
 
 **Remaining gaps:**
-- NPC entities in authoritative runtime state
-- AI loop and behavior types
-- NPC combat
-- Loot / respawn
-- Shopkeeper and quest interaction path
+- Shopkeeper interaction (comercia + shop_items parsed but unused)
+- Quest NPC interaction
+- NPC spell casting (lanza_spells + spells parsed but unused)
 
 **Goal:** NPCs walk around, attack players, sell items, give quests.
 

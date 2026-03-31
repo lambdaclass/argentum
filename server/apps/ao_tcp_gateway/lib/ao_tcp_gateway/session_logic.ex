@@ -250,7 +250,10 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
-  def handle_command(state, {:attack, _}), do: {state, []}
+  def handle_command(state, {:attack, _}) when state.character_id != nil do
+    Arena.Map.MapServer.attack(state.map_id, state.character_id)
+    {state, []}
+  end
 
   def handle_command(state, {:request_position_update, _})
       when state.map_id != nil and state.character_id != nil do
@@ -261,6 +264,20 @@ defmodule AoTcpGateway.SessionLogic do
   end
 
   def handle_command(state, {:request_position_update, _}), do: {state, []}
+
+  def handle_command(state, {:cast_spell, %{spell_slot: slot}}) when state.character_id != nil do
+    Arena.Map.MapServer.cast_spell(state.map_id, state.character_id, slot, state.target_x, state.target_y)
+    {state, []}
+  end
+
+  def handle_command(state, {:left_click, %{x: x, y: y}}) when state.character_id != nil do
+    {%{state | target_x: x, target_y: y}, []}
+  end
+
+  def handle_command(state, {:safe_toggle, _}) when state.character_id != nil do
+    Arena.Map.MapServer.safe_toggle(state.map_id, state.character_id)
+    {state, []}
+  end
 
   def handle_command(state, {command_type, _}) do
     Logger.debug("Unhandled command: #{command_type}")

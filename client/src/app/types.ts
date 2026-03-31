@@ -20,6 +20,11 @@ export interface SpellSlot {
   name: string;
 }
 
+export interface SkillEntry {
+  key: string;
+  level: number;
+}
+
 export interface CharacterView {
   charIndex: number | null;
   name: string;
@@ -143,6 +148,11 @@ export interface ClientState {
     slots: Array<SpellSlot | null>;
     selectedSlot: number | null;
   };
+  skills: {
+    entries: SkillEntry[];
+    selectedKey: string | null;
+    source: "none" | "server";
+  };
   log: PacketLogEntry[];
 }
 
@@ -228,6 +238,8 @@ export type ClientAction =
   | { type: "inventory/selectSlot"; slotIndex: number | null }
   | { type: "spellbook/setSlot"; slotIndex: number; slot: SpellSlot | null }
   | { type: "spellbook/selectSlot"; slotIndex: number | null }
+  | { type: "skills/setAll"; entries: SkillEntry[]; source?: "server" }
+  | { type: "skills/select"; key: string | null }
   | { type: "log/add"; level: LogLevel; message: string }
   | { type: "log/clear" }
   | { type: "session/resetRuntime" };
