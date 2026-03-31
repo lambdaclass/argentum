@@ -153,6 +153,7 @@ defmodule AoTcpGateway.SessionLogic do
           exp_login_packets(entity) ++
           inventory_login_packets(entity) ++
           spell_login_packets(entity) ++
+          skill_login_packets(entity) ++
           for {cid, other} <- all_players, cid != entity.char_id do
             character_create_packet(other)
           end ++
@@ -456,6 +457,10 @@ defmodule AoTcpGateway.SessionLogic do
       _ ->
         []
     end)
+  end
+
+  def skill_login_packets(entity) do
+    [{:send_skills, %{skills: entity.skills || %{}}}]
   end
 
   # ---- Heading conversion ----

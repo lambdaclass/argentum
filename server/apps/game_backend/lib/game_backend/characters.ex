@@ -397,7 +397,7 @@ defmodule GameBackend.Characters do
   defp rows_to_skills(%Ecto.Association.NotLoaded{}), do: %{}
 
   defp rows_to_skills(rows) do
-    Map.new(rows, fn row -> {row.skill_name, row.level} end)
+    Map.new(rows, fn row -> {String.to_atom(row.skill_name), row.level} end)
   end
 
   # ---- Spells ----

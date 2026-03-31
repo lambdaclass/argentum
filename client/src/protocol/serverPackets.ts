@@ -1,5 +1,5 @@
 import { BinaryReader } from "./BinaryReader";
-import type { CharacterCreatePacket, ServerPacket } from "../app/types";
+import type { CharacterCreatePacket, ServerPacket, SkillEntry } from "../app/types";
 
 function decodeCharacterCreate(reader: BinaryReader): CharacterCreatePacket {
   const charIndex = reader.readInt16();
@@ -230,6 +230,24 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
 
     case 80:
       return { type: "level_up", level: reader.readInt16() };
+
+    case 87: {
+      const SKILL_NAMES = [
+        "magic", "stealing", "combat_tactics", "combat_weapons", "meditation",
+        "short_weapons", "hiding", "survival", "trading", "combat_defense",
+        "leadership", "ranged_weapons", "wrestling", "navigation", "riding",
+        "resistance", "woodcutting", "fishing", "mining", "blacksmithing",
+        "carpentry", "alchemy", "tailoring", "taming"
+      ];
+      const skills: SkillEntry[] = [];
+      for (const name of SKILL_NAMES) {
+        const level = reader.readUint8();
+        if (level > 0) {
+          skills.push({ key: name, level });
+        }
+      }
+      return { type: "send_skills", skills };
+    }
 
     case 158:
     {

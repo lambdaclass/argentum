@@ -203,6 +203,7 @@ export type ServerPacket =
   | { type: "error_msg"; message: string }
   | { type: "session_token"; credentials: SessionCredentials }
   | { type: "change_spell_slot"; slotIndex: number; slot: SpellSlot | null }
+  | { type: "send_skills"; skills: SkillEntry[] }
   | { type: "unknown"; packetId: number };
 
 export type ClientAction =

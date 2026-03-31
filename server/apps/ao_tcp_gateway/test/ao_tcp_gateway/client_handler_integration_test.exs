@@ -415,6 +415,9 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
             use_item: use_item, use_click: use_click, drop: drop}, rest}
   end
 
+  # send_skills (87): 24 × Int8 (24 bytes)
+  defp decode_server_packet(87, <<skills::binary-size(24), rest::binary>>), do: {:ok, %{skills: skills}, rest}
+
   defp decode_server_packet(200, data) do
     with {:ok, char_id, rest} <- Reader.read_int32(data),
          {:ok, token, rest} <- Reader.read_string8(rest) do
@@ -452,7 +455,7 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
 
       # All non-special packets are valid middle types
       middle = Enum.reject(after_core, &(&1 in [37, 200]))
-      assert Enum.all?(middle, &(&1 in [42, 63, 66, 80, 29]))
+      assert Enum.all?(middle, &(&1 in [42, 63, 66, 80, 29, 87]))
     end
 
     test "logged packet has new_user=false", %{port: port} do

@@ -330,6 +330,22 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.safe_mode_off(), <<>>)
   end
 
+  # eSendSkills (ID 87) — 24 × Int8 skill levels in VB6 order
+  @skill_order [
+    :magic, :stealing, :combat_tactics, :combat_weapons, :meditation,
+    :short_weapons, :hiding, :survival, :trading, :combat_defense,
+    :leadership, :ranged_weapons, :wrestling, :navigation, :riding,
+    :resistance, :woodcutting, :fishing, :mining, :blacksmithing,
+    :carpentry, :alchemy, :tailoring, :taming
+  ]
+
+  def encode({:send_skills, %{skills: skills}}) do
+    payload = for skill <- @skill_order, into: <<>> do
+      Writer.write_int8(Map.get(skills, skill, 0))
+    end
+    Writer.build_packet(PacketIds.Server.send_skills(), payload)
+  end
+
   # ---- Helpers ----
 
   defp encode_char_flags(params) do

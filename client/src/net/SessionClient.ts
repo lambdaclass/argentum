@@ -567,6 +567,14 @@ export class SessionClient {
       case "user_index_in_server":
         return;
 
+      case "send_skills":
+        this.dispatch({
+          type: "skills/setAll",
+          entries: packet.skills,
+          source: "server"
+        });
+        return;
+
       case "unknown":
         this.dispatch({
           type: "log/add",
