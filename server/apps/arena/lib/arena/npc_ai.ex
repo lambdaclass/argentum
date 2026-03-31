@@ -101,6 +101,9 @@ defmodule Arena.NpcAi do
       # Move toward target or random walk
       {state, npc} = maybe_move_npc(state, instance_id, npc, npc_def, now)
 
+      # Cast spell if available (before melee)
+      {state, npc} = maybe_cast_spell(state, instance_id, npc, npc_def, now)
+
       # Attack if adjacent to target
       state = maybe_attack(state, instance_id, npc, npc_def, now)
 
@@ -217,6 +220,136 @@ defmodule Arena.NpcAi do
       {state, npc}
     end
   end
+
+  # --- NPC Spell Casting ---
+
+  @npc_spell_cooldown 3000
+  @npc_spell_range 10
+
+  defp maybe_cast_spell(state, instance_id, npc, npc_def, now) do
+    if npc_def.lanza_spells == 0 or npc_def.spells == [] or now < npc.next_spell_at do
+      {state, npc}
+    else
+      case select_npc_spell(state, npc, npc_def) do
+        nil -> {state, npc}
+        {spell_def, spell_target} ->
+          npc = %{npc | next_spell_at: now + @npc_spell_cooldown}
+          state = put_in(state.npcs_live[instance_id], npc)
+          state = apply_npc_spell(state, npc, spell_def, spell_target)
+          {state, npc}
+      end
+    end
+  end
+
+  defp select_npc_spell(state, npc, npc_def) do
+    spells = Enum.map(npc_def.spells, &GameData.get_spell/1) |> Enum.reject(&is_nil/1)
+
+    # Priority 1: Self-heal if HP below max
+    heal = if npc.hp < npc.max_hp do
+      Enum.find(spells, fn s -> s.sube_hp == 1 or s.sanacion end)
+    end
+    if heal, do: throw({:found, heal, {:self, npc}})
+
+    # Priority 2-3 require a valid target
+    target_player = if npc.target_id, do: Map.get(state.players, npc.target_id)
+
+    if target_player && not target_player.dead do
+      dist = abs(target_player.x - npc.x) + abs(target_player.y - npc.y)
+
+      if dist <= @npc_spell_range do
+        # Priority 2: Paralyze if target not already paralyzed
+        para = if not target_player.paralyzed do
+          Enum.find(spells, fn s -> s.paraliza end)
+        end
+        if para, do: throw({:found, para, {:player, npc.target_id}})
+
+        # Priority 3: Damage spell
+        dmg = Enum.find(spells, fn s -> s.sube_hp == 2 end)
+        if dmg, do: throw({:found, dmg, {:player, npc.target_id}})
+      end
+    end
+
+    nil
+  catch
+    {:found, spell_def, target} -> {spell_def, target}
+  end
+
+  defp apply_npc_spell(state, npc, spell_def, target) do
+    # Broadcast FX
+    if spell_def.fx_grh > 0 do
+      fx_char = case target do
+        {:player, tid} -> case Map.get(state.players, tid) do nil -> npc.char_index; p -> p.char_index end
+        {:self, _} -> npc.char_index
+      end
+      fx_raw = Encoder.encode({:create_fx, %{char_index: fx_char, fx: spell_def.fx_grh, loops: spell_def.loops}})
+      broadcast_to_nearby_players(state, npc.x, npc.y, fx_raw)
+    end
+
+    if spell_def.wav > 0 do
+      wav_raw = Encoder.encode({:play_wave, %{wav: spell_def.wav, x: npc.x, y: npc.y}})
+      broadcast_to_nearby_players(state, npc.x, npc.y, wav_raw)
+    end
+
+    case target do
+      {:self, _npc} ->
+        # Self-heal
+        heal = if spell_def.max_hp > spell_def.min_hp,
+          do: Enum.random(spell_def.min_hp..spell_def.max_hp),
+          else: max(spell_def.min_hp, 1)
+        npc_now = Map.get(state.npcs_live, npc.instance_id, npc)
+        healed = %{npc_now | hp: min(npc_now.hp + heal, npc_now.max_hp)}
+        put_in(state.npcs_live[npc.instance_id], healed)
+
+      {:player, target_id} ->
+        case Map.get(state.players, target_id) do
+          nil -> state
+          player ->
+            cond do
+              # Paralysis spell
+              spell_def.paraliza ->
+                now = System.monotonic_time(:millisecond)
+                duration_ms = max((spell_def.duration || 0) * 1000, 3000)
+                buff = %{type: :paralyzed, expires_at: now + div(duration_ms, 2)}
+                buffs = [buff | Enum.reject(player.buffs, &(&1.type == :paralyzed))]
+                player = %{player | paralyzed: true, buffs: buffs}
+                pid = Map.get(state.sessions, target_id)
+                if pid do
+                  send(pid, {:send_raw, Encoder.encode({:console_msg, %{message: "Has sido paralizado!", font_index: 5}})})
+                end
+                players = Map.put(state.players, target_id, player)
+                %{state | players: players}
+
+              # Damage spell
+              spell_def.sube_hp == 2 ->
+                damage = Combat.spell_damage(spell_def.min_hp, spell_def.max_hp, npc_def_level(spell_def), false)
+                new_hp = max(player.hp - damage, 0)
+                player = %{player | hp: new_hp}
+                pid = Map.get(state.sessions, target_id)
+                if pid do
+                  send(pid, {:send_raw, Encoder.encode({:npc_hit_user, %{char_index: npc.char_index, damage: damage}})})
+                  send(pid, {:send_raw, Encoder.encode({:update_hp, %{min_hp: new_hp}})})
+                end
+                player = if new_hp <= 0 do
+                  if pid do
+                    send(pid, {:send_raw, Encoder.encode({:npc_kill_user, %{}})})
+                    send(pid, {:send_raw, Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})})
+                  end
+                  %{player | dead: true}
+                else
+                  player
+                end
+                players = Map.put(state.players, target_id, player)
+                %{state | players: players}
+
+              true -> state
+            end
+        end
+    end
+  end
+
+  # NPC spells use npc_level from the npc_def, but we don't have it here.
+  # Use a constant effective level for NPC spell damage scaling.
+  defp npc_def_level(_spell_def), do: 20
 
   # --- Attack ---
 

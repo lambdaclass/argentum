@@ -232,6 +232,9 @@ defmodule Arena.Map.MapServer do
             Process.send_after(self(), :npc_ai_tick, @npc_ai_tick_ms)
           end
 
+          # Schedule buff decay tick
+          Process.send_after(self(), :buff_tick, 1000)
+
           {:noreply, state}
         end
 
@@ -863,6 +866,22 @@ defmodule Arena.Map.MapServer do
   def handle_info(:npc_ai_tick, state) do
     state = Arena.NpcAi.tick(state)
     Process.send_after(self(), :npc_ai_tick, @npc_ai_tick_ms)
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info(:buff_tick, state) do
+    now = System.monotonic_time(:millisecond)
+
+    state = Enum.reduce(state.players, state, fn {char_id, entity}, state ->
+      if entity.buffs == [] do
+        state
+      else
+        process_player_buffs(state, char_id, entity, now)
+      end
+    end)
+
+    Process.send_after(self(), :buff_tick, 1000)
     {:noreply, state}
   end
 
@@ -1613,6 +1632,10 @@ defmodule Arena.Map.MapServer do
 
     # Apply spell effect
     cond do
+      # Resurrection spell
+      spell_def.revivir ->
+        apply_spell_resurrect(state, char_id, entity, spell_def, target_x, target_y)
+
       # Damage spell (sube_hp == 2)
       spell_def.sube_hp == 2 ->
         is_mage = entity.class in [:mago]
@@ -1779,6 +1802,7 @@ defmodule Arena.Map.MapServer do
 
   defp apply_spell_status(state, char_id, entity, spell_def, target_x, target_y) do
     target = if target_x && target_y, do: get_occupancy(state.occupancy, target_x, target_y), else: nil
+    now = System.monotonic_time(:millisecond)
 
     target_id = case target do
       {:player, tid} -> tid
@@ -1791,11 +1815,28 @@ defmodule Arena.Map.MapServer do
         %{state | players: players}
 
       target_entity ->
+        duration_ms = max((spell_def.duration || 0) * 1000, 3000)
+
         target_entity = cond do
-          spell_def.paraliza -> %{target_entity | paralyzed: true}
-          spell_def.envenena -> %{target_entity | poisoned: true}
-          spell_def.cura_veneno -> %{target_entity | poisoned: false}
-          spell_def.invisibilidad -> %{target_entity | invisible: true}
+          spell_def.paraliza ->
+            buff = %{type: :paralyzed, expires_at: now + div(duration_ms, 2)}
+            buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :paralyzed))]
+            %{target_entity | paralyzed: true, buffs: buffs}
+
+          spell_def.envenena ->
+            buff = %{type: :poisoned, expires_at: now + duration_ms, next_tick: now + 2000}
+            buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :poisoned))]
+            %{target_entity | poisoned: true, buffs: buffs}
+
+          spell_def.cura_veneno ->
+            buffs = Enum.reject(target_entity.buffs, &(&1.type == :poisoned))
+            %{target_entity | poisoned: false, buffs: buffs}
+
+          spell_def.invisibilidad ->
+            buff = %{type: :invisible, expires_at: now + duration_ms}
+            buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :invisible))]
+            %{target_entity | invisible: true, buffs: buffs}
+
           true -> target_entity
         end
 
@@ -1805,6 +1846,102 @@ defmodule Arena.Map.MapServer do
         players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, target_entity)
         %{state | players: players}
     end
+  end
+
+  # --- Resurrection ---
+
+  defp apply_spell_resurrect(state, char_id, entity, _spell_def, target_x, target_y) do
+    target = if target_x && target_y, do: get_occupancy(state.occupancy, target_x, target_y), else: nil
+
+    target_id = case target do
+      {:player, tid} -> tid
+      _ -> nil
+    end
+
+    target_player = if target_id, do: Map.get(state.players, target_id)
+
+    if target_player && target_player.dead do
+      revived = %{target_player |
+        dead: false, hp: 1, mana: 0, hunger: 0, thirst: 0,
+        buffs: [], paralyzed: false, poisoned: false, invisible: false
+      }
+
+      # Notify revived player
+      send_to_session(state.sessions, target_id, {:send_raw,
+        Encoder.encode({:update_hp, %{min_hp: 1}})})
+      send_to_session(state.sessions, target_id, {:send_raw,
+        Encoder.encode({:update_mana, %{min_mana: 0}})})
+      send_to_session(state.sessions, target_id, {:send_raw,
+        Encoder.encode({:update_hunger_and_thirst, %{max_hunger: 100, min_hunger: 0, max_thirst: 100, min_thirst: 0}})})
+      send_to_session(state.sessions, target_id, {:send_raw,
+        Encoder.encode({:console_msg, %{message: "Has sido resucitado!", font_index: 0}})})
+
+      # Update caster mana
+      send_to_session(state.sessions, char_id, {:send_raw,
+        Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+
+      players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, revived)
+      %{state | players: players}
+    else
+      # No dead player at target — just update caster mana
+      send_to_session(state.sessions, char_id, {:send_raw,
+        Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+      send_to_session(state.sessions, char_id, {:send_raw,
+        Encoder.encode({:console_msg, %{message: "No hay un jugador muerto ahi.", font_index: 5}})})
+      players = Map.put(state.players, char_id, entity)
+      %{state | players: players}
+    end
+  end
+
+  # --- Buff tick processing ---
+
+  @poison_tick_interval 2000
+
+  defp process_player_buffs(state, char_id, entity, now) do
+    {expired, active} = Enum.split_with(entity.buffs, fn b -> now >= b.expires_at end)
+
+    # Clear flags for expired buffs
+    entity = Enum.reduce(expired, entity, fn buff, ent ->
+      case buff.type do
+        :paralyzed -> %{ent | paralyzed: false}
+        :poisoned -> %{ent | poisoned: false}
+        :invisible -> %{ent | invisible: false}
+        _ -> ent
+      end
+    end)
+
+    # Process poison ticks on active poison buffs
+    {entity, active} = Enum.map_reduce(active, entity, fn buff, ent ->
+      if buff.type == :poisoned and now >= (buff[:next_tick] || 0) do
+        damage = max(Enum.random(3..5) * div(ent.max_hp, 100), 1)
+        new_hp = max(ent.hp - damage, 0)
+        ent = %{ent | hp: new_hp}
+
+        send_to_session(state.sessions, char_id, {:send_raw,
+          Encoder.encode({:update_hp, %{min_hp: new_hp}})})
+        send_to_session(state.sessions, char_id, {:send_raw,
+          Encoder.encode({:console_msg, %{message: "Veneno te hace #{damage} de daño.", font_index: 5}})})
+
+        buff = %{buff | next_tick: now + @poison_tick_interval}
+        {buff, ent}
+      else
+        {buff, ent}
+      end
+    end)
+
+    entity = %{entity | buffs: active}
+
+    # Check poison death
+    entity = if entity.hp <= 0 and not entity.dead do
+      send_to_session(state.sessions, char_id, {:send_raw,
+        Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})})
+      %{entity | dead: true}
+    else
+      entity
+    end
+
+    players = Map.put(state.players, char_id, entity)
+    %{state | players: players}
   end
 
   # --- NPC helpers ---

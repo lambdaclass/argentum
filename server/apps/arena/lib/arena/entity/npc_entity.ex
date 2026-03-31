@@ -19,6 +19,7 @@ defmodule Arena.Entity.NpcEntity do
     spawn_y: 0,
     next_attack_at: -1_000_000_000_000,
     next_move_at: -1_000_000_000_000,
+    next_spell_at: -1_000_000_000_000,
     respawn_at: nil
   ]
 
