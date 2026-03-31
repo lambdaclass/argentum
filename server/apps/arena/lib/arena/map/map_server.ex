@@ -121,9 +121,9 @@ defmodule Arena.Map.MapServer do
     GenServer.call(via(map_id), {:use_item, char_id, slot})
   end
 
-  @doc "Attack in the direction the player is facing."
-  def attack(map_id, char_id) do
-    GenServer.call(via(map_id), {:attack, char_id})
+  @doc "Attack in the direction the player is facing, or ranged at target coords."
+  def attack(map_id, char_id, target_x \\ nil, target_y \\ nil) do
+    GenServer.call(via(map_id), {:attack, char_id, target_x, target_y})
   end
 
   @doc "Cast a spell at the given target coordinates."
@@ -134,6 +134,26 @@ defmodule Arena.Map.MapServer do
   @doc "Toggle safe mode (PvP protection)."
   def safe_toggle(map_id, char_id) do
     GenServer.call(via(map_id), {:safe_toggle, char_id})
+  end
+
+  @doc "Open commerce with NPC at target coordinates."
+  def open_commerce(map_id, char_id, target_x, target_y) do
+    GenServer.call(via(map_id), {:open_commerce, char_id, target_x, target_y})
+  end
+
+  @doc "Buy an item from the open NPC shop."
+  def commerce_buy(map_id, char_id, slot, amount) do
+    GenServer.call(via(map_id), {:commerce_buy, char_id, slot, amount})
+  end
+
+  @doc "Sell an item to the open NPC shop."
+  def commerce_sell(map_id, char_id, slot, amount) do
+    GenServer.call(via(map_id), {:commerce_sell, char_id, slot, amount})
+  end
+
+  @doc "Close the commerce window."
+  def commerce_end(map_id, char_id) do
+    GenServer.call(via(map_id), {:commerce_end, char_id})
   end
 
   @doc "Get a snapshot of a player entity (for autosave)."
@@ -577,8 +597,10 @@ defmodule Arena.Map.MapServer do
 
   # ---- Combat ----
 
+  @ranged_max_distance 18
+
   @impl true
-  def handle_call({:attack, char_id}, _from, state) do
+  def handle_call({:attack, char_id, target_x, target_y}, _from, state) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         now = System.monotonic_time(:millisecond)
@@ -588,20 +610,27 @@ defmodule Arena.Map.MapServer do
           entity.dead -> {:reply, {:error, :dead}, state}
           entity.paralyzed -> {:reply, {:error, :paralyzed}, state}
           true ->
-            {tx, ty} = facing_tile(entity.x, entity.y, entity.heading)
-            target = get_occupancy(state.occupancy, tx, ty)
+            weapon_id = entity.equipment[:weapon]
+            weapon_def = if weapon_id, do: GameData.get_item(weapon_id)
+            is_ranged = weapon_def != nil and weapon_def.proyectil > 0
 
-            # Update cooldown
-            entity = %{entity | next_attack_at: now + @attack_cooldown_ms}
+            if is_ranged and target_x != nil and target_y != nil do
+              handle_ranged_attack(state, char_id, entity, weapon_def, target_x, target_y, now)
+            else
+              # Melee attack
+              {tx, ty} = facing_tile(entity.x, entity.y, entity.heading)
+              target = get_occupancy(state.occupancy, tx, ty)
 
-            # Broadcast swing animation to AoI
-            swing_raw = Encoder.encode({:char_swing, %{char_index: entity.char_index}})
-            broadcast_visible(state, entity.x, entity.y, char_id, fn pid ->
-              send(pid, {:send_raw, swing_raw})
-            end)
+              entity = %{entity | next_attack_at: now + @attack_cooldown_ms}
 
-            state = handle_attack_target(state, char_id, entity, target)
-            {:reply, :ok, state}
+              swing_raw = Encoder.encode({:char_swing, %{char_index: entity.char_index}})
+              broadcast_visible(state, entity.x, entity.y, char_id, fn pid ->
+                send(pid, {:send_raw, swing_raw})
+              end)
+
+              state = handle_attack_target(state, char_id, entity, target)
+              {:reply, :ok, state}
+            end
         end
 
       :error -> {:reply, {:error, :not_on_map}, state}
@@ -669,6 +698,201 @@ defmodule Arena.Map.MapServer do
         send_to_session(state.sessions, char_id, {:send_raw, Encoder.encode(packet)})
 
         {:reply, :ok, state}
+
+      :error -> {:reply, {:error, :not_on_map}, state}
+    end
+  end
+
+  # ---- Commerce ----
+
+  @impl true
+  def handle_call({:open_commerce, char_id, target_x, target_y}, _from, state) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        npc_match = if target_x && target_y do
+          target_occ = get_occupancy(state.occupancy, target_x, target_y)
+          case target_occ do
+            {:npc, inst_id} -> Map.get(state.npcs_live, inst_id)
+            _ -> nil
+          end
+        end
+
+        cond do
+          npc_match == nil ->
+            {:reply, {:error, :no_npc}, state}
+
+          true ->
+            npc_def = GameData.get_npc(npc_match.npc_id)
+
+            cond do
+              npc_def == nil or not npc_def.comercia ->
+                {:reply, {:error, :not_a_merchant}, state}
+
+              abs(entity.x - npc_match.x) > 2 or abs(entity.y - npc_match.y) > 2 ->
+                {:reply, {:error, :too_far}, state}
+
+              true ->
+                entity = %{entity | commerce_npc_id: npc_match.npc_id}
+
+                send_to_session(state.sessions, char_id, {:send_raw,
+                  Encoder.encode({:commerce_init, %{npc_name: npc_def.name || "Comerciante"}})})
+
+                npc_def.shop_items
+                |> Enum.with_index(1)
+                |> Enum.each(fn {%{item_id: item_id}, slot} ->
+                  item_def = GameData.get_item(item_id)
+                  if item_def do
+                    send_to_session(state.sessions, char_id, {:send_raw,
+                      Encoder.encode({:commerce_change_slot, %{
+                        slot: slot,
+                        obj_index: item_id,
+                        amount: 10000,
+                        price: item_def.valor / 1.0,
+                        can_equip: 1
+                      }})})
+                  end
+                end)
+
+                players = Map.put(state.players, char_id, entity)
+                {:reply, :ok, %{state | players: players}}
+            end
+        end
+
+      :error -> {:reply, {:error, :not_on_map}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:commerce_buy, char_id, slot, amount}, _from, state) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        npc_id = entity.commerce_npc_id
+        npc_def = if npc_id, do: GameData.get_npc(npc_id)
+
+        if npc_def == nil or not npc_def.comercia do
+          {:reply, {:error, :no_commerce}, state}
+        else
+          shop_item = Enum.at(npc_def.shop_items, slot - 1)
+
+          if shop_item == nil do
+            {:reply, {:error, :invalid_slot}, state}
+          else
+            item_def = GameData.get_item(shop_item.item_id)
+
+            if item_def == nil do
+              {:reply, {:error, :invalid_item}, state}
+            else
+              trading_skill = Map.get(entity.skills, :trading, 0)
+              buy_price = ceil(item_def.valor / (1 + trading_skill / 100) * amount)
+
+              if entity.gold < buy_price do
+                send_to_session(state.sessions, char_id, {:send_raw,
+                  Encoder.encode({:console_msg, %{message: "No tienes suficiente oro.", font_index: 0}})})
+                {:reply, {:error, :not_enough_gold}, state}
+              else
+                case find_inventory_slot(entity, shop_item.item_id, item_def.stackable) do
+                  nil ->
+                    send_to_session(state.sessions, char_id, {:send_raw,
+                      Encoder.encode({:console_msg, %{message: "Inventario lleno.", font_index: 0}})})
+                    {:reply, {:error, :inventory_full}, state}
+
+                  inv_slot ->
+                    entity = %{entity | gold: entity.gold - buy_price}
+                    current = Enum.at(entity.inventory, inv_slot)
+                    new_item = if current && current.item_id == shop_item.item_id do
+                      %{current | amount: current.amount + amount}
+                    else
+                      %{item_id: shop_item.item_id, amount: amount, equipped: false}
+                    end
+                    inventory = List.replace_at(entity.inventory, inv_slot, new_item)
+                    entity = %{entity | inventory: inventory}
+
+                    send_to_session(state.sessions, char_id, {:send_raw,
+                      Encoder.encode({:change_inventory_slot, %{
+                        slot: inv_slot + 1,
+                        obj_index: shop_item.item_id,
+                        amount: new_item.amount,
+                        equipped: new_item.equipped,
+                        valor: item_def.valor / 1.0
+                      }})})
+                    send_to_session(state.sessions, char_id, {:send_raw,
+                      Encoder.encode({:update_gold, %{gold: entity.gold}})})
+
+                    players = Map.put(state.players, char_id, entity)
+                    {:reply, :ok, %{state | players: players}}
+                end
+              end
+            end
+          end
+        end
+
+      :error -> {:reply, {:error, :not_on_map}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:commerce_sell, char_id, slot, amount}, _from, state) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        if entity.commerce_npc_id == nil do
+          {:reply, {:error, :no_commerce}, state}
+        else
+          inv_idx = slot - 1
+          inv_item = Enum.at(entity.inventory, inv_idx)
+
+          cond do
+            inv_item == nil ->
+              {:reply, {:error, :empty_slot}, state}
+
+            inv_item.amount < amount ->
+              {:reply, {:error, :not_enough}, state}
+
+            true ->
+              item_def = GameData.get_item(inv_item.item_id)
+              sell_price = if item_def, do: div(item_def.valor, 3) * amount, else: 0
+
+              new_amount = inv_item.amount - amount
+              inventory = if new_amount <= 0 do
+                List.replace_at(entity.inventory, inv_idx, nil)
+              else
+                List.replace_at(entity.inventory, inv_idx, %{inv_item | amount: new_amount})
+              end
+
+              entity = %{entity | inventory: inventory, gold: entity.gold + sell_price}
+
+              if new_amount <= 0 do
+                send_to_session(state.sessions, char_id, {:send_raw,
+                  Encoder.encode({:change_inventory_slot, %{slot: slot, obj_index: 0, amount: 0, equipped: false, valor: 0.0}})})
+              else
+                valor = if item_def, do: item_def.valor / 1.0, else: 0.0
+                send_to_session(state.sessions, char_id, {:send_raw,
+                  Encoder.encode({:change_inventory_slot, %{
+                    slot: slot, obj_index: inv_item.item_id, amount: new_amount,
+                    equipped: inv_item.equipped, valor: valor
+                  }})})
+              end
+
+              send_to_session(state.sessions, char_id, {:send_raw,
+                Encoder.encode({:update_gold, %{gold: entity.gold}})})
+
+              players = Map.put(state.players, char_id, entity)
+              {:reply, :ok, %{state | players: players}}
+          end
+        end
+
+      :error -> {:reply, {:error, :not_on_map}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:commerce_end, char_id}, _from, state) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        entity = %{entity | commerce_npc_id: nil}
+        send_to_session(state.sessions, char_id, {:send_raw,
+          Encoder.encode({:commerce_end, %{}})})
+        players = Map.put(state.players, char_id, entity)
+        {:reply, :ok, %{state | players: players}}
 
       :error -> {:reply, {:error, :not_on_map}, state}
     end
@@ -1414,13 +1638,106 @@ defmodule Arena.Map.MapServer do
 
   # --- Combat helpers ---
 
+  # --- Ranged attack ---
+
+  defp handle_ranged_attack(state, char_id, entity, _weapon_def, target_x, target_y, now) do
+    distance = abs(entity.x - target_x) + abs(entity.y - target_y)
+
+    cond do
+      distance > @ranged_max_distance ->
+        send_to_session(state.sessions, char_id, {:send_raw,
+          Encoder.encode({:console_msg, %{message: "Demasiado lejos.", font_index: 0}})})
+        {:reply, {:error, :out_of_range}, state}
+
+      entity.equipment[:municion] == nil ->
+        send_to_session(state.sessions, char_id, {:send_raw,
+          Encoder.encode({:console_msg, %{message: "No tienes municiones equipadas.", font_index: 0}})})
+        {:reply, {:error, :no_ammo}, state}
+
+      true ->
+        ammo_id = entity.equipment[:municion]
+        ammo_slot_idx = Enum.find_index(entity.inventory, fn
+          %{item_id: ^ammo_id, equipped: true} -> true
+          _ -> false
+        end)
+
+        if ammo_slot_idx == nil do
+          entity = %{entity | equipment: Map.put(entity.equipment, :municion, nil)}
+          players = Map.put(state.players, char_id, entity)
+          {:reply, {:error, :no_ammo}, %{state | players: players}}
+        else
+          ammo_def = GameData.get_item(ammo_id)
+          entity = consume_ammo(entity, state, char_id, ammo_slot_idx, ammo_id)
+          entity = %{entity | next_attack_at: now + @attack_cooldown_ms}
+
+          swing_raw = Encoder.encode({:char_swing, %{char_index: entity.char_index}})
+          broadcast_visible(state, entity.x, entity.y, char_id, fn pid ->
+            send(pid, {:send_raw, swing_raw})
+          end)
+
+          target = get_occupancy(state.occupancy, target_x, target_y)
+
+          # Compute extra ammo damage
+          {ammo_min, ammo_max} = if ammo_def, do: {ammo_def.min_hit, ammo_def.max_hit}, else: {0, 0}
+          opts = [skill: :ranged_weapons, extra_min: ammo_min, extra_max: ammo_max]
+
+          state = handle_attack_target(state, char_id, entity, target, opts)
+          {:reply, :ok, state}
+        end
+    end
+  end
+
+  defp consume_ammo(entity, state, char_id, slot_idx, ammo_id) do
+    slot = Enum.at(entity.inventory, slot_idx)
+    new_amount = slot.amount - 1
+
+    {inventory, equipment} = if new_amount <= 0 do
+      {List.replace_at(entity.inventory, slot_idx, nil),
+       Map.put(entity.equipment, :municion, nil)}
+    else
+      {List.replace_at(entity.inventory, slot_idx, %{slot | amount: new_amount}),
+       entity.equipment}
+    end
+
+    entity = %{entity | inventory: inventory, equipment: equipment}
+
+    # Send inventory update to client
+    if new_amount <= 0 do
+      send_to_session(state.sessions, char_id, {:send_raw,
+        Encoder.encode({:change_inventory_slot, %{slot: slot_idx + 1, obj_index: 0, amount: 0, equipped: false, valor: 0.0}})})
+    else
+      item_def = GameData.get_item(ammo_id)
+      valor = if item_def, do: item_def.valor / 1, else: 0.0
+      send_to_session(state.sessions, char_id, {:send_raw,
+        Encoder.encode({:change_inventory_slot, %{slot: slot_idx + 1, obj_index: ammo_id, amount: new_amount, equipped: true, valor: valor}})})
+    end
+
+    entity
+  end
+
+  # Find an inventory slot for an item: existing stack if stackable, or first empty slot
+  defp find_inventory_slot(entity, item_id, stackable) do
+    if stackable do
+      # Try to find existing stack first
+      idx = Enum.find_index(entity.inventory, fn
+        %{item_id: ^item_id} -> true
+        _ -> false
+      end)
+      idx || Enum.find_index(entity.inventory, &is_nil/1)
+    else
+      Enum.find_index(entity.inventory, &is_nil/1)
+    end
+  end
+
   defp facing_tile(x, y, :north), do: {x, y - 1}
   defp facing_tile(x, y, :south), do: {x, y + 1}
   defp facing_tile(x, y, :east), do: {x + 1, y}
   defp facing_tile(x, y, :west), do: {x - 1, y}
   defp facing_tile(x, y, _), do: {x, y + 1}
 
-  defp handle_attack_target(state, char_id, entity, {:npc, instance_id}) do
+  defp handle_attack_target(state, char_id, entity, target, opts \\ [])
+
+  defp handle_attack_target(state, char_id, entity, {:npc, instance_id}, opts) do
     case Map.get(state.npcs_live, instance_id) do
       nil ->
         players = Map.put(state.players, char_id, entity)
@@ -1433,18 +1750,18 @@ defmodule Arena.Map.MapServer do
         else
           npc_def = GameData.get_npc(npc.npc_id)
           {min_weapon, max_weapon} = CombatStats.effective_damage(entity.equipment)
+          min_weapon = min_weapon + Keyword.get(opts, :extra_min, 0)
+          max_weapon = max_weapon + Keyword.get(opts, :extra_max, 0)
 
-          # Class ID lookup (reverse from atom)
           class_id = class_atom_to_id(entity.class)
 
-          # Hit/miss — use weapon skill (default 50) vs NPC evasion
-          weapon_skill = Map.get(entity.skills, :combat_weapons, 50)
+          skill_name = Keyword.get(opts, :skill, :combat_weapons)
+          weapon_skill = Map.get(entity.skills, skill_name, 50)
           npc_evasion = if npc_def, do: npc_def.poder_evasion, else: 0
           hit_roll = Combat.hit_chance(weapon_skill, entity.agi, entity.level, class_id,
                                        npc_evasion, 0, (if npc_def, do: npc_def.npc_level, else: 1), class_id)
 
           if :rand.uniform(100) <= hit_roll do
-            # Hit! Compute damage
             raw_damage = Combat.melee_damage(min_weapon, max_weapon, entity.str, class_id)
             npc_defense = if npc_def, do: npc_def.def, else: 0
             final_damage = max(raw_damage - npc_defense, 0)
@@ -1510,7 +1827,7 @@ defmodule Arena.Map.MapServer do
     end
   end
 
-  defp handle_attack_target(state, char_id, entity, {:player, defender_id}) do
+  defp handle_attack_target(state, char_id, entity, {:player, defender_id}, opts) do
     case Map.get(state.players, defender_id) do
       nil ->
         players = Map.put(state.players, char_id, entity)
@@ -1538,20 +1855,21 @@ defmodule Arena.Map.MapServer do
             class_id = class_atom_to_id(entity.class)
             def_class_id = class_atom_to_id(defender.class)
             {min_weapon, max_weapon} = CombatStats.effective_damage(entity.equipment)
+            min_weapon = min_weapon + Keyword.get(opts, :extra_min, 0)
+            max_weapon = max_weapon + Keyword.get(opts, :extra_max, 0)
 
-            weapon_skill = Map.get(entity.skills, :combat_weapons, 50)
+            skill_name = Keyword.get(opts, :skill, :combat_weapons)
+            weapon_skill = Map.get(entity.skills, skill_name, 50)
             def_tactics = Map.get(defender.skills, :combat_tactics, 50)
 
             hit_roll = Combat.hit_chance(weapon_skill, entity.agi, entity.level, class_id,
                                          def_tactics, defender.agi, defender.level, def_class_id)
 
             if :rand.uniform(100) <= hit_roll do
-              # Check shield block
               shield_pct = CombatStats.shield_defense_pct(defender.equipment)
               def_skill = Map.get(defender.skills, :combat_defense, 50)
 
               if shield_pct > 0 and Combat.shield_block?(shield_pct, def_skill, weapon_skill) do
-                # Blocked
                 send_to_session(state.sessions, defender_id, {:send_raw,
                   Encoder.encode({:blocked_with_shield_user, %{}})})
                 block_raw = Encoder.encode({:blocked_with_shield_other, %{char_index: defender.char_index}})
@@ -1562,7 +1880,6 @@ defmodule Arena.Map.MapServer do
                 players = Map.put(state.players, char_id, entity)
                 %{state | players: players}
               else
-                # Hit
                 raw_damage = Combat.melee_damage(min_weapon, max_weapon, entity.str, class_id)
                 {min_def, max_def} = CombatStats.effective_defense(defender.equipment)
                 {final_damage, _location} = Combat.apply_defense(raw_damage, {min_def, max_def})
@@ -1570,16 +1887,13 @@ defmodule Arena.Map.MapServer do
                 new_hp = max(defender.hp - final_damage, 0)
                 defender = %{defender | hp: new_hp}
 
-                # Send to attacker
                 send_to_session(state.sessions, char_id, {:send_raw,
                   Encoder.encode({:user_hitted_user, %{char_index: defender.char_index, damage: final_damage, hp: entity.hp}})})
-                # Send to defender
                 send_to_session(state.sessions, defender_id, {:send_raw,
                   Encoder.encode({:user_hitted_by_user, %{char_index: entity.char_index, damage: final_damage, hp: new_hp}})})
                 send_to_session(state.sessions, defender_id, {:send_raw,
                   Encoder.encode({:update_hp, %{min_hp: new_hp}})})
 
-                # Flag attacker as criminal
                 entity = if not defender.criminal, do: %{entity | criminal: true}, else: entity
 
                 defender = if new_hp <= 0 do
@@ -1596,7 +1910,6 @@ defmodule Arena.Map.MapServer do
                 %{state | players: players}
               end
             else
-              # Miss
               players = Map.put(state.players, char_id, entity)
               %{state | players: players}
             end
@@ -1604,7 +1917,7 @@ defmodule Arena.Map.MapServer do
     end
   end
 
-  defp handle_attack_target(state, char_id, entity, _no_target) do
+  defp handle_attack_target(state, char_id, entity, _no_target, _opts) do
     players = Map.put(state.players, char_id, entity)
     %{state | players: players}
   end

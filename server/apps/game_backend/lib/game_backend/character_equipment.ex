@@ -10,12 +10,13 @@ defmodule GameBackend.CharacterEquipment do
     field :shield, :integer
     field :helmet, :integer
     field :ring, :integer
+    field :municion, :integer
     timestamps()
   end
 
   def changeset(equipment, attrs) do
     equipment
-    |> cast(attrs, [:character_id, :weapon, :armor, :shield, :helmet, :ring])
+    |> cast(attrs, [:character_id, :weapon, :armor, :shield, :helmet, :ring, :municion])
     |> validate_required([:character_id])
     |> unique_constraint([:character_id])
   end

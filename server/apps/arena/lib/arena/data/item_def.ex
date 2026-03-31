@@ -26,7 +26,9 @@ defmodule Arena.Data.ItemDef do
     forbidden_classes: nil,
     allowed_races: nil,
     gender_restriction: :any,
-    destruye: false
+    destruye: false,
+    proyectil: 0,
+    municion_type: 0
   ]
 
   @stackable_types [1, 5, 11, 13, 32, 33, 34]
@@ -34,6 +36,7 @@ defmodule Arena.Data.ItemDef do
   @equip_slots %{
     2 => :weapon,
     3 => :armor,
+    11 => :municion,
     16 => :shield,
     17 => :helmet,
     35 => :ring
@@ -75,7 +78,9 @@ defmodule Arena.Data.ItemDef do
       forbidden_classes: parse_forbidden_classes(section),
       allowed_races: parse_allowed_races(section),
       gender_restriction: parse_gender(section),
-      destruye: parse_int(section["destruye"]) == 1
+      destruye: parse_int(section["destruye"]) == 1,
+      proyectil: parse_int(section["proyectil"]),
+      municion_type: parse_int(section["municiontype"])
     }
   end
 

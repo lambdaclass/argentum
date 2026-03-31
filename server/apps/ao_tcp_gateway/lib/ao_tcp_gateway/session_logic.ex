@@ -252,7 +252,7 @@ defmodule AoTcpGateway.SessionLogic do
   end
 
   def handle_command(state, {:attack, _}) when state.character_id != nil do
-    Arena.Map.MapServer.attack(state.map_id, state.character_id)
+    Arena.Map.MapServer.attack(state.map_id, state.character_id, state.target_x, state.target_y)
     {state, []}
   end
 
@@ -277,6 +277,28 @@ defmodule AoTcpGateway.SessionLogic do
 
   def handle_command(state, {:safe_toggle, _}) when state.character_id != nil do
     Arena.Map.MapServer.safe_toggle(state.map_id, state.character_id)
+    {state, []}
+  end
+
+  def handle_command(state, {:commerce_start, _}) when state.character_id != nil do
+    Arena.Map.MapServer.open_commerce(state.map_id, state.character_id, state.target_x, state.target_y)
+    {state, []}
+  end
+
+  def handle_command(state, {:commerce_buy, %{slot: slot, amount: amount}})
+      when state.character_id != nil do
+    Arena.Map.MapServer.commerce_buy(state.map_id, state.character_id, slot, amount)
+    {state, []}
+  end
+
+  def handle_command(state, {:commerce_sell, %{slot: slot, amount: amount}})
+      when state.character_id != nil do
+    Arena.Map.MapServer.commerce_sell(state.map_id, state.character_id, slot, amount)
+    {state, []}
+  end
+
+  def handle_command(state, {:commerce_end, _}) when state.character_id != nil do
+    Arena.Map.MapServer.commerce_end(state.map_id, state.character_id)
     {state, []}
   end
 

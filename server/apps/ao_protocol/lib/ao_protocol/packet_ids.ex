@@ -157,6 +157,11 @@ defmodule AoProtocol.PacketIds do
     def blind, do: 74
     def dumb, do: 75
 
+    # Commerce
+    def commerce_init, do: 132
+    def commerce_end, do: 133
+    def commerce_change_slot, do: 134
+
     # Extensions (not in original AO20)
     def session_token, do: 200
   end

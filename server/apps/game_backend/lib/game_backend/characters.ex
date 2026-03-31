@@ -317,7 +317,7 @@ defmodule GameBackend.Characters do
   end
 
   defp save_equipment(character_id, equipment) when equipment == %{} or equipment == nil, do:
-    save_equipment(character_id, %{weapon: nil, armor: nil, shield: nil, helmet: nil, ring: nil})
+    save_equipment(character_id, %{weapon: nil, armor: nil, shield: nil, helmet: nil, ring: nil, municion: nil})
 
   defp save_equipment(character_id, equipment) do
     now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
@@ -326,6 +326,7 @@ defmodule GameBackend.Characters do
     shield = equipment[:shield] || equipment["shield"]
     helmet = equipment[:helmet] || equipment["helmet"]
     ring = equipment[:ring] || equipment["ring"]
+    municion = equipment[:municion] || equipment["municion"]
 
     Repo.insert!(
       %CharacterEquipment{
@@ -335,10 +336,11 @@ defmodule GameBackend.Characters do
         shield: shield,
         helmet: helmet,
         ring: ring,
+        municion: municion,
         inserted_at: now,
         updated_at: now
       },
-      on_conflict: [set: [weapon: weapon, armor: armor, shield: shield, helmet: helmet, ring: ring, updated_at: now]],
+      on_conflict: [set: [weapon: weapon, armor: armor, shield: shield, helmet: helmet, ring: ring, municion: municion, updated_at: now]],
       conflict_target: [:character_id]
     )
   end
@@ -355,11 +357,11 @@ defmodule GameBackend.Characters do
     end)
   end
 
-  defp row_to_equipment(nil), do: %{weapon: nil, armor: nil, shield: nil, helmet: nil, ring: nil}
-  defp row_to_equipment(%Ecto.Association.NotLoaded{}), do: %{weapon: nil, armor: nil, shield: nil, helmet: nil, ring: nil}
+  defp row_to_equipment(nil), do: %{weapon: nil, armor: nil, shield: nil, helmet: nil, ring: nil, municion: nil}
+  defp row_to_equipment(%Ecto.Association.NotLoaded{}), do: %{weapon: nil, armor: nil, shield: nil, helmet: nil, ring: nil, municion: nil}
 
   defp row_to_equipment(%CharacterEquipment{} = eq) do
-    %{weapon: eq.weapon, armor: eq.armor, shield: eq.shield, helmet: eq.helmet, ring: eq.ring}
+    %{weapon: eq.weapon, armor: eq.armor, shield: eq.shield, helmet: eq.helmet, ring: eq.ring, municion: eq.municion}
   end
 
   # ---- Skills ----

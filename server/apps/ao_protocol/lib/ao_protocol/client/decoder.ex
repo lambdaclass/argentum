@@ -168,6 +168,28 @@ defmodule AoProtocol.Client.Decoder do
     end
   end
 
+  # CommerceStart (ID 53) — no payload
+  defp decode_packet(53, rest), do: {:ok, {:commerce_start, %{}}, rest}
+
+  # CommerceBuy (ID 9) — slot(Int8) + amount(Int16)
+  defp decode_packet(9, rest) do
+    with {:ok, slot, rest} <- Reader.read_int8(rest),
+         {:ok, amount, rest} <- Reader.read_int16(rest) do
+      {:ok, {:commerce_buy, %{slot: slot, amount: amount}}, rest}
+    end
+  end
+
+  # CommerceSell (ID 11) — slot(Int8) + amount(Int16)
+  defp decode_packet(11, rest) do
+    with {:ok, slot, rest} <- Reader.read_int8(rest),
+         {:ok, amount, rest} <- Reader.read_int16(rest) do
+      {:ok, {:commerce_sell, %{slot: slot, amount: amount}}, rest}
+    end
+  end
+
+  # CommerceEnd (ID 88) — no payload
+  defp decode_packet(88, rest), do: {:ok, {:commerce_end, %{}}, rest}
+
   # Unknown packet
   defp decode_packet(id, _rest), do: {:error, {:unknown_packet, id}}
 end

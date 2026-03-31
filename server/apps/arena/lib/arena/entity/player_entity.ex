@@ -54,7 +54,7 @@ defmodule Arena.Entity.PlayerEntity do
     inventory: List.duplicate(nil, 24),
 
     # Equipment slots: %{weapon: item_id, armor: item_id, shield: item_id, helmet: item_id, ring: item_id}
-    equipment: %{weapon: nil, armor: nil, shield: nil, helmet: nil, ring: nil},
+    equipment: %{weapon: nil, armor: nil, shield: nil, helmet: nil, ring: nil, municion: nil},
 
     # Skills: %{skill_id => value}
     skills: %{},
@@ -92,6 +92,9 @@ defmodule Arena.Entity.PlayerEntity do
     char_index: nil,
 
     # Map the player is on (for reference during export)
-    map_id: nil
+    map_id: nil,
+
+    # Transient: NPC id of open shop (not persisted)
+    commerce_npc_id: nil
   ]
 end

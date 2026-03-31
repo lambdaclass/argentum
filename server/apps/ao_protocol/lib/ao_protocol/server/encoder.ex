@@ -346,6 +346,28 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.send_skills(), payload)
   end
 
+  # eCommerceInit (ID 132) — npc_name(String8)
+  def encode({:commerce_init, %{npc_name: name}}) do
+    payload = Writer.write_string8(name)
+    Writer.build_packet(PacketIds.Server.commerce_init(), payload)
+  end
+
+  # eCommerceChangeSlot (ID 134) — slot(Int8) + obj_index(Int16) + amount(Int16) + price(Real32) + can_equip(Int8)
+  def encode({:commerce_change_slot, params}) do
+    payload =
+      Writer.write_int8(params[:slot]) <>
+        Writer.write_int16(params[:obj_index] || 0) <>
+        Writer.write_int16(params[:amount] || 0) <>
+        Writer.write_real32(params[:price] || 0.0) <>
+        Writer.write_int8(params[:can_equip] || 1)
+    Writer.build_packet(PacketIds.Server.commerce_change_slot(), payload)
+  end
+
+  # eCommerceEnd (ID 133) — no payload
+  def encode({:commerce_end, _params}) do
+    Writer.build_packet(PacketIds.Server.commerce_end(), <<>>)
+  end
+
   # ---- Helpers ----
 
   defp encode_char_flags(params) do
