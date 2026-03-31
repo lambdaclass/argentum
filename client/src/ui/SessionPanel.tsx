@@ -10,6 +10,7 @@ interface SessionPanelProps {
   showTileDebug: boolean;
   onEndpointChange: (value: string) => void;
   onCharacterNameChange: (value: string) => void;
+  onBootstrapPasswordChange: (value: string) => void;
   onConnect: () => void;
   onDisconnect: () => void;
   onForgetSession: () => void;
@@ -24,6 +25,7 @@ export function SessionPanel({
   showTileDebug,
   onEndpointChange,
   onCharacterNameChange,
+  onBootstrapPasswordChange,
   onConnect,
   onDisconnect,
   onForgetSession
@@ -62,7 +64,7 @@ export function SessionPanel({
 
       <p className="panel-copy compact session-title-copy">
         {connected
-          ? "Connected session. Use Advanced only for endpoint/dev changes."
+          ? "Connected session. Saved reconnect tokens handle packet 73 automatically."
           : title}
       </p>
 
@@ -101,11 +103,21 @@ export function SessionPanel({
           </label>
 
           <label className="field">
-            <span>Character Name</span>
+            <span>Character / Account</span>
             <input
               type="text"
               value={state.connection.characterName}
               onChange={(event) => onCharacterNameChange(event.target.value)}
+            />
+          </label>
+
+          <label className="field">
+            <span>Password</span>
+            <input
+              type="password"
+              value={state.connection.bootstrapPassword}
+              autoComplete="current-password"
+              onChange={(event) => onBootstrapPasswordChange(event.target.value)}
             />
           </label>
 
@@ -116,13 +128,15 @@ export function SessionPanel({
             </div>
             <div className="session-note">
               <span>Bootstrap</span>
-              <strong>Assets + map pack first</strong>
+              <strong>Packet 74 name + password</strong>
             </div>
           </div>
 
           <p className="field-hint session-help-text">
-            If no saved session exists, the client creates a new character with dev
-            defaults after assets and map data finish loading.
+            Without a saved session, Connect sends packet 74 using the name and password
+            above. After a successful login, packet 200 saves a reconnect token and later
+            boots use packet 73 automatically. Use Forget to switch to a different saved
+            session.
           </p>
         </div>
       ) : null}

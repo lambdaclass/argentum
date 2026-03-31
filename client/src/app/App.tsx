@@ -7,13 +7,12 @@ import { WorldCanvas } from "../render/WorldCanvas";
 import { loadAssetCatalog, type AssetCatalog } from "../render/assetCatalog";
 import { loadMapPack, type MapPackProgress } from "../net/mapApi";
 import { SessionPanel } from "../ui/SessionPanel";
-import { HudPanel } from "../ui/HudPanel";
-import { InventoryPanel } from "../ui/InventoryPanel";
 import { PacketLogPanel } from "../ui/PacketLogPanel";
 import { ChatPanel } from "../ui/ChatPanel";
 import { CharacterCard } from "../ui/CharacterCard";
 import { WorldStatusPanel } from "../ui/WorldStatusPanel";
 import { HechizosPanel } from "../ui/HechizosPanel";
+import { ClassicHudPanel } from "../ui/ClassicHudPanel";
 
 const MOVE_KEYS: Record<string, Direction> = {
   ArrowUp: "north",
@@ -318,6 +317,10 @@ export function App() {
       return;
     }
 
+    if (state.connection.credentials == null) {
+      return;
+    }
+
     if (state.world.map != null || state.world.self.charIndex != null) {
       return;
     }
@@ -329,7 +332,11 @@ export function App() {
       }
 
       setBootConnectAttempts((attempts) => attempts + 1);
-      session.connect(state.connection.endpoint, state.connection.characterName);
+      session.connect(
+        state.connection.endpoint,
+        state.connection.characterName,
+        state.connection.bootstrapPassword
+      );
     }, delayMs);
 
     return () => {
@@ -340,7 +347,9 @@ export function App() {
     bootConnectAttempts,
     mapPackStatus,
     session,
+    state.connection.bootstrapPassword,
     state.connection.characterName,
+    state.connection.credentials,
     state.connection.endpoint,
     state.connection.status,
     state.world.map,
@@ -383,7 +392,11 @@ export function App() {
 
   const handleConnect = () => {
     manualDisconnectRef.current = false;
-    session.connect(state.connection.endpoint, state.connection.characterName);
+    session.connect(
+      state.connection.endpoint,
+      state.connection.characterName,
+      state.connection.bootstrapPassword
+    );
   };
 
   const handleDisconnect = () => {
@@ -410,7 +423,7 @@ export function App() {
       return {
         eyebrow: "Session",
         title: "Connecting",
-        copy: "Opening the same AO session flow used by the legacy test client."
+        copy: "Opening the AO session flow with saved-token reconnect or packet 74 account auth."
       };
     }
 
@@ -420,7 +433,9 @@ export function App() {
         title: state.connection.lastError ? "Connection Failed" : "Ready To Enter",
         copy:
           state.connection.lastError ??
-          "Assets are loaded. The client will connect automatically on first boot, or you can reconnect manually from the session panel."
+          (state.connection.credentials
+            ? "Assets are loaded. The client will reconnect automatically with the saved session token."
+            : "Assets are loaded. Enter a character name and password in Session, then connect.")
       };
     }
 
@@ -533,9 +548,10 @@ export function App() {
       </main>
 
       <aside className="side-panel side-panel-right game-sidebar">
-        <section className="panel ao-sidebar-shell">
+        <section className="panel ao-sidebar-shell" data-active-tab={activeRightTab}>
           <CharacterCard
             canConnect={assetStatus === "ready" && mapPackStatus === "ready"}
+            dense={activeRightTab === "hud"}
             state={state}
             onConnect={handleConnect}
             onDisconnect={handleDisconnect}
@@ -557,9 +573,7 @@ export function App() {
 
           <div
             className={`sidebar-tab-body ${
-              activeRightTab === "hud" || activeRightTab === "spells"
-                ? "sidebar-tab-body-fixed"
-                : ""
+              activeRightTab === "spells" ? "sidebar-tab-body-fixed" : ""
             }`}
           >
             {activeRightTab === "session" ? (
@@ -576,6 +590,9 @@ export function App() {
                 onCharacterNameChange={(characterName) =>
                   dispatch({ type: "connection/setCharacterName", characterName })
                 }
+                onBootstrapPasswordChange={(bootstrapPassword) =>
+                  dispatch({ type: "connection/setBootstrapPassword", bootstrapPassword })
+                }
                 onConnect={handleConnect}
                 onDisconnect={handleDisconnect}
                 onForgetSession={() =>
@@ -587,11 +604,8 @@ export function App() {
             {activeRightTab === "world" ? <WorldStatusPanel state={state} /> : null}
 
             {activeRightTab === "hud" ? (
-              <div className="hud-stack">
-                <InventoryPanel
+              <ClassicHudPanel
                   assetCatalog={assetCatalog}
-                  compact
-                  showSelectedDetails={false}
                   state={state}
                   onSelectSlot={(slotIndex) =>
                     dispatch({ type: "inventory/selectSlot", slotIndex })
@@ -599,9 +613,7 @@ export function App() {
                   onEquip={(slotIndex) => session.sendEquip(slotIndex)}
                   onUse={(slotIndex) => session.sendUse(slotIndex)}
                   onDrop={(slotIndex, amount) => session.sendDrop(slotIndex, amount)}
-                />
-                <HudPanel compact state={state} />
-              </div>
+              />
             ) : null}
 
             {activeRightTab === "spells" ? (

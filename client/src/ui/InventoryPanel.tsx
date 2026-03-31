@@ -6,6 +6,7 @@ import { getObjectIconFrame, getObjectName } from "../render/assetCatalog";
 interface InventoryPanelProps {
   assetCatalog: AssetCatalog | null;
   compact?: boolean;
+  showHeader?: boolean;
   showSelectedDetails?: boolean;
   state: ClientState;
   onSelectSlot: (slotIndex: number | null) => void;
@@ -17,6 +18,7 @@ interface InventoryPanelProps {
 export function InventoryPanel({
   assetCatalog,
   compact = false,
+  showHeader = true,
   showSelectedDetails = true,
   state,
   onSelectSlot,
@@ -43,10 +45,12 @@ export function InventoryPanel({
 
   return (
     <section className={`panel inventory-panel ${compact ? "inventory-panel-compact" : ""}`}>
-      <div className="panel-header">
-        <h2>Inventario</h2>
-        <span className="panel-tag">24 slots</span>
-      </div>
+      {showHeader ? (
+        <div className="panel-header">
+          <h2>Inventario</h2>
+          <span className="panel-tag">24 slots</span>
+        </div>
+      ) : null}
 
       {!compact ? (
         <div className="inventory-stat-row">

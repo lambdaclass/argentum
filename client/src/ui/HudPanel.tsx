@@ -2,6 +2,7 @@ import type { ClientState } from "../app/types";
 
 interface HudPanelProps {
   compact?: boolean;
+  showHeader?: boolean;
   state: ClientState;
 }
 
@@ -33,16 +34,32 @@ function Bar({
   );
 }
 
-export function HudPanel({ compact = false, state }: HudPanelProps) {
+export function HudPanel({ compact = false, showHeader = true, state }: HudPanelProps) {
+  const labels = compact
+    ? {
+        gold: "Oro",
+        speed: "Vel",
+        others: "Otros",
+        position: "Pos"
+      }
+    : {
+        gold: "Gold",
+        speed: "Velocidad",
+        others: "Others",
+        position: "Posicion"
+      };
+
   return (
     <section className={`panel hud-panel ${compact ? "hud-panel-compact" : ""}`}>
-      <div className="panel-header">
-        <div>
-          <p className="eyebrow">Vitales</p>
-          <h2>HUD</h2>
+      {showHeader ? (
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Vitales</p>
+            <h2>HUD</h2>
+          </div>
+          <span className="panel-tag">Live</span>
         </div>
-        <span className="panel-tag">Live</span>
-      </div>
+      ) : null}
 
       <Bar
         label="Energia"
@@ -71,19 +88,19 @@ export function HudPanel({ compact = false, state }: HudPanelProps) {
         }`}
       >
         <div className="meta-card">
-          <span>Gold</span>
+          <span>{labels.gold}</span>
           <strong>{state.stats.gold}</strong>
         </div>
         <div className="meta-card">
-          <span>Velocidad</span>
+          <span>{labels.speed}</span>
           <strong>{state.world.self.speed}</strong>
         </div>
         <div className="meta-card">
-          <span>Others</span>
+          <span>{labels.others}</span>
           <strong>{Object.keys(state.world.others).length}</strong>
         </div>
         <div className="meta-card">
-          <span>Posicion</span>
+          <span>{labels.position}</span>
           <strong>
             {state.world.self.x ?? "--"},{state.world.self.y ?? "--"}
           </strong>

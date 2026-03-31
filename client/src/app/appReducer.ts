@@ -9,6 +9,7 @@ import type {
 
 const DEFAULT_ENDPOINT = "ws://127.0.0.1:7667/ao";
 const DEFAULT_CHARACTER_NAME = "Player_Web";
+const DEFAULT_BOOTSTRAP_PASSWORD = "browser_bootstrap_token";
 const STORAGE_CHAR_ID = "ao_char_id";
 const STORAGE_TOKEN = "ao_session_token";
 
@@ -112,6 +113,7 @@ export function createInitialState(): ClientState {
       status: "offline",
       endpoint: defaultEndpoint(),
       characterName: DEFAULT_CHARACTER_NAME,
+      bootstrapPassword: DEFAULT_BOOTSTRAP_PASSWORD,
       lastError: null,
       credentials: loadStoredCredentials()
     },
@@ -179,6 +181,15 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
         connection: {
           ...state.connection,
           characterName: action.characterName
+        }
+      };
+
+    case "connection/setBootstrapPassword":
+      return {
+        ...state,
+        connection: {
+          ...state.connection,
+          bootstrapPassword: action.bootstrapPassword
         }
       };
 

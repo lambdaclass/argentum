@@ -27,6 +27,7 @@ export class SessionClient {
   private readonly runtime: GameRuntime;
   private mapRequestId = 0;
   private selfCharIndex: number | null = null;
+  private closeReason: string | null = null;
 
   constructor(dispatch: Dispatch<ClientAction>, getState: () => ClientState) {
     this.dispatch = dispatch;
@@ -70,14 +71,46 @@ export class SessionClient {
     this.runtime.setRenderer(renderer);
   }
 
-  connect(endpoint: string, characterName: string) {
+  connect(endpoint: string, characterName: string, bootstrapPassword: string) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.dispatch({ type: "log/add", level: "warn", message: "Already connected." });
       return;
     }
 
+    const trimmedName = characterName.trim();
+    const hasSavedSession = this.getState().connection.credentials != null;
+
+    if (!hasSavedSession && trimmedName.length === 0) {
+      this.dispatch({
+        type: "connection/setStatus",
+        status: "offline",
+        lastError: "Character name is required."
+      });
+      this.dispatch({
+        type: "log/add",
+        level: "error",
+        message: "Cannot bootstrap session without a character name."
+      });
+      return;
+    }
+
+    if (!hasSavedSession && bootstrapPassword.length === 0) {
+      this.dispatch({
+        type: "connection/setStatus",
+        status: "offline",
+        lastError: "Password is required."
+      });
+      this.dispatch({
+        type: "log/add",
+        level: "error",
+        message: "Cannot bootstrap session without a password."
+      });
+      return;
+    }
+
     this.runtime.resetConnection();
     this.selfCharIndex = null;
+    this.closeReason = null;
     this.dispatch({ type: "connection/setStatus", status: "connecting" });
     this.dispatch({
       type: "log/add",
@@ -108,11 +141,11 @@ export class SessionClient {
           message: `LOGIN char_id=${credentials.charId}`
         });
       } else {
-        this.sendRaw(encodeCreateCharacter(characterName));
+        this.sendRaw(encodeCreateCharacter(trimmedName, bootstrapPassword));
         this.dispatch({
           type: "log/add",
           level: "packet-out",
-          message: `CREATE ${characterName}`
+          message: `LOGIN_OR_CREATE name=${trimmedName}`
         });
       }
     });
@@ -134,11 +167,13 @@ export class SessionClient {
         currentState.world.self.charIndex == null;
       const bootstrapMessage =
         currentState.connection.lastError ??
+        this.closeReason ??
         (isBootstrapPhase ? "Connection closed during bootstrap. Retrying…" : null);
 
       this.mapRequestId += 1;
       this.runtime.resetConnection();
       this.selfCharIndex = null;
+      this.closeReason = null;
       this.dispatch({ type: "session/resetRuntime" });
       this.dispatch({
         type: "connection/setStatus",
@@ -450,14 +485,34 @@ export class SessionClient {
 
       case "error_msg":
       {
+        const credentials = this.getState().connection.credentials;
         const world = this.getState().world;
         const bootstrapError = world.map == null && world.self.charIndex == null;
+
+        if (
+          bootstrapError &&
+          credentials &&
+          (packet.message === "Invalid session token." || packet.message === "Character not found.")
+        ) {
+          this.dispatch({ type: "connection/setCredentials", credentials: null });
+          this.dispatch({
+            type: "log/add",
+            level: "warn",
+            message: "Saved session was rejected and has been cleared."
+          });
+        }
+
         this.dispatch({
           type: "connection/setStatus",
           status: bootstrapError ? "offline" : "connected",
           lastError: packet.message
         });
         this.dispatch({ type: "log/add", level: "error", message: packet.message });
+
+        if (bootstrapError && this.ws && this.ws.readyState === WebSocket.OPEN) {
+          this.closeReason = packet.message;
+          this.ws.close();
+        }
         return;
       }
 

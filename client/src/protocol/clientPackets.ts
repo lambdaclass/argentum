@@ -15,6 +15,14 @@ const CLIENT_PACKET = {
   quit: 39
 } as const;
 
+const CLIENT_VERSION = {
+  major: 1,
+  minor: 0,
+  build: 0
+} as const;
+
+const CLIENT_MD5 = "abcdef1234567890abcdef1234567890";
+
 function writeInt8(bytes: number[], value: number) {
   bytes.push(value & 0xff);
 }
@@ -64,21 +72,21 @@ export function encodeLoginExisting(charId: number, token: string) {
   return buildPacket(CLIENT_PACKET.loginExisting, (bytes) => {
     writeString8(bytes, token);
     writeInt32(bytes, charId);
-    writeInt8(bytes, 1);
-    writeInt8(bytes, 0);
-    writeInt8(bytes, 0);
-    writeString8(bytes, "abcdef1234567890abcdef1234567890");
+    writeInt8(bytes, CLIENT_VERSION.major);
+    writeInt8(bytes, CLIENT_VERSION.minor);
+    writeInt8(bytes, CLIENT_VERSION.build);
+    writeString8(bytes, CLIENT_MD5);
   });
 }
 
-export function encodeCreateCharacter(characterName: string) {
+export function encodeCreateCharacter(characterName: string, password: string) {
   return buildPacket(CLIENT_PACKET.loginNewChar, (bytes) => {
-    writeString8(bytes, "browser_bootstrap_token");
+    writeString8(bytes, password);
     writeString8(bytes, characterName);
-    writeInt8(bytes, 1);
-    writeInt8(bytes, 0);
-    writeInt8(bytes, 0);
-    writeString8(bytes, "abcdef1234567890abcdef1234567890");
+    writeInt8(bytes, CLIENT_VERSION.major);
+    writeInt8(bytes, CLIENT_VERSION.minor);
+    writeInt8(bytes, CLIENT_VERSION.build);
+    writeString8(bytes, CLIENT_MD5);
     writeInt8(bytes, 1);
     writeInt8(bytes, 1);
     writeInt8(bytes, 6);

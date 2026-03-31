@@ -106,6 +106,7 @@ export interface ClientState {
     status: ConnectionStatus;
     endpoint: string;
     characterName: string;
+    bootstrapPassword: string;
     lastError: string | null;
     credentials: SessionCredentials | null;
   };
@@ -198,6 +199,7 @@ export type ClientAction =
   | { type: "connection/setStatus"; status: ConnectionStatus; lastError?: string | null }
   | { type: "connection/setEndpoint"; endpoint: string }
   | { type: "connection/setCharacterName"; characterName: string }
+  | { type: "connection/setBootstrapPassword"; bootstrapPassword: string }
   | { type: "connection/setCredentials"; credentials: SessionCredentials | null }
   | { type: "world/setMap"; mapId: number }
   | { type: "world/setMapLoading"; mapId: number }
