@@ -11,9 +11,11 @@ defmodule Arena.Map.Visibility do
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
-  @aoi_range_x Application.compile_env(:arena, :aoi_range_x, 11)
-  @aoi_range_y Application.compile_env(:arena, :aoi_range_y, 9)
-  @cell_size max(max(@aoi_range_x, @aoi_range_y), 12)
+  # cell_size is compile-time; runtime AoI checks use Helpers.aoi_range_x/y()
+  @cell_size max(max(
+    Application.compile_env(:arena, :aoi_range_x, 11),
+    Application.compile_env(:arena, :aoi_range_y, 9)
+  ), 12)
 
   # --- Spatial grid helpers ---
   # Grid cells are @cell_size x @cell_size tiles. Each cell stores a MapSet of char_ids.
@@ -54,7 +56,7 @@ defmodule Arena.Map.Visibility do
       case Map.get(players, cid) do
         nil -> :ok
         entity ->
-          if abs(entity.x - origin_x) <= @aoi_range_x and abs(entity.y - origin_y) <= @aoi_range_y do
+          if abs(entity.x - origin_x) <= Helpers.aoi_range_x() and abs(entity.y - origin_y) <= Helpers.aoi_range_y() do
             case Map.get(sessions, cid) do
               nil -> :ok
               pid -> fun.(pid)
@@ -69,7 +71,7 @@ defmodule Arena.Map.Visibility do
       case Map.get(players, cid) do
         nil -> :ok
         entity ->
-          if abs(entity.x - origin_x) <= @aoi_range_x and abs(entity.y - origin_y) <= @aoi_range_y do
+          if abs(entity.x - origin_x) <= Helpers.aoi_range_x() and abs(entity.y - origin_y) <= Helpers.aoi_range_y() do
             case Map.get(sessions, cid) do
               nil -> :ok
               pid -> fun.(pid)
@@ -97,8 +99,8 @@ defmodule Arena.Map.Visibility do
           if exclude_id do
             for {cid, entity} <- state.players,
                 cid != exclude_id,
-                abs(entity.x - origin_x) <= @aoi_range_x,
-                abs(entity.y - origin_y) <= @aoi_range_y do
+                abs(entity.x - origin_x) <= Helpers.aoi_range_x(),
+                abs(entity.y - origin_y) <= Helpers.aoi_range_y() do
               case Map.get(state.sessions, cid) do
                 nil -> :skip
                 pid -> fun.(pid)
@@ -106,8 +108,8 @@ defmodule Arena.Map.Visibility do
             end
           else
             for {cid, entity} <- state.players,
-                abs(entity.x - origin_x) <= @aoi_range_x,
-                abs(entity.y - origin_y) <= @aoi_range_y do
+                abs(entity.x - origin_x) <= Helpers.aoi_range_x(),
+                abs(entity.y - origin_y) <= Helpers.aoi_range_y() do
               case Map.get(state.sessions, cid) do
                 nil -> :skip
                 pid -> fun.(pid)
@@ -167,7 +169,7 @@ defmodule Arena.Map.Visibility do
         state.players
         |> Enum.filter(fn {cid, entity} ->
           cid != exclude_id and
-            abs(entity.x - x) <= @aoi_range_x and abs(entity.y - y) <= @aoi_range_y
+            abs(entity.x - x) <= Helpers.aoi_range_x() and abs(entity.y - y) <= Helpers.aoi_range_y()
         end)
         |> Enum.map(fn {cid, _} -> cid end)
         |> MapSet.new()
@@ -178,7 +180,7 @@ defmodule Arena.Map.Visibility do
           cid != exclude_id and
             case Map.get(state.players, cid) do
               nil -> false
-              entity -> abs(entity.x - x) <= @aoi_range_x and abs(entity.y - y) <= @aoi_range_y
+              entity -> abs(entity.x - x) <= Helpers.aoi_range_x() and abs(entity.y - y) <= Helpers.aoi_range_y()
             end
         end)
         |> MapSet.new()
@@ -213,7 +215,7 @@ defmodule Arena.Map.Visibility do
 
   def send_nearby_npcs(state, entity, sessions) do
     for {_iid, npc} <- state.npcs_live, npc.alive do
-      if abs(npc.x - entity.x) <= @aoi_range_x and abs(npc.y - entity.y) <= @aoi_range_y do
+      if abs(npc.x - entity.x) <= Helpers.aoi_range_x() and abs(npc.y - entity.y) <= Helpers.aoi_range_y() do
         npc_def = GameData.get_npc(npc.npc_id)
         if npc_def do
           raw = Encoder.encode(Helpers.npc_create_packet(npc, npc_def))
