@@ -22,7 +22,7 @@ defmodule Arena.Map.MapServer do
   alias Arena.Map.CsmParser
   alias Arena.Entity.PlayerEntity
   alias Arena.Entity.NpcEntity
-  alias Arena.Map.{Helpers, Visibility, Movement, CombatHandlers, InventoryHandlers, CommerceHandlers}
+  alias Arena.Map.{Helpers, Visibility, Movement, CombatHandlers, InventoryHandlers, Commerce, Bank, Trade, Social}
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
@@ -189,6 +189,7 @@ defmodule Arena.Map.MapServer do
             players: %{},
             sessions: %{},
             monitors: %{},
+            monitor_refs: %{},
             occupancy: occupancy,
             visibility_mode: visibility_mode,
             grid: if(visibility_mode == :aoi_grid, do: %{}, else: nil),
@@ -239,19 +240,7 @@ defmodule Arena.Map.MapServer do
   def handle_call({:leave, char_id}, _from, state) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
-        visible_sets = Visibility.remove_from_visibility(state, char_id, entity)
-
-        # Demonitor session
-        {ref, monitors} = Map.pop(state.monitors, char_id)
-        if ref, do: Process.demonitor(ref, [:flush])
-
-        players = Map.delete(state.players, char_id)
-        sessions = Map.delete(state.sessions, char_id)
-        occupancy = Helpers.clear_occupancy(state.occupancy, entity.x, entity.y)
-        grid = Visibility.maybe_grid_remove(state, entity.x, entity.y, char_id)
-
-        state = %{state | players: players, sessions: sessions, monitors: monitors,
-                          occupancy: occupancy, grid: grid, visible_sets: visible_sets}
+        state = do_remove_player(state, char_id, entity)
         {:reply, {:ok, entity}, state}
 
       :error ->
@@ -289,36 +278,38 @@ defmodule Arena.Map.MapServer do
 
   # ---- Commerce / Bank / Trade (delegated) ----
 
+  # ---- Commerce / Bank / Trade (delegated) ----
+
   @impl true
-  def handle_call({:safe_toggle, char_id}, _from, state), do: CommerceHandlers.handle_safe_toggle(state, char_id)
+  def handle_call({:safe_toggle, char_id}, _from, state), do: Social.handle_safe_toggle(state, char_id)
   @impl true
-  def handle_call({:open_commerce, char_id, tx, ty}, _from, state), do: CommerceHandlers.handle_open_commerce(state, char_id, tx, ty)
+  def handle_call({:open_commerce, char_id, tx, ty}, _from, state), do: Commerce.handle_open_commerce(state, char_id, tx, ty)
   @impl true
-  def handle_call({:commerce_buy, char_id, slot, amount}, _from, state), do: CommerceHandlers.handle_commerce_buy(state, char_id, slot, amount)
+  def handle_call({:commerce_buy, char_id, slot, amount}, _from, state), do: Commerce.handle_commerce_buy(state, char_id, slot, amount)
   @impl true
-  def handle_call({:commerce_sell, char_id, slot, amount}, _from, state), do: CommerceHandlers.handle_commerce_sell(state, char_id, slot, amount)
+  def handle_call({:commerce_sell, char_id, slot, amount}, _from, state), do: Commerce.handle_commerce_sell(state, char_id, slot, amount)
   @impl true
-  def handle_call({:commerce_end, char_id}, _from, state), do: CommerceHandlers.handle_commerce_end(state, char_id)
+  def handle_call({:commerce_end, char_id}, _from, state), do: Commerce.handle_commerce_end(state, char_id)
   @impl true
-  def handle_call({:open_bank, char_id, tx, ty}, _from, state), do: CommerceHandlers.handle_open_bank(state, char_id, tx, ty)
+  def handle_call({:open_bank, char_id, tx, ty}, _from, state), do: Bank.handle_open_bank(state, char_id, tx, ty)
   @impl true
-  def handle_call({:bank_deposit, char_id, slot, amount, slot_destino}, _from, state), do: CommerceHandlers.handle_bank_deposit(state, char_id, slot, amount, slot_destino)
+  def handle_call({:bank_deposit, char_id, slot, amount, slot_destino}, _from, state), do: Bank.handle_bank_deposit(state, char_id, slot, amount, slot_destino)
   @impl true
-  def handle_call({:bank_extract_item, char_id, slot, amount, slot_destino}, _from, state), do: CommerceHandlers.handle_bank_extract_item(state, char_id, slot, amount, slot_destino)
+  def handle_call({:bank_extract_item, char_id, slot, amount, slot_destino}, _from, state), do: Bank.handle_bank_extract_item(state, char_id, slot, amount, slot_destino)
   @impl true
-  def handle_call({:bank_deposit_gold, char_id, amount}, _from, state), do: CommerceHandlers.handle_bank_deposit_gold(state, char_id, amount)
+  def handle_call({:bank_deposit_gold, char_id, amount}, _from, state), do: Bank.handle_bank_deposit_gold(state, char_id, amount)
   @impl true
-  def handle_call({:bank_extract_gold, char_id, amount}, _from, state), do: CommerceHandlers.handle_bank_extract_gold(state, char_id, amount)
+  def handle_call({:bank_extract_gold, char_id, amount}, _from, state), do: Bank.handle_bank_extract_gold(state, char_id, amount)
   @impl true
-  def handle_call({:bank_end, char_id}, _from, state), do: CommerceHandlers.handle_bank_end(state, char_id)
+  def handle_call({:bank_end, char_id}, _from, state), do: Bank.handle_bank_end(state, char_id)
   @impl true
-  def handle_call({:user_trade_offer, char_id, obj_index, amount}, _from, state), do: CommerceHandlers.handle_user_trade_offer(state, char_id, obj_index, amount)
+  def handle_call({:user_trade_offer, char_id, obj_index, amount}, _from, state), do: Trade.handle_user_trade_offer(state, char_id, obj_index, amount)
   @impl true
-  def handle_call({:user_trade_accept, char_id}, _from, state), do: CommerceHandlers.handle_user_trade_accept(state, char_id)
+  def handle_call({:user_trade_accept, char_id}, _from, state), do: Trade.handle_user_trade_accept(state, char_id)
   @impl true
-  def handle_call({:user_trade_reject, char_id}, _from, state), do: CommerceHandlers.handle_user_trade_reject(state, char_id)
+  def handle_call({:user_trade_reject, char_id}, _from, state), do: Trade.handle_user_trade_reject(state, char_id)
   @impl true
-  def handle_call({:user_trade_end, char_id}, _from, state), do: CommerceHandlers.handle_user_trade_end(state, char_id)
+  def handle_call({:user_trade_end, char_id}, _from, state), do: Trade.handle_user_trade_end(state, char_id)
 
   # ---- Info / Map Data ----
 
@@ -376,25 +367,25 @@ defmodule Arena.Map.MapServer do
   @impl true
   def handle_cast({:change_heading, char_id, heading}, state), do: Movement.handle_change_heading(state, char_id, heading)
   @impl true
-  def handle_cast({:chat, char_id, message}, state), do: CommerceHandlers.handle_chat(state, char_id, message)
+  def handle_cast({:chat, char_id, message}, state), do: Social.handle_chat(state, char_id, message)
   @impl true
-  def handle_cast({:yell, char_id, message}, state), do: CommerceHandlers.handle_yell(state, char_id, message)
+  def handle_cast({:yell, char_id, message}, state), do: Social.handle_yell(state, char_id, message)
   @impl true
-  def handle_cast({:rest, char_id}, state), do: CommerceHandlers.handle_rest(state, char_id)
+  def handle_cast({:rest, char_id}, state), do: Social.handle_rest(state, char_id)
   @impl true
-  def handle_cast({:meditate, char_id}, state), do: CommerceHandlers.handle_meditate(state, char_id)
+  def handle_cast({:meditate, char_id}, state), do: Social.handle_meditate(state, char_id)
   @impl true
-  def handle_cast({:heal, char_id}, state), do: CommerceHandlers.handle_heal(state, char_id)
+  def handle_cast({:heal, char_id}, state), do: Social.handle_heal(state, char_id)
   @impl true
-  def handle_cast({:resucitate, char_id}, state), do: CommerceHandlers.handle_resucitate(state, char_id)
+  def handle_cast({:resucitate, char_id}, state), do: Social.handle_resucitate(state, char_id)
   @impl true
-  def handle_cast({:request_atributes, char_id}, state), do: CommerceHandlers.handle_request_atributes(state, char_id)
+  def handle_cast({:request_atributes, char_id}, state), do: Social.handle_request_atributes(state, char_id)
   @impl true
-  def handle_cast({:request_skills, char_id}, state), do: CommerceHandlers.handle_request_skills(state, char_id)
+  def handle_cast({:request_skills, char_id}, state), do: Social.handle_request_skills(state, char_id)
   @impl true
-  def handle_cast({:request_mini_stats, char_id}, state), do: CommerceHandlers.handle_request_mini_stats(state, char_id)
+  def handle_cast({:request_mini_stats, char_id}, state), do: Social.handle_request_mini_stats(state, char_id)
   @impl true
-  def handle_cast({:double_click, char_id, x, y}, state), do: CommerceHandlers.handle_double_click(state, char_id, x, y)
+  def handle_cast({:double_click, char_id, x, y}, state), do: Social.handle_double_click(state, char_id, x, y)
 
   # ---- Timers ----
 
@@ -432,73 +423,26 @@ defmodule Arena.Map.MapServer do
 
   @impl true
   def handle_info(:regen_tick, state) do
-    state = Enum.reduce(state.players, state, fn {char_id, entity}, state ->
-      cond do
-        entity.dead ->
-          state
-
-        entity.resting and entity.hp < entity.max_hp ->
-          regen = max(div(entity.max_hp, 50), 1)
-          new_hp = min(entity.hp + regen, entity.max_hp)
-          entity = %{entity | hp: new_hp}
-          entity = if new_hp >= entity.max_hp, do: %{entity | resting: false}, else: entity
-
-          Helpers.send_to_session(state.sessions, char_id,
-            {:send_raw, Encoder.encode({:update_hp, %{min_hp: new_hp, shield: 0}})})
-
-          if not entity.resting do
-            Helpers.send_to_session(state.sessions, char_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: "Has terminado de descansar.", font_index: 0}})})
-          end
-
-          %{state | players: Map.put(state.players, char_id, entity)}
-
-        entity.meditating and entity.mana < entity.max_mana ->
-          regen = max(div(entity.max_mana, 35), 1)
-          new_mana = min(entity.mana + regen, entity.max_mana)
-          entity = %{entity | mana: new_mana}
-          entity = if new_mana >= entity.max_mana, do: %{entity | meditating: false}, else: entity
-
-          Helpers.send_to_session(state.sessions, char_id,
-            {:send_raw, Encoder.encode({:update_mana, %{min_mana: new_mana}})})
-
-          if not entity.meditating do
-            Helpers.send_to_session(state.sessions, char_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: "Has terminado de meditar.", font_index: 0}})})
-          end
-
-          %{state | players: Map.put(state.players, char_id, entity)}
-
-        true ->
-          state
-      end
-    end)
-
+    state = CombatHandlers.process_regen_tick(state)
     Process.send_after(self(), :regen_tick, @regen_tick_ms)
     {:noreply, state}
   end
 
-  # Session process crashed — clean up the player
+  # Session process crashed — clean up the player (O(1) via reverse ref map)
   @impl true
   def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
-    case Enum.find(state.monitors, fn {_char_id, mref} -> mref == ref end) do
-      {char_id, _} ->
+    case Map.fetch(state.monitor_refs, ref) do
+      {:ok, char_id} ->
         Logger.warning("Session #{char_id} crashed, cleaning up from map #{state.map_id}")
         case Map.fetch(state.players, char_id) do
           {:ok, entity} ->
-            visible_sets = Visibility.remove_from_visibility(state, char_id, entity)
-            players = Map.delete(state.players, char_id)
-            sessions = Map.delete(state.sessions, char_id)
-            monitors = Map.delete(state.monitors, char_id)
-            occupancy = Helpers.clear_occupancy(state.occupancy, entity.x, entity.y)
-            grid = Visibility.maybe_grid_remove(state, entity.x, entity.y, char_id)
-            {:noreply, %{state | players: players, sessions: sessions, monitors: monitors,
-                                  occupancy: occupancy, grid: grid, visible_sets: visible_sets}}
+            {:noreply, do_remove_player(state, char_id, entity)}
           :error ->
-            {:noreply, %{state | monitors: Map.delete(state.monitors, char_id)}}
+            {:noreply, %{state | monitors: Map.delete(state.monitors, char_id),
+                                  monitor_refs: Map.delete(state.monitor_refs, ref)}}
         end
 
-      nil ->
+      :error ->
         {:noreply, state}
     end
   end
@@ -532,10 +476,12 @@ defmodule Arena.Map.MapServer do
     players = Map.put(state.players, entity.char_id, entity)
     sessions = Map.put(state.sessions, entity.char_id, caller_pid)
     monitors = Map.put(state.monitors, entity.char_id, ref)
+    monitor_refs = Map.put(state.monitor_refs, ref, entity.char_id)
     occupancy = Helpers.set_occupancy(state.occupancy, x, y, {:player, entity.char_id})
     grid = Visibility.maybe_grid_add(state, x, y, entity.char_id)
 
-    state = %{state | players: players, sessions: sessions, monitors: monitors, occupancy: occupancy, grid: grid}
+    state = %{state | players: players, sessions: sessions, monitors: monitors,
+                      monitor_refs: monitor_refs, occupancy: occupancy, grid: grid}
 
     {visible_sets, reply_players} = Visibility.enter_visibility(state, entity, sessions)
 
@@ -543,6 +489,29 @@ defmodule Arena.Map.MapServer do
 
     state = %{state | visible_sets: visible_sets, next_char_index: char_index + 1}
     {:reply, {:ok, char_index, reply_players}, state}
+  end
+
+  # Shared cleanup for leave + :DOWN — single source of truth
+  defp do_remove_player(state, char_id, entity) do
+    visible_sets = Visibility.remove_from_visibility(state, char_id, entity)
+
+    # Demonitor session
+    {ref, monitors} = Map.pop(state.monitors, char_id)
+    monitor_refs = if ref do
+      Process.demonitor(ref, [:flush])
+      Map.delete(state.monitor_refs, ref)
+    else
+      state.monitor_refs
+    end
+
+    players = Map.delete(state.players, char_id)
+    sessions = Map.delete(state.sessions, char_id)
+    occupancy = Helpers.clear_occupancy(state.occupancy, entity.x, entity.y)
+    grid = Visibility.maybe_grid_remove(state, entity.x, entity.y, char_id)
+
+    %{state | players: players, sessions: sessions, monitors: monitors,
+              monitor_refs: monitor_refs, occupancy: occupancy, grid: grid,
+              visible_sets: visible_sets}
   end
 
   # ---- Private helpers (map-server-specific) ----

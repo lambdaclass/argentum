@@ -1079,4 +1079,52 @@ defmodule Arena.Map.CombatHandlers do
     map_id in @faction_pvp_maps and
       attacker.criminal != defender.criminal
   end
+
+  # ==================================================================
+  # Regen tick (rest + meditate)
+  # ==================================================================
+
+  def process_regen_tick(state) do
+    Enum.reduce(state.players, state, fn {char_id, entity}, state ->
+      cond do
+        entity.dead ->
+          state
+
+        entity.resting and entity.hp < entity.max_hp ->
+          regen = max(div(entity.max_hp, 50), 1)
+          new_hp = min(entity.hp + regen, entity.max_hp)
+          entity = %{entity | hp: new_hp}
+          entity = if new_hp >= entity.max_hp, do: %{entity | resting: false}, else: entity
+
+          Helpers.send_to_session(state.sessions, char_id,
+            {:send_raw, Encoder.encode({:update_hp, %{min_hp: new_hp, shield: 0}})})
+
+          if not entity.resting do
+            Helpers.send_to_session(state.sessions, char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "Has terminado de descansar.", font_index: 0}})})
+          end
+
+          %{state | players: Map.put(state.players, char_id, entity)}
+
+        entity.meditating and entity.mana < entity.max_mana ->
+          regen = max(div(entity.max_mana, 35), 1)
+          new_mana = min(entity.mana + regen, entity.max_mana)
+          entity = %{entity | mana: new_mana}
+          entity = if new_mana >= entity.max_mana, do: %{entity | meditating: false}, else: entity
+
+          Helpers.send_to_session(state.sessions, char_id,
+            {:send_raw, Encoder.encode({:update_mana, %{min_mana: new_mana}})})
+
+          if not entity.meditating do
+            Helpers.send_to_session(state.sessions, char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "Has terminado de meditar.", font_index: 0}})})
+          end
+
+          %{state | players: Map.put(state.players, char_id, entity)}
+
+        true ->
+          state
+      end
+    end)
+  end
 end
