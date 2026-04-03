@@ -6,9 +6,13 @@ defmodule Arena.Map.Helpers do
 
   @map_width 100
   @map_height 100
+  @aoi_range_x Application.compile_env(:arena, :aoi_range_x, 11)
+  @aoi_range_y Application.compile_env(:arena, :aoi_range_y, 9)
 
   def map_width, do: @map_width
   def map_height, do: @map_height
+  def aoi_range_x, do: @aoi_range_x
+  def aoi_range_y, do: @aoi_range_y
 
   # with_player helper to reduce boilerplate
   # For handle_call: fun receives entity, must return {:reply, term, state}

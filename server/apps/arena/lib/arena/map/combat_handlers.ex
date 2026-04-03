@@ -16,10 +16,6 @@ defmodule Arena.Map.CombatHandlers do
 
   @attack_cooldown_ms 1500
   @ranged_max_distance 18
-  @map_width 100
-  @map_height 100
-  @aoi_range_x Application.compile_env(:arena, :aoi_range_x, 11)
-  @aoi_range_y Application.compile_env(:arena, :aoi_range_y, 9)
 
   @req_weapon 0x001
   @req_shield 0x002
@@ -401,7 +397,7 @@ defmodule Arena.Map.CombatHandlers do
 
                 # VB6: spell range check uses AoI range
                 spell_in_range = target_x == nil or target_y == nil or
-                  (abs(entity.x - target_x) <= @aoi_range_x and abs(entity.y - target_y) <= @aoi_range_y)
+                  (abs(entity.x - target_x) <= Helpers.aoi_range_x() and abs(entity.y - target_y) <= Helpers.aoi_range_y())
 
                 magic_skill = Map.get(entity.skills, :magic, 0)
                 req = if spell_def, do: spell_def.requirement_mask, else: 0
@@ -523,7 +519,7 @@ defmodule Arena.Map.CombatHandlers do
     targets =
       for ty <- (center_y - r)..(center_y + r),
           tx <- (center_x - r)..(center_x + r),
-          tx >= 1 and tx <= @map_width and ty >= 1 and ty <= @map_height do
+          tx >= 1 and tx <= Helpers.map_width() and ty >= 1 and ty <= Helpers.map_height() do
         {tx, ty, Helpers.get_occupancy(state.occupancy, tx, ty)}
       end
 

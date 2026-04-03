@@ -29,8 +29,6 @@ defmodule Arena.Map.MapServer do
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
-  @map_width 100
-  @map_height 100
   @autosave_interval_ms 60_000
   @npc_ai_tick_ms 500
   @regen_tick_ms 3000
@@ -63,8 +61,8 @@ defmodule Arena.Map.MapServer do
   @doc "Find a random walkable tile on the map."
   def random_spawn(map_id) do
     Enum.find_value(1..200, {50, 50}, fn _ ->
-      x = :rand.uniform(@map_width)
-      y = :rand.uniform(@map_height)
+      x = :rand.uniform(Helpers.map_width())
+      y = :rand.uniform(Helpers.map_height())
       if TileGrid.is_walkable(map_id, x, y), do: {x, y}
     end)
   end
@@ -166,7 +164,7 @@ defmodule Arena.Map.MapServer do
 
           visibility_mode = Application.get_env(:arena, :visibility_mode, :aoi_grid)
 
-          occupancy = :array.new(@map_width * @map_height, default: nil)
+          occupancy = :array.new(Helpers.map_width() * Helpers.map_height(), default: nil)
           {npcs_live, npc_char_indices, occupancy, next_idx} =
             spawn_npcs(map_data.npcs, map_id, occupancy)
 
@@ -526,8 +524,8 @@ defmodule Arena.Map.MapServer do
 
   defp find_spawn_point(map_id) do
     Enum.find_value(1..200, {50, 50}, fn _ ->
-      x = :rand.uniform(@map_width)
-      y = :rand.uniform(@map_height)
+      x = :rand.uniform(Helpers.map_width())
+      y = :rand.uniform(Helpers.map_height())
       if TileGrid.is_walkable(map_id, x, y), do: {x, y}
     end)
   end
@@ -543,7 +541,7 @@ defmodule Arena.Map.MapServer do
               nx = x + dx
               ny = y + dy
 
-              if nx >= 1 and nx <= @map_width and ny >= 1 and ny <= @map_height and
+              if nx >= 1 and nx <= Helpers.map_width() and ny >= 1 and ny <= Helpers.map_height() and
                    TileGrid.is_walkable(state.map_id, nx, ny) and
                    Helpers.get_occupancy(state.occupancy, nx, ny) == nil do
                 {nx, ny}
@@ -563,7 +561,7 @@ defmodule Arena.Map.MapServer do
           x = npc_spawn.x
           y = npc_spawn.y
 
-          if x >= 1 and x <= @map_width and y >= 1 and y <= @map_height and
+          if x >= 1 and x <= Helpers.map_width() and y >= 1 and y <= Helpers.map_height() and
              TileGrid.is_walkable(map_id, x, y) and :array.get(Helpers.occ_index(x, y), occ) == nil do
             instance_id = next_idx
             entity = NpcEntity.from_def(npc_def, instance_id, next_idx, x, y)
@@ -605,7 +603,7 @@ defmodule Arena.Map.MapServer do
     alias Arena.Map.CsmParser.MapData
 
     tiles =
-      for y <- 1..@map_height, x <- 1..@map_width do
+      for y <- 1..Helpers.map_height(), x <- 1..Helpers.map_width() do
         if x >= 38 and x <= 62 and y >= 38 and y <= 62, do: 0, else: 0x0F
       end
 

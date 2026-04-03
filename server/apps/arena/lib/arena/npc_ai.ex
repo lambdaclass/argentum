@@ -6,11 +6,10 @@ defmodule Arena.NpcAi do
 
   alias Arena.Combat
   alias Arena.Data.GameData
+  alias Arena.Map.Helpers
   alias AoProtocol.Server.Encoder
 
   @aggro_range 10
-  @map_width 100
-  @map_height 100
 
   @doc "Process one AI tick for all NPCs on this map."
   def tick(state) do
@@ -44,7 +43,7 @@ defmodule Arena.NpcAi do
     y = npc.spawn_y
 
     # Check if spawn tile is free
-    if get_occupancy(state.occupancy, x, y) == nil do
+    if Helpers.get_occupancy(state.occupancy, x, y) == nil do
       hp = if npc_def do
         if npc_def.max_hp > npc_def.min_hp, do: Enum.random(npc_def.min_hp..npc_def.max_hp), else: npc_def.max_hp
       else
@@ -58,7 +57,7 @@ defmodule Arena.NpcAi do
         next_move_at: -1_000_000_000_000
       }
 
-      occupancy = set_occupancy(state.occupancy, x, y, {:npc, instance_id})
+      occupancy = Helpers.set_occupancy(state.occupancy, x, y, {:npc, instance_id})
       state = %{state | occupancy: occupancy}
       state = put_in(state.npcs_live[instance_id], npc)
 
@@ -199,11 +198,11 @@ defmodule Arena.NpcAi do
   end
 
   defp move_npc_to(state, instance_id, npc, nx, ny, next_move_at) do
-    if nx >= 1 and nx <= @map_width and ny >= 1 and ny <= @map_height and
+    if nx >= 1 and nx <= Helpers.map_width() and ny >= 1 and ny <= Helpers.map_height() and
        TileGrid.is_walkable(state.map_id, nx, ny) and
-       get_occupancy(state.occupancy, nx, ny) == nil do
-      occupancy = clear_occupancy(state.occupancy, npc.x, npc.y)
-      occupancy = set_occupancy(occupancy, nx, ny, {:npc, instance_id})
+       Helpers.get_occupancy(state.occupancy, nx, ny) == nil do
+      occupancy = Helpers.clear_occupancy(state.occupancy, npc.x, npc.y)
+      occupancy = Helpers.set_occupancy(occupancy, nx, ny, {:npc, instance_id})
 
       npc = %{npc | x: nx, y: ny, next_move_at: next_move_at}
       state = %{state | occupancy: occupancy}
@@ -376,7 +375,7 @@ defmodule Arena.NpcAi do
             broadcast_to_nearby_players(state, npc.x, npc.y, swing_raw)
 
             # Hit check
-            def_class_id = class_atom_to_id(player.class)
+            def_class_id = Helpers.class_atom_to_id(player.class)
             def_tactics = Map.get(player.skills, :combat_tactics, 50)
             hit_roll = Combat.npc_hit_chance(npc_def.poder_ataque, def_tactics, player.agi, player.level, def_class_id)
 
@@ -445,28 +444,4 @@ defmodule Arena.NpcAi do
     end
   end
 
-  # Occupancy helpers (duplicated from MapServer for purity)
-  defp occ_index(x, y), do: (y - 1) * @map_width + (x - 1)
-
-  defp get_occupancy(occ, x, y) when x >= 1 and x <= @map_width and y >= 1 and y <= @map_height do
-    :array.get(occ_index(x, y), occ)
-  end
-  defp get_occupancy(_occ, _x, _y), do: :out_of_bounds
-
-  defp set_occupancy(occ, x, y, value) when x >= 1 and x <= @map_width and y >= 1 and y <= @map_height do
-    :array.set(occ_index(x, y), value, occ)
-  end
-  defp set_occupancy(occ, _x, _y, _value), do: occ
-
-  defp clear_occupancy(occ, x, y) when x >= 1 and x <= @map_width and y >= 1 and y <= @map_height do
-    :array.set(occ_index(x, y), nil, occ)
-  end
-  defp clear_occupancy(occ, _x, _y), do: occ
-
-  @class_id_map %{
-    mago: 1, clerigo: 2, paladin: 3, cazador: 4, trabajador: 5,
-    guerrero: 6, ladron: 7, bandido: 8, asesino: 9, druida: 10, bardo: 11, pirata: 12
-  }
-
-  defp class_atom_to_id(class_atom), do: Map.get(@class_id_map, class_atom, 6)
 end

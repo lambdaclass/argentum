@@ -41,8 +41,7 @@ defmodule Arena.Map.CsmParser do
     ]
   end
 
-  @map_width 100
-  @map_height 100
+  alias Arena.Map.Helpers
 
   # Block flags from Declares.bas — used by tile grid NIF and movement checks
   # @block_north 0x01
@@ -303,13 +302,13 @@ defmodule Arena.Map.CsmParser do
 
   defp build_tile_grid(sections) do
     # Start with all tiles walkable (0)
-    grid = :array.new(@map_width * @map_height, default: 0)
+    grid = :array.new(Helpers.map_width() * Helpers.map_height(), default: 0)
 
     # Apply blocked tiles
     grid =
       Enum.reduce(sections.blocked, grid, fn %{x: x, y: y, blocked: lados}, grid ->
         if valid_pos?(x, y) do
-          idx = (y - 1) * @map_width + (x - 1)
+          idx = (y - 1) * Helpers.map_width() + (x - 1)
           :array.set(idx, lados, grid)
         else
           grid
@@ -320,7 +319,7 @@ defmodule Arena.Map.CsmParser do
     :array.to_list(grid)
   end
 
-  defp valid_pos?(x, y), do: x >= 1 and x <= @map_width and y >= 1 and y <= @map_height
+  defp valid_pos?(x, y), do: x >= 1 and x <= Helpers.map_width() and y >= 1 and y <= Helpers.map_height()
 
   # ---- Binary reading helpers ----
   # VB6 Binary Get reads strings as 2-byte length prefix + bytes
