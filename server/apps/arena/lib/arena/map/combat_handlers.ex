@@ -280,7 +280,7 @@ defmodule Arena.Map.CombatHandlers do
             players = Map.put(state.players, char_id, entity)
             %{state | players: players}
 
-          state.safe_zone and not faction_pvp_exception?(state.map_id, entity, defender) ->
+          state.meta.safe_zone and not faction_pvp_exception?(state.map_id, entity, defender) ->
             Helpers.send_to_session(state.sessions, char_id, {:send_raw,
               Encoder.encode({:console_msg, %{message: "Zona segura.", font_index: 0}})})
             players = Map.put(state.players, char_id, entity)

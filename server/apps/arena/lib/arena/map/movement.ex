@@ -181,7 +181,7 @@ defmodule Arena.Map.Movement do
   Returns `{state, transferring?}`.
   """
   def check_tile_exit(state, char_id, entity, x, y) do
-    case Map.get(state.tile_exit_map, {x, y}) do
+    case Map.get(state.meta.tile_exit_map, {x, y}) do
       nil ->
         {state, false}
 

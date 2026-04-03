@@ -170,9 +170,8 @@ defmodule Arena.Map.MapServer do
           # Build O(1) tile exit map from list
           tile_exit_map = Map.new(map_data.tile_exits, fn ex -> {{ex.x, ex.y}, ex} end)
 
-          state = %{
-            map_id: map_id,
-            loading: false,
+          # Static metadata — never changes after init
+          meta = %{
             name: map_data.map_name,
             zone: map_data.zone,
             terrain: map_data.terrain,
@@ -185,7 +184,13 @@ defmodule Arena.Map.MapServer do
             objects: map_data.objects,
             tile_exits: map_data.tile_exits,
             tile_exit_map: tile_exit_map,
-            triggers: map_data.triggers,
+            triggers: map_data.triggers
+          }
+
+          state = %{
+            map_id: map_id,
+            loading: false,
+            meta: meta,
             players: %{},
             sessions: %{},
             monitors: %{},
@@ -227,7 +232,7 @@ defmodule Arena.Map.MapServer do
 
   @impl true
   def handle_call({:enter, %PlayerEntity{} = entity, opts}, {caller_pid, _}, state) do
-    with :ok <- Helpers.check_map_restriction(state.restrict_mode, entity) do
+    with :ok <- Helpers.check_map_restriction(state.meta.restrict_mode, entity) do
       do_enter(state, entity, opts, caller_pid)
     else
       {:error, reason} ->
@@ -320,13 +325,13 @@ defmodule Arena.Map.MapServer do
   def handle_call(:get_info, _from, state) do
     info = %{
       map_id: state.map_id,
-      name: state.name,
-      zone: state.zone,
-      terrain: state.terrain,
-      safe_zone: state.safe_zone,
-      npc_count: length(state.npcs),
-      object_count: length(state.objects),
-      exit_count: length(state.tile_exits)
+      name: state.meta.name,
+      zone: state.meta.zone,
+      terrain: state.meta.terrain,
+      safe_zone: state.meta.safe_zone,
+      npc_count: length(state.meta.npcs),
+      object_count: length(state.meta.objects),
+      exit_count: length(state.meta.tile_exits)
     }
     {:reply, info, state}
   end
@@ -339,20 +344,20 @@ defmodule Arena.Map.MapServer do
       Enum.map(layer, fn %{x: x, y: y, grh_index: grh} -> [x, y, grh] end)
     end
 
-    [l1, l2, l3, l4] = state.layers
+    [l1, l2, l3, l4] = state.meta.layers
 
     data = %{
       map_id: state.map_id,
-      name: state.name,
+      name: state.meta.name,
       width: 100,
       height: 100,
       tiles: tiles,
-      music_hi: state.music_hi,
-      music_low: state.music_low,
+      music_hi: state.meta.music_hi,
+      music_low: state.meta.music_low,
       layers: [encode_layer.(l1), encode_layer.(l2), encode_layer.(l3), encode_layer.(l4)],
-      npcs: Enum.map(state.npcs, fn npc -> %{x: npc.x, y: npc.y, id: npc.npc_index} end),
-      objects: Enum.map(state.objects, fn obj -> %{x: obj.x, y: obj.y, id: obj.obj_index, amount: obj.amount} end),
-      exits: Enum.map(state.tile_exits, fn ex -> %{x: ex.x, y: ex.y, dest_map: ex.dest_map, dest_x: ex.dest_x, dest_y: ex.dest_y} end)
+      npcs: Enum.map(state.meta.npcs, fn npc -> %{x: npc.x, y: npc.y, id: npc.npc_index} end),
+      objects: Enum.map(state.meta.objects, fn obj -> %{x: obj.x, y: obj.y, id: obj.obj_index, amount: obj.amount} end),
+      exits: Enum.map(state.meta.tile_exits, fn ex -> %{x: ex.x, y: ex.y, dest_map: ex.dest_map, dest_x: ex.dest_x, dest_y: ex.dest_y} end)
     }
     {:reply, data, state}
   end
