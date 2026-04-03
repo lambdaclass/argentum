@@ -8,9 +8,12 @@ defmodule Arena.Map.MapServer do
 
   Handler logic is delegated to domain modules:
   - `Arena.Map.Movement` — walk, heading, tile exits
-  - `Arena.Map.CombatHandlers` — attack, spells, buffs
+  - `Arena.Map.CombatHandlers` — attack, spells, buffs, regen
   - `Arena.Map.InventoryHandlers` — pick up, drop, equip, use item
-  - `Arena.Map.CommerceHandlers` — NPC shop, bank, user trade, chat, stats
+  - `Arena.Map.Commerce` — NPC shopkeeper
+  - `Arena.Map.Bank` — banking
+  - `Arena.Map.Trade` — user-to-user trade
+  - `Arena.Map.Social` — chat, rest, meditate, heal, stats, NPC interaction
   - `Arena.Map.Visibility` — spatial grid, AoI broadcasts, visible sets
   - `Arena.Map.Helpers` — shared utilities (occupancy, packets, conversions)
   """
