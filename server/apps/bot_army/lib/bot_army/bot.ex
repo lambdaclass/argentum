@@ -215,16 +215,23 @@ defmodule BotArmy.Bot do
 
   # --- Packet builders ---
 
-  # Login (ID 73): packet_id(Int16) + session_token(String8) + char_id(Int32) + version(3xInt8) + md5(String8)
+  # Login new char (ID 74): packet_id(Int16) + password(String8) + name(String8) + version(3xInt8) + md5(String8)
+  #   + race(Int8) + gender(Int8) + class(Int8) + head(Int16) + home_city(Int8)
   defp build_login(char_id) do
-    token = "bot_token_#{char_id}"
+    name = "Bot_#{char_id}"
+    password = "bot_pass_#{char_id}"
     md5 = "botmd5"
 
-    <<73::little-signed-16>> <>
-      write_string8(token) <>
-      <<char_id::little-signed-32>> <>
+    <<74::little-signed-16>> <>
+      write_string8(password) <>
+      write_string8(name) <>
       <<1::unsigned-8, 0::unsigned-8, 0::unsigned-8>> <>
-      write_string8(md5)
+      write_string8(md5) <>
+      <<1::unsigned-8>> <>
+      <<1::unsigned-8>> <>
+      <<6::unsigned-8>> <>
+      <<1::little-signed-16>> <>
+      <<1::unsigned-8>>
   end
 
   # Walk (ID 78): packet_id(Int16) + heading(Int8) + packet_count(Int32)
@@ -240,14 +247,14 @@ defmodule BotArmy.Bot do
     <<78::little-signed-16, heading::unsigned-8, 1::little-signed-32>>
   end
 
-  # Talk (ID 75): packet_id(Int16) + message(String8)
+  # Talk (ID 75): packet_id(Int16) + message(String8) + packet_count(Int32)
   defp build_talk(message) do
-    <<75::little-signed-16>> <> write_string8(message)
+    <<75::little-signed-16>> <> write_string8(message) <> <<1::little-signed-32>>
   end
 
-  # Attack (ID 80): packet_id(Int16)
+  # Attack (ID 80): packet_id(Int16) + packet_count(Int32)
   defp build_attack do
-    <<80::little-signed-16>>
+    <<80::little-signed-16, 1::little-signed-32>>
   end
 
   defp write_string8(str) do

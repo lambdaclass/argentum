@@ -21,6 +21,9 @@ defmodule Arena.Data.ItemDef do
     min_modificador: 0,
     max_modificador: 0,
     porcentaje: 0,
+    max_elv: 0,
+    dos_manos: false,
+    newbie: false,
     stackable: false,
     equip_slot: nil,
     forbidden_classes: nil,
@@ -28,7 +31,11 @@ defmodule Arena.Data.ItemDef do
     gender_restriction: :any,
     destruye: false,
     proyectil: 0,
-    municion_type: 0
+    municion_type: 0,
+    intirable: true,
+    instransferible: false,
+    staff_power: 0,
+    staff_damage_bonus: 0
   ]
 
   @stackable_types [1, 5, 11, 13, 32, 33, 34]
@@ -67,6 +74,9 @@ defmodule Arena.Data.ItemDef do
       min_def: parse_int(section["mindef"]),
       max_def: parse_int(section["maxdef"]),
       min_elv: parse_int(section["minelv"]),
+      max_elv: parse_int(section["maxelv"]),
+      dos_manos: parse_int(section["dosmanos"]) == 1,
+      newbie: parse_int(section["newbie"]) == 1,
       min_ham: parse_int(section["minham"]),
       min_sed: parse_int(section["minsed"]),
       tipo_pocion: parse_int(section["tipopocion"]),
@@ -80,7 +90,11 @@ defmodule Arena.Data.ItemDef do
       gender_restriction: parse_gender(section),
       destruye: parse_int(section["destruye"]) == 1,
       proyectil: parse_int(section["proyectil"]),
-      municion_type: parse_int(section["municiontype"])
+      municion_type: parse_int(section["municiontype"]),
+      intirable: section["intirable"] == nil or parse_int(section["intirable"]) != 0,
+      instransferible: parse_int(section["instransferible"]) == 1,
+      staff_power: parse_int(section["staffpower"]),
+      staff_damage_bonus: parse_int(section["staffdamagebonus"])
     }
   end
 

@@ -1,5 +1,6 @@
 import { BinaryReader } from "./BinaryReader";
-import type { CharacterCreatePacket, ServerPacket, SkillEntry } from "../app/types";
+import type { CharacterCreatePacket, ServerPacket, SkillEntry, TradeOfferSlot } from "../app/types";
+import { getSpellMetadata } from "../data/gameData";
 
 function decodeCharacterCreate(reader: BinaryReader): CharacterCreatePacket {
   const charIndex = reader.readInt16();
@@ -29,7 +30,7 @@ function decodeCharacterCreate(reader: BinaryReader): CharacterCreatePacket {
 
   const speed = reader.readFloat32();
 
-  reader.readUint8();
+  const isNpc = reader.readUint8() !== 0;
   reader.readUint8();
   reader.readInt16();
   reader.readInt16();
@@ -59,7 +60,8 @@ function decodeCharacterCreate(reader: BinaryReader): CharacterCreatePacket {
     minHp,
     maxHp,
     minMana,
-    maxMana
+    maxMana,
+    isNpc
   };
 }
 
@@ -67,6 +69,33 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
   switch (packetId) {
     case 2:
       return { type: "logged", newUser: reader.readBool() };
+
+    case 8:
+      return { type: "commerce_end" };
+
+    case 10:
+      return { type: "commerce_init", npcName: reader.readString8() };
+
+    case 12:
+      return { type: "user_commerce_init" };
+
+    case 16:
+      return { type: "npc_kill_user" };
+
+    case 17:
+      return { type: "blocked_with_shield_user" };
+
+    case 18:
+      return { type: "blocked_with_shield_other", charIndex: reader.readInt16() };
+
+    case 19:
+      return { type: "char_swing", charIndex: reader.readInt16() };
+
+    case 20:
+      return { type: "safe_mode_on" };
+
+    case 21:
+      return { type: "safe_mode_off" };
 
     case 25:
       return { type: "update_stamina", current: reader.readInt16() };
@@ -105,6 +134,29 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
     case 31:
       return { type: "pos_update", x: reader.readUint8(), y: reader.readUint8() };
 
+    case 32:
+      return {
+        type: "npc_hit_user",
+        target: reader.readUint8(),
+        damage: reader.readInt16()
+      };
+
+    case 33:
+      return {
+        type: "user_hitted_by_user",
+        charIndex: reader.readInt16(),
+        target: reader.readUint8(),
+        damage: reader.readInt16()
+      };
+
+    case 34:
+      return {
+        type: "user_hitted_user",
+        charIndex: reader.readInt16(),
+        target: reader.readUint8(),
+        damage: reader.readInt16()
+      };
+
     case 35:
     {
       const message = reader.readString8();
@@ -138,8 +190,12 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
         character: decodeCharacterCreate(reader)
       };
 
-    case 43:
-      return { type: "character_remove", charIndex: reader.readInt16() };
+    case 43: {
+      const charIndex = reader.readInt16();
+      reader.readBool(); // desvanecido
+      reader.readBool(); // fue_warp
+      return { type: "character_remove", charIndex };
+    }
 
     case 44:
       return {
@@ -155,12 +211,21 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
     case 47:
       return { type: "user_char_index_in_server", charIndex: reader.readInt16() };
 
-    case 49:
-      return {
-        type: "character_change_heading",
-        charIndex: reader.readInt16(),
-        heading: reader.readUint8()
-      };
+    case 49: {
+      const charIndex = reader.readInt16();
+      reader.readUint8(); // flags
+      const bodyId = reader.readInt16();
+      const headId = reader.readInt16();
+      const heading = reader.readUint8();
+      reader.readInt16(); // weapon_id
+      reader.readInt16(); // shield_id
+      reader.readInt16(); // helmet_id
+      reader.readInt16(); // cart_id
+      reader.readInt16(); // backpack_id
+      reader.readInt16(); // fx
+      reader.readInt16(); // fx_loops
+      return { type: "character_change", charIndex, bodyId, headId, heading };
+    }
 
     case 50:
     {
@@ -177,6 +242,56 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
 
     case 52:
       return { type: "object_delete", x: reader.readUint8(), y: reader.readUint8() };
+
+    case 55:
+      return {
+        type: "play_wave",
+        wav: reader.readInt16(),
+        x: reader.readUint8(),
+        y: reader.readUint8(),
+        cancelLast: reader.readUint8() !== 0,
+        localize: reader.readUint8() !== 0
+      };
+
+    case 60:
+      return {
+        type: "create_fx",
+        charIndex: reader.readInt16(),
+        fxId: reader.readInt16(),
+        loops: reader.readInt16(),
+        x: reader.readUint8(),
+        y: reader.readUint8()
+      };
+
+    case 61: {
+      const hpMax = reader.readInt16();
+      const hpCurrent = reader.readInt16();
+      reader.readInt32(); // shield
+      const manaMax = reader.readInt16();
+      const manaCurrent = reader.readInt16();
+      const staminaMax = reader.readInt16();
+      const staminaCurrent = reader.readInt16();
+      const gold = reader.readInt32();
+      reader.readInt32(); // gold_cap
+      const level = reader.readUint8();
+      const nextXp = reader.readInt32();
+      const currentXp = reader.readInt32();
+      reader.readUint8(); // class
+
+      return {
+        type: "update_user_stats",
+        hpCurrent,
+        hpMax,
+        manaCurrent,
+        manaMax,
+        staminaCurrent,
+        staminaMax,
+        gold,
+        level,
+        currentXp,
+        nextXp
+      };
+    }
 
     case 63: {
       const slotIndex = reader.readUint8() - 1;
@@ -207,17 +322,61 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
     case 66: {
       const slotIndex = reader.readUint8() - 1;
       const spellId = reader.readInt16();
-      const name = reader.readString8();
+      reader.readInt16(); // index (same as spellId or -1)
+      reader.readBool(); // is_bindable
 
       return {
         type: "change_spell_slot",
         slotIndex,
-        slot: spellId <= 0 ? null : { spellId, name }
+        slot: spellId <= 0 ? null : { spellId, name: getSpellMetadata(spellId)?.name ?? `Spell ${spellId}` }
       };
     }
 
     case 73:
       return { type: "error_msg", message: reader.readString8() };
+
+    case 77: {
+      const slotIndex = reader.readUint8() - 1;
+      const itemId = reader.readInt16();
+      const amount = reader.readInt16();
+      const price = reader.readFloat32();
+      const elementalTags = reader.readInt32();
+      const canUse = reader.readUint8();
+
+      return {
+        type: "change_npc_inventory_slot",
+        slotIndex,
+        slot:
+          itemId === 0 || amount === 0
+            ? null
+            : {
+                itemId,
+                amount,
+                price,
+                elementalTags,
+                canUse
+              }
+      };
+    }
+
+    case 100: {
+      const myOffer = reader.readBool();
+      const gold = reader.readInt32();
+      const items: Array<TradeOfferSlot | null> = [];
+
+      for (let index = 0; index < 10; index += 1) {
+        const itemId = reader.readInt16();
+        const amount = reader.readInt32();
+        items.push(itemId > 0 && amount > 0 ? { itemId, amount } : null);
+      }
+
+      return {
+        type: "change_user_trade_slot",
+        myOffer,
+        gold,
+        items
+      };
+    }
 
     case 78: {
       reader.readUint8();
@@ -226,6 +385,27 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
       const hunger = reader.readUint8();
 
       return { type: "update_hunger_and_thirst", hunger, thirst };
+    }
+
+    case 79: {
+      reader.readInt32(); // ciudadanos_matados
+      reader.readInt32(); // criminales_matados
+      const factionStatus = reader.readUint8();
+      reader.readInt32(); // npcs_killed
+      const classId = reader.readUint8();
+      reader.readInt32(); // penalty
+      reader.readInt32(); // deaths
+      const genderId = reader.readUint8();
+      reader.readInt32(); // fishing_points
+      const raceId = reader.readUint8();
+
+      return {
+        type: "mini_stats",
+        classId,
+        raceId,
+        genderId,
+        factionStatus
+      };
     }
 
     case 80:
@@ -267,6 +447,9 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
           token: reader.readString8()
         }
       };
+
+    case 13:
+      return { type: "user_commerce_end" };
 
     default:
       return { type: "unknown", packetId };

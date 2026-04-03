@@ -14,6 +14,7 @@
 - `Missing` — not started
 
 **Phase snapshot:**
+- `Compatibility — AO20 Wire Parity`: `Partially done`
 - `Foundation — Rendering & Assets`: `Partially done`
 - `Foundation — Login & Session`: `Partially done`
 - `Phase 1 — Map Transitions`: `Partially done`
@@ -39,6 +40,40 @@
 - **The server is authoritative.** The client renders state and sends intents; it does not compute gameplay truth for movement, combat, inventory, or NPC interaction.
 - **Web auth is a bootstrap layer, not a different game protocol.** If the browser uses username/password, that flow must end by obtaining the same character identity / session credentials needed to start the AO20 session.
 - **The web client is the primary development client.** The VB6 client remains the protocol compatibility reference, but the web client is where players will actually play.
+- **Convenience must not mutate the wire contract.** Better UX, richer UI state, and browser-specific auth are fine, but gameplay packets must stay byte-compatible with the VB6 client/server contract.
+
+---
+
+## Compatibility — AO20 Wire Parity
+
+**Status:** `Partially done`
+
+This is a cross-cutting gate, not just another UI phase. The web client is not
+allowed to invent a parallel gameplay protocol.
+
+**Done means:**
+- Every implemented gameplay packet matches the VB6 packet ID, payload shape, and byte order.
+- The web client encode/decode layer can be checked packet-for-packet against VB6 sources and fixtures.
+- Any browser-only auth/bootstrap flow ends before normal AO20 gameplay packets begin.
+- UI features do not depend on packet shapes that the VB6 client would not understand.
+
+**Current backlog:**
+- Keep the web encoder/decoder aligned as the server closes protocol gaps, especially around:
+  - `talk`
+  - `whisper`
+  - `attack`
+  - `drop`
+  - `cast_spell`
+  - `left_click`
+  - `use_item`
+  - `equip_item`
+  - `change_spell_slot`
+  - commerce/shop packet families
+- Add explicit protocol conformance tests using VB6 packet fixtures, not just ad hoc web-client expectations.
+- Keep any web-only extension isolated from AO20 gameplay bytes.
+
+No client phase should be considered complete if it depends on a packet shape
+that diverges from the VB6 contract.
 
 ---
 

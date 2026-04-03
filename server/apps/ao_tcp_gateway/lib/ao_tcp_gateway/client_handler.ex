@@ -69,7 +69,9 @@ defmodule AoTcpGateway.ClientHandler do
         loop(state)
 
       {:autosave, entity} ->
-        SessionLogic.autosave(entity)
+        if entity.map_id == state.map_id do
+          SessionLogic.autosave(entity)
+        end
         loop(state)
     end
   end

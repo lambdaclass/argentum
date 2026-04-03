@@ -65,15 +65,25 @@ defmodule Arena.Entity.PlayerEntity do
     # Buffs/debuffs: [%{type, remaining_ms, value}, ...]
     buffs: [],
 
+    # Base min/max hit (character level-based damage, VB6: MinHIT/MaxHIT)
+    min_hit: 0,
+    max_hit: 0,
+
+    # Attribute buff modifiers (from spells, temporary)
+    str_buff: 0,
+    agi_buff: 0,
+
     # Flags
     dead: false,
     poisoned: false,
     criminal: false,
     invisible: false,
     paralyzed: false,
+    immobilized: false,
     meditating: false,
     resting: false,
     safe_mode: false,
+    navigating: false,
     gm: false,
 
     # Cooldowns use System.monotonic_time(:millisecond).
@@ -82,6 +92,8 @@ defmodule Arena.Entity.PlayerEntity do
     next_attack_at: -1_000_000_000_000,
     next_spell_at: -1_000_000_000_000,
     next_item_use_at: -1_000_000_000_000,
+    # VB6: per-spell-slot cooldowns — %{spell_slot => next_cast_at_ms}
+    spell_cooldowns: %{},
 
     # Speed hack detection
     last_step_at: -1_000_000_000_000,
@@ -95,6 +107,16 @@ defmodule Arena.Entity.PlayerEntity do
     map_id: nil,
 
     # Transient: NPC id of open shop (not persisted)
-    commerce_npc_id: nil
+    commerce_npc_id: nil,
+    # Transient: NPC id of open bank (not persisted)
+    bank_npc_id: nil,
+    # Transient: bank gold loaded during bank session
+    bank_gold: 0,
+    # Transient: user-to-user trade state (not persisted)
+    trade_request_target: nil,
+    trade_partner_id: nil,
+    trade_offer_gold: 0,
+    trade_offer_items: [],
+    trade_accepted: false
   ]
 end

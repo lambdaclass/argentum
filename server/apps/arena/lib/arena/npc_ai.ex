@@ -64,7 +64,7 @@ defmodule Arena.NpcAi do
 
       # Broadcast NPC creation to nearby players
       if npc_def do
-        raw = Encoder.encode(Arena.Map.MapServer.npc_create_packet(npc, npc_def))
+        raw = Encoder.encode(Arena.Map.Helpers.npc_create_packet(npc, npc_def))
         broadcast_to_nearby_players(state, x, y, raw)
       end
 
@@ -282,7 +282,7 @@ defmodule Arena.NpcAi do
         {:player, tid} -> case Map.get(state.players, tid) do nil -> npc.char_index; p -> p.char_index end
         {:self, _} -> npc.char_index
       end
-      fx_raw = Encoder.encode({:create_fx, %{char_index: fx_char, fx: spell_def.fx_grh, loops: spell_def.loops}})
+      fx_raw = Encoder.encode({:create_fx, %{char_index: fx_char, fx: spell_def.fx_grh, loops: spell_def.loops, x: npc.x, y: npc.y}})
       broadcast_to_nearby_players(state, npc.x, npc.y, fx_raw)
     end
 
@@ -327,7 +327,7 @@ defmodule Arena.NpcAi do
                 player = %{player | hp: new_hp}
                 pid = Map.get(state.sessions, target_id)
                 if pid do
-                  send(pid, {:send_raw, Encoder.encode({:npc_hit_user, %{char_index: npc.char_index, damage: damage}})})
+                  send(pid, {:send_raw, Encoder.encode({:npc_hit_user, %{damage: damage}})})
                   send(pid, {:send_raw, Encoder.encode({:update_hp, %{min_hp: new_hp}})})
                 end
                 player = if new_hp <= 0 do
@@ -393,7 +393,7 @@ defmodule Arena.NpcAi do
               # Send damage to player
               pid = Map.get(state.sessions, npc.target_id)
               if pid do
-                send(pid, {:send_raw, Encoder.encode({:npc_hit_user, %{char_index: npc.char_index, damage: final_damage}})})
+                send(pid, {:send_raw, Encoder.encode({:npc_hit_user, %{damage: final_damage}})})
                 send(pid, {:send_raw, Encoder.encode({:update_hp, %{min_hp: new_hp}})})
               end
 

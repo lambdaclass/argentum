@@ -90,12 +90,7 @@ defmodule AoTcpGateway.SessionLogic do
         {state, packets} = enter_world(state, account_id, entity)
 
         if state.character_id do
-          token_packets =
-            if is_binary(character.session_token),
-              do: [{:session_token, %{char_id: char_id, token: character.session_token}}],
-              else: []
-
-          {state, packets ++ token_packets}
+          {state, packets}
         else
           AoSession.unregister(char_id)
           {state, packets}
@@ -302,6 +297,153 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
+  # ---- Banking ----
+
+  def handle_command(state, {:bank_start, _}) when state.character_id != nil do
+    Arena.Map.MapServer.open_bank(state.map_id, state.character_id, state.target_x, state.target_y)
+    {state, []}
+  end
+
+  def handle_command(state, {:bank_deposit, %{slot: slot, amount: amount, slot_destino: slot_destino}})
+      when state.character_id != nil do
+    Arena.Map.MapServer.bank_deposit(state.map_id, state.character_id, slot, amount, slot_destino)
+    {state, []}
+  end
+
+  def handle_command(state, {:bank_extract_item, %{slot: slot, amount: amount, slot_destino: slot_destino}})
+      when state.character_id != nil do
+    Arena.Map.MapServer.bank_extract_item(state.map_id, state.character_id, slot, amount, slot_destino)
+    {state, []}
+  end
+
+  def handle_command(state, {:bank_deposit_gold, %{amount: amount}})
+      when state.character_id != nil do
+    Arena.Map.MapServer.bank_deposit_gold(state.map_id, state.character_id, amount)
+    {state, []}
+  end
+
+  def handle_command(state, {:bank_extract_gold, %{amount: amount}})
+      when state.character_id != nil do
+    Arena.Map.MapServer.bank_extract_gold(state.map_id, state.character_id, amount)
+    {state, []}
+  end
+
+  def handle_command(state, {:bank_end, _}) when state.character_id != nil do
+    Arena.Map.MapServer.bank_end(state.map_id, state.character_id)
+    {state, []}
+  end
+
+  def handle_command(state, {:yell, %{message: message}}) when state.character_id != nil do
+    Arena.Map.MapServer.yell(state.map_id, state.character_id, message)
+    {state, []}
+  end
+
+  def handle_command(state, {:whisper, %{target_name: target_name, message: message}})
+      when state.character_id != nil do
+    # Whisper is cross-map: resolve target via OnlineDirectory, send directly to their session
+    case AoSession.OnlineDirectory.lookup_by_name(target_name) do
+      {:ok, _target_char_id, target_info} ->
+        # Look up sender name
+        sender_name =
+          case AoSession.OnlineDirectory.lookup_by_id(state.character_id) do
+            {:ok, info} -> info.name
+            :not_found -> "?"
+          end
+
+        whisper_msg = "#{sender_name} te dice: #{message}"
+        send(target_info.session_pid, {:send_raw,
+          AoProtocol.Server.Encoder.encode({:console_msg, %{message: whisper_msg, font_index: 5}})})
+
+        # Confirm to sender
+        confirm_msg = "Le dices a #{target_name}: #{message}"
+        {state, [{:console_msg, %{message: confirm_msg, font_index: 5}}]}
+
+      :not_found ->
+        {state, [{:console_msg, %{message: "Jugador no encontrado.", font_index: 0}}]}
+    end
+  end
+
+  def handle_command(state, {:rest, _}) when state.character_id != nil do
+    Arena.Map.MapServer.rest(state.map_id, state.character_id)
+    {state, []}
+  end
+
+  def handle_command(state, {:meditate, _}) when state.character_id != nil do
+    Arena.Map.MapServer.meditate(state.map_id, state.character_id)
+    {state, []}
+  end
+
+  def handle_command(state, {:heal, _}) when state.character_id != nil do
+    Arena.Map.MapServer.heal(state.map_id, state.character_id)
+    {state, []}
+  end
+
+  def handle_command(state, {:resucitate, _}) when state.character_id != nil do
+    Arena.Map.MapServer.resucitate(state.map_id, state.character_id)
+    {state, []}
+  end
+
+  def handle_command(state, {:request_atributes, _}) when state.character_id != nil do
+    Arena.Map.MapServer.request_atributes(state.map_id, state.character_id)
+    {state, []}
+  end
+
+  def handle_command(state, {:request_skills, _}) when state.character_id != nil do
+    Arena.Map.MapServer.request_skills(state.map_id, state.character_id)
+    {state, []}
+  end
+
+  def handle_command(state, {:request_mini_stats, _}) when state.character_id != nil do
+    Arena.Map.MapServer.request_mini_stats(state.map_id, state.character_id)
+    {state, []}
+  end
+
+  def handle_command(state, {:double_click, %{x: x, y: y}}) when state.character_id != nil do
+    Arena.Map.MapServer.double_click(state.map_id, state.character_id, x, y)
+    {state, []}
+  end
+
+  def handle_command(state, {:online, _}) when state.character_id != nil do
+    # VB6: /online is GM-only. Check GM flag from entity snapshot.
+    case Arena.Map.MapServer.snapshot_entity(state.map_id, state.character_id) do
+      {:ok, entity} when entity.gm ->
+        count = AoSession.OnlineDirectory.online_count()
+        {state, [{:console_msg, %{message: "Jugadores en linea: #{count}", font_index: 0}}]}
+
+      _ ->
+        {state, [{:console_msg, %{message: "Comando deshabilitado.", font_index: 0}}]}
+    end
+  end
+
+  # ---- User-to-user trade ----
+
+  def handle_command(state, {:user_commerce_offer, %{obj_index: obj_index, amount: amount}})
+      when state.character_id != nil do
+    Arena.Map.MapServer.user_trade_offer(state.map_id, state.character_id, obj_index, amount)
+    {state, []}
+  end
+
+  def handle_command(state, {:user_commerce_ok, _}) when state.character_id != nil do
+    Arena.Map.MapServer.user_trade_accept(state.map_id, state.character_id)
+    {state, []}
+  end
+
+  def handle_command(state, {:user_commerce_reject, _}) when state.character_id != nil do
+    Arena.Map.MapServer.user_trade_reject(state.map_id, state.character_id)
+    {state, []}
+  end
+
+  def handle_command(state, {:user_commerce_end, _}) when state.character_id != nil do
+    Arena.Map.MapServer.user_trade_end(state.map_id, state.character_id)
+    {state, []}
+  end
+
+  # VB6: use_spell_macro — client-side macro casts via cast_spell;
+  # this packet is a no-op on the server (no payload to act on).
+  def handle_command(state, {:use_spell_macro, _}) when state.character_id != nil do
+    {state, []}
+  end
+
   def handle_command(state, {command_type, _}) do
     Logger.debug("Unhandled command: #{command_type}")
     {state, []}
@@ -465,14 +607,11 @@ defmodule AoTcpGateway.SessionLogic do
     |> Enum.with_index(1)
     |> Enum.flat_map(fn
       {spell_id, slot} when is_integer(spell_id) and spell_id > 0 ->
-        spell_name = Arena.Data.GameData.get_spell_name(spell_id) || "Hechizo #{spell_id}"
-
         [
           {:change_spell_slot,
            %{
              slot: slot,
-             spell_id: spell_id,
-             spell_name: spell_name
+             spell_id: spell_id
            }}
         ]
 

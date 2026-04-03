@@ -81,6 +81,9 @@ defmodule Arena.Inventory do
           item_def.min_elv > 0 and character_info.level < item_def.min_elv ->
             {:error, :level_too_low}
 
+          item_def.max_elv > 0 and character_info.level > item_def.max_elv ->
+            {:error, :level_too_high}
+
           not class_allowed?(item_def, character_info.class) ->
             {:error, :class_not_allowed}
 
@@ -95,10 +98,19 @@ defmodule Arena.Inventory do
             {new_inventory, unequipped_slots} =
               unequip_slot(inventory, equipment, item_def.equip_slot)
 
+            # VB6: two-handed weapons auto-unequip shield
+            {new_inventory, new_equipment, extra_unequipped} =
+              if item_def.dos_manos and item_def.equip_slot == :weapon do
+                {inv2, slots2} = unequip_slot(new_inventory, equipment, :shield)
+                {inv2, Map.put(equipment, :shield, nil), slots2}
+              else
+                {new_inventory, equipment, []}
+              end
+
             new_item = %{item | equipped: true}
             new_inventory = List.replace_at(new_inventory, slot, new_item)
-            new_equipment = Map.put(equipment, item_def.equip_slot, item.item_id)
-            {:ok, new_inventory, new_equipment, [slot | unequipped_slots]}
+            new_equipment = Map.put(new_equipment, item_def.equip_slot, item.item_id)
+            {:ok, new_inventory, new_equipment, [slot | unequipped_slots ++ extra_unequipped]}
         end
     end
   end

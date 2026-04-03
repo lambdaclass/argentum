@@ -29,6 +29,7 @@ export function HechizosPanel({
   const selectedMetadata =
     selectedSlot == null ? null : getSpellMetadata(selectedSlot.spellId);
   const canCast = connected && selectedSlotIndex != null && selectedSlot != null;
+  const targetTile = state.world.targetTile;
 
   useEffect(() => {
     if (selectedSlot == null) {
@@ -55,7 +56,9 @@ export function HechizosPanel({
         <small>
           {connected
             ? selectedSlot
-              ? "Double-click or use Lanzar to cast the selected spell."
+              ? targetTile
+                ? `Objetivo ${targetTile.x},${targetTile.y} listo para lanzar.`
+                : "Marca un objetivo en el mapa o usa el hechizo sobre ti mismo."
               : "Select a learned spell to inspect or cast it."
             : "Connect first to cast spells from this list."}
         </small>
@@ -141,13 +144,17 @@ export function HechizosPanel({
                 <strong>{selectedMetadata?.manaRequired ?? "--"}</strong>
               </div>
               <div className="selected-slot-item">
-                <span>Objetivo</span>
-                <strong>
-                  {selectedMetadata ? getSpellTargetLabel(selectedMetadata.target) : "Desconocido"}
-                </strong>
-              </div>
+              <span>Objetivo</span>
+              <strong>
+                {selectedMetadata ? getSpellTargetLabel(selectedMetadata.target) : "Desconocido"}
+              </strong>
             </div>
-          </>
+            <div className="selected-slot-item">
+              <span>Tile</span>
+              <strong>{targetTile ? `${targetTile.x},${targetTile.y}` : "--,--"}</strong>
+            </div>
+          </div>
+        </>
         ) : (
           <p className="panel-copy compact">
             Selecciona un hechizo para verlo aqui.

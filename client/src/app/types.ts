@@ -25,6 +25,49 @@ export interface SkillEntry {
   level: number;
 }
 
+export interface TileTarget {
+  x: number;
+  y: number;
+}
+
+export interface CombatTextEvent {
+  id: number;
+  x: number;
+  y: number;
+  text: string;
+  tone: "damage" | "block" | "status" | "info";
+  createdAt: number;
+  ttlMs: number;
+}
+
+export interface WorldFxEvent {
+  id: number;
+  x: number;
+  y: number;
+  fxId: number;
+  loops: number;
+  createdAt: number;
+  ttlMs: number;
+}
+
+export interface MerchantSlot {
+  itemId: number;
+  amount: number;
+  price: number;
+  canUse: number;
+  elementalTags: number;
+}
+
+export interface TradeOfferSlot {
+  itemId: number;
+  amount: number;
+}
+
+export interface TradeOfferState {
+  gold: number;
+  items: Array<TradeOfferSlot | null>;
+}
+
 export interface CharacterView {
   charIndex: number | null;
   name: string;
@@ -49,6 +92,7 @@ export interface RemoteCharacter {
   bodyId: number;
   headId: number;
   speed: number;
+  isNpc: boolean;
 }
 
 export interface MapLayerTile {
@@ -122,9 +166,16 @@ export interface ClientState {
     map: WorldMapData | null;
     groundObjects: Record<string, GroundObject>;
     chatBubbles: ChatBubble[];
+    targetTile: TileTarget | null;
+    combatTexts: CombatTextEvent[];
+    fxEvents: WorldFxEvent[];
     walkIntervalMs: number;
     self: CharacterView;
     others: Record<number, RemoteCharacter>;
+  };
+  combat: {
+    safeMode: boolean;
+    lastEvent: string | null;
   };
   stats: {
     hpCurrent: number;
@@ -147,6 +198,22 @@ export interface ClientState {
   spellbook: {
     slots: Array<SpellSlot | null>;
     selectedSlot: number | null;
+  };
+  commerce: {
+    open: boolean;
+    npcName: string | null;
+    slots: Array<MerchantSlot | null>;
+    selectedSlot: number | null;
+    buyAmount: number;
+    sellAmount: number;
+  };
+  trade: {
+    open: boolean;
+    myOffer: TradeOfferState;
+    otherOffer: TradeOfferState;
+    offerAmount: number;
+    accepted: boolean;
+    partnerAccepted: boolean;
   };
   skills: {
     entries: SkillEntry[];
@@ -171,6 +238,7 @@ export interface CharacterCreatePacket {
   maxHp: number;
   minMana: number;
   maxMana: number;
+  isNpc: boolean;
 }
 
 export type ServerPacket =
@@ -184,7 +252,18 @@ export type ServerPacket =
   | { type: "character_move"; charIndex: number; x: number; y: number }
   | { type: "user_index_in_server"; userIndex: number }
   | { type: "user_char_index_in_server"; charIndex: number }
-  | { type: "character_change_heading"; charIndex: number; heading: number }
+  | { type: "character_change"; charIndex: number; bodyId: number; headId: number; heading: number }
+  | { type: "char_swing"; charIndex: number }
+  | { type: "npc_kill_user" }
+  | { type: "blocked_with_shield_user" }
+  | { type: "blocked_with_shield_other"; charIndex: number }
+  | { type: "npc_hit_user"; target: number; damage: number }
+  | { type: "user_hitted_by_user"; charIndex: number; target: number; damage: number }
+  | { type: "user_hitted_user"; charIndex: number; target: number; damage: number }
+  | { type: "safe_mode_on" }
+  | { type: "safe_mode_off" }
+  | { type: "create_fx"; charIndex: number; fxId: number; loops: number; x: number; y: number }
+  | { type: "play_wave"; wav: number; x: number; y: number; cancelLast: boolean; localize: boolean }
   | {
       type: "change_inventory_slot";
       slotIndex: number;
@@ -203,6 +282,35 @@ export type ServerPacket =
   | { type: "error_msg"; message: string }
   | { type: "session_token"; credentials: SessionCredentials }
   | { type: "change_spell_slot"; slotIndex: number; slot: SpellSlot | null }
+  | { type: "commerce_init"; npcName: string }
+  | { type: "user_commerce_init" }
+  | { type: "user_commerce_end" }
+  | {
+      type: "change_npc_inventory_slot";
+      slotIndex: number;
+      slot: MerchantSlot | null;
+    }
+  | {
+      type: "change_user_trade_slot";
+      myOffer: boolean;
+      gold: number;
+      items: Array<TradeOfferSlot | null>;
+    }
+  | { type: "commerce_end" }
+  | {
+      type: "update_user_stats";
+      hpCurrent: number;
+      hpMax: number;
+      manaCurrent: number;
+      manaMax: number;
+      staminaCurrent: number;
+      staminaMax: number;
+      gold: number;
+      level: number;
+      currentXp: number;
+      nextXp: number;
+    }
+  | { type: "mini_stats"; classId: number; raceId: number; genderId: number; factionStatus: number }
   | { type: "send_skills"; skills: SkillEntry[] }
   | { type: "unknown"; packetId: number };
 
@@ -217,17 +325,22 @@ export type ClientAction =
   | { type: "world/setMapData"; map: WorldMapData; groundObjects: Record<string, GroundObject> }
   | { type: "world/setMapError"; mapId: number; message: string }
   | { type: "world/setWalkInterval"; walkIntervalMs: number }
+  | { type: "world/setTargetTile"; target: TileTarget | null }
   | { type: "world/setCharIndex"; charIndex: number }
   | { type: "world/setSelfPosition"; x: number; y: number }
   | { type: "world/setSelfHeading"; heading: number }
   | { type: "world/upsertCharacter"; character: CharacterCreatePacket; self: boolean }
   | { type: "world/moveOther"; charIndex: number; x: number; y: number }
-  | { type: "world/setOtherHeading"; charIndex: number; heading: number }
+  | { type: "world/setCharacterAppearance"; charIndex: number; bodyId?: number; headId?: number; heading?: number }
   | { type: "world/removeOther"; charIndex: number }
   | { type: "world/upsertGroundObject"; object: GroundObject }
   | { type: "world/removeGroundObject"; x: number; y: number }
   | { type: "world/addChatBubble"; bubble: ChatBubble }
-  | { type: "world/pruneChatBubbles"; now: number }
+  | { type: "world/addCombatText"; event: CombatTextEvent }
+  | { type: "world/addFx"; event: WorldFxEvent }
+  | { type: "world/pruneTransient"; now: number }
+  | { type: "combat/setSafeMode"; safeMode: boolean }
+  | { type: "combat/setLastEvent"; message: string | null }
   | { type: "stats/setHp"; current: number; max?: number }
   | { type: "stats/setMana"; current: number; max?: number }
   | { type: "stats/setStamina"; current: number; max?: number }
@@ -235,10 +348,35 @@ export type ClientAction =
   | { type: "stats/setHungerThirst"; hunger: number; thirst: number }
   | { type: "stats/setLevel"; level: number }
   | { type: "stats/setExp"; current: number; next: number }
+  | {
+      type: "stats/setAll";
+      hpCurrent: number;
+      hpMax: number;
+      manaCurrent: number;
+      manaMax: number;
+      staminaCurrent: number;
+      staminaMax: number;
+      gold: number;
+      level: number;
+      currentXp: number;
+      nextXp: number;
+    }
   | { type: "inventory/setSlot"; slotIndex: number; slot: InventorySlot | null }
   | { type: "inventory/selectSlot"; slotIndex: number | null }
   | { type: "spellbook/setSlot"; slotIndex: number; slot: SpellSlot | null }
   | { type: "spellbook/selectSlot"; slotIndex: number | null }
+  | { type: "commerce/open"; npcName: string }
+  | { type: "commerce/close" }
+  | { type: "commerce/setSlot"; slotIndex: number; slot: MerchantSlot | null }
+  | { type: "commerce/selectSlot"; slotIndex: number | null }
+  | { type: "commerce/setBuyAmount"; amount: number }
+  | { type: "commerce/setSellAmount"; amount: number }
+  | { type: "trade/open" }
+  | { type: "trade/close" }
+  | { type: "trade/setOffer"; which: "mine" | "theirs"; gold: number; items: Array<TradeOfferSlot | null> }
+  | { type: "trade/setOfferAmount"; amount: number }
+  | { type: "trade/markAccepted"; accepted: boolean }
+  | { type: "trade/markPartnerAccepted"; accepted: boolean }
   | { type: "skills/setAll"; entries: SkillEntry[]; source?: "server" }
   | { type: "skills/select"; key: string | null }
   | { type: "log/add"; level: LogLevel; message: string }

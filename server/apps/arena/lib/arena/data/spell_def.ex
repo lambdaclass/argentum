@@ -31,9 +31,22 @@ defmodule Arena.Data.SpellDef do
     sube_ag: 0,
     min_ag: 0,
     max_ag: 0,
+    sube_mana: 0,
+    min_mana: 0,
+    max_mana: 0,
+    sube_sta: 0,
+    min_sta: 0,
+    max_sta: 0,
     duration: 0,
     invoca: 0,
-    work_on_dead: false
+    work_on_dead: false,
+    area_afecta: 0,
+    area_radio: 0,
+    max_level_casteable: 0,
+    need_staff: false,
+    staff_afecta: 0,
+    cooldown: 2,
+    requirement_mask: 0
   ]
 
   @doc "Build a SpellDef from a parsed INI section (downcased keys)."
@@ -66,9 +79,22 @@ defmodule Arena.Data.SpellDef do
       sube_ag: parse_int(section["subeag"]),
       min_ag: parse_int(section["minag"]),
       max_ag: parse_int(section["maxag"]),
+      sube_mana: parse_int(section["subemana"]),
+      min_mana: parse_int(section["minmana"]),
+      max_mana: parse_int(section["maxmana"]),
+      sube_sta: parse_int(section["subesta"]),
+      min_sta: parse_int(section["minsta"]),
+      max_sta: parse_int(section["maxsta"]),
       duration: parse_int(section["duration"]),
       invoca: parse_int(section["invoca"]),
-      work_on_dead: parse_bool(section["workondead"])
+      work_on_dead: parse_bool(section["workondead"]),
+      area_afecta: parse_int(section["areaafecta"]),
+      area_radio: parse_int(section["arearadio"]),
+      max_level_casteable: parse_int(section["maxlevelcasteable"]),
+      need_staff: parse_bool(section["needstaff"]),
+      staff_afecta: parse_int(section["staffafecta"]),
+      cooldown: parse_cooldown(section["cooldown"]),
+      requirement_mask: parse_int(section["req"])
     }
   end
 
@@ -85,4 +111,11 @@ defmodule Arena.Data.SpellDef do
 
   defp parse_bool(nil), do: false
   defp parse_bool(val), do: parse_int(val) == 1
+
+  # VB6 default spell cooldown is 2 seconds
+  defp parse_cooldown(nil), do: 2
+  defp parse_cooldown(val) do
+    v = parse_int(val)
+    if v > 0, do: v, else: 2
+  end
 end

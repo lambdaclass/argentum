@@ -36,4 +36,37 @@ defmodule GameBackend.BankItems do
     |> order_by(:slot)
     |> Repo.all()
   end
+
+  @doc "Upsert a bank item: add to existing slot or insert new."
+  def upsert(character_id, slot, item_id, amount) do
+    existing = __MODULE__
+      |> where(character_id: ^character_id, slot: ^slot)
+      |> Repo.one()
+
+    if existing do
+      existing
+      |> change(%{amount: existing.amount + amount, item_id: item_id})
+      |> Repo.update()
+    else
+      %__MODULE__{}
+      |> changeset(%{character_id: character_id, slot: slot, item_id: item_id, amount: amount})
+      |> Repo.insert()
+    end
+  end
+
+  @doc "Remove amount from a bank slot. Deletes the row if amount reaches 0."
+  def withdraw(character_id, slot, amount) do
+    existing = __MODULE__
+      |> where(character_id: ^character_id, slot: ^slot)
+      |> Repo.one()
+
+    case existing do
+      nil -> {:error, :not_found}
+      bi when bi.amount <= amount ->
+        Repo.delete(bi)
+        {:ok, :deleted}
+      bi ->
+        bi |> change(%{amount: bi.amount - amount}) |> Repo.update()
+    end
+  end
 end

@@ -1558,6 +1558,54 @@ h3 {
   text-align: right;
 }
 
+.classic-hud-combat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(96, 123, 160, 0.18);
+  background:
+    radial-gradient(circle at top left, rgba(101, 147, 227, 0.08), transparent 38%),
+    linear-gradient(180deg, rgba(14, 20, 31, 0.96), rgba(10, 14, 21, 0.98));
+}
+
+.classic-hud-combat-copy {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.classic-hud-combat-copy span {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--text-soft);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.classic-hud-combat-copy strong {
+  display: block;
+  min-width: 0;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.classic-hud-combat-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.classic-hud-combat-actions .ghost-button {
+  min-width: 0;
+  padding: 7px 8px;
+  font-size: 10px;
+}
+
 .classic-hud-inventory-well,
 .classic-hud-vitals-well {
   position: relative;
@@ -1741,6 +1789,257 @@ h3 {
 .inventory-tooltip-panel p:first-child {
   color: var(--text);
   font-weight: 600;
+}
+
+.merchant-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.trade-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.merchant-panel-header,
+.merchant-section-header,
+.trade-section-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.merchant-banner,
+.merchant-action-card,
+.trade-banner,
+.trade-action-card {
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 216, 132, 0.12);
+  background:
+    linear-gradient(180deg, rgba(18, 24, 34, 0.96), rgba(10, 15, 23, 0.98));
+}
+
+.merchant-banner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.merchant-banner span,
+.merchant-action-card .eyebrow,
+.trade-banner span,
+.trade-action-card .eyebrow {
+  display: block;
+  margin-bottom: 3px;
+}
+
+.merchant-banner small,
+.trade-selection-copy {
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.merchant-banner small {
+  text-align: right;
+}
+
+.merchant-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.trade-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.merchant-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.trade-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.merchant-row {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 216, 132, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  text-align: left;
+}
+
+.merchant-row-selected {
+  border-color: rgba(242, 194, 97, 0.42);
+  background:
+    linear-gradient(180deg, rgba(72, 52, 26, 0.42), rgba(23, 19, 20, 0.86));
+}
+
+.merchant-row-empty {
+  opacity: 0.55;
+}
+
+.merchant-row-slot {
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.merchant-row-copy {
+  min-width: 0;
+}
+
+.merchant-row-copy strong,
+.merchant-row-copy small {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.merchant-row-copy small {
+  margin-top: 2px;
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.trade-row {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 216, 132, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.trade-row-empty {
+  opacity: 0.55;
+}
+
+.trade-row-slot {
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.trade-row-copy {
+  min-width: 0;
+}
+
+.trade-row-copy strong,
+.trade-row-copy small {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trade-row-copy small {
+  margin-top: 2px;
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.merchant-icon {
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+}
+
+.merchant-icon-fallback {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.merchant-action-row {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+}
+
+.merchant-action-row input {
+  flex: 0 0 92px;
+  border: 1px solid rgba(255, 216, 132, 0.14);
+  background: rgba(7, 12, 20, 0.94);
+  color: var(--text);
+  padding: 9px 10px;
+  border-radius: 10px;
+}
+
+.merchant-action-row .ghost-button {
+  flex: 1 1 auto;
+}
+
+.trade-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.trade-banner-copy {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.trade-banner-copy strong {
+  display: block;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trade-offer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.trade-footer-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.trade-footer-actions .ghost-button {
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 11px;
+}
+
+.merchant-inventory-grid {
+  grid-template-rows: repeat(6, 40px);
+  gap: 5px;
+}
+
+.merchant-inventory-grid .inventory-slot-compact {
+  min-height: 40px;
+  padding: 3px;
 }
 
 .world-status-card {

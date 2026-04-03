@@ -10,6 +10,9 @@ interface ClassicHudPanelProps {
   onEquip: (slotIndex: number) => void;
   onUse: (slotIndex: number) => void;
   onDrop: (slotIndex: number, amount: number) => void;
+  onAttack: () => void;
+  onStartCommerce: () => void;
+  onToggleSafeMode: () => void;
 }
 
 function HudBar({
@@ -46,7 +49,10 @@ export function ClassicHudPanel({
   onSelectSlot,
   onEquip,
   onUse,
-  onDrop
+  onDrop,
+  onAttack,
+  onStartCommerce,
+  onToggleSafeMode
 }: ClassicHudPanelProps) {
   const [tooltip, setTooltip] = useState<{
     x: number;
@@ -62,6 +68,7 @@ export function ClassicHudPanel({
   const selectedCanUse = selected != null && selected.canUse > 0;
   const selectedCanDrop = selected != null && selected.amount > 0;
   const selectedEquipped = selected?.equipped === true;
+  const targetTile = state.world.targetTile;
   const slotLabel =
     state.inventory.selectedSlot == null
       ? `${state.inventory.slots.length} slots`
@@ -80,6 +87,7 @@ export function ClassicHudPanel({
         : selectedCanUse
           ? "Listo para usar."
           : "Listo para equipar.";
+  const targetLabel = targetTile ? `${targetTile.x},${targetTile.y}` : "Sin objetivo";
 
   return (
     <section className="panel classic-hud-panel">
@@ -97,6 +105,47 @@ export function ClassicHudPanel({
           <strong>{selectedName ?? "Elige un item del inventario"}</strong>
         </div>
         <small>{selectionHint}</small>
+      </div>
+
+      <div className="classic-hud-combat-card">
+        <div className="classic-hud-combat-copy">
+          <div>
+            <span>Objetivo</span>
+            <strong>{targetLabel}</strong>
+          </div>
+          <div>
+            <span>Ultimo evento</span>
+            <strong>{state.combat.lastEvent ?? "Sin novedades"}</strong>
+          </div>
+        </div>
+        <div className="classic-hud-combat-actions">
+          <button
+            className={`ghost-button ${targetTile ? "classic-hud-action-primary" : ""}`}
+            disabled={targetTile == null || state.connection.status !== "connected"}
+            onClick={onAttack}
+            type="button"
+          >
+            Atacar
+          </button>
+          <button
+            className={`ghost-button ${targetTile ? "classic-hud-action-primary" : ""}`}
+            disabled={targetTile == null || state.connection.status !== "connected"}
+            onClick={onStartCommerce}
+            type="button"
+          >
+            Comercio
+          </button>
+          <button
+            className={`ghost-button ${
+              state.combat.safeMode ? "classic-hud-action-primary" : ""
+            }`}
+            disabled={state.connection.status !== "connected"}
+            onClick={onToggleSafeMode}
+            type="button"
+          >
+            {state.combat.safeMode ? "Seguro ON" : "Seguro OFF"}
+          </button>
+        </div>
       </div>
 
       <div className="classic-hud-inventory-well">

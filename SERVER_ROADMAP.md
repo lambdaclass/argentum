@@ -9,6 +9,7 @@
 - `Missing` — not implemented on the live gameplay path yet
 
 **Current phase snapshot:**
+- `Compatibility Gate — AO20 / VB6 Protocol & Behavior Parity`: `Partially done`
 - `Phase 1 — Runtime & Performance Foundations`: `Done`
 - `Phase 2 — Character System, Persistence & Map Transitions`: `Done`
 - `Phase 2A — Transition Quality & Client Map Pack`: `Done`
@@ -17,7 +18,7 @@
 - `Phase 5 — Combat`: `Done`
 - `Phase 6 — Spells`: `Done`
 - `Phase 7 — NPC AI`: `Done`
-- `Phase 8 — Commerce & Banking`: `Missing`
+- `Phase 8 — Commerce & Banking`: `Partially done`
 - `Phase 9 — Crafting & Gathering`: `Missing`
 - `Phase 10 — Social Systems`: `Partially done`
 - `Phase 11 — Progression`: `Partially done`
@@ -28,7 +29,7 @@
 - `Phase 16 — Chat Moderation`: `Missing`
 
 **Implemented so far (~6.8k lines of Elixir + 295 lines Rust):**
-- TCP + WebSocket networking with AO20 protocol support for the currently used gameplay packets
+- TCP + WebSocket networking with AO20 protocol support for the currently used gameplay subset; exact VB6 wire parity is not fully closed yet
 - Authoritative `MapServer` with movement, chat, heading, map transitions, autosave, and direct session delivery
 - AoI visibility lifecycle, `:global` / `:aoi_scan` / `:aoi_grid`, spatial grid, pre-encoded hot-path broadcasts
 - Character creation, login, persistence, online directory, static `.dat` loading
@@ -40,7 +41,9 @@
 - Benchmark harness, benchmark maps, metrics, CI/release workflows, web test client
 
 **Important roadmap/code divergence to keep in mind:**
-- `bank_items` table is not implemented yet
+- Phase 8 is no longer entirely missing: shopkeeper commerce exists on the live path, but banking/trade and VB6 protocol cleanup still remain
+- Exact AO20 parity is still incomplete even where features exist; some packet IDs and payload layouts still diverge from the VB6 client/server
+- The live protocol module still covers only a subset of the old VB6 enums, so "feature done" does not automatically mean "VB6-compatible"
 - The top-level phase statuses below are the source of truth; the old “not done” summary is no longer accurate
 
 **VB6 server:** ~93,000 lines across 50+ modules
@@ -68,6 +71,60 @@
 - **Keep JSON as a dev/debug format only** so maps remain easy to inspect and test from the browser.
 
 **Decision:** `.csm` on the backend, binary packed map data on the frontend, JSON only for tooling/debug.
+
+---
+
+## Compatibility Gate — AO20 / VB6 Protocol & Behavior Parity
+
+**Status:** `Partially done`
+
+This gate sits above the feature phases. A phase is only truly complete when the
+Elixir server remains playable by the original VB6 client without protocol
+patching or behavior-specific workarounds.
+
+**Done means:**
+- The raw TCP AO20 path matches the VB6 packet IDs, field order, sizes, and byte layout for every implemented packet.
+- The original VB6 client can log in, walk, chat, attack, cast, equip/use/drop, buy/sell, die/resurrect, and relog against the Elixir server.
+- Web-only conveniences or extensions never become mandatory on the VB6 path.
+- Behavior-level deviations from VB6 are either closed or explicitly tracked here as open work.
+
+### Protocol parity backlog
+
+- ~~Expand `AoProtocol` packet coverage~~ — **Done.** All 37 client→server packet IDs have decoders; all 52 server→client packet IDs have encoders. No reduced subset.
+- ~~Fix server packet ID mismatches (commerce/shop flows)~~ — **Done.** Commerce IDs (10/8) were verified correct against VB6 source; stale encoder comments fixed.
+- ~~Fix payload layout mismatches~~ — **Done.** All known mismatches fixed:
+  - server→client: `change_spell_slot`, `character_change`, `character_remove`, `npc_hit_user`, `user_hitted_user`, `user_hitted_by_user`, `create_fx`, `play_wave`, `change_npc_inventory_slot`
+  - client→server: `talk`, `whisper`, `attack`, `drop`, `cast_spell`, `left_click`, `use_item`, `equip_item` (packet_counter consumption added)
+- ~~Keep extension packets out of VB6 path~~ — **Done.** `session_token` (ID 200) is WS-only, injected by WsHandler, never sent on TCP.
+- Remaining: 15 client→server packets are decoded but have no game logic handler yet (yell, whisper, rest, meditate, heal, resucitate, request_atributes/skills/mini_stats, bank ops, double_click, work, online, party_safe_toggle, use_spell_macro). These decode cleanly and don't break the stream; handlers will be added as features are implemented.
+
+### Behavior parity backlog
+
+- Keep auditing gameplay semantics against VB6 and treat "close enough" as incomplete.
+- Remaining open items already identified:
+  - ranged attacks (bow/arrow, ammo consumption, distance targeting)
+  - buff/debuff timers (paralysis, poison, invisibility never expire)
+  - resurrection spells (spell_def.revivir parsed but unchecked)
+  - NPC spell casting (npc_def.lanza_spells parsed but unused)
+  - interval clamps that may still differ from raw VB6 data-driven timing
+  - ongoing invisibility / AI / spell-selection edge-case review
+
+### Compatibility test gate
+
+- ~~Add byte-golden tests for every implemented packet~~ — **Done.** 150 golden tests cover all encoder/decoder pairs.
+- Add fixture/trace tests derived from the VB6 client and server packet writers/readers.
+- Add explicit VB6-client smoke coverage for:
+  - ~~login~~ / reconnect
+  - ~~walk~~ / map transfer
+  - whisper / yell / console flow
+  - ~~melee~~ / ranged / spell cast
+  - ~~equip / use / drop / pickup~~
+  - ~~shop open / buy / sell~~
+  - bank open / deposit / withdraw
+  - death / resurrect / relog persistence
+
+No server phase that changes networking or gameplay semantics should be marked
+`Done` if this gate regresses.
 
 ---
 
@@ -748,16 +805,17 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 ## Phase 8 — Commerce & Banking
 
-**Status:** `Missing`
+**Status:** `Partially done`
 
 **In code now:**
-- `bank_gold` and item/value data shape exist in persistence/static data
+- Shopkeeper commerce on the live path: open / buy / sell / close, pricing formulas, and inventory mutations
+- `bank_gold` and `bank_items` persistence/static data shape exist
+- Basic protocol hooks for commerce already exist, but they still need AO20 / VB6 compatibility cleanup
 
 **Remaining gaps:**
-- Shop interaction flow
-- Buy/sell formulas and inventory mutations
 - Bank open / deposit / withdraw
 - Player-to-player trade
+- Protocol cleanup so commerce/banking use the exact VB6 packet IDs and payloads instead of the current remapped shop/commerce shape
 
 **Goal:** Players can buy/sell from NPC shops and store items in bank.
 

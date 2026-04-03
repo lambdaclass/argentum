@@ -73,10 +73,6 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
     socket
   end
 
-  defp send_login(socket, id) do
-    send_login_with_name(socket, "Player_#{id}")
-  end
-
   defp send_login_with_name(socket, name) do
     token = "test_token"
     md5 = "abcdef1234567890abcdef1234567890"
@@ -114,7 +110,7 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
   end
 
   defp send_talk(socket, message) do
-    payload = Writer.write_string8(message)
+    payload = Writer.write_string8(message) <> Writer.write_int32(1)
     packet = Writer.build_packet(75, payload)
     :ok = :gen_tcp.send(socket, packet)
   end
@@ -359,7 +355,7 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
     end
   end
 
-  defp decode_server_packet(43, <<char_index::little-signed-16, rest::binary>>), do: {:ok, %{char_index: char_index}, rest}
+  defp decode_server_packet(43, <<char_index::little-signed-16, desvanecido::8, fue_warp::8, rest::binary>>), do: {:ok, %{char_index: char_index, desvanecido: desvanecido != 0, fue_warp: fue_warp != 0}, rest}
   defp decode_server_packet(44, <<char_index::little-signed-16, x::8, y::8, rest::binary>>), do: {:ok, %{char_index: char_index, x: x, y: y}, rest}
   defp decode_server_packet(46, <<idx::little-signed-16, rest::binary>>), do: {:ok, %{user_index: idx}, rest}
   defp decode_server_packet(47, <<idx::little-signed-16, rest::binary>>), do: {:ok, %{char_index: idx}, rest}
@@ -385,13 +381,9 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
     {:ok, %{current_xp: current_xp, next_xp: next_xp}, rest}
   end
 
-  # change_spell_slot (ID 66) — slot(Int8) + spell_id(Int16) + name(String8)
-  defp decode_server_packet(66, <<slot::8, spell_id::little-16, rest::binary>>) do
-    case Reader.read_string8(rest) do
-      {:ok, spell_name, rest2} ->
-        {:ok, %{slot: slot, spell_id: spell_id, spell_name: spell_name}, rest2}
-      _ -> :incomplete
-    end
+  # change_spell_slot (ID 66) — slot(Int8) + spell_id(Int16) + index(Int16) + is_bindable(Bool)
+  defp decode_server_packet(66, <<slot::8, spell_id::little-signed-16, index::little-signed-16, is_bindable::8, rest::binary>>) do
+    {:ok, %{slot: slot, spell_id: spell_id, index: index, is_bindable: is_bindable != 0}, rest}
   end
 
   # level_up (ID 80) — level(Int16)
@@ -441,20 +433,13 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
       core_ids = [2, 46, 30, 47, 42, 31, 158, 27, 26, 25, 28, 78]
       assert Enum.take(ids, 12) == core_ids
 
-      # After core: player/NPC creates, ground items, welcome, session_token.
+      # After core: player/NPC creates, ground items, welcome.
       # NPC character_creates (42) arrive async so position is non-deterministic.
       after_core = Enum.drop(ids, 12)
       assert 37 in after_core
-      assert 200 in after_core
 
-      # Welcome(37) before session_token(200) ignoring NPC creates
-      non_npc = Enum.reject(after_core, &(&1 == 42))
-      welcome_idx = Enum.find_index(non_npc, &(&1 == 37))
-      token_idx = Enum.find_index(non_npc, &(&1 == 200))
-      assert welcome_idx < token_idx
-
-      # All non-special packets are valid middle types
-      middle = Enum.reject(after_core, &(&1 in [37, 200]))
+      # All non-welcome packets are valid middle types
+      middle = Enum.reject(after_core, &(&1 == 37))
       assert Enum.all?(middle, &(&1 in [42, 63, 66, 80, 29, 87]))
     end
 
@@ -557,7 +542,7 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
 
     test "consecutive walks accumulate", %{port: port} do
       {socket, packets, _char_id} = login_and_setup(port, unique_name())
-      {31, initial_pos} = find_packet(packets, 31)
+      {31, _initial_pos} = find_packet(packets, 31)
 
       # Find a safe direction first
       result = walk_any_direction(socket)
@@ -874,13 +859,12 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
       {26, mana1} = find_packet(packets1, 26)
       {28, gold1} = find_packet(packets1, 28)
 
-      # Get session token for Packet 73 reconnect
-      {200, session} = find_packet(packets1, 200)
-      token = session.token
-
       # Disconnect — triggers autosave
       :gen_tcp.close(socket1)
       Process.sleep(500)
+
+      # Get session token from DB for Packet 73 reconnect
+      token = GameBackend.Characters.get(char_id).session_token
 
       # Reconnect via Packet 73
       socket2 = connect(port)
@@ -910,13 +894,12 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
         |> Enum.filter(fn {id, _} -> id == 63 end)
         |> Enum.sort_by(fn {_, fields} -> fields.slot end)
 
-      {200, session} = find_packet(packets1, 200)
-
       :gen_tcp.close(socket1)
       Process.sleep(500)
 
+      token = GameBackend.Characters.get(char_id).session_token
       socket2 = connect(port)
-      send_login_existing(socket2, char_id, session.token)
+      send_login_existing(socket2, char_id, token)
       data2 = recv_all(socket2)
       packets2 = decode_all_packets(data2)
       on_exit(fn -> :gen_tcp.close(socket2) end)
@@ -947,13 +930,12 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
         |> Enum.filter(fn {id, _} -> id == 66 end)
         |> Enum.sort_by(fn {_, fields} -> fields.slot end)
 
-      {200, session} = find_packet(packets1, 200)
-
       :gen_tcp.close(socket1)
       Process.sleep(500)
 
+      token = GameBackend.Characters.get(char_id).session_token
       socket2 = connect(port)
-      send_login_existing(socket2, char_id, session.token)
+      send_login_existing(socket2, char_id, token)
       data2 = recv_all(socket2)
       packets2 = decode_all_packets(data2)
       on_exit(fn -> :gen_tcp.close(socket2) end)

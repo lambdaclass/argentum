@@ -2,16 +2,23 @@ import { useEffect, useRef } from "react";
 import type { WorldState } from "../app/types";
 import type { SessionClient } from "../net/SessionClient";
 import type { AssetCatalog } from "./assetCatalog";
-import { WorldRenderer } from "./WorldRenderer";
+import { WorldRenderer, type TileInteractionPayload } from "./WorldRenderer";
 
 interface WorldCanvasProps {
   world: WorldState;
   assetCatalog: AssetCatalog | null;
   showTileDebug: boolean;
   session: SessionClient;
+  onTileInteraction?: (payload: TileInteractionPayload) => void;
 }
 
-export function WorldCanvas({ world, assetCatalog, showTileDebug, session }: WorldCanvasProps) {
+export function WorldCanvas({
+  world,
+  assetCatalog,
+  showTileDebug,
+  session,
+  onTileInteraction
+}: WorldCanvasProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<WorldRenderer | null>(null);
 
@@ -36,6 +43,10 @@ export function WorldCanvas({ world, assetCatalog, showTileDebug, session }: Wor
       rendererRef.current = null;
     };
   }, [session]);
+
+  useEffect(() => {
+    rendererRef.current?.setTileInteractionHandler(onTileInteraction ?? null);
+  }, [onTileInteraction]);
 
   useEffect(() => {
     rendererRef.current?.render(world, assetCatalog, showTileDebug);

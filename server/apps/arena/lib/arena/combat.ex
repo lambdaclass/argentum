@@ -27,13 +27,15 @@ defmodule Arena.Combat do
 
   @doc """
   Compute melee weapon damage.
-  damage = (3 * random(weapon_min, weapon_max) + weapon_max * 0.2 * max(0, str - 15)) * class_mod
+  VB6: damage = (3 * WeaponDamage + MaxWeaponDamage * 0.2 * max(0, Fuerza - 15) + UserDamage) * ClassModifier
+  user_min/user_max are the character's base MinHIT/MaxHit from level/class.
   Returns integer >= 1.
   """
-  def melee_damage(weapon_min, weapon_max, str, class_id) do
+  def melee_damage(weapon_min, weapon_max, str, class_id, user_min \\ 0, user_max \\ 0) do
     dmg_mod = GameData.class_damage_mod(class_id)
     weapon_dmg = if weapon_max > weapon_min, do: Enum.random(weapon_min..weapon_max), else: weapon_min
-    raw = (3 * weapon_dmg + weapon_max * 0.2 * max(0, str - 15)) * dmg_mod
+    user_dmg = if user_max > user_min, do: Enum.random(user_min..user_max), else: user_min
+    raw = (3 * weapon_dmg + weapon_max * 0.2 * max(0, str - 15) + user_dmg) * dmg_mod
     max(round(raw), 1)
   end
 
@@ -64,12 +66,15 @@ defmodule Arena.Combat do
   xp = (damage * npc_give_exp) / max(npc_max_hp, 1)
   Level delta penalty: if player_level - npc_level > 4, XP halved per extra level.
   """
+  @xp_penalty_per_level 0.1
+
   def xp_gain(damage, npc_give_exp, npc_max_hp, player_level, npc_level) do
     base = div(damage * npc_give_exp, max(npc_max_hp, 1))
     level_diff = player_level - npc_level
 
     if level_diff > 4 do
-      penalty = :math.pow(0.5, level_diff - 4)
+      # VB6: linear penalty = 1 - (PenaltyExpUserPerLevel * extra_levels)
+      penalty = max(1.0 - @xp_penalty_per_level * (level_diff - 4), 0.0)
       max(round(base * penalty), 0)
     else
       max(base, 0)
@@ -104,12 +109,47 @@ defmodule Arena.Combat do
   def npc_hit_chance(poder_ataque, def_tactics, def_agi, def_level, def_class_id) do
     def_mod = GameData.class_evasion_mod(def_class_id)
     evasion = (def_tactics + 3 * def_tactics / 100 * def_agi) * def_mod + 2.5 * max(def_level - 12, 0)
-    round(50 + (poder_ataque - evasion) * 0.4) |> clamp(5, 95)
+    # VB6 clamps NPC hit chance to 10-90
+    round(50 + (poder_ataque - evasion) * 0.4) |> clamp(10, 90)
   end
 
   @doc "NPC damage roll between min and max hit."
   def npc_damage(min_hit, max_hit) do
     if max_hit > min_hit, do: Enum.random(min_hit..max_hit), else: max(min_hit, 1)
+  end
+
+  @doc """
+  VB6: meditating reduces evasion by 25%.
+  Adjusts hit_chance upward when defender is meditating.
+  """
+  def adjust_hit_for_meditate(hit_chance, true) do
+    miss_chance = (100 - hit_chance) * 0.75
+    clamp(round(100 - miss_chance), 10, 90)
+  end
+  def adjust_hit_for_meditate(hit_chance, _false), do: hit_chance
+
+  @doc """
+  VB6-exact base character damage from level and class.
+
+  GetHitModifier formula (Modulo_UsUaRiOs.bas:3152):
+    level <= 36 → modifier = (level - 1) * HitPre36
+    level >  36 → modifier = 35 * HitPre36 + (level - 36) * HitPost36
+  MinHIT = modifier + 1, MaxHIT = modifier + 2
+  """
+  def base_user_damage(level, class_id) do
+    pre36 = GameData.class_hit_pre36(class_id)
+    post36 = GameData.class_hit_post36(class_id)
+
+    modifier =
+      if level <= 36 do
+        (level - 1) * pre36
+      else
+        35 * pre36 + (level - 36) * post36
+      end
+
+    min_hit = modifier + 1
+    max_hit = modifier + 2
+    {max(min_hit, 1), max(max_hit, 2)}
   end
 
   defp clamp(val, min_val, max_val), do: min(max(val, min_val), max_val)

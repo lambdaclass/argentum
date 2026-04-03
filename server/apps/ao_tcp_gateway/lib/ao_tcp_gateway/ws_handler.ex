@@ -65,9 +65,11 @@ defmodule AoTcpGateway.WsHandler do
     reply(state, encode_frames(packets))
   end
 
-  # Autosave from MapServer
+  # Autosave from MapServer — guard against stale saves during map transfer
   def websocket_info({:autosave, entity}, state) do
-    SessionLogic.autosave(entity)
+    if entity.map_id == state.map_id do
+      SessionLogic.autosave(entity)
+    end
     {:ok, state}
   end
 
@@ -118,13 +120,13 @@ defmodule AoTcpGateway.WsHandler do
   defp dispatch_command(state, {:login_existing_char, %{char_id: char_id, session_token: token}}) do
     Logger.info("WS Login: char_id=#{char_id}")
     {state, packets} = SessionLogic.login_existing(state, char_id, token)
-    {state, encode_frames(packets)}
+    {state, encode_frames(packets) ++ session_token_frame(state)}
   end
 
   defp dispatch_command(state, {:login_new_char, params}) do
     Logger.info("WS new character: #{params.username}")
     {state, packets} = SessionLogic.login_new(state, params)
-    {state, encode_frames(packets)}
+    {state, encode_frames(packets) ++ session_token_frame(state)}
   end
 
   defp dispatch_command(state, {:quit, _}) do
@@ -142,6 +144,20 @@ defmodule AoTcpGateway.WsHandler do
   defp encode_frames(packets) do
     Enum.map(packets, fn cmd -> {:binary, Encoder.encode(cmd)} end)
   end
+
+  # After successful login, send session credentials so the web client can reconnect.
+  # Only sent over WebSocket — VB6 TCP clients never see this packet.
+  defp session_token_frame(%{character_id: char_id}) when is_integer(char_id) do
+    case GameBackend.Characters.get(char_id) do
+      %{session_token: token} when is_binary(token) and byte_size(token) > 0 ->
+        [{:binary, Encoder.encode({:session_token, %{char_id: char_id, token: token}})}]
+
+      _ ->
+        []
+    end
+  end
+
+  defp session_token_frame(_state), do: []
 
   # Combine binary frames for efficiency, pass through control frames (close).
   defp reply(state, []), do: {:ok, state}

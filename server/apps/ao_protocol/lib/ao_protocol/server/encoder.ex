@@ -101,15 +101,37 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.character_create(), payload)
   end
 
-  # eCharacterChange (ID 49) — charindex(Int16) + heading(Int8)
-  def encode({:character_change_heading, %{char_index: char_index, heading: heading}}) do
-    payload = Writer.write_int16(char_index) <> Writer.write_int8(heading)
+  # eCharacterChange (ID 49) — full appearance update
+  # charindex(Int16) + flags(Int8) + body(Int16) + head(Int16) + heading(Int8)
+  # + weapon(Int16) + shield(Int16) + helmet(Int16) + cart(Int16) + backpack(Int16)
+  # + fx(Int16) + fx_loops(Int16)
+  def encode({:character_change, params}) do
+    flags = encode_char_flags(params)
+
+    payload =
+      Writer.write_int16(params[:char_index] || 0) <>
+        flags <>
+        Writer.write_int16(params[:body_id] || 0) <>
+        Writer.write_int16(params[:head_id] || 0) <>
+        Writer.write_int8(params[:heading] || 3) <>
+        Writer.write_int16(params[:weapon_id] || 0) <>
+        Writer.write_int16(params[:shield_id] || 0) <>
+        Writer.write_int16(params[:helmet_id] || 0) <>
+        Writer.write_int16(params[:cart_id] || 0) <>
+        Writer.write_int16(params[:backpack_id] || 0) <>
+        Writer.write_int16(params[:fx] || 0) <>
+        Writer.write_int16(params[:fx_loops] || 0)
+
     Writer.build_packet(PacketIds.Server.character_change(), payload)
   end
 
-  # eCharacterRemove (ID 43) — charindex(Int16)
-  def encode({:character_remove, %{char_index: char_index}}) do
-    payload = Writer.write_int16(char_index)
+  # eCharacterRemove (ID 43) — charindex(Int16) + desvanecido(Bool) + fue_warp(Bool)
+  def encode({:character_remove, params}) do
+    payload =
+      Writer.write_int16(params[:char_index] || 0) <>
+        Writer.write_bool(params[:desvanecido] || false) <>
+        Writer.write_bool(params[:fue_warp] || false)
+
     Writer.build_packet(PacketIds.Server.character_remove(), payload)
   end
 
@@ -217,12 +239,16 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.change_inventory_slot(), payload)
   end
 
-  # eChangeSpellSlot (ID 66) — slot(Int8) + spell_id(Int16) + name(String8)
-  def encode({:change_spell_slot, %{slot: slot, spell_id: spell_id, spell_name: spell_name}}) do
+  # eChangeSpellSlot (ID 66) — slot(Int8) + spell_id(Int16) + index(Int16) + is_bindable(Bool)
+  def encode({:change_spell_slot, params}) do
+    spell_id = params[:spell_id] || 0
+    index = if spell_id > 0, do: spell_id, else: -1
+
     payload =
-      Writer.write_int8(slot) <>
+      Writer.write_int8(params[:slot] || 0) <>
         Writer.write_int16(spell_id) <>
-        Writer.write_string8(spell_name)
+        Writer.write_int16(index) <>
+        Writer.write_bool(params[:is_bindable] || false)
 
     Writer.build_packet(PacketIds.Server.change_spell_slot(), payload)
   end
@@ -262,7 +288,8 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.level_up(), payload)
   end
 
-  # eSessionToken (ID 200) — char_id(Int32) + token(String8)
+  # session_token (ID 200) — WS-only extension, not in VB6 protocol.
+  # Sent by WsHandler after login so the web client can reconnect.
   def encode({:session_token, %{char_id: char_id, token: token}}) do
     payload = Writer.write_int32(char_id) <> Writer.write_string8(token)
     Writer.build_packet(PacketIds.Server.session_token(), payload)
@@ -274,21 +301,32 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.char_swing(), payload)
   end
 
-  # eUserHittedUser (ID 34) — charindex(Int16) + damage(Int32) + hp(Int32)
-  def encode({:user_hitted_user, %{char_index: char_index, damage: damage, hp: hp}}) do
-    payload = Writer.write_int16(char_index) <> Writer.write_int32(damage) <> Writer.write_int32(hp)
+  # eUserHittedUser (ID 34) — charindex(Int16) + target/body_part(Int8) + damage(Int16)
+  def encode({:user_hitted_user, params}) do
+    payload =
+      Writer.write_int16(params[:char_index] || 0) <>
+        Writer.write_int8(params[:target] || 1) <>
+        Writer.write_int16(params[:damage] || 0)
+
     Writer.build_packet(PacketIds.Server.user_hitted_user(), payload)
   end
 
-  # eUserHittedByUser (ID 33) — attacker_charindex(Int16) + damage(Int32) + hp(Int32)
-  def encode({:user_hitted_by_user, %{char_index: char_index, damage: damage, hp: hp}}) do
-    payload = Writer.write_int16(char_index) <> Writer.write_int32(damage) <> Writer.write_int32(hp)
+  # eUserHittedByUser (ID 33) — attacker_charindex(Int16) + target/body_part(Int8) + damage(Int16)
+  def encode({:user_hitted_by_user, params}) do
+    payload =
+      Writer.write_int16(params[:char_index] || 0) <>
+        Writer.write_int8(params[:target] || 1) <>
+        Writer.write_int16(params[:damage] || 0)
+
     Writer.build_packet(PacketIds.Server.user_hitted_by_user(), payload)
   end
 
-  # eNpcHitUser (ID 32) — npc_charindex(Int16) + damage(Int32)
-  def encode({:npc_hit_user, %{char_index: char_index, damage: damage}}) do
-    payload = Writer.write_int16(char_index) <> Writer.write_int32(damage)
+  # eNpcHitUser (ID 32) — target/body_part(Int8) + damage(Int16)
+  def encode({:npc_hit_user, params}) do
+    payload =
+      Writer.write_int8(params[:target] || 1) <>
+        Writer.write_int16(params[:damage] || 0)
+
     Writer.build_packet(PacketIds.Server.npc_hit_user(), payload)
   end
 
@@ -308,15 +346,27 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.npc_kill_user(), <<>>)
   end
 
-  # eCreateFX (ID 60) — charindex(Int16) + fx(Int16) + loops(Int16)
-  def encode({:create_fx, %{char_index: char_index, fx: fx, loops: loops}}) do
-    payload = Writer.write_int16(char_index) <> Writer.write_int16(fx) <> Writer.write_int16(loops)
+  # eCreateFX (ID 60) — charindex(Int16) + fx(Int16) + loops(Int16) + x(Int8) + y(Int8)
+  def encode({:create_fx, params}) do
+    payload =
+      Writer.write_int16(params[:char_index] || 0) <>
+        Writer.write_int16(params[:fx] || 0) <>
+        Writer.write_int16(params[:loops] || 0) <>
+        Writer.write_int8(params[:x] || 0) <>
+        Writer.write_int8(params[:y] || 0)
+
     Writer.build_packet(PacketIds.Server.create_fx(), payload)
   end
 
-  # ePlayWave (ID 55) — wav(Int8) + x(Int8) + y(Int8)
-  def encode({:play_wave, %{wav: wav, x: x, y: y}}) do
-    payload = Writer.write_int8(wav) <> Writer.write_int8(x) <> Writer.write_int8(y)
+  # ePlayWave (ID 55) — wav(Int16) + x(Int8) + y(Int8) + cancel_last(Int8) + localize(Int8)
+  def encode({:play_wave, params}) do
+    payload =
+      Writer.write_int16(params[:wav] || 0) <>
+        Writer.write_int8(params[:x] || 0) <>
+        Writer.write_int8(params[:y] || 0) <>
+        Writer.write_int8(params[:cancel_last] || 0) <>
+        Writer.write_int8(params[:localize] || 1)
+
     Writer.build_packet(PacketIds.Server.play_wave(), payload)
   end
 
@@ -346,26 +396,186 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.send_skills(), payload)
   end
 
-  # eCommerceInit (ID 132) — npc_name(String8)
+  # eCommerceInit (ID 10) — npc_name(String8)
   def encode({:commerce_init, %{npc_name: name}}) do
     payload = Writer.write_string8(name)
     Writer.build_packet(PacketIds.Server.commerce_init(), payload)
   end
 
-  # eCommerceChangeSlot (ID 134) — slot(Int8) + obj_index(Int16) + amount(Int16) + price(Real32) + can_equip(Int8)
-  def encode({:commerce_change_slot, params}) do
+  # eChangeNPCInventorySlot (ID 77) — slot(Int8) + obj_index(Int16) + amount(Int16)
+  #   + price(Real32) + elemental_tags(Int32) + puede_usar(Int8)
+  def encode({:change_npc_inventory_slot, params}) do
     payload =
       Writer.write_int8(params[:slot]) <>
         Writer.write_int16(params[:obj_index] || 0) <>
         Writer.write_int16(params[:amount] || 0) <>
         Writer.write_real32(params[:price] || 0.0) <>
-        Writer.write_int8(params[:can_equip] || 1)
-    Writer.build_packet(PacketIds.Server.commerce_change_slot(), payload)
+        Writer.write_int32(params[:elemental_tags] || 0) <>
+        Writer.write_int8(params[:puede_usar] || 1)
+
+    Writer.build_packet(PacketIds.Server.change_npc_inventory_slot(), payload)
   end
 
-  # eCommerceEnd (ID 133) — no payload
+  # eCommerceEnd (ID 8) — no payload
   def encode({:commerce_end, _params}) do
     Writer.build_packet(PacketIds.Server.commerce_end(), <<>>)
+  end
+
+  # eUserCommerceInit (ID 12) — no payload (VB6: opens user trade UI)
+  def encode({:user_commerce_init, _params}) do
+    Writer.build_packet(PacketIds.Server.user_commerce_init(), <<>>)
+  end
+
+  # eUserCommerceEnd (ID 13) — no payload
+  def encode({:user_commerce_end, _params}) do
+    Writer.build_packet(PacketIds.Server.user_commerce_end(), <<>>)
+  end
+
+  # eChangeUserTradeSlot (ID 100) — my_offer(Bool) + gold(Int32) + items[10]
+  # Each item: obj_index(Int16) + amount(Int32)
+  def encode({:change_user_trade_slot, params}) do
+    items = params[:items] || []
+    item_payload =
+      Enum.reduce(0..9, <<>>, fn i, acc ->
+        item = Enum.at(items, i)
+        if item do
+          acc <> Writer.write_int16(item.obj_index) <> Writer.write_int32(item.amount)
+        else
+          acc <> Writer.write_int16(0) <> Writer.write_int32(0)
+        end
+      end)
+
+    payload =
+      Writer.write_bool(params[:my_offer] || false) <>
+        Writer.write_int32(params[:gold] || 0) <>
+        item_payload
+
+    Writer.build_packet(PacketIds.Server.change_user_trade_slot(), payload)
+  end
+
+  # eNavigateToggle (ID 5) — new_state(Bool)
+  def encode({:navigate_toggle, %{new_state: new_state}}) do
+    payload = Writer.write_bool(new_state)
+    Writer.build_packet(PacketIds.Server.navigate_toggle(), payload)
+  end
+
+  # eShowMessageBox (ID 40) — message_id(Int16) + extra(String8)
+  def encode({:show_message_box, %{message_id: message_id} = params}) do
+    payload =
+      Writer.write_int16(message_id) <>
+        Writer.write_string8(params[:extra] || "")
+
+    Writer.build_packet(PacketIds.Server.show_message_box(), payload)
+  end
+
+  # ePlayMidi (ID 54) — midi(Int8) + loops(Int16)
+  def encode({:play_midi, %{midi: midi} = params}) do
+    payload =
+      Writer.write_int8(midi) <>
+        Writer.write_int16(params[:loops] || -1)
+
+    Writer.build_packet(PacketIds.Server.play_midi(), payload)
+  end
+
+  # eAreaChanged (ID 57) — x(Int8) + y(Int8)
+  def encode({:area_changed, %{x: x, y: y}}) do
+    payload = Writer.write_int8(x) <> Writer.write_int8(y)
+    Writer.build_packet(PacketIds.Server.area_changed(), payload)
+  end
+
+  # ePauseToggle (ID 58) — no payload
+  def encode({:pause_toggle, _params}) do
+    Writer.build_packet(PacketIds.Server.pause_toggle(), <<>>)
+  end
+
+  # eRainToggle (ID 59) — raining(Bool)
+  def encode({:rain_toggle, %{raining: raining}}) do
+    payload = Writer.write_bool(raining)
+    Writer.build_packet(PacketIds.Server.rain_toggle(), payload)
+  end
+
+  # eBlind (ID 74) — no payload
+  def encode({:blind, _params}) do
+    Writer.build_packet(PacketIds.Server.blind(), <<>>)
+  end
+
+  # eDumb (ID 75) — no payload
+  def encode({:dumb, _params}) do
+    Writer.build_packet(PacketIds.Server.dumb(), <<>>)
+  end
+
+  # eMiniStats (ID 79)
+  # ciudadanos_matados(Int32) + criminales_matados(Int32) + faction_status(Int8)
+  # + npcs_killed(Int32) + class(Int8) + penalty(Int32) + deaths(Int32)
+  # + gender(Int8) + fishing_points(Int32) + race(Int8)
+  def encode({:mini_stats, params}) do
+    payload =
+      Writer.write_int32(params[:ciudadanos_matados] || 0) <>
+        Writer.write_int32(params[:criminales_matados] || 0) <>
+        Writer.write_int8(params[:faction_status] || 0) <>
+        Writer.write_int32(params[:npcs_killed] || 0) <>
+        Writer.write_int8(params[:class] || 0) <>
+        Writer.write_int32(params[:penalty] || 0) <>
+        Writer.write_int32(params[:deaths] || 0) <>
+        Writer.write_int8(params[:gender] || 0) <>
+        Writer.write_int32(params[:fishing_points] || 0) <>
+        Writer.write_int8(params[:race] || 0)
+
+    Writer.build_packet(PacketIds.Server.mini_stats(), payload)
+  end
+
+  # eUpdateUserStats (ID 61)
+  # max_hp(Int16) + min_hp(Int16) + shield(Int32) + max_mana(Int16) + min_mana(Int16)
+  # + max_sta(Int16) + min_sta(Int16) + gold(Int32) + gold_cap(Int32)
+  # + level(Int8) + exp_next_level(Int32) + exp(Int32) + class(Int8)
+  def encode({:update_user_stats, params}) do
+    payload =
+      Writer.write_int16(params[:max_hp] || 0) <>
+        Writer.write_int16(params[:min_hp] || 0) <>
+        Writer.write_int32(params[:shield] || 0) <>
+        Writer.write_int16(params[:max_mana] || 0) <>
+        Writer.write_int16(params[:min_mana] || 0) <>
+        Writer.write_int16(params[:max_sta] || 0) <>
+        Writer.write_int16(params[:min_sta] || 0) <>
+        Writer.write_int32(params[:gold] || 0) <>
+        Writer.write_int32(params[:gold_cap] || 0) <>
+        Writer.write_int8(params[:level] || 0) <>
+        Writer.write_int32(params[:exp_next_level] || 0) <>
+        Writer.write_int32(params[:exp] || 0) <>
+        Writer.write_int8(params[:class] || 0)
+
+    Writer.build_packet(PacketIds.Server.update_user_stats(), payload)
+  end
+
+  # eBankInit (ID 118) — bank_gold(Int32)
+  # eBankInit (ID 11) — no payload (VB6: empty packet opens bank UI)
+  def encode({:bank_init, _params}) do
+    Writer.build_packet(PacketIds.Server.bank_init(), <<>>)
+  end
+
+  # eChangeBankSlot (ID 65) — slot(Int8) + obj_index(Int16) + elemental_tags(Int32)
+  #   + amount(Int16) + valor(Int32) + puede_usar(Int8)
+  def encode({:change_bank_slot, params}) do
+    payload =
+      Writer.write_int8(params[:slot]) <>
+        Writer.write_int16(params[:obj_index] || 0) <>
+        Writer.write_int32(params[:elemental_tags] || 0) <>
+        Writer.write_int16(params[:amount] || 0) <>
+        Writer.write_int32(params[:valor] || 0) <>
+        Writer.write_int8(params[:puede_usar] || 1)
+
+    Writer.build_packet(PacketIds.Server.change_bank_slot(), payload)
+  end
+
+  # eUpdateBankGld (ID 175) — bank_gold(Int32)
+  def encode({:update_bank_gold, %{bank_gold: bank_gold}}) do
+    payload = Writer.write_int32(bank_gold)
+    Writer.build_packet(PacketIds.Server.update_bank_gold(), payload)
+  end
+
+  # eBankEnd (ID 9) — no payload
+  def encode({:bank_end, _params}) do
+    Writer.build_packet(PacketIds.Server.bank_end(), <<>>)
   end
 
   # ---- Helpers ----

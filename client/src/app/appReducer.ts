@@ -84,6 +84,23 @@ function initialCharacter(): ClientState["world"]["self"] {
   };
 }
 
+function initialTrade(): ClientState["trade"] {
+  return {
+    open: false,
+    myOffer: {
+      gold: 0,
+      items: Array.from({ length: 10 }, () => null)
+    },
+    otherOffer: {
+      gold: 0,
+      items: Array.from({ length: 10 }, () => null)
+    },
+    offerAmount: 1,
+    accepted: false,
+    partnerAccepted: false
+  };
+}
+
 function groundObjectKey(x: number, y: number) {
   return `${x},${y}`;
 }
@@ -136,9 +153,16 @@ export function createInitialState(): ClientState {
       map: null,
       groundObjects: {},
       chatBubbles: [],
+      targetTile: null,
+      combatTexts: [],
+      fxEvents: [],
       walkIntervalMs: 210,
       self: initialCharacter(),
       others: {}
+    },
+    combat: {
+      safeMode: false,
+      lastEvent: null
     },
     stats: {
       hpCurrent: 100,
@@ -162,6 +186,15 @@ export function createInitialState(): ClientState {
       slots: Array.from({ length: 20 }, () => null),
       selectedSlot: null
     },
+    commerce: {
+      open: false,
+      npcName: null,
+      slots: [],
+      selectedSlot: null,
+      buyAmount: 1,
+      sellAmount: 1
+    },
+    trade: initialTrade(),
     skills: {
       entries: [],
       selectedKey: null,
@@ -233,8 +266,24 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
           mapStatus: nextMapStatus(state.world),
           mapError: null,
           chatBubbles: [],
+          targetTile: null,
+          combatTexts: [],
+          fxEvents: [],
           others: {}
-        }
+        },
+        combat: {
+          ...state.combat,
+          lastEvent: null
+        },
+        commerce: {
+          open: false,
+          npcName: null,
+          slots: [],
+          selectedSlot: null,
+          buyAmount: 1,
+          sellAmount: 1
+        },
+        trade: initialTrade()
       };
 
     case "world/setMapLoading":
@@ -250,8 +299,24 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
           mapStatus: nextMapStatus(state.world),
           mapError: null,
           chatBubbles: [],
+          targetTile: null,
+          combatTexts: [],
+          fxEvents: [],
           others: {}
-        }
+        },
+        combat: {
+          ...state.combat,
+          lastEvent: null
+        },
+        commerce: {
+          open: false,
+          npcName: null,
+          slots: [],
+          selectedSlot: null,
+          buyAmount: 1,
+          sellAmount: 1
+        },
+        trade: initialTrade()
       };
 
     case "world/setMapData":
@@ -294,6 +359,15 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
         world: {
           ...state.world,
           walkIntervalMs: action.walkIntervalMs
+        }
+      };
+
+    case "world/setTargetTile":
+      return {
+        ...state,
+        world: {
+          ...state.world,
+          targetTile: action.target
         }
       };
 
@@ -378,7 +452,8 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
               heading: action.character.heading,
               bodyId: action.character.bodyId,
               headId: action.character.headId,
-              speed: action.character.speed
+              speed: action.character.speed,
+              isNpc: action.character.isNpc
             }
           }
         }
@@ -405,7 +480,22 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
         }
       };
 
-    case "world/setOtherHeading":
+    case "world/setCharacterAppearance":
+      if (action.charIndex === state.world.self.charIndex) {
+        return {
+          ...state,
+          world: {
+            ...state.world,
+            self: {
+              ...state.world.self,
+              heading: action.heading ?? state.world.self.heading,
+              bodyId: action.bodyId ?? state.world.self.bodyId,
+              headId: action.headId ?? state.world.self.headId
+            }
+          }
+        };
+      }
+
       if (!state.world.others[action.charIndex]) {
         return state;
       }
@@ -418,7 +508,9 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
             ...state.world.others,
             [action.charIndex]: {
               ...state.world.others[action.charIndex],
-              heading: action.heading
+              heading: action.heading ?? state.world.others[action.charIndex].heading,
+              bodyId: action.bodyId ?? state.world.others[action.charIndex].bodyId,
+              headId: action.headId ?? state.world.others[action.charIndex].headId
             }
           }
         }
@@ -474,14 +566,56 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
         }
       };
 
-    case "world/pruneChatBubbles":
+    case "world/addCombatText":
+      return {
+        ...state,
+        world: {
+          ...state.world,
+          combatTexts: [...state.world.combatTexts, action.event].slice(-24)
+        }
+      };
+
+    case "world/addFx":
+      return {
+        ...state,
+        world: {
+          ...state.world,
+          fxEvents: [...state.world.fxEvents, action.event].slice(-24)
+        }
+      };
+
+    case "world/pruneTransient":
       return {
         ...state,
         world: {
           ...state.world,
           chatBubbles: state.world.chatBubbles.filter(
             (bubble) => action.now - bubble.createdAt < bubble.ttlMs
+          ),
+          combatTexts: state.world.combatTexts.filter(
+            (event) => action.now - event.createdAt < event.ttlMs
+          ),
+          fxEvents: state.world.fxEvents.filter(
+            (event) => action.now - event.createdAt < event.ttlMs
           )
+        }
+      };
+
+    case "combat/setSafeMode":
+      return {
+        ...state,
+        combat: {
+          ...state.combat,
+          safeMode: action.safeMode
+        }
+      };
+
+    case "combat/setLastEvent":
+      return {
+        ...state,
+        combat: {
+          ...state.combat,
+          lastEvent: action.message
         }
       };
 
@@ -553,6 +687,24 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
         }
       };
 
+    case "stats/setAll":
+      return {
+        ...state,
+        stats: {
+          ...state.stats,
+          hpCurrent: action.hpCurrent,
+          hpMax: action.hpMax,
+          manaCurrent: action.manaCurrent,
+          manaMax: action.manaMax,
+          staminaCurrent: action.staminaCurrent,
+          staminaMax: action.staminaMax,
+          gold: action.gold,
+          level: action.level,
+          xpCurrent: action.currentXp,
+          xpNext: action.nextXp
+        }
+      };
+
     case "inventory/setSlot": {
       const slots = [...state.inventory.slots];
       slots[action.slotIndex] = action.slot;
@@ -604,6 +756,152 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
         spellbook: {
           ...state.spellbook,
           selectedSlot: action.slotIndex
+        }
+      };
+
+    case "commerce/open":
+      return {
+        ...state,
+        commerce: {
+          open: true,
+          npcName: action.npcName,
+          slots: [],
+          selectedSlot: null,
+          buyAmount: 1,
+          sellAmount: 1
+        }
+      };
+
+    case "commerce/close":
+      return {
+        ...state,
+        commerce: {
+          open: false,
+          npcName: null,
+          slots: [],
+          selectedSlot: null,
+          buyAmount: 1,
+          sellAmount: 1
+        }
+      };
+
+    case "commerce/setSlot": {
+      const slots =
+        action.slotIndex < state.commerce.slots.length
+          ? [...state.commerce.slots]
+          : [
+              ...state.commerce.slots,
+              ...Array.from(
+                { length: action.slotIndex - state.commerce.slots.length + 1 },
+                () => null
+              )
+            ];
+
+      slots[action.slotIndex] = action.slot;
+
+      const selectedSlot =
+        state.commerce.selectedSlot != null &&
+        state.commerce.selectedSlot < slots.length &&
+        slots[state.commerce.selectedSlot] != null
+          ? state.commerce.selectedSlot
+          : slots.findIndex((slot) => slot != null);
+
+      return {
+        ...state,
+        commerce: {
+          ...state.commerce,
+          open: true,
+          slots,
+          selectedSlot: selectedSlot >= 0 ? selectedSlot : null
+        }
+      };
+    }
+
+    case "commerce/selectSlot":
+      return {
+        ...state,
+        commerce: {
+          ...state.commerce,
+          selectedSlot: action.slotIndex
+        }
+      };
+
+    case "commerce/setBuyAmount":
+      return {
+        ...state,
+        commerce: {
+          ...state.commerce,
+          buyAmount: Math.max(1, Math.floor(action.amount) || 1)
+        }
+      };
+
+    case "commerce/setSellAmount":
+      return {
+        ...state,
+        commerce: {
+          ...state.commerce,
+          sellAmount: Math.max(1, Math.floor(action.amount) || 1)
+        }
+      };
+
+    case "trade/open":
+      return {
+        ...state,
+        trade: {
+          ...initialTrade(),
+          open: true
+        }
+      };
+
+    case "trade/close":
+      return {
+        ...state,
+        trade: initialTrade()
+      };
+
+    case "trade/setOffer":
+      return {
+        ...state,
+        trade: {
+          ...state.trade,
+          open: true,
+          accepted: false,
+          partnerAccepted: false,
+          myOffer:
+            action.which === "mine"
+              ? { gold: action.gold, items: action.items }
+              : state.trade.myOffer,
+          otherOffer:
+            action.which === "theirs"
+              ? { gold: action.gold, items: action.items }
+              : state.trade.otherOffer
+        }
+      };
+
+    case "trade/setOfferAmount":
+      return {
+        ...state,
+        trade: {
+          ...state.trade,
+          offerAmount: Math.max(1, Math.floor(action.amount) || 1)
+        }
+      };
+
+    case "trade/markAccepted":
+      return {
+        ...state,
+        trade: {
+          ...state.trade,
+          accepted: action.accepted
+        }
+      };
+
+    case "trade/markPartnerAccepted":
+      return {
+        ...state,
+        trade: {
+          ...state.trade,
+          partnerAccepted: action.accepted
         }
       };
 
@@ -659,9 +957,16 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
           map: null,
           groundObjects: {},
           chatBubbles: [],
+          targetTile: null,
+          combatTexts: [],
+          fxEvents: [],
           walkIntervalMs: state.world.walkIntervalMs,
           self: initialCharacter(),
           others: {}
+        },
+        combat: {
+          safeMode: false,
+          lastEvent: null
         },
         stats: {
           hpCurrent: 100,
@@ -685,6 +990,15 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
           slots: Array.from({ length: 20 }, () => null),
           selectedSlot: null
         },
+        commerce: {
+          open: false,
+          npcName: null,
+          slots: [],
+          selectedSlot: null,
+          buyAmount: 1,
+          sellAmount: 1
+        },
+        trade: initialTrade(),
         skills: {
           entries: [],
           selectedKey: null,

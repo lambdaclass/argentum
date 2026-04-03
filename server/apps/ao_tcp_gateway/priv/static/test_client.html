@@ -380,7 +380,7 @@ function sendRequestPositionUpdate() {
 
 function sendChangeHeading(headingInt) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(buildPacket(6, buf => { writeInt8(buf, headingInt); }));
+  ws.send(buildPacket(6, buf => { writeInt8(buf, headingInt); writeInt32(buf, 1); }));
 }
 
 function pushPendingWalkStep(x, y) {
@@ -1009,7 +1009,7 @@ function sendWalk(heading) {
 }
 
 function sendTalk(message) {
-  ws.send(buildPacket(75, buf => { writeString8(buf, message); }));
+  ws.send(buildPacket(75, buf => { writeString8(buf, message); writeInt32(buf, 1); }));
   log('TALK "' + message + '"', 'pkt-out');
 }
 
@@ -1019,17 +1019,17 @@ function sendPickUp() {
 }
 
 function sendDrop(slot, amount) {
-  ws.send(buildPacket(93, buf => { writeInt8(buf, slot); writeInt16(buf, amount); }));
+  ws.send(buildPacket(93, buf => { writeInt8(buf, slot); writeInt32(buf, amount); writeInt32(buf, 1); }));
   log('DROP slot=' + slot + ' amt=' + amount, 'pkt-out');
 }
 
 function sendEquipItem(slot) {
-  ws.send(buildPacket(5, buf => { writeInt8(buf, slot); }));
+  ws.send(buildPacket(5, buf => { writeInt8(buf, slot); writeInt8(buf, 0); writeInt32(buf, 1); }));
   log('EQUIP slot=' + slot, 'pkt-out');
 }
 
 function sendUseItem(slot) {
-  ws.send(buildPacket(99, buf => { writeInt8(buf, slot); }));
+  ws.send(buildPacket(99, buf => { writeInt8(buf, slot); writeInt8(buf, 1); writeInt32(buf, 1); }));
   log('USE slot=' + slot, 'pkt-out');
 }
 
@@ -1159,6 +1159,7 @@ function decodeServerPacket(id, r) {
     }
     case 43: {
       const ci = r.readInt16();
+      r.readBool(); r.readBool();
       delete otherChars[ci];
       removeOtherCharSprite(ci);
       log('CHAR_REMOVE[' + ci + ']', 'pkt-in');
@@ -1218,7 +1219,9 @@ function decodeServerPacket(id, r) {
     case 66: {
       const slot = r.readInt8() - 1;
       const spellId = r.readInt16();
-      const spellName = r.readString8();
+      r.readInt16(); // index
+      r.readBool(); // is_bindable
+      const spellName = '';
       state.spells = state.spells || [];
       state.spells[slot] = { spellId, spellName };
       log('SPELL[' + slot + '] id=' + spellId + ' "' + spellName + '"', 'pkt-in');

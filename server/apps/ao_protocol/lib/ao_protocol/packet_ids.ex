@@ -49,11 +49,17 @@ defmodule AoProtocol.PacketIds do
     def request_skills, do: 86
     def request_mini_stats, do: 87
 
-    # Commerce
+    # Commerce (NPC)
     def commerce_start, do: 53
     def commerce_buy, do: 9
     def commerce_sell, do: 11
     def commerce_end, do: 88
+
+    # Commerce (user-to-user, VB6: mdlCOmercioConUsuario)
+    def user_commerce_offer, do: 16
+    def user_commerce_end, do: 89
+    def user_commerce_ok, do: 91
+    def user_commerce_reject, do: 92
 
     # Bank
     def bank_start, do: 54
@@ -157,12 +163,25 @@ defmodule AoProtocol.PacketIds do
     def blind, do: 74
     def dumb, do: 75
 
-    # Commerce
-    def commerce_init, do: 132
-    def commerce_end, do: 133
-    def commerce_change_slot, do: 134
+    # Commerce (NPC)
+    def commerce_init, do: 10
+    def commerce_end, do: 8
+    def change_npc_inventory_slot, do: 77
 
-    # Extensions (not in original AO20)
+    # Commerce (user-to-user)
+    def user_commerce_init, do: 12
+    def user_commerce_end, do: 13
+    def change_user_trade_slot, do: 100
+
+    # Bank (VB6: eBankInit=11, eBankEnd=9, eChangeBankSlot=65, eUpdateBankGld=175)
+    def bank_init, do: 11
+    def bank_end, do: 9
+    def change_bank_slot, do: 65
+    def update_bank_gold, do: 175
+
+    # session_token (200) — WS-only extension, not in VB6 protocol.
+    # Sent by WsHandler after login so the web client can reconnect.
+    # TCP handler never sends this. See encoder.ex and ws_handler.ex.
     def session_token, do: 200
   end
 end

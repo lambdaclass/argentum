@@ -18,7 +18,6 @@ import {
   bodyGrhForDirection,
   getGrhAnimation,
   getGrhTexture,
-  getNpcDef,
   getObjectGrh,
   type AssetCatalog,
   headGrhForDirection
@@ -76,6 +75,41 @@ const bubbleStyle = new TextStyle({
   strokeThickness: 3
 });
 
+const damageTextStyle = new TextStyle({
+  fontFamily: "monospace",
+  fontSize: 14,
+  fontWeight: "700",
+  fill: 0xff8a73,
+  stroke: 0x000000,
+  strokeThickness: 3
+});
+
+const blockTextStyle = new TextStyle({
+  fontFamily: "monospace",
+  fontSize: 12,
+  fontWeight: "700",
+  fill: 0xa5d4ff,
+  stroke: 0x000000,
+  strokeThickness: 3
+});
+
+const statusTextStyle = new TextStyle({
+  fontFamily: "monospace",
+  fontSize: 12,
+  fontWeight: "700",
+  fill: 0xffdd85,
+  stroke: 0x000000,
+  strokeThickness: 3
+});
+
+const infoTextStyle = new TextStyle({
+  fontFamily: "monospace",
+  fontSize: 11,
+  fill: 0xf0f2ff,
+  stroke: 0x000000,
+  strokeThickness: 3
+});
+
 const exitStyle = new TextStyle({
   fontFamily: "monospace",
   fontSize: 10,
@@ -109,7 +143,7 @@ interface CharacterNode {
   headId: number;
   heading: number;
   speed: number;
-  kind: "self" | "other";
+  kind: "self" | "other" | "npc";
   desiredX: number;
   desiredY: number;
 }
@@ -125,6 +159,12 @@ interface StaticSceneLayers {
   belowCharacters: Container;
   staticEntities: Container;
   overlay: Container;
+}
+
+export interface TileInteractionPayload {
+  x: number;
+  y: number;
+  detail: number;
 }
 
 function worldX(tileX: number) {
@@ -494,6 +534,7 @@ export class WorldRenderer {
   private dynamicObjectLayer: Container | null = null;
   private charactersLayer: Container | null = null;
   private overlayLayer: Container | null = null;
+  private effectsLayer: Container | null = null;
   private chatLayer: Container | null = null;
   private hudText: Text | null = null;
   private mountNode: HTMLDivElement | null = null;
@@ -509,6 +550,7 @@ export class WorldRenderer {
   private adjacentSceneWarmupTimer: number | null = null;
   private transferInProgress = false;
   private runtimeTick: ((now: number) => void) | null = null;
+  private tileInteractionHandler: ((payload: TileInteractionPayload) => void) | null = null;
   private renderLoopActive = false;
   /**
    * Imperative fast path: immediately start a motion animation for the self
@@ -574,6 +616,12 @@ export class WorldRenderer {
     this.runtimeTick = runtimeTick;
   }
 
+  setTileInteractionHandler(
+    tileInteractionHandler: ((payload: TileInteractionPayload) => void) | null
+  ) {
+    this.tileInteractionHandler = tileInteractionHandler;
+  }
+
   private readonly tick = () => {
     if (!this.app) {
       this.renderLoopActive = false;
@@ -622,6 +670,7 @@ export class WorldRenderer {
     this.dynamicObjectLayer = new Container();
     this.charactersLayer = new Container();
     this.overlayLayer = new Container();
+    this.effectsLayer = new Container();
     this.chatLayer = new Container();
 
     this.worldLayer.addChild(this.belowCharactersLayer);
@@ -629,6 +678,7 @@ export class WorldRenderer {
     this.worldLayer.addChild(this.dynamicObjectLayer);
     this.worldLayer.addChild(this.charactersLayer);
     this.worldLayer.addChild(this.overlayLayer);
+    this.worldLayer.addChild(this.effectsLayer);
     this.worldLayer.addChild(this.chatLayer);
 
     this.app.stage.addChild(this.worldLayer);
@@ -638,6 +688,8 @@ export class WorldRenderer {
     this.hudText.y = 12;
     this.hudText.visible = false;
     this.app.stage.addChild(this.hudText);
+
+    this.canvas.addEventListener("click", this.handleCanvasClick);
     this.app.ticker.add(this.tick);
     this.app.stop();
     this.renderLoopActive = false;
@@ -677,6 +729,34 @@ export class WorldRenderer {
     this.canvas.style.height = `${Math.floor(VIEWPORT_HEIGHT * scale)}px`;
   }
 
+  private readonly handleCanvasClick = (event: MouseEvent) => {
+    if (!this.canvas || !this.worldLayer || !this.tileInteractionHandler) {
+      return;
+    }
+
+    const rect = this.canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return;
+    }
+
+    const canvasX = ((event.clientX - rect.left) / rect.width) * VIEWPORT_WIDTH;
+    const canvasY = ((event.clientY - rect.top) / rect.height) * VIEWPORT_HEIGHT;
+    const tileX = Math.floor((canvasX - this.worldLayer.x) / TILE_SIZE) + 1;
+    const tileY = Math.floor((canvasY - this.worldLayer.y) / TILE_SIZE) + 1;
+
+    const mapWidth = this.lastWorld?.map?.width ?? DEFAULT_MAP_SIZE;
+    const mapHeight = this.lastWorld?.map?.height ?? DEFAULT_MAP_SIZE;
+    if (tileX < 1 || tileY < 1 || tileX > mapWidth || tileY > mapHeight) {
+      return;
+    }
+
+    this.tileInteractionHandler({
+      x: tileX,
+      y: tileY,
+      detail: event.detail
+    });
+  };
+
   render(world: WorldState, assetCatalog: AssetCatalog | null = null, showTileDebug = false) {
     if (
       !this.worldLayer ||
@@ -685,6 +765,7 @@ export class WorldRenderer {
       !this.dynamicObjectLayer ||
       !this.charactersLayer ||
       !this.overlayLayer ||
+      !this.effectsLayer ||
       !this.chatLayer ||
       !this.hudText
     ) {
@@ -721,6 +802,7 @@ export class WorldRenderer {
 
     this.syncCharacters(world, assetCatalog);
     this.rebuildChatBubbles(world.chatBubbles);
+    this.rebuildEffects(world);
     this.ensureRenderLoop();
   }
 
@@ -866,21 +948,6 @@ export class WorldRenderer {
         }
       }
 
-      for (const npc of map.npcs) {
-        const npcDef = getNpcDef(assetCatalog, npc.id);
-        const visual = createCharacterVisual(
-          assetCatalog,
-          npcDef?.name ?? `NPC ${npc.id}`,
-          npcDef?.body ?? 1,
-          npcDef?.head ?? 1,
-          npcDef?.heading ?? 3,
-          "npc"
-        );
-        visual.container.x = worldX(npc.x);
-        visual.container.y = worldY(npc.y);
-        nextStaticEntityLayer.addChild(visual.container);
-      }
-
       for (const tile of map.layers[2] ?? []) {
         const sprite = createLayerSprite(assetCatalog, tile.grhIndex, tile.x, tile.y);
         if (sprite) {
@@ -984,7 +1051,7 @@ export class WorldRenderer {
       const current = this.otherNodes.get(other.charIndex) ?? null;
       const next = this.syncCharacterNode(
         current,
-        "other",
+        other.isNpc ? "npc" : "other",
         other.name,
         other.bodyId,
         other.headId,
@@ -1010,7 +1077,7 @@ export class WorldRenderer {
 
   private syncCharacterNode(
     current: CharacterNode | null,
-    kind: "self" | "other",
+    kind: "self" | "other" | "npc",
     name: string,
     bodyId: number,
     headId: number,
@@ -1160,6 +1227,80 @@ export class WorldRenderer {
     }
   }
 
+  private rebuildEffects(world: WorldState) {
+    if (!this.effectsLayer) {
+      return;
+    }
+
+    this.effectsLayer.removeChildren();
+    const now = Date.now();
+
+    if (world.targetTile) {
+      const highlight = new Graphics();
+      highlight.lineStyle(2, 0xf3d27d, 0.92);
+      highlight.beginFill(0xf3d27d, 0.08);
+      highlight.drawRoundedRect(
+        worldX(world.targetTile.x) + 2,
+        worldY(world.targetTile.y) + 2,
+        TILE_SIZE - 4,
+        TILE_SIZE - 4,
+        6
+      );
+      highlight.endFill();
+      highlight.lineStyle(1, 0xf9e4b4, 0.8);
+      highlight.moveTo(tileCenterX(world.targetTile.x), worldY(world.targetTile.y) + 4);
+      highlight.lineTo(tileCenterX(world.targetTile.x), worldY(world.targetTile.y) + TILE_SIZE - 4);
+      highlight.moveTo(worldX(world.targetTile.x) + 4, tileCenterY(world.targetTile.y));
+      highlight.lineTo(worldX(world.targetTile.x) + TILE_SIZE - 4, tileCenterY(world.targetTile.y));
+      this.effectsLayer.addChild(highlight);
+    }
+
+    for (const event of world.fxEvents) {
+      const age = now - event.createdAt;
+      const progress = clamp(age / event.ttlMs, 0, 1);
+      const alpha = clamp(1 - progress, 0, 1);
+      if (alpha <= 0) {
+        continue;
+      }
+
+      const color = [0x85b6ff, 0xcf96ff, 0x8af3cb, 0xffc66b][event.fxId % 4] ?? 0x85b6ff;
+      const pulse = new Graphics();
+      pulse.lineStyle(2, color, alpha * 0.9);
+      pulse.beginFill(color, alpha * 0.12);
+      pulse.drawCircle(
+        tileCenterX(event.x),
+        tileCenterY(event.y) - 8,
+        10 + progress * 18
+      );
+      pulse.endFill();
+      this.effectsLayer.addChild(pulse);
+    }
+
+    for (const event of world.combatTexts) {
+      const age = now - event.createdAt;
+      const progress = clamp(age / event.ttlMs, 0, 1);
+      const alpha = clamp(1 - progress, 0, 1);
+      if (alpha <= 0) {
+        continue;
+      }
+
+      const style =
+        event.tone === "damage"
+          ? damageTextStyle
+          : event.tone === "block"
+            ? blockTextStyle
+            : event.tone === "status"
+              ? statusTextStyle
+              : infoTextStyle;
+      const label = new Text(event.text, style);
+      label.anchor.set(0.5, 1);
+      label.alpha = alpha;
+      label.x = tileCenterX(event.x);
+      label.y = worldY(event.y) - 14 - progress * 22;
+      this.effectsLayer.addChild(label);
+    }
+  }
+
   private updateCharacterMotions(now: number) {
     const entries = [
       ...(this.selfNode ? [this.selfNode] : []),
@@ -1230,6 +1371,7 @@ export class WorldRenderer {
     this.resizeObserver = null;
 
     if (this.app) {
+      this.canvas?.removeEventListener("click", this.handleCanvasClick);
       this.app.ticker.remove(this.tick);
       this.stopRenderLoop();
       this.app.destroy(true, {
@@ -1252,6 +1394,8 @@ export class WorldRenderer {
     this.lastWorld = null;
     this.selfNode = null;
     this.otherNodes.clear();
+    this.effectsLayer = null;
+    this.tileInteractionHandler = null;
     this.transferInProgress = false;
     this.clearStaticSceneCache();
   }

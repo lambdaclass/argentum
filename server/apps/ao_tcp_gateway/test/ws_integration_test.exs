@@ -12,10 +12,8 @@ defmodule AoTcpGateway.WsIntegrationTest do
   @pkt_user_index_in_server 46
   @pkt_change_map 30
   @pkt_session_token 200
-
   # Packet IDs (client -> server)
   @pkt_login_new_char 74
-  @pkt_login_existing_char 73
   @pkt_walk 78
 
   setup do
@@ -53,7 +51,7 @@ defmodule AoTcpGateway.WsIntegrationTest do
            "Expected change_map (ID 30) in response, got: #{inspect(packet_ids)}"
 
     assert @pkt_session_token in packet_ids,
-           "Expected session_token (ID 200) in response, got: #{inspect(packet_ids)}"
+           "Expected session_token (ID 200) in WS response, got: #{inspect(packet_ids)}"
   end
 
   test "walk packet after login doesn't crash" do
@@ -329,13 +327,8 @@ defmodule AoTcpGateway.WsIntegrationTest do
   # update_exp (29): Int32 + Int32 (8 bytes)
   defp skip_packet_payload(29, <<_::binary-size(8), rest::binary>>), do: {:ok, rest}
 
-  # change_spell_slot (66): Int8 + Int16 + String8
-  defp skip_packet_payload(66, <<_slot::8, _spell_id::binary-size(2), rest::binary>>) do
-    case rest do
-      <<len::little-signed-integer-16, _str::binary-size(len), rest::binary>> -> {:ok, rest}
-      _ -> :unknown
-    end
-  end
+  # change_spell_slot (66): Int8 + Int16 + Int16 + Bool (6 bytes)
+  defp skip_packet_payload(66, <<_::binary-size(6), rest::binary>>), do: {:ok, rest}
 
   # intervals (158): 12 * Int32 (48 bytes)
   defp skip_packet_payload(158, <<_::binary-size(48), rest::binary>>), do: {:ok, rest}
@@ -343,7 +336,7 @@ defmodule AoTcpGateway.WsIntegrationTest do
   # send_skills (87): 24 × Int8 (24 bytes)
   defp skip_packet_payload(87, <<_::binary-size(24), rest::binary>>), do: {:ok, rest}
 
-  # session_token (200): Int32 + String8
+  # session_token (200): WS-only — Int32 + String8
   defp skip_packet_payload(200, <<_char_id::little-signed-integer-32, rest::binary>>) do
     case rest do
       <<len::little-signed-integer-16, _str::binary-size(len), rest::binary>> -> {:ok, rest}

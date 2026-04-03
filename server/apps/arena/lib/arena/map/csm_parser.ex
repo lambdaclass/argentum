@@ -30,6 +30,7 @@ defmodule Arena.Map.CsmParser do
       :rain,
       :snow,
       :fog,
+      restrict_mode: "",
       blocked: [],
       layers: [[], [], [], []],
       triggers: [],
@@ -85,6 +86,7 @@ defmodule Arena.Map.CsmParser do
          rain: map_dat.rain,
          snow: map_dat.snow,
          fog: map_dat.fog,
+         restrict_mode: map_dat.restrict_mode,
          blocked: sections.blocked,
          layers: sections.layers,
          triggers: sections.triggers,
@@ -148,7 +150,7 @@ defmodule Arena.Map.CsmParser do
   defp parse_map_dat(data) do
     with {:ok, map_name, rest} <- read_vb6_string(data),
          {:ok, _backup_mode, rest} <- read_byte(rest),
-         {:ok, _restrict_mode, rest} <- read_vb6_string(rest),
+         {:ok, restrict_mode, rest} <- read_vb6_string(rest),
          {:ok, music_hi, rest} <- read_int32(rest),
          {:ok, music_low, rest} <- read_int32(rest),
          {:ok, seguro, rest} <- read_byte(rest),
@@ -172,7 +174,8 @@ defmodule Arena.Map.CsmParser do
         music_low: music_low,
         rain: lluvia != 0,
         snow: nieve != 0,
-        fog: niebla != 0
+        fog: niebla != 0,
+        restrict_mode: String.upcase(restrict_mode)
       }
 
       {:ok, map_dat, rest}

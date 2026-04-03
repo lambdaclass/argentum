@@ -3,6 +3,7 @@ import { appReducer, createInitialState } from "./appReducer";
 import type { Direction } from "./types";
 import { SessionClient, type MovementDebugSnapshot } from "../net/SessionClient";
 import { MapMusicController } from "../audio/mapMusic";
+import { SoundEffectsController } from "../audio/soundEffects";
 import { WorldCanvas } from "../render/WorldCanvas";
 import { loadAssetCatalog, type AssetCatalog } from "../render/assetCatalog";
 import { loadMapPack, type MapPackProgress } from "../net/mapApi";
@@ -14,6 +15,8 @@ import { WorldStatusPanel } from "../ui/WorldStatusPanel";
 import { HechizosPanel } from "../ui/HechizosPanel";
 import { ClassicHudPanel } from "../ui/ClassicHudPanel";
 import { SkillsPanel } from "../ui/SkillsPanel";
+import { MerchantPanel } from "../ui/MerchantPanel";
+import { TradePanel } from "../ui/TradePanel";
 
 const MOVE_KEYS: Record<string, Direction> = {
   ArrowUp: "north",
@@ -26,7 +29,7 @@ const MOVE_KEYS: Record<string, Direction> = {
   a: "west"
 };
 
-const RIGHT_TABS = [
+const BASE_RIGHT_TABS = [
   { key: "hud", label: "HUD" },
   { key: "skills", label: "Skills" },
   { key: "spells", label: "Hechizos" },
@@ -57,7 +60,7 @@ export function App() {
     totalBytes: null
   });
   const [activeRightTab, setActiveRightTab] = useState<
-    "hud" | "skills" | "spells" | "world" | "session" | "chat" | "debug"
+    "hud" | "trade" | "commerce" | "skills" | "spells" | "world" | "session" | "chat" | "debug"
   >("hud");
   const [showTileDebug, setShowTileDebug] = useState(false);
   const [showMoveDebug, setShowMoveDebug] = useState(false);
@@ -81,6 +84,24 @@ export function App() {
     stateRef.current = state;
   }, [state]);
 
+  const rightTabs = useMemo(() => {
+    const dynamicTabs = [];
+
+    if (state.trade.open) {
+      dynamicTabs.push({ key: "trade" as const, label: "Trueque" });
+    }
+
+    if (state.commerce.open) {
+      dynamicTabs.push({ key: "commerce" as const, label: "Comercio" });
+    }
+
+    if (dynamicTabs.length === 0) {
+      return BASE_RIGHT_TABS;
+    }
+
+    return [BASE_RIGHT_TABS[0], ...dynamicTabs, ...BASE_RIGHT_TABS.slice(1)];
+  }, [state.commerce.open, state.trade.open]);
+
   useEffect(() => {
     if (state.world.mapStatus === "ready" && state.world.map) {
       enteredWorldRef.current = true;
@@ -90,8 +111,23 @@ export function App() {
     }
   }, [bootConnectAttempts, state.world.map, state.world.mapStatus]);
 
+  useEffect(() => {
+    if (state.trade.open) {
+      setActiveRightTab("trade");
+      return;
+    }
+
+    if (state.commerce.open) {
+      setActiveRightTab("commerce");
+      return;
+    }
+
+    setActiveRightTab((current) => (current === "commerce" || current === "trade" ? "hud" : current));
+  }, [state.commerce.open, state.trade.open]);
+
   const sessionRef = useRef<SessionClient | null>(null);
   const musicRef = useRef<MapMusicController | null>(null);
+  const soundRef = useRef<SoundEffectsController | null>(null);
 
   if (sessionRef.current == null) {
     sessionRef.current = new SessionClient(dispatch, () => stateRef.current);
@@ -101,8 +137,13 @@ export function App() {
     musicRef.current = new MapMusicController();
   }
 
+  if (soundRef.current == null) {
+    soundRef.current = new SoundEffectsController();
+  }
+
   const session = sessionRef.current;
   const music = musicRef.current;
+  const sound = soundRef.current;
 
   useEffect(() => {
     let cancelled = false;
@@ -244,6 +285,24 @@ export function App() {
         return;
       }
 
+      if (event.key === "f" || event.key === "F") {
+        event.preventDefault();
+        session.sendAttack();
+        return;
+      }
+
+      if (event.key === "g" || event.key === "G") {
+        event.preventDefault();
+        session.sendSafeToggle();
+        return;
+      }
+
+      if (event.key === "e" || event.key === "E") {
+        event.preventDefault();
+        session.sendCommerceStart();
+        return;
+      }
+
       const direction = MOVE_KEYS[event.key];
       if (!direction) {
         return;
@@ -281,7 +340,7 @@ export function App() {
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
-      dispatch({ type: "world/pruneChatBubbles", now: Date.now() });
+      dispatch({ type: "world/pruneTransient", now: Date.now() });
     }, 250);
 
     return () => {
@@ -290,11 +349,22 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    session.setSoundPlayer((payload) => {
+      sound.playWave(stateRef.current.connection.endpoint, payload);
+    });
+
+    return () => {
+      session.setSoundPlayer(null);
+    };
+  }, [session, sound]);
+
+  useEffect(() => {
     return () => {
       session.destroy();
       music.destroy();
+      sound.destroy();
     };
-  }, [music, session]);
+  }, [music, session, sound]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -501,6 +571,12 @@ export function App() {
                   assetCatalog={assetCatalog}
                   showTileDebug={showTileDebug}
                   session={session}
+                  onTileInteraction={({ x, y, detail }) => {
+                    session.sendLeftClick(x, y);
+                    if (detail >= 2) {
+                      session.sendAttack();
+                    }
+                  }}
                 />
                 {worldOverlay ? (
                   <div className="world-overlay-state">
@@ -563,7 +639,7 @@ export function App() {
           />
 
           <div className="sidebar-tabs sidebar-tabs-top sidebar-tabs-ao">
-            {RIGHT_TABS.map((tab) => (
+            {rightTabs.map((tab) => (
               <button
                 className={`ghost-button ${activeRightTab === tab.key ? "tab-active" : ""}`}
                 key={tab.key}
@@ -609,14 +685,50 @@ export function App() {
 
             {activeRightTab === "hud" ? (
               <ClassicHudPanel
-                  assetCatalog={assetCatalog}
-                  state={state}
-                  onSelectSlot={(slotIndex) =>
-                    dispatch({ type: "inventory/selectSlot", slotIndex })
-                  }
-                  onEquip={(slotIndex) => session.sendEquip(slotIndex)}
-                  onUse={(slotIndex) => session.sendUse(slotIndex)}
-                  onDrop={(slotIndex, amount) => session.sendDrop(slotIndex, amount)}
+                assetCatalog={assetCatalog}
+                state={state}
+                onSelectSlot={(slotIndex) =>
+                  dispatch({ type: "inventory/selectSlot", slotIndex })
+                }
+                onEquip={(slotIndex) => session.sendEquip(slotIndex)}
+                onUse={(slotIndex) => session.sendUse(slotIndex)}
+                onDrop={(slotIndex, amount) => session.sendDrop(slotIndex, amount)}
+                onAttack={() => session.sendAttack()}
+                onStartCommerce={() => session.sendCommerceStart()}
+                onToggleSafeMode={() => session.sendSafeToggle()}
+              />
+            ) : null}
+
+            {activeRightTab === "commerce" && state.commerce.open ? (
+              <MerchantPanel
+                assetCatalog={assetCatalog}
+                state={state}
+                onClose={() => session.sendCommerceEnd()}
+                onSelectMerchantSlot={(slotIndex) =>
+                  dispatch({ type: "commerce/selectSlot", slotIndex })
+                }
+                onSelectInventorySlot={(slotIndex) =>
+                  dispatch({ type: "inventory/selectSlot", slotIndex })
+                }
+                onSetBuyAmount={(amount) => dispatch({ type: "commerce/setBuyAmount", amount })}
+                onSetSellAmount={(amount) => dispatch({ type: "commerce/setSellAmount", amount })}
+                onBuy={(slotIndex, amount) => session.sendCommerceBuy(slotIndex, amount)}
+                onSell={(slotIndex, amount) => session.sendCommerceSell(slotIndex, amount)}
+              />
+            ) : null}
+
+            {activeRightTab === "trade" && state.trade.open ? (
+              <TradePanel
+                assetCatalog={assetCatalog}
+                state={state}
+                onSelectInventorySlot={(slotIndex) =>
+                  dispatch({ type: "inventory/selectSlot", slotIndex })
+                }
+                onSetOfferAmount={(amount) => dispatch({ type: "trade/setOfferAmount", amount })}
+                onOffer={(itemId, amount) => session.sendUserTradeOffer(itemId, amount)}
+                onAccept={() => session.sendUserTradeAccept()}
+                onReject={() => session.sendUserTradeReject()}
+                onClose={() => session.sendUserTradeEnd()}
               />
             ) : null}
 
