@@ -39,6 +39,17 @@ const VIEWPORT_WIDTH = 736;
 const VIEWPORT_HEIGHT = 608;
 const GHOST_BODY_ID = 829;
 const GHOST_HEAD_ID = 0;
+const GHOST_BODY_DEF = {
+  type: "direct" as const,
+  bodyOffsetX: 0,
+  bodyOffsetY: 0,
+  offHeadX: 0,
+  offHeadY: -2,
+  north: 51672,
+  east: 51673,
+  south: 51671,
+  west: 51674
+};
 
 const hudStyle = new TextStyle({
   fontFamily: "monospace",
@@ -514,26 +525,30 @@ function createCharacterVisual(
   }
 
   const container = new Container();
+  const ghostBody = effectiveBodyId === GHOST_BODY_ID ? GHOST_BODY_DEF : null;
   const rawNpcBody =
-    kind === "npc" && effectiveBodyId > 0 && !catalog.bodies[effectiveBodyId]
+    !ghostBody && kind === "npc" && effectiveBodyId > 0 && !catalog.bodies[effectiveBodyId]
       ? getRawNpcBodyDef(effectiveBodyId)
       : null;
-  const body = rawNpcBody ? null : catalog.bodies[effectiveBodyId];
-  const bodyOffsetX = rawNpcBody?.bodyOffsetX ?? 0;
-  const bodyOffsetY = rawNpcBody?.bodyOffsetY ?? 0;
-  const headOffsetX = rawNpcBody?.offHeadX ?? body?.offHeadX ?? 0;
-  const headOffsetY = rawNpcBody?.offHeadY ?? body?.offHeadY ?? 0;
+  const directBody = ghostBody ?? rawNpcBody;
+  const body = directBody ? null : catalog.bodies[effectiveBodyId];
+  const bodyOffsetX = directBody?.bodyOffsetX ?? 0;
+  const bodyOffsetY = directBody?.bodyOffsetY ?? 0;
+  const headOffsetX = directBody?.offHeadX ?? body?.offHeadX ?? 0;
+  const headOffsetY = directBody?.offHeadY ?? body?.offHeadY ?? 0;
 
   let bodyFrames: Texture[] | null = null;
   let frameVelocity = 210;
   let bodyTexture: Texture | null = null;
 
-  if (rawNpcBody?.type === "direct") {
-    const bodyGrhId = rawNpcBody[direction];
-    const bodyAnimation = bodyGrhId ? getGrhAnimation(catalog, bodyGrhId, true) : null;
+  if (directBody?.type === "direct") {
+    const bodyGrhId = directBody[direction];
+    const useCharIndex = !ghostBody;
+    const bodyAnimation = bodyGrhId ? getGrhAnimation(catalog, bodyGrhId, useCharIndex) : null;
     bodyFrames = bodyAnimation?.textures ?? null;
     frameVelocity = bodyAnimation?.velocidad ?? 210;
-    bodyTexture = bodyFrames?.[0] ?? (bodyGrhId ? getGrhTexture(catalog, bodyGrhId, true) : null);
+    bodyTexture =
+      bodyFrames?.[0] ?? (bodyGrhId ? getGrhTexture(catalog, bodyGrhId, useCharIndex) : null);
   } else if (rawNpcBody?.type === "molded") {
     const rawDirection = rawNpcBody.directions[direction];
     const rawSheetUrl = getRawNpcBodySheetUrl(rawNpcBody.fileNum);
