@@ -973,6 +973,21 @@ h3 {
   flex-wrap: wrap;
 }
 
+.hero-chip-row-dense {
+  margin-top: 8px;
+}
+
+.hero-chip-sailing {
+  border-color: rgba(96, 192, 241, 0.22);
+  color: #c7ecff;
+}
+
+.hero-chip-dead {
+  border-color: rgba(214, 189, 255, 0.26);
+  color: #e5d8ff;
+  background: rgba(104, 78, 153, 0.18);
+}
+
 .character-status-track {
   margin-top: 10px;
   height: 8px;
@@ -1797,6 +1812,12 @@ h3 {
   gap: 10px;
 }
 
+.bank-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .trade-panel {
   display: flex;
   flex-direction: column;
@@ -1828,6 +1849,30 @@ h3 {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
+}
+
+.bank-banner {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.bank-banner-copy {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.bank-banner-copy strong {
+  display: block;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bank-banner small {
+  text-align: left;
 }
 
 .merchant-banner span,
@@ -1992,6 +2037,24 @@ h3 {
 
 .merchant-action-row .ghost-button {
   flex: 1 1 auto;
+}
+
+.bank-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-rows: repeat(8, 40px);
+  gap: 5px;
+  margin-top: 0;
+}
+
+.bank-grid .inventory-slot-compact {
+  min-height: 40px;
+  padding: 3px;
+}
+
+.bank-gold-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .trade-banner {
@@ -2461,6 +2524,10 @@ h3 {
   margin-top: 10px;
 }
 
+.spellbook-hotkeys-card {
+  margin-top: 10px;
+}
+
 .spellbook-info-card {
   margin-top: 10px;
 }
@@ -2486,6 +2553,76 @@ h3 {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   margin-bottom: 6px;
+}
+
+.spellbook-requirements {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.spellbook-requirements > span {
+  color: var(--text-soft);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.spellbook-requirement-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.spellbook-requirement-chip {
+  padding: 5px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 216, 132, 0.16);
+  background: rgba(255, 216, 132, 0.08);
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.spellbook-hotkey-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.spellbook-hotkey-button {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 216, 132, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  text-align: left;
+}
+
+.spellbook-hotkey-button span {
+  color: var(--text-soft);
+  font-size: 10px;
+}
+
+.spellbook-hotkey-button strong {
+  min-width: 0;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+}
+
+.spellbook-hotkey-button-active {
+  border-color: rgba(242, 194, 97, 0.52);
+  background: rgba(242, 194, 97, 0.08);
 }
 
 .world-minimap-expanded {

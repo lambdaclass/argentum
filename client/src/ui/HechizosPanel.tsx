@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import type { ClientState } from "../app/types";
 import {
+  getSpellAreaTargetLabel,
   getSpellMetadata,
+  getSpellRequirementLabels,
   getSpellTargetLabel,
   getSpellTypeLabel
 } from "../data/gameData";
@@ -9,17 +11,21 @@ import {
 interface HechizosPanelProps {
   compact?: boolean;
   connected?: boolean;
+  spellHotkeys: Array<number | null>;
   state: ClientState;
   onSelectSlot: (slotIndex: number | null) => void;
   onCast: (slotIndex: number) => void;
+  onBindHotkey: (hotkeyIndex: number, slotIndex: number | null) => void;
 }
 
 export function HechizosPanel({
   compact = false,
   connected = false,
+  spellHotkeys,
   state,
   onSelectSlot,
-  onCast
+  onCast,
+  onBindHotkey
 }: HechizosPanelProps) {
   const [showInfo, setShowInfo] = useState(false);
   const slots = state.spellbook.slots;
@@ -28,8 +34,16 @@ export function HechizosPanel({
   const selectedSlot = selectedSlotIndex == null ? null : slots[selectedSlotIndex];
   const selectedMetadata =
     selectedSlot == null ? null : getSpellMetadata(selectedSlot.spellId);
+  const requirementLabels = getSpellRequirementLabels(selectedMetadata);
   const canCast = connected && selectedSlotIndex != null && selectedSlot != null;
   const targetTile = state.world.targetTile;
+  const targetTerrain =
+    targetTile && state.world.map
+      ? state.world.map.tiles[(targetTile.y - 1) * state.world.map.width + (targetTile.x - 1)] === 2
+        ? "Agua"
+        : "Tierra"
+      : null;
+  const hotkeyLabels = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
 
   useEffect(() => {
     if (selectedSlot == null) {
@@ -86,7 +100,7 @@ export function HechizosPanel({
               <strong>{spell?.name ?? "(vacio)"}</strong>
               {spell ? (
                 <small className="spellbook-row-cost">
-                  {metadata ? `M ${metadata.manaRequired}` : `#${spell.spellId}`}
+                  {metadata ? `M ${metadata.manaRequired} · ${metadata.cooldown ?? 2}s` : `#${spell.spellId}`}
                 </small>
               ) : null}
             </button>
@@ -125,6 +139,35 @@ export function HechizosPanel({
         </button>
       </div>
 
+      <div className="selected-slot-card spellbook-hotkeys-card">
+        <p className="session-card-title">Macros locales</p>
+        <div className="spellbook-hotkey-grid">
+          {spellHotkeys.map((slotIndex, hotkeyIndex) => {
+            const spell = slotIndex == null ? null : slots[slotIndex];
+            const selectedBinding = selectedSlotIndex != null && slotIndex === selectedSlotIndex;
+
+            return (
+              <button
+                className={`spellbook-hotkey-button ${selectedBinding ? "spellbook-hotkey-button-active" : ""}`}
+                key={hotkeyLabels[hotkeyIndex]}
+                onClick={() => onBindHotkey(hotkeyIndex, selectedSlotIndex)}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  onBindHotkey(hotkeyIndex, null);
+                }}
+                type="button"
+              >
+                <span>{hotkeyLabels[hotkeyIndex]}</span>
+                <strong title={spell?.name ?? "Libre"}>{spell?.name ?? "Libre"}</strong>
+              </button>
+            );
+          })}
+        </div>
+        <small className="panel-copy compact">
+          Click asigna el hechizo seleccionado. Click derecho limpia. Teclas 1-0 lanzan la macro, Ctrl+1-0 asigna rapido.
+        </small>
+      </div>
+
       <div className="selected-slot-card spellbook-detail-card">
         {selectedSlot ? (
           <>
@@ -144,17 +187,35 @@ export function HechizosPanel({
                 <strong>{selectedMetadata?.manaRequired ?? "--"}</strong>
               </div>
               <div className="selected-slot-item">
-              <span>Objetivo</span>
-              <strong>
-                {selectedMetadata ? getSpellTargetLabel(selectedMetadata.target) : "Desconocido"}
-              </strong>
+                <span>Objetivo</span>
+                <strong>
+                  {selectedMetadata ? getSpellTargetLabel(selectedMetadata.target) : "Desconocido"}
+                </strong>
+              </div>
+              <div className="selected-slot-item">
+                <span>Cooldown</span>
+                <strong>{selectedMetadata?.cooldown ?? 2}s</strong>
+              </div>
+              <div className="selected-slot-item">
+                <span>Area</span>
+                <strong>
+                  {selectedMetadata && (selectedMetadata.areaRadio ?? 0) > 0
+                    ? `R${selectedMetadata.areaRadio} · ${getSpellAreaTargetLabel(
+                        selectedMetadata.areaAfecta ?? 0
+                      )}`
+                    : "Directo"}
+                </strong>
+              </div>
+              <div className="selected-slot-item">
+                <span>Tile</span>
+                <strong>{targetTile ? `${targetTile.x},${targetTile.y}` : "--,--"}</strong>
+              </div>
+              <div className="selected-slot-item">
+                <span>Terreno</span>
+                <strong>{targetTerrain ?? "--"}</strong>
+              </div>
             </div>
-            <div className="selected-slot-item">
-              <span>Tile</span>
-              <strong>{targetTile ? `${targetTile.x},${targetTile.y}` : "--,--"}</strong>
-            </div>
-          </div>
-        </>
+          </>
         ) : (
           <p className="panel-copy compact">
             Selecciona un hechizo para verlo aqui.
@@ -185,10 +246,38 @@ export function HechizosPanel({
               <strong>{selectedMetadata?.minSkill ?? "--"}</strong>
             </div>
             <div className="selected-slot-item">
+              <span>Area</span>
+              <strong>
+                {selectedMetadata && (selectedMetadata.areaRadio ?? 0) > 0
+                  ? `${getSpellAreaTargetLabel(selectedMetadata.areaAfecta ?? 0)} · R${selectedMetadata.areaRadio}`
+                  : "Directo"}
+              </strong>
+            </div>
+            <div className="selected-slot-item">
+              <span>Nivel max.</span>
+              <strong>
+                {selectedMetadata?.maxLevelCasteable && selectedMetadata.maxLevelCasteable > 0
+                  ? selectedMetadata.maxLevelCasteable
+                  : "Sin tope"}
+              </strong>
+            </div>
+            <div className="selected-slot-item">
               <span>Icono</span>
               <strong>{selectedMetadata?.iconIndex || "--"}</strong>
             </div>
           </div>
+          {requirementLabels.length > 0 ? (
+            <div className="spellbook-requirements">
+              <span>Requisitos</span>
+              <div className="spellbook-requirement-list">
+                {requirementLabels.map((label) => (
+                  <strong className="spellbook-requirement-chip" key={label}>
+                    {label}
+                  </strong>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <div className="spellbook-chant">
             <span>Palabras magicas</span>
             <strong>{selectedMetadata?.magicWords || "No registradas"}</strong>

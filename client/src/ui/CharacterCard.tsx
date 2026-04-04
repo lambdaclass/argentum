@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ClientState } from "../app/types";
-import { getLevelProgress } from "../data/gameData";
+import { getFactionStatusLabel, getLevelProgress } from "../data/gameData";
 import { drawMinimap } from "./minimap";
 
 const SIDEBAR_COLLAPSE_STORAGE_KEY = "ao_sidebar_hero_collapsed";
@@ -94,6 +94,8 @@ export function CharacterCard({
     state.stats.xpCurrent,
     state.stats.xpNext
   );
+  const factionLabel = getFactionStatusLabel(state.world.self.factionStatus);
+  const deathLabel = state.world.self.dead ? "Fantasma" : null;
   const effectiveCollapsed = dense || collapsed || isShortViewport;
 
   useEffect(() => {
@@ -170,6 +172,14 @@ export function CharacterCard({
               />
             </div>
           </div>
+        </div>
+        <div className="hero-chip-row hero-chip-row-dense">
+          <span className="status-pill" data-state={state.connection.status}>
+            {statusLabel}
+          </span>
+          {deathLabel ? <span className="hero-chip hero-chip-dead">{deathLabel}</span> : null}
+          <span className="hero-chip">{factionLabel}</span>
+          {state.world.self.navigating ? <span className="hero-chip hero-chip-sailing">Navegando</span> : null}
         </div>
       </section>
     );
@@ -287,6 +297,9 @@ export function CharacterCard({
           <span className="status-pill" data-state={state.connection.status}>
             {statusLabel}
           </span>
+          {deathLabel ? <span className="hero-chip hero-chip-dead">{deathLabel}</span> : null}
+          <span className="hero-chip">{factionLabel}</span>
+          {state.world.self.navigating ? <span className="hero-chip hero-chip-sailing">Navegando</span> : null}
           <span className="hero-chip">{mapSummary}</span>
           <span className="hero-chip">World {state.world.mapStatus}</span>
         </div>

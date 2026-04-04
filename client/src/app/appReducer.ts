@@ -12,6 +12,11 @@ const DEFAULT_CHARACTER_NAME = "Player_Web";
 const DEFAULT_BOOTSTRAP_PASSWORD = "browser_bootstrap_token";
 const STORAGE_CHAR_ID = "ao_char_id";
 const STORAGE_TOKEN = "ao_session_token";
+const GHOST_BODY_ID = 829;
+
+function isDeadBody(bodyId: number) {
+  return bodyId === GHOST_BODY_ID;
+}
 
 function defaultEndpoint() {
   if (typeof window === "undefined") {
@@ -73,14 +78,40 @@ function initialCharacter(): ClientState["world"]["self"] {
     name: "",
     x: null,
     y: null,
+    dead: false,
     heading: 3,
     bodyId: 1,
     headId: 1,
+    weaponId: 0,
+    shieldId: 0,
+    helmetId: 0,
+    cartId: 0,
+    backpackId: 0,
+    effectId: 0,
+    effectLoops: 0,
     speed: 1,
     hpCurrent: 100,
     hpMax: 100,
     manaCurrent: 100,
-    manaMax: 100
+    manaMax: 100,
+    navigating: false,
+    classId: null,
+    raceId: null,
+    genderId: null,
+    factionStatus: null
+  };
+}
+
+function initialBank(): ClientState["bank"] {
+  return {
+    open: false,
+    slots: Array.from({ length: 40 }, () => null),
+    selectedSlot: null,
+    bankGold: 0,
+    depositAmount: 1,
+    withdrawAmount: 1,
+    depositGoldAmount: 1,
+    withdrawGoldAmount: 1
   };
 }
 
@@ -126,9 +157,17 @@ function applyCharacter(target: CharacterCreatePacket, character: ClientState["w
   character.name = target.name;
   character.x = target.x;
   character.y = target.y;
+  character.dead = isDeadBody(target.bodyId) || target.minHp <= 0;
   character.heading = target.heading;
   character.bodyId = target.bodyId;
   character.headId = target.headId;
+  character.weaponId = target.weaponId;
+  character.shieldId = target.shieldId;
+  character.helmetId = target.helmetId;
+  character.cartId = target.cartId;
+  character.backpackId = target.backpackId;
+  character.effectId = target.effectId;
+  character.effectLoops = target.effectLoops;
   character.speed = target.speed;
   character.hpCurrent = target.minHp;
   character.hpMax = target.maxHp;
@@ -194,6 +233,7 @@ export function createInitialState(): ClientState {
       buyAmount: 1,
       sellAmount: 1
     },
+    bank: initialBank(),
     trade: initialTrade(),
     skills: {
       entries: [],
@@ -283,6 +323,7 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
           buyAmount: 1,
           sellAmount: 1
         },
+        bank: initialBank(),
         trade: initialTrade()
       };
 
@@ -316,6 +357,7 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
           buyAmount: 1,
           sellAmount: 1
         },
+        bank: initialBank(),
         trade: initialTrade()
       };
 
@@ -414,6 +456,30 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
         }
       };
 
+    case "world/setSelfNavigation":
+      return {
+        ...state,
+        world: {
+          ...state.world,
+          self: {
+            ...state.world.self,
+            navigating: action.navigating
+          }
+        }
+      };
+
+    case "world/setSelfDead":
+      return {
+        ...state,
+        world: {
+          ...state.world,
+          self: {
+            ...state.world.self,
+            dead: action.dead
+          }
+        }
+      };
+
     case "world/upsertCharacter": {
       if (action.self || action.character.charIndex === state.world.self.charIndex) {
         const self = { ...state.world.self };
@@ -449,9 +515,17 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
               name: action.character.name,
               x: action.character.x,
               y: action.character.y,
+              dead: isDeadBody(action.character.bodyId) || action.character.minHp <= 0,
               heading: action.character.heading,
               bodyId: action.character.bodyId,
               headId: action.character.headId,
+              weaponId: action.character.weaponId,
+              shieldId: action.character.shieldId,
+              helmetId: action.character.helmetId,
+              cartId: action.character.cartId,
+              backpackId: action.character.backpackId,
+              effectId: action.character.effectId,
+              effectLoops: action.character.effectLoops,
               speed: action.character.speed,
               isNpc: action.character.isNpc
             }
@@ -459,6 +533,21 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
         }
       };
     }
+
+    case "world/setMiniStats":
+      return {
+        ...state,
+        world: {
+          ...state.world,
+          self: {
+            ...state.world.self,
+            classId: action.classId,
+            raceId: action.raceId,
+            genderId: action.genderId,
+            factionStatus: action.factionStatus
+          }
+        }
+      };
 
     case "world/moveOther":
       if (!state.world.others[action.charIndex]) {
@@ -488,9 +577,20 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
             ...state.world,
             self: {
               ...state.world.self,
+              dead:
+                action.bodyId != null
+                  ? isDeadBody(action.bodyId)
+                  : state.world.self.dead,
               heading: action.heading ?? state.world.self.heading,
               bodyId: action.bodyId ?? state.world.self.bodyId,
-              headId: action.headId ?? state.world.self.headId
+              headId: action.headId ?? state.world.self.headId,
+              weaponId: action.weaponId ?? state.world.self.weaponId,
+              shieldId: action.shieldId ?? state.world.self.shieldId,
+              helmetId: action.helmetId ?? state.world.self.helmetId,
+              cartId: action.cartId ?? state.world.self.cartId,
+              backpackId: action.backpackId ?? state.world.self.backpackId,
+              effectId: action.effectId ?? state.world.self.effectId,
+              effectLoops: action.effectLoops ?? state.world.self.effectLoops
             }
           }
         };
@@ -508,9 +608,20 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
             ...state.world.others,
             [action.charIndex]: {
               ...state.world.others[action.charIndex],
+              dead:
+                action.bodyId != null
+                  ? isDeadBody(action.bodyId)
+                  : state.world.others[action.charIndex].dead,
               heading: action.heading ?? state.world.others[action.charIndex].heading,
               bodyId: action.bodyId ?? state.world.others[action.charIndex].bodyId,
-              headId: action.headId ?? state.world.others[action.charIndex].headId
+              headId: action.headId ?? state.world.others[action.charIndex].headId,
+              weaponId: action.weaponId ?? state.world.others[action.charIndex].weaponId,
+              shieldId: action.shieldId ?? state.world.others[action.charIndex].shieldId,
+              helmetId: action.helmetId ?? state.world.others[action.charIndex].helmetId,
+              cartId: action.cartId ?? state.world.others[action.charIndex].cartId,
+              backpackId: action.backpackId ?? state.world.others[action.charIndex].backpackId,
+              effectId: action.effectId ?? state.world.others[action.charIndex].effectId,
+              effectLoops: action.effectLoops ?? state.world.others[action.charIndex].effectLoops
             }
           }
         }
@@ -622,6 +733,13 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
     case "stats/setHp":
       return {
         ...state,
+        world: {
+          ...state.world,
+          self: {
+            ...state.world.self,
+            dead: action.current <= 0
+          }
+        },
         stats: {
           ...state.stats,
           hpCurrent: action.current,
@@ -690,6 +808,13 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
     case "stats/setAll":
       return {
         ...state,
+        world: {
+          ...state.world,
+          self: {
+            ...state.world.self,
+            dead: action.hpCurrent <= 0
+          }
+        },
         stats: {
           ...state.stats,
           hpCurrent: action.hpCurrent,
@@ -841,6 +966,108 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
         commerce: {
           ...state.commerce,
           sellAmount: Math.max(1, Math.floor(action.amount) || 1)
+        }
+      };
+
+    case "bank/open":
+      return {
+        ...state,
+        bank: {
+          ...initialBank(),
+          open: true
+        }
+      };
+
+    case "bank/close":
+      return {
+        ...state,
+        bank: initialBank()
+      };
+
+    case "bank/setSlot": {
+      const slots =
+        action.slotIndex < state.bank.slots.length
+          ? [...state.bank.slots]
+          : [
+              ...state.bank.slots,
+              ...Array.from(
+                { length: action.slotIndex - state.bank.slots.length + 1 },
+                () => null
+              )
+            ];
+
+      slots[action.slotIndex] = action.slot;
+
+      const selectedSlot =
+        state.bank.selectedSlot != null &&
+        state.bank.selectedSlot < slots.length &&
+        slots[state.bank.selectedSlot] != null
+          ? state.bank.selectedSlot
+          : slots.findIndex((slot) => slot != null);
+
+      return {
+        ...state,
+        bank: {
+          ...state.bank,
+          open: true,
+          slots,
+          selectedSlot: selectedSlot >= 0 ? selectedSlot : null
+        }
+      };
+    }
+
+    case "bank/selectSlot":
+      return {
+        ...state,
+        bank: {
+          ...state.bank,
+          selectedSlot: action.slotIndex
+        }
+      };
+
+    case "bank/setGold":
+      return {
+        ...state,
+        bank: {
+          ...state.bank,
+          open: true,
+          bankGold: Math.max(0, action.bankGold)
+        }
+      };
+
+    case "bank/setDepositAmount":
+      return {
+        ...state,
+        bank: {
+          ...state.bank,
+          depositAmount: Math.max(1, Math.floor(action.amount) || 1)
+        }
+      };
+
+    case "bank/setWithdrawAmount":
+      return {
+        ...state,
+        bank: {
+          ...state.bank,
+          withdrawAmount: Math.max(1, Math.floor(action.amount) || 1)
+        }
+      };
+
+    case "bank/setDepositGoldAmount":
+      return {
+        ...state,
+        bank: {
+          ...state.bank,
+          depositGoldAmount: Math.max(1, Math.floor(action.amount) || 1)
+        }
+      };
+
+    case "bank/setWithdrawGoldAmount":
+      return {
+        ...state,
+        bank: {
+          ...state.bank,
+          withdrawGoldAmount: Math.max(1, Math.floor(action.amount) || 1)
         }
       };
 
@@ -998,6 +1225,7 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
           buyAmount: 1,
           sellAmount: 1
         },
+        bank: initialBank(),
         trade: initialTrade(),
         skills: {
           entries: [],

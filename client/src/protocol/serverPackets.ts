@@ -10,13 +10,13 @@ function decodeCharacterCreate(reader: BinaryReader): CharacterCreatePacket {
   const x = reader.readUint8();
   const y = reader.readUint8();
 
-  reader.readInt16();
-  reader.readInt16();
-  reader.readInt16();
-  reader.readInt16();
-  reader.readInt16();
-  reader.readInt16();
-  reader.readInt16();
+  const weaponId = reader.readInt16();
+  const shieldId = reader.readInt16();
+  const helmetId = reader.readInt16();
+  const cartId = reader.readInt16();
+  const backpackId = reader.readInt16();
+  const effectId = reader.readInt16();
+  const effectLoops = reader.readInt16();
 
   const name = reader.readString8();
 
@@ -52,6 +52,13 @@ function decodeCharacterCreate(reader: BinaryReader): CharacterCreatePacket {
     charIndex,
     bodyId,
     headId,
+    weaponId,
+    shieldId,
+    helmetId,
+    cartId,
+    backpackId,
+    effectId,
+    effectLoops,
     heading,
     x,
     y,
@@ -70,11 +77,20 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
     case 2:
       return { type: "logged", newUser: reader.readBool() };
 
+    case 5:
+      return { type: "navigate_toggle", navigating: reader.readBool() };
+
     case 8:
       return { type: "commerce_end" };
 
+    case 9:
+      return { type: "bank_end" };
+
     case 10:
       return { type: "commerce_init", npcName: reader.readString8() };
+
+    case 11:
+      return { type: "bank_init" };
 
     case 12:
       return { type: "user_commerce_init" };
@@ -217,14 +233,27 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
       const bodyId = reader.readInt16();
       const headId = reader.readInt16();
       const heading = reader.readUint8();
-      reader.readInt16(); // weapon_id
-      reader.readInt16(); // shield_id
-      reader.readInt16(); // helmet_id
-      reader.readInt16(); // cart_id
-      reader.readInt16(); // backpack_id
-      reader.readInt16(); // fx
-      reader.readInt16(); // fx_loops
-      return { type: "character_change", charIndex, bodyId, headId, heading };
+      const weaponId = reader.readInt16();
+      const shieldId = reader.readInt16();
+      const helmetId = reader.readInt16();
+      const cartId = reader.readInt16();
+      const backpackId = reader.readInt16();
+      const effectId = reader.readInt16();
+      const effectLoops = reader.readInt16();
+      return {
+        type: "character_change",
+        charIndex,
+        bodyId,
+        headId,
+        weaponId,
+        shieldId,
+        helmetId,
+        cartId,
+        backpackId,
+        effectId,
+        effectLoops,
+        heading
+      };
     }
 
     case 50:
@@ -315,6 +344,30 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
                 equipped,
                 value,
                 canUse
+              }
+      };
+    }
+
+    case 65: {
+      const slotIndex = reader.readUint8() - 1;
+      const itemId = reader.readInt16();
+      const elementalTags = reader.readInt32();
+      const amount = reader.readInt16();
+      const value = reader.readInt32();
+      const canUse = reader.readUint8();
+
+      return {
+        type: "change_bank_slot",
+        slotIndex,
+        slot:
+          itemId === 0 || amount === 0
+            ? null
+            : {
+                itemId,
+                amount,
+                value,
+                canUse,
+                elementalTags
               }
       };
     }
@@ -438,6 +491,9 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
       }
       return { type: "intervals", walk };
     }
+
+    case 175:
+      return { type: "update_bank_gold", bankGold: reader.readInt32() };
 
     case 200:
       return {

@@ -17,6 +17,7 @@ import { ClassicHudPanel } from "../ui/ClassicHudPanel";
 import { SkillsPanel } from "../ui/SkillsPanel";
 import { MerchantPanel } from "../ui/MerchantPanel";
 import { TradePanel } from "../ui/TradePanel";
+import { BankPanel } from "../ui/BankPanel";
 
 const MOVE_KEYS: Record<string, Direction> = {
   ArrowUp: "north",
@@ -47,6 +48,40 @@ const UTILITY_ACTIONS = [
   { key: "clans" as const, label: "Clanes" }
 ];
 
+const SPELL_HOTKEY_STORAGE_KEY = "ao_spell_hotkeys";
+
+function loadSpellHotkeys() {
+  if (typeof window === "undefined") {
+    return Array.from({ length: 10 }, () => null as number | null);
+  }
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(SPELL_HOTKEY_STORAGE_KEY) ?? "[]");
+    if (!Array.isArray(parsed)) {
+      return Array.from({ length: 10 }, () => null as number | null);
+    }
+
+    return Array.from({ length: 10 }, (_, index) => {
+      const value = parsed[index];
+      return Number.isInteger(value) && value >= 0 ? value : null;
+    });
+  } catch {
+    return Array.from({ length: 10 }, () => null as number | null);
+  }
+}
+
+function hotkeyIndexFromKey(key: string) {
+  if (key >= "1" && key <= "9") {
+    return Number.parseInt(key, 10) - 1;
+  }
+
+  if (key === "0") {
+    return 9;
+  }
+
+  return null;
+}
+
 export function App() {
   const [state, dispatch] = useReducer(appReducer, undefined, createInitialState);
   const [assetCatalog, setAssetCatalog] = useState<AssetCatalog | null>(null);
@@ -60,10 +95,11 @@ export function App() {
     totalBytes: null
   });
   const [activeRightTab, setActiveRightTab] = useState<
-    "hud" | "trade" | "commerce" | "skills" | "spells" | "world" | "session" | "chat" | "debug"
+    "hud" | "trade" | "bank" | "commerce" | "skills" | "spells" | "world" | "session" | "chat" | "debug"
   >("hud");
   const [showTileDebug, setShowTileDebug] = useState(false);
   const [showMoveDebug, setShowMoveDebug] = useState(false);
+  const [spellHotkeys, setSpellHotkeys] = useState<Array<number | null>>(() => loadSpellHotkeys());
   const [bootConnectAttempts, setBootConnectAttempts] = useState(0);
   const [movementDebug, setMovementDebug] = useState<MovementDebugSnapshot>({
     predictedX: null,
@@ -84,11 +120,23 @@ export function App() {
     stateRef.current = state;
   }, [state]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(SPELL_HOTKEY_STORAGE_KEY, JSON.stringify(spellHotkeys));
+  }, [spellHotkeys]);
+
   const rightTabs = useMemo(() => {
     const dynamicTabs = [];
 
     if (state.trade.open) {
       dynamicTabs.push({ key: "trade" as const, label: "Trueque" });
+    }
+
+    if (state.bank.open) {
+      dynamicTabs.push({ key: "bank" as const, label: "Banco" });
     }
 
     if (state.commerce.open) {
@@ -100,7 +148,7 @@ export function App() {
     }
 
     return [BASE_RIGHT_TABS[0], ...dynamicTabs, ...BASE_RIGHT_TABS.slice(1)];
-  }, [state.commerce.open, state.trade.open]);
+  }, [state.bank.open, state.commerce.open, state.trade.open]);
 
   useEffect(() => {
     if (state.world.mapStatus === "ready" && state.world.map) {
@@ -117,13 +165,20 @@ export function App() {
       return;
     }
 
+    if (state.bank.open) {
+      setActiveRightTab("bank");
+      return;
+    }
+
     if (state.commerce.open) {
       setActiveRightTab("commerce");
       return;
     }
 
-    setActiveRightTab((current) => (current === "commerce" || current === "trade" ? "hud" : current));
-  }, [state.commerce.open, state.trade.open]);
+    setActiveRightTab((current) =>
+      current === "commerce" || current === "trade" || current === "bank" ? "hud" : current
+    );
+  }, [state.bank.open, state.commerce.open, state.trade.open]);
 
   const sessionRef = useRef<SessionClient | null>(null);
   const musicRef = useRef<MapMusicController | null>(null);
@@ -303,6 +358,44 @@ export function App() {
         return;
       }
 
+      if (event.key === "b" || event.key === "B") {
+        event.preventDefault();
+        session.sendBankStart();
+        return;
+      }
+
+      const hotkeyIndex = hotkeyIndexFromKey(event.key);
+      if (hotkeyIndex != null) {
+        if (event.ctrlKey || event.metaKey) {
+          const selectedSpellSlot = stateRef.current.spellbook.selectedSlot;
+          if (selectedSpellSlot != null) {
+            event.preventDefault();
+            setSpellHotkeys((current) => {
+              const next = [...current];
+              next[hotkeyIndex] = selectedSpellSlot;
+              return next;
+            });
+            dispatch({
+              type: "log/add",
+              level: "info",
+              message: `Macro ${event.key} asignada al slot ${selectedSpellSlot + 1}.`
+            });
+          }
+          return;
+        }
+
+        const slotIndex = spellHotkeys[hotkeyIndex];
+        const slot = slotIndex == null ? null : stateRef.current.spellbook.slots[slotIndex];
+        if (slotIndex != null && slot != null) {
+          event.preventDefault();
+          dispatch({ type: "spellbook/selectSlot", slotIndex });
+          if (stateRef.current.connection.status === "connected") {
+            session.sendCastSpell(slotIndex);
+          }
+        }
+        return;
+      }
+
       const direction = MOVE_KEYS[event.key];
       if (!direction) {
         return;
@@ -336,7 +429,7 @@ export function App() {
       window.removeEventListener("keyup", releaseHandler);
       window.removeEventListener("blur", blurHandler);
     };
-  }, [session]);
+  }, [session, spellHotkeys]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -476,6 +569,62 @@ export function App() {
     session.disconnect();
   };
 
+  const handleChatSend = (message: string) => {
+    const trimmed = message.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    const whisperMatch = trimmed.match(/^\/(?:w|whisper|susurrar)\s+(\S+)\s+(.+)$/i);
+    if (whisperMatch) {
+      session.sendWhisper(whisperMatch[1], whisperMatch[2]);
+      return;
+    }
+
+    const yellMatch = trimmed.match(/^\/(?:yell|gritar)\s+(.+)$/i);
+    if (yellMatch) {
+      session.sendYell(yellMatch[1]);
+      return;
+    }
+
+    switch (trimmed.toLowerCase()) {
+      case "/online":
+        session.sendOnline();
+        return;
+      case "/rest":
+      case "/descansar":
+        session.sendRest();
+        return;
+      case "/meditate":
+      case "/meditar":
+        session.sendMeditate();
+        return;
+      case "/heal":
+      case "/curar":
+        session.sendHeal();
+        return;
+      case "/resucitar":
+      case "/resucitate":
+        session.sendResucitate();
+        return;
+      case "/stats":
+      case "/atributos":
+        session.sendRequestAttributes();
+        return;
+      case "/skills":
+      case "/habilidades":
+        session.sendRequestSkills();
+        return;
+      case "/mini":
+      case "/ministats":
+      case "/perfil":
+        session.sendRequestMiniStats();
+        return;
+      default:
+        session.sendChat(trimmed);
+    }
+  };
+
   const title = useMemo(() => {
     const position =
       state.world.self.x != null && state.world.self.y != null
@@ -574,6 +723,18 @@ export function App() {
                   onTileInteraction={({ x, y, detail }) => {
                     session.sendLeftClick(x, y);
                     if (detail >= 2) {
+                      const clickedCharacter =
+                        Object.values(state.world.others).find(
+                          (other) => other.x === x && other.y === y
+                        ) ?? null;
+                      const staticNpcOnTile =
+                        state.world.map?.npcs.some((npc) => npc.x === x && npc.y === y) ?? false;
+
+                      if (clickedCharacter?.isNpc || staticNpcOnTile) {
+                        session.sendDoubleClick(x, y);
+                        return;
+                      }
+
                       session.sendAttack();
                     }
                   }}
@@ -695,7 +856,40 @@ export function App() {
                 onDrop={(slotIndex, amount) => session.sendDrop(slotIndex, amount)}
                 onAttack={() => session.sendAttack()}
                 onStartCommerce={() => session.sendCommerceStart()}
+                onStartBank={() => session.sendBankStart()}
                 onToggleSafeMode={() => session.sendSafeToggle()}
+              />
+            ) : null}
+
+            {activeRightTab === "bank" && state.bank.open ? (
+              <BankPanel
+                assetCatalog={assetCatalog}
+                state={state}
+                onClose={() => session.sendBankEnd()}
+                onSelectBankSlot={(slotIndex) => dispatch({ type: "bank/selectSlot", slotIndex })}
+                onSelectInventorySlot={(slotIndex) =>
+                  dispatch({ type: "inventory/selectSlot", slotIndex })
+                }
+                onSetDepositAmount={(amount) =>
+                  dispatch({ type: "bank/setDepositAmount", amount })
+                }
+                onSetWithdrawAmount={(amount) =>
+                  dispatch({ type: "bank/setWithdrawAmount", amount })
+                }
+                onSetDepositGoldAmount={(amount) =>
+                  dispatch({ type: "bank/setDepositGoldAmount", amount })
+                }
+                onSetWithdrawGoldAmount={(amount) =>
+                  dispatch({ type: "bank/setWithdrawGoldAmount", amount })
+                }
+                onDeposit={(inventorySlotIndex, amount, bankSlotIndex) =>
+                  session.sendBankDeposit(inventorySlotIndex, amount, bankSlotIndex)
+                }
+                onWithdraw={(bankSlotIndex, amount, inventorySlotIndex) =>
+                  session.sendBankExtractItem(bankSlotIndex, amount, inventorySlotIndex)
+                }
+                onDepositGold={(amount) => session.sendBankDepositGold(amount)}
+                onWithdrawGold={(amount) => session.sendBankExtractGold(amount)}
               />
             ) : null}
 
@@ -744,8 +938,16 @@ export function App() {
                 <HechizosPanel
                   compact
                   connected={state.connection.status === "connected"}
+                  spellHotkeys={spellHotkeys}
                   state={state}
                   onCast={(slotIndex) => session.sendCastSpell(slotIndex)}
+                  onBindHotkey={(hotkeyIndex, slotIndex) =>
+                    setSpellHotkeys((current) => {
+                      const next = [...current];
+                      next[hotkeyIndex] = slotIndex;
+                      return next;
+                    })
+                  }
                   onSelectSlot={(slotIndex) =>
                     dispatch({ type: "spellbook/selectSlot", slotIndex })
                   }
@@ -755,9 +957,16 @@ export function App() {
 
             {activeRightTab === "chat" ? (
               <ChatPanel
-                onSend={(message) => session.sendChat(message)}
+                onSend={handleChatSend}
                 onPickUp={() => session.sendPickUp()}
                 onRequestPosition={() => session.requestPositionUpdate()}
+                onRequestStats={() => session.sendRequestAttributes()}
+                onRequestSkills={() => session.sendRequestSkills()}
+                onRequestMiniStats={() => session.sendRequestMiniStats()}
+                onRest={() => session.sendRest()}
+                onMeditate={() => session.sendMeditate()}
+                onHeal={() => session.sendHeal()}
+                onResucitate={() => session.sendResucitate()}
               />
             ) : null}
 

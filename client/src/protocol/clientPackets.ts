@@ -4,22 +4,39 @@ const CLIENT_PACKET = {
   loginExisting: 73,
   loginNewChar: 74,
   talk: 75,
+  yell: 76,
+  whisper: 77,
   walk: 78,
   requestPositionUpdate: 79,
   attack: 80,
   castSpell: 94,
   pickUp: 81,
   safeToggle: 82,
+  requestAttributes: 85,
+  requestSkills: 86,
   drop: 93,
   commerceStart: 53,
   commerceBuy: 9,
   commerceSell: 11,
   commerceEnd: 88,
+  bankStart: 54,
+  bankExtractItem: 10,
+  bankDeposit: 12,
+  bankEnd: 90,
+  bankExtractGold: 70,
+  bankDepositGold: 71,
   userCommerceOffer: 16,
   userCommerceEnd: 89,
   userCommerceOk: 91,
   userCommerceReject: 92,
   leftClick: 95,
+  doubleClick: 96,
+  requestMiniStats: 87,
+  online: 38,
+  rest: 47,
+  meditate: 48,
+  resucitate: 49,
+  heal: 50,
   changeHeading: 6,
   equipItem: 5,
   useItem: 99,
@@ -126,6 +143,19 @@ export function encodeTalk(message: string) {
   });
 }
 
+export function encodeYell(message: string) {
+  return buildPacket(CLIENT_PACKET.yell, (bytes) => {
+    writeString8(bytes, message);
+  });
+}
+
+export function encodeWhisper(targetName: string, message: string) {
+  return buildPacket(CLIENT_PACKET.whisper, (bytes) => {
+    writeString8(bytes, targetName);
+    writeString8(bytes, message);
+  });
+}
+
 export function encodeAttack() {
   return buildPacket(CLIENT_PACKET.attack, (bytes) => {
     writeInt32(bytes, nextPacketCounter());
@@ -182,8 +212,23 @@ export function encodeLeftClick(x: number, y: number) {
   });
 }
 
+export function encodeDoubleClick(x: number, y: number) {
+  return buildPacket(CLIENT_PACKET.doubleClick, (bytes) => {
+    writeInt8(bytes, x);
+    writeInt8(bytes, y);
+  });
+}
+
 export function encodeSafeToggle() {
   return buildPacket(CLIENT_PACKET.safeToggle);
+}
+
+export function encodeRequestAttributes() {
+  return buildPacket(CLIENT_PACKET.requestAttributes);
+}
+
+export function encodeRequestSkills() {
+  return buildPacket(CLIENT_PACKET.requestSkills);
 }
 
 export function encodeCommerceStart() {
@@ -208,6 +253,50 @@ export function encodeCommerceEnd() {
   return buildPacket(CLIENT_PACKET.commerceEnd);
 }
 
+export function encodeBankStart() {
+  return buildPacket(CLIENT_PACKET.bankStart);
+}
+
+export function encodeBankDeposit(
+  slotIndex: number,
+  amount: number,
+  destinationSlotIndex: number | null
+) {
+  return buildPacket(CLIENT_PACKET.bankDeposit, (bytes) => {
+    writeInt8(bytes, slotIndex + 1);
+    writeInt16(bytes, Math.max(1, Math.min(32_767, Math.floor(amount))));
+    writeInt8(bytes, destinationSlotIndex == null ? 0 : destinationSlotIndex + 1);
+  });
+}
+
+export function encodeBankExtractItem(
+  slotIndex: number,
+  amount: number,
+  destinationSlotIndex: number | null
+) {
+  return buildPacket(CLIENT_PACKET.bankExtractItem, (bytes) => {
+    writeInt8(bytes, slotIndex + 1);
+    writeInt16(bytes, Math.max(1, Math.min(32_767, Math.floor(amount))));
+    writeInt8(bytes, destinationSlotIndex == null ? 0 : destinationSlotIndex + 1);
+  });
+}
+
+export function encodeBankDepositGold(amount: number) {
+  return buildPacket(CLIENT_PACKET.bankDepositGold, (bytes) => {
+    writeInt32(bytes, Math.max(1, Math.floor(amount)));
+  });
+}
+
+export function encodeBankExtractGold(amount: number) {
+  return buildPacket(CLIENT_PACKET.bankExtractGold, (bytes) => {
+    writeInt32(bytes, Math.max(1, Math.floor(amount)));
+  });
+}
+
+export function encodeBankEnd() {
+  return buildPacket(CLIENT_PACKET.bankEnd);
+}
+
 export function encodeUserTradeOffer(itemId: number, amount: number) {
   return buildPacket(CLIENT_PACKET.userCommerceOffer, (bytes) => {
     writeInt16(bytes, itemId);
@@ -229,6 +318,30 @@ export function encodeUserTradeReject() {
 
 export function encodeRequestPositionUpdate() {
   return buildPacket(CLIENT_PACKET.requestPositionUpdate);
+}
+
+export function encodeRequestMiniStats() {
+  return buildPacket(CLIENT_PACKET.requestMiniStats);
+}
+
+export function encodeOnline() {
+  return buildPacket(CLIENT_PACKET.online);
+}
+
+export function encodeRest() {
+  return buildPacket(CLIENT_PACKET.rest);
+}
+
+export function encodeMeditate() {
+  return buildPacket(CLIENT_PACKET.meditate);
+}
+
+export function encodeResucitate() {
+  return buildPacket(CLIENT_PACKET.resucitate);
+}
+
+export function encodeHeal() {
+  return buildPacket(CLIENT_PACKET.heal);
 }
 
 export function encodeQuit() {

@@ -5,6 +5,12 @@ import { GameRuntime, type MovementDebugSnapshot } from "../runtime/GameRuntime"
 import { fetchMapData } from "./mapApi";
 import {
   encodeAttack,
+  encodeBankDeposit,
+  encodeBankDepositGold,
+  encodeBankEnd,
+  encodeBankExtractGold,
+  encodeBankExtractItem,
+  encodeBankStart,
   encodeCastSpell,
   encodeChangeHeading,
   encodeCommerceBuy,
@@ -12,13 +18,22 @@ import {
   encodeCommerceSell,
   encodeCommerceStart,
   encodeCreateCharacter,
+  encodeDoubleClick,
   encodeDrop,
   encodeEquipItem,
+  encodeHeal,
   encodeLeftClick,
   encodeLoginExisting,
+  encodeMeditate,
+  encodeOnline,
   encodePickUp,
   encodeQuit,
+  encodeRequestAttributes,
+  encodeRequestMiniStats,
   encodeRequestPositionUpdate,
+  encodeRequestSkills,
+  encodeResucitate,
+  encodeRest,
   encodeSafeToggle,
   encodeTalk,
   encodeUserTradeAccept,
@@ -26,7 +41,9 @@ import {
   encodeUserTradeOffer,
   encodeUserTradeReject,
   encodeUseItem,
-  encodeWalk
+  encodeWalk,
+  encodeWhisper,
+  encodeYell
 } from "../protocol/clientPackets";
 import { decodeServerPackets } from "../protocol/serverPackets";
 export type { MovementDebugSnapshot } from "../runtime/GameRuntime";
@@ -263,6 +280,20 @@ export class SessionClient {
     this.dispatch({ type: "log/add", level: "packet-out", message: `CHAT "${message}"` });
   }
 
+  sendYell(message: string) {
+    this.sendRaw(encodeYell(message));
+    this.dispatch({ type: "log/add", level: "packet-out", message: `YELL "${message}"` });
+  }
+
+  sendWhisper(targetName: string, message: string) {
+    this.sendRaw(encodeWhisper(targetName, message));
+    this.dispatch({
+      type: "log/add",
+      level: "packet-out",
+      message: `WHISPER ${targetName}: "${message}"`
+    });
+  }
+
   sendPickUp() {
     this.sendRaw(encodePickUp());
     this.dispatch({ type: "log/add", level: "packet-out", message: "PICK_UP" });
@@ -319,9 +350,28 @@ export class SessionClient {
     });
   }
 
+  sendDoubleClick(x: number, y: number) {
+    this.sendRaw(encodeDoubleClick(x, y));
+    this.dispatch({
+      type: "log/add",
+      level: "packet-out",
+      message: `DOUBLE_CLICK ${x},${y}`
+    });
+  }
+
   sendSafeToggle() {
     this.sendRaw(encodeSafeToggle());
     this.dispatch({ type: "log/add", level: "packet-out", message: "SAFE_TOGGLE" });
+  }
+
+  sendRequestAttributes() {
+    this.sendRaw(encodeRequestAttributes());
+    this.dispatch({ type: "log/add", level: "packet-out", message: "REQUEST_ATTRIBUTES" });
+  }
+
+  sendRequestSkills() {
+    this.sendRaw(encodeRequestSkills());
+    this.dispatch({ type: "log/add", level: "packet-out", message: "REQUEST_SKILLS" });
   }
 
   sendCommerceStart() {
@@ -350,6 +400,82 @@ export class SessionClient {
   sendCommerceEnd() {
     this.sendRaw(encodeCommerceEnd());
     this.dispatch({ type: "log/add", level: "packet-out", message: "COMMERCE_END" });
+  }
+
+  sendBankStart() {
+    this.sendRaw(encodeBankStart());
+    this.dispatch({ type: "log/add", level: "packet-out", message: "BANK_START" });
+  }
+
+  sendBankDeposit(slotIndex: number, amount: number, destinationSlotIndex: number | null) {
+    this.sendRaw(encodeBankDeposit(slotIndex, amount, destinationSlotIndex));
+    this.dispatch({
+      type: "log/add",
+      level: "packet-out",
+      message: `BANK_DEPOSIT slot=${slotIndex + 1} amount=${amount} dest=${destinationSlotIndex == null ? 0 : destinationSlotIndex + 1}`
+    });
+  }
+
+  sendBankExtractItem(slotIndex: number, amount: number, destinationSlotIndex: number | null) {
+    this.sendRaw(encodeBankExtractItem(slotIndex, amount, destinationSlotIndex));
+    this.dispatch({
+      type: "log/add",
+      level: "packet-out",
+      message: `BANK_EXTRACT slot=${slotIndex + 1} amount=${amount} dest=${destinationSlotIndex == null ? 0 : destinationSlotIndex + 1}`
+    });
+  }
+
+  sendBankDepositGold(amount: number) {
+    this.sendRaw(encodeBankDepositGold(amount));
+    this.dispatch({
+      type: "log/add",
+      level: "packet-out",
+      message: `BANK_DEPOSIT_GOLD amount=${amount}`
+    });
+  }
+
+  sendBankExtractGold(amount: number) {
+    this.sendRaw(encodeBankExtractGold(amount));
+    this.dispatch({
+      type: "log/add",
+      level: "packet-out",
+      message: `BANK_EXTRACT_GOLD amount=${amount}`
+    });
+  }
+
+  sendBankEnd() {
+    this.sendRaw(encodeBankEnd());
+    this.dispatch({ type: "log/add", level: "packet-out", message: "BANK_END" });
+  }
+
+  sendRequestMiniStats() {
+    this.sendRaw(encodeRequestMiniStats());
+    this.dispatch({ type: "log/add", level: "packet-out", message: "REQUEST_MINI_STATS" });
+  }
+
+  sendOnline() {
+    this.sendRaw(encodeOnline());
+    this.dispatch({ type: "log/add", level: "packet-out", message: "ONLINE" });
+  }
+
+  sendRest() {
+    this.sendRaw(encodeRest());
+    this.dispatch({ type: "log/add", level: "packet-out", message: "REST" });
+  }
+
+  sendMeditate() {
+    this.sendRaw(encodeMeditate());
+    this.dispatch({ type: "log/add", level: "packet-out", message: "MEDITATE" });
+  }
+
+  sendHeal() {
+    this.sendRaw(encodeHeal());
+    this.dispatch({ type: "log/add", level: "packet-out", message: "HEAL" });
+  }
+
+  sendResucitate() {
+    this.sendRaw(encodeResucitate());
+    this.dispatch({ type: "log/add", level: "packet-out", message: "RESUCITATE" });
   }
 
   sendUserTradeOffer(itemId: number, amount: number) {
@@ -544,6 +670,19 @@ export class SessionClient {
           level: "packet-in",
           message: `LOGGED new_user=${packet.newUser}`
         });
+        this.sendRequestAttributes();
+        this.sendRequestSkills();
+        this.sendRequestMiniStats();
+        return;
+
+      case "navigate_toggle":
+        this.dispatch({ type: "world/setSelfNavigation", navigating: packet.navigating });
+        this.setLastEvent(packet.navigating ? "Embarcaste." : "Volviste a tierra.");
+        this.dispatch({
+          type: "log/add",
+          level: "info",
+          message: packet.navigating ? "Navigation enabled." : "Navigation disabled."
+        });
         return;
 
       case "safe_mode_on":
@@ -627,6 +766,13 @@ export class SessionClient {
           charIndex: packet.charIndex,
           bodyId: packet.bodyId,
           headId: packet.headId,
+          weaponId: packet.weaponId,
+          shieldId: packet.shieldId,
+          helmetId: packet.helmetId,
+          cartId: packet.cartId,
+          backpackId: packet.backpackId,
+          effectId: packet.effectId,
+          effectLoops: packet.effectLoops,
           heading: packet.heading
         });
         return;
@@ -636,6 +782,7 @@ export class SessionClient {
         return;
 
       case "npc_kill_user":
+        this.dispatch({ type: "world/setSelfDead", dead: true });
         this.addCombatTextForChar(this.getState().world.self.charIndex, "DEAD", "status", 1_600);
         this.setLastEvent("Has muerto.");
         this.dispatch({ type: "log/add", level: "warn", message: "NPC kill user." });
@@ -739,6 +886,12 @@ export class SessionClient {
         return;
 
       case "console_msg":
+        if (packet.message === "Has muerto!" || packet.message === "Estas muerto.") {
+          this.dispatch({ type: "world/setSelfDead", dead: true });
+        }
+        if (packet.message === "Has sido resucitado." || packet.message === "Has sido resucitado!") {
+          this.dispatch({ type: "world/setSelfDead", dead: false });
+        }
         this.setLastEvent(packet.message);
         this.dispatch({ type: "log/add", level: "info", message: packet.message });
         return;
@@ -847,6 +1000,11 @@ export class SessionClient {
         this.setLastEvent(`Comercio abierto con ${packet.npcName}.`);
         return;
 
+      case "bank_init":
+        this.dispatch({ type: "bank/open" });
+        this.setLastEvent("Banco abierto.");
+        return;
+
       case "user_commerce_init":
         this.dispatch({ type: "trade/open" });
         this.setLastEvent("Trueque abierto.");
@@ -860,6 +1018,14 @@ export class SessionClient {
       case "change_npc_inventory_slot":
         this.dispatch({
           type: "commerce/setSlot",
+          slotIndex: packet.slotIndex,
+          slot: packet.slot
+        });
+        return;
+
+      case "change_bank_slot":
+        this.dispatch({
+          type: "bank/setSlot",
           slotIndex: packet.slotIndex,
           slot: packet.slot
         });
@@ -882,6 +1048,15 @@ export class SessionClient {
         this.setLastEvent("Comercio cerrado.");
         return;
 
+      case "bank_end":
+        this.dispatch({ type: "bank/close" });
+        this.setLastEvent("Banco cerrado.");
+        return;
+
+      case "update_bank_gold":
+        this.dispatch({ type: "bank/setGold", bankGold: packet.bankGold });
+        return;
+
       case "send_skills":
         this.dispatch({
           type: "skills/setAll",
@@ -892,9 +1067,16 @@ export class SessionClient {
 
       case "mini_stats":
         this.dispatch({
+          type: "world/setMiniStats",
+          classId: packet.classId,
+          raceId: packet.raceId,
+          genderId: packet.genderId,
+          factionStatus: packet.factionStatus
+        });
+        this.dispatch({
           type: "log/add",
           level: "packet-in",
-          message: `MINI_STATS class=${packet.classId} race=${packet.raceId} gender=${packet.genderId}`
+          message: `MINI_STATS class=${packet.classId} race=${packet.raceId} gender=${packet.genderId} faction=${packet.factionStatus}`
         });
         return;
 

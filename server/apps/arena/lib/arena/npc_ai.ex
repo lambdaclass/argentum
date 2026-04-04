@@ -4,6 +4,8 @@ defmodule Arena.NpcAi do
   Called every 500ms from MapServer's :npc_ai_tick handler.
   """
 
+  require Logger
+
   alias Arena.Combat
   alias Arena.Data.GameData
   alias Arena.Map.Helpers
@@ -103,10 +105,12 @@ defmodule Arena.NpcAi do
       # Cast spell if available (before melee)
       {state, npc} = maybe_cast_spell(state, instance_id, npc, npc_def, now)
 
-      # Attack if adjacent to target
-      state = maybe_attack(state, instance_id, npc, npc_def, now)
+      # Persist npc updates (target_id, spell cooldowns) before attack
+      # so maybe_attack's re-read from state sees the current npc
+      state = put_in(state.npcs_live[instance_id], npc)
 
-      state
+      # Attack if adjacent to target
+      maybe_attack(state, instance_id, npc, npc_def, now)
     end
   end
 

@@ -12,6 +12,13 @@ export interface SpellMetadata {
   target: number;
   type: number;
   iconIndex: number;
+  cooldown?: number;
+  areaAfecta?: number;
+  areaRadio?: number;
+  maxLevelCasteable?: number;
+  needStaff?: boolean;
+  requirementMask?: number;
+  workOnDead?: boolean;
 }
 
 interface ExpTableRow {
@@ -57,6 +64,30 @@ const SPELL_TYPE_LABELS: Record<number, string> = {
   12: "Deteccion"
 };
 
+const SPELL_AREA_TARGET_LABELS: Record<number, string> = {
+  1: "Usuarios",
+  2: "NPCs",
+  3: "Usuarios y NPCs"
+};
+
+const FACTION_STATUS_LABELS: Record<number, string> = {
+  0: "Ciudadano",
+  1: "Criminal",
+  2: "Caos",
+  3: "Armada"
+};
+
+const SPELL_REQUIREMENT = {
+  weapon: 0x001,
+  shield: 0x002,
+  armor: 0x004,
+  helm: 0x008,
+  projectile: 0x020,
+  ship: 0x040,
+  onLand: 0x200,
+  onWater: 0x400
+} as const;
+
 export function getSpellMetadata(spellId: number): SpellMetadata | null {
   return spellMetadataById.get(spellId) ?? null;
 }
@@ -67,6 +98,60 @@ export function getSpellTargetLabel(target: number): string {
 
 export function getSpellTypeLabel(type: number): string {
   return SPELL_TYPE_LABELS[type] ?? "Desconocido";
+}
+
+export function getSpellAreaTargetLabel(areaAfecta: number): string {
+  return SPELL_AREA_TARGET_LABELS[areaAfecta] ?? "Objetivo flexible";
+}
+
+export function getFactionStatusLabel(status: number | null): string {
+  if (status == null) {
+    return "Sin faccion";
+  }
+
+  return FACTION_STATUS_LABELS[status] ?? `Estado ${status}`;
+}
+
+export function getSpellRequirementLabels(spell: SpellMetadata | null): string[] {
+  if (!spell) {
+    return [];
+  }
+
+  const mask = spell.requirementMask ?? 0;
+  const labels: string[] = [];
+
+  if (spell.needStaff) {
+    labels.push("Baston");
+  }
+  if (mask & SPELL_REQUIREMENT.weapon) {
+    labels.push("Arma");
+  }
+  if (mask & SPELL_REQUIREMENT.shield) {
+    labels.push("Escudo");
+  }
+  if (mask & SPELL_REQUIREMENT.armor) {
+    labels.push("Armadura");
+  }
+  if (mask & SPELL_REQUIREMENT.helm) {
+    labels.push("Casco");
+  }
+  if (mask & SPELL_REQUIREMENT.projectile) {
+    labels.push("Municion");
+  }
+  if (mask & SPELL_REQUIREMENT.ship) {
+    labels.push("Barca");
+  }
+  if (mask & SPELL_REQUIREMENT.onLand) {
+    labels.push("Objetivo en tierra");
+  }
+  if (mask & SPELL_REQUIREMENT.onWater) {
+    labels.push("Objetivo en agua");
+  }
+  if (spell.workOnDead) {
+    labels.push("Funciona en muertos");
+  }
+
+  return labels;
 }
 
 export function getLevelProgress(

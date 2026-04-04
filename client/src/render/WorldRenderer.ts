@@ -1,7 +1,11 @@
 import {
   Application,
+  BaseTexture,
   Container,
   Graphics,
+  MIPMAP_MODES,
+  Rectangle,
+  SCALE_MODES,
   Sprite,
   Text,
   TextStyle,
@@ -17,17 +21,24 @@ import type {
 import {
   bodyGrhForDirection,
   getGrhAnimation,
+  getNpcDef,
   getGrhTexture,
   getObjectGrh,
   type AssetCatalog,
   headGrhForDirection
 } from "./assetCatalog";
 import { getMapPackRecord } from "../net/mapApi";
+import {
+  getRawNpcBodyDef,
+  getRawNpcBodySheetUrl
+} from "./npcRawBodies.generated";
 
 const TILE_SIZE = 32;
 const DEFAULT_MAP_SIZE = 100;
 const VIEWPORT_WIDTH = 736;
 const VIEWPORT_HEIGHT = 608;
+const GHOST_BODY_ID = 829;
+const GHOST_HEAD_ID = 0;
 
 const hudStyle = new TextStyle({
   fontFamily: "monospace",
@@ -141,9 +152,17 @@ interface CharacterNode {
   name: string;
   bodyId: number;
   headId: number;
+  weaponId: number;
+  shieldId: number;
+  helmetId: number;
+  cartId: number;
+  backpackId: number;
+  effectId: number;
+  effectLoops: number;
   heading: number;
   speed: number;
   kind: "self" | "other" | "npc";
+  dead: boolean;
   desiredX: number;
   desiredY: number;
 }
@@ -160,6 +179,8 @@ interface StaticSceneLayers {
   staticEntities: Container;
   overlay: Container;
 }
+
+const rawBodyTextureCache = new Map<string, Texture>();
 
 export interface TileInteractionPayload {
   x: number;
@@ -202,6 +223,32 @@ function headingToDirection(heading: number): Direction {
     default:
       return "south";
   }
+}
+
+function getRawBodyTexture(
+  url: string,
+  frameX: number,
+  frameY: number,
+  width: number,
+  height: number
+) {
+  const cacheKey = `${url}:${frameX}:${frameY}:${width}:${height}`;
+  const cached = rawBodyTextureCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const baseTexture = BaseTexture.from(url, {
+    scaleMode: SCALE_MODES.NEAREST,
+    mipmap: MIPMAP_MODES.OFF
+  });
+  const texture = new Texture(
+    baseTexture,
+    new Rectangle(frameX, frameY, width, height)
+  );
+
+  rawBodyTextureCache.set(cacheKey, texture);
+  return texture;
 }
 
 function applyAoAnchor(sprite: Sprite) {
@@ -408,15 +455,47 @@ function createCharacterVisual(
   name: string,
   bodyId: number,
   headId: number,
+  weaponId: number,
+  shieldId: number,
+  helmetId: number,
+  cartId: number,
+  backpackId: number,
+  effectId: number,
+  effectLoops: number,
   heading: number,
-  kind: "self" | "other" | "npc"
+  kind: "self" | "other" | "npc",
+  dead = false
 ): CharacterVisual {
+  const effectiveBodyId = dead ? GHOST_BODY_ID : bodyId;
+  const effectiveHeadId = dead ? GHOST_HEAD_ID : headId;
+  const effectiveWeaponId = dead ? 0 : weaponId;
+  const effectiveShieldId = dead ? 0 : shieldId;
+  const effectiveHelmetId = dead ? 0 : helmetId;
+  const effectiveCartId = dead ? 0 : cartId;
+  const effectiveBackpackId = dead ? 0 : backpackId;
+  const effectiveEffectId = dead ? 0 : effectId;
   const direction = headingToDirection(heading);
   const displayName = worldLabel(name);
   const labelStyle =
     kind === "self" ? selfNameStyle : kind === "npc" ? npcNameStyle : otherNameStyle;
   const fillColor = kind === "self" ? 0x4cb38a : kind === "npc" ? 0xe29c52 : 0xdc8a43;
   const outlineColor = kind === "self" ? 0xdff7e8 : kind === "npc" ? 0x432a10 : 0x2a1606;
+  const addOverlaySprite = (grhId: number, offsetX = 0, offsetY = 0) => {
+    if (!grhId || !catalog) {
+      return;
+    }
+
+    const texture = getGrhTexture(catalog, grhId, true);
+    if (!texture) {
+      return;
+    }
+
+    const sprite = new Sprite(texture);
+    applyAoAnchor(sprite);
+    sprite.x = offsetX;
+    sprite.y = offsetY;
+    container.addChild(sprite);
+  };
 
   if (!catalog) {
     return {
@@ -435,38 +514,82 @@ function createCharacterVisual(
   }
 
   const container = new Container();
-  const body = catalog.bodies[bodyId];
-  const bodyGrhId = bodyGrhForDirection(catalog, bodyId, direction);
-  const bodyAnimation = bodyGrhId ? getGrhAnimation(catalog, bodyGrhId, true) : null;
+  const rawNpcBody =
+    kind === "npc" && effectiveBodyId > 0 && !catalog.bodies[effectiveBodyId]
+      ? getRawNpcBodyDef(effectiveBodyId)
+      : null;
+  const body = rawNpcBody ? null : catalog.bodies[effectiveBodyId];
+  const bodyOffsetX = rawNpcBody?.bodyOffsetX ?? 0;
+  const bodyOffsetY = rawNpcBody?.bodyOffsetY ?? 0;
+  const headOffsetX = rawNpcBody?.offHeadX ?? body?.offHeadX ?? 0;
+  const headOffsetY = rawNpcBody?.offHeadY ?? body?.offHeadY ?? 0;
+
+  let bodyFrames: Texture[] | null = null;
+  let frameVelocity = 210;
+  let bodyTexture: Texture | null = null;
+
+  if (rawNpcBody?.type === "direct") {
+    const bodyGrhId = rawNpcBody[direction];
+    const bodyAnimation = bodyGrhId ? getGrhAnimation(catalog, bodyGrhId, true) : null;
+    bodyFrames = bodyAnimation?.textures ?? null;
+    frameVelocity = bodyAnimation?.velocidad ?? 210;
+    bodyTexture = bodyFrames?.[0] ?? (bodyGrhId ? getGrhTexture(catalog, bodyGrhId, true) : null);
+  } else if (rawNpcBody?.type === "molded") {
+    const rawDirection = rawNpcBody.directions[direction];
+    const rawSheetUrl = getRawNpcBodySheetUrl(rawNpcBody.fileNum);
+    if (rawSheetUrl) {
+      bodyFrames = rawDirection.frames.map((frame) =>
+        getRawBodyTexture(
+          rawSheetUrl,
+          frame.x,
+          frame.y,
+          rawNpcBody.width,
+          rawNpcBody.height
+        )
+      );
+      frameVelocity = rawDirection.velocity;
+      bodyTexture = bodyFrames[0] ?? null;
+    }
+  } else {
+    const bodyGrhId = bodyGrhForDirection(catalog, effectiveBodyId, direction);
+    const bodyAnimation = bodyGrhId ? getGrhAnimation(catalog, bodyGrhId, true) : null;
+    bodyFrames = bodyAnimation?.textures ?? null;
+    frameVelocity = bodyAnimation?.velocidad ?? 210;
+    bodyTexture = bodyFrames?.[0] ?? (bodyGrhId ? getGrhTexture(catalog, bodyGrhId, true) : null);
+  }
 
   let bodySprite: Sprite | null = null;
-  if (bodyAnimation?.textures.length) {
-    bodySprite = new Sprite(bodyAnimation.textures[0]);
-  } else if (bodyGrhId) {
-    const bodyTexture = getGrhTexture(catalog, bodyGrhId, true);
-    if (bodyTexture) {
-      bodySprite = new Sprite(bodyTexture);
-    }
+  if (bodyTexture) {
+    bodySprite = new Sprite(bodyTexture);
   }
 
   if (bodySprite) {
     applyAoAnchor(bodySprite);
-    bodySprite.x = 0;
-    bodySprite.y = 0;
+    bodySprite.x = bodyOffsetX;
+    bodySprite.y = bodyOffsetY;
     container.addChild(bodySprite);
   }
 
-  const headGrhId = headGrhForDirection(catalog, headId, direction);
+  addOverlaySprite(effectiveCartId, bodyOffsetX, bodyOffsetY);
+  addOverlaySprite(effectiveBackpackId, bodyOffsetX, bodyOffsetY);
+  addOverlaySprite(effectiveShieldId, bodyOffsetX, bodyOffsetY);
+  addOverlaySprite(effectiveWeaponId, bodyOffsetX, bodyOffsetY);
+
+  const headGrhId =
+    effectiveHeadId > 0 ? headGrhForDirection(catalog, effectiveHeadId, direction) : null;
   if (headGrhId) {
     const headTexture = getGrhTexture(catalog, headGrhId, true);
     if (headTexture) {
       const headSprite = new Sprite(headTexture);
       applyAoAnchor(headSprite);
-      headSprite.x = body?.offHeadX ?? 0;
-      headSprite.y = body?.offHeadY ?? 0;
+      headSprite.x = headOffsetX;
+      headSprite.y = headOffsetY;
       container.addChild(headSprite);
     }
   }
+
+  addOverlaySprite(effectiveHelmetId, bodyOffsetX, bodyOffsetY);
+  addOverlaySprite(effectiveEffectId, bodyOffsetX, bodyOffsetY);
 
   if (container.children.length === 0) {
     return {
@@ -493,8 +616,8 @@ function createCharacterVisual(
   return {
     container,
     bodySprite,
-    bodyFrames: bodyAnimation?.textures ?? null,
-    frameVelocity: bodyAnimation?.velocidad ?? 210
+    bodyFrames,
+    frameVelocity
   };
 }
 
@@ -549,6 +672,8 @@ export class WorldRenderer {
   private staticSceneCache = new Map<string, StaticSceneLayers>();
   private adjacentSceneWarmupTimer: number | null = null;
   private transferInProgress = false;
+  private liveNpcMapId: number | null = null;
+  private sawLiveNpcThisMap = false;
   private runtimeTick: ((now: number) => void) | null = null;
   private tileInteractionHandler: ((payload: TileInteractionPayload) => void) | null = null;
   private renderLoopActive = false;
@@ -776,6 +901,17 @@ export class WorldRenderer {
     const sceneMap =
       world.map ??
       (world.mapStatus === "loading" || world.mapStatus === "transferring" ? this.renderedMap : null);
+    const sceneMapId = sceneMap?.mapId ?? null;
+
+    if (sceneMapId !== this.liveNpcMapId) {
+      this.liveNpcMapId = sceneMapId;
+      this.sawLiveNpcThisMap = false;
+    }
+
+    if (Object.values(world.others).some((other) => other.isNpc)) {
+      this.sawLiveNpcThisMap = true;
+    }
+
     const assetCatalogChanged = assetCatalog !== this.renderedCatalog;
     if (assetCatalogChanged) {
       this.clearStaticSceneCache();
@@ -1031,7 +1167,15 @@ export class WorldRenderer {
         world.self.name || "You",
         world.self.bodyId,
         world.self.headId,
+        world.self.weaponId,
+        world.self.shieldId,
+        world.self.helmetId,
+        world.self.cartId,
+        world.self.backpackId,
+        world.self.effectId,
+        world.self.effectLoops,
         world.self.heading,
+        world.self.dead,
         world.self.speed,
         world.self.x,
         world.self.y,
@@ -1055,7 +1199,15 @@ export class WorldRenderer {
         other.name,
         other.bodyId,
         other.headId,
+        other.weaponId,
+        other.shieldId,
+        other.helmetId,
+        other.cartId,
+        other.backpackId,
+        other.effectId,
+        other.effectLoops,
         other.heading,
+        other.dead,
         other.speed,
         other.x,
         other.y,
@@ -1065,6 +1217,45 @@ export class WorldRenderer {
         shouldSnapAll
       );
       this.otherNodes.set(other.charIndex, next);
+    }
+
+    if (world.map && !this.sawLiveNpcThisMap) {
+      for (let index = 0; index < world.map.npcs.length; index += 1) {
+        const mapNpc = world.map.npcs[index];
+        const npcDef = getNpcDef(assetCatalog, mapNpc.id);
+
+        if (!npcDef) {
+          continue;
+        }
+
+        const syntheticCharIndex = -(index + 1);
+        presentOthers.add(syntheticCharIndex);
+        const current = this.otherNodes.get(syntheticCharIndex) ?? null;
+        const next = this.syncCharacterNode(
+          current,
+          "npc",
+          npcDef.name,
+          npcDef.body,
+          npcDef.head,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          npcDef.heading,
+          false,
+          1,
+          mapNpc.x,
+          mapNpc.y,
+          world.walkIntervalMs,
+          assetCatalog,
+          now,
+          true
+        );
+        this.otherNodes.set(syntheticCharIndex, next);
+      }
     }
 
     for (const [charIndex, node] of this.otherNodes.entries()) {
@@ -1081,7 +1272,15 @@ export class WorldRenderer {
     name: string,
     bodyId: number,
     headId: number,
+    weaponId: number,
+    shieldId: number,
+    helmetId: number,
+    cartId: number,
+    backpackId: number,
+    effectId: number,
+    effectLoops: number,
     heading: number,
+    dead: boolean,
     speed: number,
     x: number,
     y: number,
@@ -1099,12 +1298,35 @@ export class WorldRenderer {
       current.name !== name ||
       current.bodyId !== bodyId ||
       current.headId !== headId ||
-      current.heading !== heading;
+      current.weaponId !== weaponId ||
+      current.shieldId !== shieldId ||
+      current.helmetId !== helmetId ||
+      current.cartId !== cartId ||
+      current.backpackId !== backpackId ||
+      current.effectId !== effectId ||
+      current.effectLoops !== effectLoops ||
+      current.heading !== heading ||
+      current.dead !== dead;
 
     let next: CharacterNode;
 
     if (needsRebuild) {
-      const visual = createCharacterVisual(assetCatalog, name, bodyId, headId, heading, kind);
+      const visual = createCharacterVisual(
+        assetCatalog,
+        name,
+        bodyId,
+        headId,
+        weaponId,
+        shieldId,
+        helmetId,
+        cartId,
+        backpackId,
+        effectId,
+        effectLoops,
+        heading,
+        kind,
+        dead
+      );
       const motion = current?.motion ?? createMotionState();
 
       next = {
@@ -1118,9 +1340,17 @@ export class WorldRenderer {
         name,
         bodyId,
         headId,
+        weaponId,
+        shieldId,
+        helmetId,
+        cartId,
+        backpackId,
+        effectId,
+        effectLoops,
         heading,
         speed,
         kind,
+        dead,
         desiredX: x,
         desiredY: y
       };
@@ -1158,6 +1388,14 @@ export class WorldRenderer {
     next.name = name;
     next.bodyId = bodyId;
     next.headId = headId;
+    next.weaponId = weaponId;
+    next.shieldId = shieldId;
+    next.helmetId = helmetId;
+    next.cartId = cartId;
+    next.backpackId = backpackId;
+    next.effectId = effectId;
+    next.effectLoops = effectLoops;
+    next.dead = dead;
 
     const position = sampleMotion(next.motion, now);
     next.motion.renderX = position.x;
@@ -1178,8 +1416,16 @@ export class WorldRenderer {
       current.name,
       current.bodyId,
       current.headId,
+      current.weaponId,
+      current.shieldId,
+      current.helmetId,
+      current.cartId,
+      current.backpackId,
+      current.effectId,
+      current.effectLoops,
       heading,
-      current.kind
+      current.kind,
+      current.dead
     );
     const next: CharacterNode = {
       ...current,

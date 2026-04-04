@@ -58,6 +58,14 @@ export interface MerchantSlot {
   elementalTags: number;
 }
 
+export interface BankSlot {
+  itemId: number;
+  amount: number;
+  value: number;
+  canUse: number;
+  elementalTags: number;
+}
+
 export interface TradeOfferSlot {
   itemId: number;
   amount: number;
@@ -73,14 +81,27 @@ export interface CharacterView {
   name: string;
   x: number | null;
   y: number | null;
+  dead: boolean;
   heading: number;
   bodyId: number;
   headId: number;
+  weaponId: number;
+  shieldId: number;
+  helmetId: number;
+  cartId: number;
+  backpackId: number;
+  effectId: number;
+  effectLoops: number;
   speed: number;
   hpCurrent: number;
   hpMax: number;
   manaCurrent: number;
   manaMax: number;
+  navigating: boolean;
+  classId: number | null;
+  raceId: number | null;
+  genderId: number | null;
+  factionStatus: number | null;
 }
 
 export interface RemoteCharacter {
@@ -88,9 +109,17 @@ export interface RemoteCharacter {
   name: string;
   x: number;
   y: number;
+  dead: boolean;
   heading: number;
   bodyId: number;
   headId: number;
+  weaponId: number;
+  shieldId: number;
+  helmetId: number;
+  cartId: number;
+  backpackId: number;
+  effectId: number;
+  effectLoops: number;
   speed: number;
   isNpc: boolean;
 }
@@ -207,6 +236,16 @@ export interface ClientState {
     buyAmount: number;
     sellAmount: number;
   };
+  bank: {
+    open: boolean;
+    slots: Array<BankSlot | null>;
+    selectedSlot: number | null;
+    bankGold: number;
+    depositAmount: number;
+    withdrawAmount: number;
+    depositGoldAmount: number;
+    withdrawGoldAmount: number;
+  };
   trade: {
     open: boolean;
     myOffer: TradeOfferState;
@@ -229,6 +268,13 @@ export interface CharacterCreatePacket {
   charIndex: number;
   bodyId: number;
   headId: number;
+  weaponId: number;
+  shieldId: number;
+  helmetId: number;
+  cartId: number;
+  backpackId: number;
+  effectId: number;
+  effectLoops: number;
   heading: number;
   x: number;
   y: number;
@@ -252,7 +298,20 @@ export type ServerPacket =
   | { type: "character_move"; charIndex: number; x: number; y: number }
   | { type: "user_index_in_server"; userIndex: number }
   | { type: "user_char_index_in_server"; charIndex: number }
-  | { type: "character_change"; charIndex: number; bodyId: number; headId: number; heading: number }
+  | {
+      type: "character_change";
+      charIndex: number;
+      bodyId: number;
+      headId: number;
+      weaponId: number;
+      shieldId: number;
+      helmetId: number;
+      cartId: number;
+      backpackId: number;
+      effectId: number;
+      effectLoops: number;
+      heading: number;
+    }
   | { type: "char_swing"; charIndex: number }
   | { type: "npc_kill_user" }
   | { type: "blocked_with_shield_user" }
@@ -262,6 +321,7 @@ export type ServerPacket =
   | { type: "user_hitted_user"; charIndex: number; target: number; damage: number }
   | { type: "safe_mode_on" }
   | { type: "safe_mode_off" }
+  | { type: "navigate_toggle"; navigating: boolean }
   | { type: "create_fx"; charIndex: number; fxId: number; loops: number; x: number; y: number }
   | { type: "play_wave"; wav: number; x: number; y: number; cancelLast: boolean; localize: boolean }
   | {
@@ -283,6 +343,7 @@ export type ServerPacket =
   | { type: "session_token"; credentials: SessionCredentials }
   | { type: "change_spell_slot"; slotIndex: number; slot: SpellSlot | null }
   | { type: "commerce_init"; npcName: string }
+  | { type: "bank_init" }
   | { type: "user_commerce_init" }
   | { type: "user_commerce_end" }
   | {
@@ -291,12 +352,19 @@ export type ServerPacket =
       slot: MerchantSlot | null;
     }
   | {
+      type: "change_bank_slot";
+      slotIndex: number;
+      slot: BankSlot | null;
+    }
+  | {
       type: "change_user_trade_slot";
       myOffer: boolean;
       gold: number;
       items: Array<TradeOfferSlot | null>;
     }
   | { type: "commerce_end" }
+  | { type: "bank_end" }
+  | { type: "update_bank_gold"; bankGold: number }
   | {
       type: "update_user_stats";
       hpCurrent: number;
@@ -329,9 +397,31 @@ export type ClientAction =
   | { type: "world/setCharIndex"; charIndex: number }
   | { type: "world/setSelfPosition"; x: number; y: number }
   | { type: "world/setSelfHeading"; heading: number }
+  | { type: "world/setSelfNavigation"; navigating: boolean }
+  | { type: "world/setSelfDead"; dead: boolean }
   | { type: "world/upsertCharacter"; character: CharacterCreatePacket; self: boolean }
   | { type: "world/moveOther"; charIndex: number; x: number; y: number }
-  | { type: "world/setCharacterAppearance"; charIndex: number; bodyId?: number; headId?: number; heading?: number }
+  | {
+      type: "world/setCharacterAppearance";
+      charIndex: number;
+      bodyId?: number;
+      headId?: number;
+      weaponId?: number;
+      shieldId?: number;
+      helmetId?: number;
+      cartId?: number;
+      backpackId?: number;
+      effectId?: number;
+      effectLoops?: number;
+      heading?: number;
+    }
+  | {
+      type: "world/setMiniStats";
+      classId: number;
+      raceId: number;
+      genderId: number;
+      factionStatus: number;
+    }
   | { type: "world/removeOther"; charIndex: number }
   | { type: "world/upsertGroundObject"; object: GroundObject }
   | { type: "world/removeGroundObject"; x: number; y: number }
@@ -371,6 +461,15 @@ export type ClientAction =
   | { type: "commerce/selectSlot"; slotIndex: number | null }
   | { type: "commerce/setBuyAmount"; amount: number }
   | { type: "commerce/setSellAmount"; amount: number }
+  | { type: "bank/open" }
+  | { type: "bank/close" }
+  | { type: "bank/setSlot"; slotIndex: number; slot: BankSlot | null }
+  | { type: "bank/selectSlot"; slotIndex: number | null }
+  | { type: "bank/setGold"; bankGold: number }
+  | { type: "bank/setDepositAmount"; amount: number }
+  | { type: "bank/setWithdrawAmount"; amount: number }
+  | { type: "bank/setDepositGoldAmount"; amount: number }
+  | { type: "bank/setWithdrawGoldAmount"; amount: number }
   | { type: "trade/open" }
   | { type: "trade/close" }
   | { type: "trade/setOffer"; which: "mine" | "theirs"; gold: number; items: Array<TradeOfferSlot | null> }

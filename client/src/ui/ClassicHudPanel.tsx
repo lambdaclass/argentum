@@ -12,6 +12,7 @@ interface ClassicHudPanelProps {
   onDrop: (slotIndex: number, amount: number) => void;
   onAttack: () => void;
   onStartCommerce: () => void;
+  onStartBank: () => void;
   onToggleSafeMode: () => void;
 }
 
@@ -52,6 +53,7 @@ export function ClassicHudPanel({
   onDrop,
   onAttack,
   onStartCommerce,
+  onStartBank,
   onToggleSafeMode
 }: ClassicHudPanelProps) {
   const [tooltip, setTooltip] = useState<{
@@ -134,6 +136,14 @@ export function ClassicHudPanel({
             type="button"
           >
             Comercio
+          </button>
+          <button
+            className={`ghost-button ${targetTile ? "classic-hud-action-primary" : ""}`}
+            disabled={targetTile == null || state.connection.status !== "connected"}
+            onClick={onStartBank}
+            type="button"
+          >
+            Banco
           </button>
           <button
             className={`ghost-button ${

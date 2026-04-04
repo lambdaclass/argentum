@@ -4,9 +4,27 @@ interface ChatPanelProps {
   onSend: (message: string) => void;
   onPickUp: () => void;
   onRequestPosition: () => void;
+  onRequestStats: () => void;
+  onRequestSkills: () => void;
+  onRequestMiniStats: () => void;
+  onRest: () => void;
+  onMeditate: () => void;
+  onHeal: () => void;
+  onResucitate: () => void;
 }
 
-export function ChatPanel({ onSend, onPickUp, onRequestPosition }: ChatPanelProps) {
+export function ChatPanel({
+  onSend,
+  onPickUp,
+  onRequestPosition,
+  onRequestStats,
+  onRequestSkills,
+  onRequestMiniStats,
+  onRest,
+  onMeditate,
+  onHeal,
+  onResucitate
+}: ChatPanelProps) {
   const [message, setMessage] = useState("");
   const canSend = message.trim().length > 0;
 
@@ -23,6 +41,30 @@ export function ChatPanel({ onSend, onPickUp, onRequestPosition }: ChatPanelProp
         </button>
         <button className="ghost-button" onClick={onRequestPosition} type="button">
           Request Pos
+        </button>
+        <button className="ghost-button" onClick={onRequestStats} type="button">
+          Stats
+        </button>
+        <button className="ghost-button" onClick={onRequestSkills} type="button">
+          Skills
+        </button>
+        <button className="ghost-button" onClick={onRequestMiniStats} type="button">
+          Perfil
+        </button>
+      </div>
+
+      <div className="action-row">
+        <button className="ghost-button" onClick={onRest} type="button">
+          Descansar
+        </button>
+        <button className="ghost-button" onClick={onMeditate} type="button">
+          Meditar
+        </button>
+        <button className="ghost-button" onClick={onHeal} type="button">
+          Curar
+        </button>
+        <button className="ghost-button" onClick={onResucitate} type="button">
+          Resucitar
         </button>
       </div>
 
@@ -57,6 +99,12 @@ export function ChatPanel({ onSend, onPickUp, onRequestPosition }: ChatPanelProp
             Send
           </button>
         </div>
+        <p className="field-hint">
+          Slash commands: <code>/yell</code>, <code>/w NOMBRE</code>, <code>/online</code>,{" "}
+          <code>/rest</code>, <code>/meditate</code>, <code>/heal</code>,{" "}
+          <code>/resucitar</code>, <code>/stats</code>, <code>/skills</code>,{" "}
+          <code>/mini</code>.
+        </p>
       </div>
     </section>
   );
