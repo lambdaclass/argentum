@@ -35,7 +35,8 @@ defmodule Arena.Data.ItemDef do
     intirable: true,
     instransferible: false,
     staff_power: 0,
-    staff_damage_bonus: 0
+    staff_damage_bonus: 0,
+    ropaje: nil
   ]
 
   @stackable_types [1, 5, 11, 13, 32, 33, 34]
@@ -94,7 +95,8 @@ defmodule Arena.Data.ItemDef do
       intirable: section["intirable"] == nil or parse_int(section["intirable"]) != 0,
       instransferible: parse_int(section["instransferible"]) == 1,
       staff_power: parse_int(section["staffpower"]),
-      staff_damage_bonus: parse_int(section["staffdamagebonus"])
+      staff_damage_bonus: parse_int(section["staffdamagebonus"]),
+      ropaje: parse_ropaje(section)
     }
   end
 
@@ -140,5 +142,45 @@ defmodule Arena.Data.ItemDef do
       parse_int(section["hombre"]) == 1 -> :male
       true -> :any
     end
+  end
+
+  @ropaje_keys [
+    {"ropajehumano", :humano_m},
+    {"ropajehumana", :humano_f},
+    {"ropajeelfo", :elfo_m},
+    {"ropajeelfa", :elfo_f},
+    {"ropajeelfooscuro", :elfo_oscuro_m},
+    {"ropajeelfaoscura", :elfo_oscuro_f},
+    {"ropajeenano", :enano_m},
+    {"ropajeenana", :enano_f},
+    {"ropajeorco", :orco_m},
+    {"ropajeorca", :orco_f},
+    {"ropajegnomo", :gnomo_m},
+    {"ropajegnoma", :gnomo_f},
+    # Alternate underscore-separated keys (used in some obj.dat variants)
+    {"ropaje_humano_m", :humano_m},
+    {"ropaje_humano_f", :humano_f},
+    {"ropaje_elfo_m", :elfo_m},
+    {"ropaje_elfo_f", :elfo_f},
+    {"ropaje_elfo_oscuro_m", :elfo_oscuro_m},
+    {"ropaje_elfo_oscuro_f", :elfo_oscuro_f},
+    {"ropaje_enano_m", :enano_m},
+    {"ropaje_enano_f", :enano_f},
+    {"ropaje_orco_m", :orco_m},
+    {"ropaje_orco_f", :orco_f},
+    {"ropaje_gnomo_m", :gnomo_m},
+    {"ropaje_gnomo_f", :gnomo_f}
+  ]
+
+  defp parse_ropaje(section) do
+    ropaje =
+      for {raw_key, atom_key} <- @ropaje_keys,
+          val = parse_int(section[raw_key]),
+          val != 0,
+          into: %{} do
+        {atom_key, val}
+      end
+
+    if map_size(ropaje) == 0, do: nil, else: ropaje
   end
 end

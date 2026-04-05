@@ -156,6 +156,7 @@ defmodule Arena.CharacterCreation do
       y: spawn.y,
       heading: :south,
       body_id: body_id,
+      base_body_id: body_id,
       head_id: params.head,
       hp: hp,
       max_hp: hp,

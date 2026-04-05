@@ -19,6 +19,7 @@ defmodule Arena.Entity.PlayerEntity do
 
     # Visual (display metadata for client packets)
     body_id: 1,
+    base_body_id: 1,
     head_id: 1,
 
     # Vital stats

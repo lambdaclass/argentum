@@ -99,7 +99,15 @@ defmodule Arena.Map.InventoryHandlers do
                     end
 
                   visual_changed = item.equipped and entity.equipment != new_equipment
-                  entity = %{entity | inventory: new_inventory, equipment: new_equipment}
+
+                  new_body_id =
+                    if visual_changed and item_def && item_def.equip_slot == :armor do
+                      entity.base_body_id
+                    else
+                      entity.body_id
+                    end
+
+                  entity = %{entity | inventory: new_inventory, equipment: new_equipment, body_id: new_body_id}
                   players = Map.put(state.players, char_id, entity)
 
                   if item_def && item_def.destruye do
@@ -138,7 +146,27 @@ defmodule Arena.Map.InventoryHandlers do
       }
       case Inventory.equip_toggle(entity.inventory, entity.equipment, slot, character_info) do
         {:ok, new_inventory, new_equipment, changed_slots} ->
-          entity = %{entity | inventory: new_inventory, equipment: new_equipment}
+          new_body_id =
+            if new_equipment[:armor] != entity.equipment[:armor] do
+              case new_equipment[:armor] do
+                nil ->
+                  entity.base_body_id
+
+                armor_id ->
+                  item_def = GameData.get_item(armor_id)
+
+                  if item_def && item_def.ropaje do
+                    key = ropaje_key(entity.race, entity.gender)
+                    Map.get(item_def.ropaje, key, entity.body_id)
+                  else
+                    entity.body_id
+                  end
+              end
+            else
+              entity.body_id
+            end
+
+          entity = %{entity | inventory: new_inventory, equipment: new_equipment, body_id: new_body_id}
           players = Map.put(state.players, char_id, entity)
           state = %{state | players: players}
 
@@ -293,5 +321,11 @@ defmodule Arena.Map.InventoryHandlers do
     |> Enum.reduce(%{}, fn obj, acc ->
       Map.put(acc, {obj.x, obj.y}, %{item_id: obj.obj_index, amount: obj.amount})
     end)
+  end
+
+  defp ropaje_key(race, gender) do
+    suffix = if gender == "female" or gender == :female, do: "_f", else: "_m"
+    race_str = to_string(race)
+    String.to_atom(race_str <> suffix)
   end
 end

@@ -169,8 +169,20 @@ defmodule GameBackend.Characters do
     end)
   end
 
+  # Naked body IDs by {race_string, gender_string} — mirrors @body_ids in CharacterCreation
+  @naked_body_ids %{
+    {"humano", "male"} => 1,   {"humano", "female"} => 1,
+    {"elfo", "male"} => 2,     {"elfo", "female"} => 2,
+    {"elfo_oscuro", "male"} => 3, {"elfo_oscuro", "female"} => 3,
+    {"enano", "male"} => 300,  {"enano", "female"} => 300,
+    {"gnomo", "male"} => 300,  {"gnomo", "female"} => 300,
+    {"orco", "male"} => 582,   {"orco", "female"} => 581
+  }
+
   @doc "Convert a DB record to a PlayerEntity struct."
   def to_entity(%__MODULE__{} = c) do
+    base_body = Map.get(@naked_body_ids, {c.race, c.gender}, c.body_id)
+
     %Arena.Entity.PlayerEntity{
       char_id: c.id,
       name: c.name,
@@ -179,6 +191,7 @@ defmodule GameBackend.Characters do
       y: c.pos_y,
       heading: String.to_atom(c.heading),
       body_id: c.body_id,
+      base_body_id: base_body,
       head_id: c.head_id,
       hp: c.hp,
       max_hp: c.max_hp,

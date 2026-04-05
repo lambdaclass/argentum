@@ -225,4 +225,53 @@ defmodule Arena.AppearanceBugsTest do
              "social.ex uses fx_id instead of fx on lines: #{inspect(lines_with_fx_id)}"
     end
   end
+
+  # ---- Bug 6: Armor equip does not update body_id ----
+
+  describe "Bug 6: armor changes body_id" do
+    test "ItemDef parses ropaje fields from obj.dat sections" do
+      section = %{
+        "name" => "Armadura de Cuero",
+        "objtype" => "3",
+        "grhindex" => "274",
+        "ropaje_humano_m" => "63",
+        "ropaje_humano_f" => "3139",
+        "ropaje_elfo_m" => "63",
+        "ropaje_elfo_f" => "3139",
+        "mindef" => "7",
+        "maxdef" => "12",
+        "valor" => "2500"
+      }
+
+      item_def = Arena.Data.ItemDef.from_section(30, section)
+      assert item_def.ropaje != nil, "ItemDef should parse ropaje map"
+      assert item_def.ropaje[:humano_m] == 63
+      assert item_def.ropaje[:humano_f] == 3139
+    end
+
+    test "visual_state uses armor body_id when armor is equipped" do
+      # An entity wearing armor item 30 which has ropaje body 63 for humano male
+      entity = %PlayerEntity{
+        char_id: 99040,
+        char_index: 40,
+        heading: :south,
+        body_id: 63,
+        head_id: 1,
+        dead: false,
+        equipment: %{weapon: nil, armor: 30, shield: nil, helmet: nil, ring: nil, municion: nil}
+      }
+
+      {_tag, params} = Helpers.character_create_packet(entity)
+
+      # body_id should reflect the armor, not the naked body
+      assert params[:body_id] == 63,
+             "body_id should be the armor's ropaje body, got #{params[:body_id]}"
+    end
+
+    test "PlayerEntity has a base_body_id field for naked body restoration" do
+      entity = %PlayerEntity{}
+      assert Map.has_key?(entity, :base_body_id),
+             "PlayerEntity should have a base_body_id field so armor unequip can restore naked body"
+    end
+  end
 end
