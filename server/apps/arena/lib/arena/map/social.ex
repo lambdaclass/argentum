@@ -318,6 +318,55 @@ defmodule Arena.Map.Social do
     end
   end
 
+  @skill_order [
+    :magic, :stealing, :combat_tactics, :combat_weapons, :meditation,
+    :short_weapons, :hiding, :survival, :trading, :combat_defense,
+    :leadership, :ranged_weapons, :wrestling, :navigation, :riding,
+    :resistance, :woodcutting, :fishing, :mining, :blacksmithing,
+    :carpentry, :alchemy, :tailoring, :taming
+  ]
+
+  def handle_train_skill(state, char_id, skill_index) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        skill_atom = Enum.at(@skill_order, skill_index)
+
+        cond do
+          skill_atom == nil ->
+            {:noreply, state}
+
+          entity.skill_points <= 0 ->
+            Helpers.send_to_session(state.sessions, char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "No tienes puntos de skill disponibles.", font_index: 0}})})
+            {:noreply, state}
+
+          Map.get(entity.skills, skill_atom, 0) >= 100 ->
+            Helpers.send_to_session(state.sessions, char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "Ya tienes el maximo en esa habilidad.", font_index: 0}})})
+            {:noreply, state}
+
+          true ->
+            current = Map.get(entity.skills, skill_atom, 0)
+            entity = %{entity |
+              skills: Map.put(entity.skills, skill_atom, current + 1),
+              skill_points: entity.skill_points - 1
+            }
+            players = Map.put(state.players, char_id, entity)
+            state = %{state | players: players}
+
+            Helpers.send_to_session(state.sessions, char_id,
+              {:send_raw, Encoder.encode({:send_skills, %{skills: entity.skills}})})
+            Helpers.send_to_session(state.sessions, char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "Skill points restantes: #{entity.skill_points}", font_index: 0}})})
+
+            {:noreply, state}
+        end
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
   def handle_request_mini_stats(state, char_id) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->

@@ -8,8 +8,11 @@ defmodule Arena.Map.Movement do
   alias Arena.Map.{Helpers, Visibility}
   alias AoProtocol.Server.Encoder
 
+  require Logger
+
   @base_walk_interval_ms 210
   @stealth_classes [:thief, :bandit]
+  @speed_hack_threshold 3.0
 
   # ---- Movement ----
 
@@ -32,6 +35,23 @@ defmodule Arena.Map.Movement do
             {:reply, {:error, :too_early}, state}
 
           true ->
+          # Speed hack accumulator
+          elapsed = max(now - entity.last_step_at, 1)
+          delta = (min_interval - elapsed) / min_interval
+          new_counter = if delta > 0,
+            do: entity.speed_hack_counter + delta,
+            else: max(entity.speed_hack_counter + delta * 5, 0.0)
+
+          if new_counter > @speed_hack_threshold do
+            # Snap back — reject move, apply penalty
+            Logger.warning("Speed hack: char_id=#{char_id} counter=#{Float.round(new_counter, 2)}")
+            entity = %{entity | speed_hack_counter: 0.0, next_move_at: now + min_interval * 2}
+            players = Map.put(state.players, char_id, entity)
+            Helpers.send_to_session(state.sessions, char_id, {:send_raw,
+              Encoder.encode({:pos_update, %{x: entity.x, y: entity.y}})})
+            {:reply, {:error, :speed_hack}, %{state | players: players}}
+          else
+            entity = %{entity | speed_hack_counter: new_counter}
 
           case TileGrid.move_entity(state.map_id, entity.x, entity.y, direction) do
             {:ok, %TileGrid.Position{x: nx, y: ny}} ->
@@ -92,6 +112,7 @@ defmodule Arena.Map.Movement do
             {:error, :blocked} ->
               {:reply, {:error, :blocked}, state}
           end
+          end  # speed hack else
         end
 
       :error ->

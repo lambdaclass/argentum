@@ -76,11 +76,11 @@ defmodule Arena.Map.CombatHandlers do
   end
 
   def handle_ranged_attack(state, char_id, entity, _weapon_def, target_x, target_y, now) do
-    # VB6 uses Chebyshev distance (max of dx, dy) for ranged checks
-    distance = max(abs(entity.x - target_x), abs(entity.y - target_y))
-
     cond do
-      distance > @ranged_max_distance ->
+      target_x < 1 or target_x > Helpers.map_width() or target_y < 1 or target_y > Helpers.map_height() ->
+        {:reply, {:error, :out_of_range}, state}
+
+      max(abs(entity.x - target_x), abs(entity.y - target_y)) > @ranged_max_distance ->
         Helpers.send_to_session(state.sessions, char_id, {:send_raw,
           Encoder.encode({:console_msg, %{message: "Demasiado lejos.", font_index: 0}})})
         {:reply, {:error, :out_of_range}, state}
@@ -219,17 +219,11 @@ defmodule Arena.Map.CombatHandlers do
               remove_raw = Encoder.encode({:character_remove, %{char_index: npc.char_index}})
               Visibility.broadcast_visible_all(state, npc.x, npc.y, fn pid -> send(pid, {:send_raw, remove_raw}) end)
 
-              # Award XP
+              # Award XP (with party split)
               give_exp = if npc_def, do: npc_def.give_exp, else: 0
               npc_level = if npc_def, do: npc_def.npc_level, else: 1
               xp_gained = Combat.xp_gain(final_damage, give_exp, npc.max_hp, entity.level, npc_level)
-              entity = %{entity | xp: entity.xp + xp_gained}
-
-              # Check level up
-              entity = check_level_up(entity, state.sessions, char_id)
-
-              Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                Encoder.encode({:update_exp, %{current_xp: entity.xp, next_xp: GameData.exp_for_level(entity.level + 1) || 0}})})
+              {entity, state} = award_xp_with_party(state, char_id, entity, xp_gained)
 
               # Award gold
               give_gld = if npc_def, do: npc_def.give_gld, else: 0
@@ -395,9 +389,11 @@ defmodule Arena.Map.CombatHandlers do
                 spell_id = Enum.at(entity.spells, spell_idx)
                 spell_def = GameData.get_spell(spell_id)
 
-                # VB6: spell range check uses AoI range
-                spell_in_range = target_x == nil or target_y == nil or
-                  (abs(entity.x - target_x) <= Helpers.aoi_range_x() and abs(entity.y - target_y) <= Helpers.aoi_range_y())
+                # Bounds + range check
+                target_oob = target_x != nil and target_y != nil and
+                  (target_x < 1 or target_x > Helpers.map_width() or target_y < 1 or target_y > Helpers.map_height())
+                spell_in_range = not target_oob and (target_x == nil or target_y == nil or
+                  (abs(entity.x - target_x) <= Helpers.aoi_range_x() and abs(entity.y - target_y) <= Helpers.aoi_range_y()))
 
                 magic_skill = Map.get(entity.skills, :magic, 0)
                 req = if spell_def, do: spell_def.requirement_mask, else: 0
@@ -621,11 +617,8 @@ defmodule Arena.Map.CombatHandlers do
               give_exp = if npc_def, do: npc_def.give_exp, else: 0
               npc_level = if npc_def, do: npc_def.npc_level, else: 1
               xp_gained = Combat.xp_gain(final_damage, give_exp, npc.max_hp, entity.level, npc_level)
-              entity = %{entity | xp: entity.xp + xp_gained}
-              entity = check_level_up(entity, state.sessions, char_id)
+              {entity, state} = award_xp_with_party(state, char_id, entity, xp_gained)
 
-              Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                Encoder.encode({:update_exp, %{current_xp: entity.xp, next_xp: GameData.exp_for_level(entity.level + 1) || 0}})})
               Helpers.send_to_session(state.sessions, char_id, {:send_raw,
                 Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
 
@@ -1014,12 +1007,102 @@ defmodule Arena.Map.CombatHandlers do
     end
   end
 
+  defp award_xp_with_party(state, char_id, entity, xp_gained) do
+    nearby = Arena.PartyServer.nearby_members(char_id, state.players)
+
+    if nearby == [] do
+      # Solo — full XP
+      entity = %{entity | xp: entity.xp + xp_gained}
+      entity = check_level_up(entity, state.sessions, char_id)
+      send_xp_update(state, char_id, entity)
+      {entity, state}
+    else
+      # Split among killer + nearby party members
+      share_count = length(nearby) + 1
+      share = max(div(xp_gained, share_count), 1)
+
+      entity = %{entity | xp: entity.xp + share}
+      entity = check_level_up(entity, state.sessions, char_id)
+      send_xp_update(state, char_id, entity)
+
+      state = Enum.reduce(nearby, state, fn mid, state ->
+        case Map.get(state.players, mid) do
+          nil -> state
+          member ->
+            member = %{member | xp: member.xp + share}
+            member = check_level_up(member, state.sessions, mid)
+            send_xp_update(state, mid, member)
+            %{state | players: Map.put(state.players, mid, member)}
+        end
+      end)
+
+      {entity, state}
+    end
+  end
+
+  defp send_xp_update(state, char_id, entity) do
+    Helpers.send_to_session(state.sessions, char_id, {:send_raw,
+      Encoder.encode({:update_exp, %{current_xp: entity.xp, next_xp: GameData.exp_for_level(entity.level + 1) || 0}})})
+  end
+
   def check_level_up(entity, sessions, char_id) do
     next_xp = GameData.exp_for_level(entity.level + 1)
 
     if next_xp && entity.xp >= next_xp do
-      entity = %{entity | level: entity.level + 1, xp: entity.xp - next_xp}
-      Helpers.send_to_session(sessions, char_id, {:send_raw, Encoder.encode({:level_up, %{level: entity.level}})})
+      class_id = Helpers.class_atom_to_id(entity.class)
+      new_level = entity.level + 1
+
+      # HP growth: randomized around class modifier
+      hp_mod = GameData.class_hp_mod(class_id)
+      hp_gain = max(trunc(hp_mod * (0.8 + :rand.uniform() * 0.4)), 1)
+      new_max_hp = entity.max_hp + hp_gain
+
+      # Mana growth: int * class multiplier (0 for non-casters)
+      mana_mult = GameData.class_mana_mult(class_id)
+      mana_gain = trunc(entity.int * mana_mult)
+      new_max_mana = entity.max_mana + mana_gain
+
+      # Stamina growth
+      sta_growth = GameData.class_stamina_growth(class_id)
+      sta_gain = max(trunc(sta_growth * entity.agi / 33), 1)
+      new_max_stamina = entity.max_stamina + sta_gain
+
+      # Skill points
+      skill_pts = GameData.class_skill_points(class_id)
+
+      # Base damage for new level
+      {new_min_hit, new_max_hit} = Combat.base_user_damage(new_level, class_id)
+
+      entity = %{entity |
+        level: new_level,
+        xp: entity.xp - next_xp,
+        max_hp: new_max_hp, hp: new_max_hp,
+        max_mana: new_max_mana, mana: new_max_mana,
+        max_stamina: new_max_stamina, stamina: new_max_stamina,
+        min_hit: new_min_hit, max_hit: new_max_hit,
+        skill_points: entity.skill_points + skill_pts
+      }
+
+      # Level-up packet
+      Helpers.send_to_session(sessions, char_id, {:send_raw,
+        Encoder.encode({:level_up, %{level: new_level}})})
+
+      # Full stat refresh
+      Helpers.send_to_session(sessions, char_id, {:send_raw,
+        Encoder.encode({:update_user_stats, %{
+          max_hp: entity.max_hp, min_hp: entity.hp, shield: 0,
+          max_mana: entity.max_mana, min_mana: entity.mana,
+          max_sta: entity.max_stamina, min_sta: entity.stamina,
+          gold: entity.gold, gold_cap: 1_000_000,
+          level: entity.level,
+          exp_next_level: GameData.exp_for_level(entity.level + 1) || 0,
+          exp: entity.xp,
+          class: Helpers.class_atom_to_id(entity.class)
+        }})})
+
+      Helpers.send_to_session(sessions, char_id, {:send_raw,
+        Encoder.encode({:console_msg, %{message: "Has alcanzado el nivel #{new_level}!", font_index: 0}})})
+
       # Recursive check for multiple level ups
       check_level_up(entity, sessions, char_id)
     else

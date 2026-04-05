@@ -110,6 +110,7 @@ defmodule Arena.Map.MapServer do
   def request_atributes(map_id, char_id), do: GenServer.cast(via(map_id), {:request_atributes, char_id})
   def request_skills(map_id, char_id), do: GenServer.cast(via(map_id), {:request_skills, char_id})
   def request_mini_stats(map_id, char_id), do: GenServer.cast(via(map_id), {:request_mini_stats, char_id})
+  def train_skill(map_id, char_id, skill_index), do: GenServer.cast(via(map_id), {:train_skill, char_id, skill_index})
   def double_click(map_id, char_id, x, y), do: GenServer.cast(via(map_id), {:double_click, char_id, x, y})
   def snapshot_entity(map_id, char_id), do: GenServer.call(via(map_id), {:snapshot, char_id})
   def player_count(map_id), do: GenServer.call(via(map_id), :player_count)
@@ -386,6 +387,8 @@ defmodule Arena.Map.MapServer do
   def handle_cast({:resucitate, char_id}, state), do: Social.handle_resucitate(state, char_id)
   @impl true
   def handle_cast({:request_atributes, char_id}, state), do: Social.handle_request_atributes(state, char_id)
+  @impl true
+  def handle_cast({:train_skill, char_id, skill_index}, state), do: Social.handle_train_skill(state, char_id, skill_index)
   @impl true
   def handle_cast({:request_skills, char_id}, state), do: Social.handle_request_skills(state, char_id)
   @impl true

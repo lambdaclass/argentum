@@ -11,6 +11,7 @@ defmodule Arena.Application do
       {Registry, keys: :unique, name: Arena.MapRegistry},
       {Phoenix.PubSub, name: Arena.PubSub},
       Arena.Data.GameData,
+      Arena.PartyServer,
       Arena.Map.MapSupervisor,
       ArenaWeb.Endpoint
     ]

@@ -210,8 +210,37 @@ defmodule AoTcpGateway.SessionLogic do
   def handle_command(state, {:walk, _}), do: {state, []}
 
   def handle_command(state, {:talk, %{message: message}}) when state.character_id != nil do
-    Arena.Map.MapServer.chat(state.map_id, state.character_id, message)
-    {state, []}
+    case parse_party_command(message) do
+      {:party_invite, target_name} ->
+        case AoSession.OnlineDirectory.lookup_by_name(target_name) do
+          {:ok, target_id, _info} ->
+            Arena.PartyServer.invite(state.character_id, target_id)
+          :not_found ->
+            send_console(state, "Jugador no encontrado.")
+        end
+        {state, []}
+
+      :party_leave ->
+        Arena.PartyServer.leave(state.character_id)
+        {state, []}
+
+      {:party_kick, target_name} ->
+        case AoSession.OnlineDirectory.lookup_by_name(target_name) do
+          {:ok, target_id, _info} ->
+            Arena.PartyServer.kick(state.character_id, target_id)
+          :not_found ->
+            send_console(state, "Jugador no encontrado.")
+        end
+        {state, []}
+
+      :party_accept ->
+        Arena.PartyServer.accept_invite(state.character_id)
+        {state, []}
+
+      :not_party_command ->
+        Arena.Map.MapServer.chat(state.map_id, state.character_id, message)
+        {state, []}
+    end
   end
 
   def handle_command(state, {:talk, _}), do: {state, []}
@@ -438,6 +467,11 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
+  def handle_command(state, {:work, %{skill: skill_index}}) when state.character_id != nil do
+    Arena.Map.MapServer.train_skill(state.map_id, state.character_id, skill_index)
+    {state, []}
+  end
+
   # VB6: use_spell_macro — client-side macro casts via cast_spell;
   # this packet is a no-op on the server (no payload to act on).
   def handle_command(state, {:use_spell_macro, _}) when state.character_id != nil do
@@ -481,6 +515,7 @@ defmodule AoTcpGateway.SessionLogic do
     end
 
     if state.character_id do
+      Arena.PartyServer.leave(state.character_id)
       AoSession.OnlineDirectory.unregister(state.character_id)
       AoSession.unregister(state.character_id)
     end
@@ -651,4 +686,26 @@ defmodule AoTcpGateway.SessionLogic do
   defp creation_error_message({:invalid_class, _}), do: "Invalid class."
   defp creation_error_message({:invalid_home_city, _}), do: "Invalid home city."
   defp creation_error_message(_), do: "Character creation failed."
+
+  # ---- Party chat commands ----
+
+  defp parse_party_command(message) do
+    upper = String.upcase(String.trim(message))
+    cond do
+      String.starts_with?(upper, "/PARTY ") ->
+        name = String.trim(String.slice(message, 7..-1//1))
+        {:party_invite, name}
+      upper == "/SALIRGRUPO" -> :party_leave
+      String.starts_with?(upper, "/ECHARGRUPO ") ->
+        name = String.trim(String.slice(message, 12..-1//1))
+        {:party_kick, name}
+      upper == "/ACEPTARGRUPO" -> :party_accept
+      true -> :not_party_command
+    end
+  end
+
+  defp send_console(_state, message) do
+    raw = AoProtocol.Server.Encoder.encode({:console_msg, %{message: message, font_index: 0}})
+    send(self(), {:send_raw, raw})
+  end
 end
