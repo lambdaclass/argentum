@@ -1184,47 +1184,104 @@ defmodule Arena.Map.CombatHandlers do
   # Regen tick (rest + meditate)
   # ==================================================================
 
+  # VB6: starvation/dehydration damage per tick
+  @hunger_thirst_damage 5
+
   def process_regen_tick(state) do
     Enum.reduce(state.players, state, fn {char_id, entity}, state ->
-      cond do
-        entity.dead ->
-          state
+      if entity.dead do
+        state
+      else
+        {entity, vitals_changed} = drain_hunger_thirst(entity)
+        starving = entity.hunger == 0
+        dehydrated = entity.thirst == 0
 
-        entity.resting and entity.hp < entity.max_hp ->
-          regen = max(div(entity.max_hp, 50), 1)
-          new_hp = min(entity.hp + regen, entity.max_hp)
-          entity = %{entity | hp: new_hp}
-          entity = if new_hp >= entity.max_hp, do: %{entity | resting: false}, else: entity
-
-          Helpers.send_to_session(state.sessions, char_id,
-            {:send_raw, Encoder.encode({:update_hp, %{min_hp: new_hp, shield: 0}})})
-
-          if not entity.resting do
-            Helpers.send_to_session(state.sessions, char_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: "Has terminado de descansar.", font_index: 0}})})
+        # Starvation/dehydration damage
+        entity =
+          cond do
+            starving and dehydrated ->
+              %{entity | hp: max(entity.hp - @hunger_thirst_damage * 2, 0)}
+            starving or dehydrated ->
+              %{entity | hp: max(entity.hp - @hunger_thirst_damage, 0)}
+            true ->
+              entity
           end
 
-          %{state | players: Map.put(state.players, char_id, entity)}
+        hp_changed = entity.hp != state.players[char_id].hp
 
-        entity.meditating and entity.mana < entity.max_mana ->
-          regen = max(div(entity.max_mana, 35), 1)
-          new_mana = min(entity.mana + regen, entity.max_mana)
-          entity = %{entity | mana: new_mana}
-          entity = if new_mana >= entity.max_mana, do: %{entity | meditating: false}, else: entity
+        # Kill on starvation
+        entity = if entity.hp <= 0, do: %{entity | hp: 0, dead: true}, else: entity
 
-          Helpers.send_to_session(state.sessions, char_id,
-            {:send_raw, Encoder.encode({:update_mana, %{min_mana: new_mana}})})
+        # Regen (blocked by starvation/dehydration)
+        entity =
+          cond do
+            starving or dehydrated ->
+              entity
 
-          if not entity.meditating do
-            Helpers.send_to_session(state.sessions, char_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: "Has terminado de meditar.", font_index: 0}})})
+            entity.resting and entity.hp < entity.max_hp ->
+              regen = max(div(entity.max_hp, 50), 1)
+              new_hp = min(entity.hp + regen, entity.max_hp)
+              entity = %{entity | hp: new_hp}
+              if new_hp >= entity.max_hp do
+                Helpers.send_to_session(state.sessions, char_id,
+                  {:send_raw, Encoder.encode({:console_msg, %{message: "Has terminado de descansar.", font_index: 0}})})
+                %{entity | resting: false}
+              else
+                entity
+              end
+
+            entity.meditating and entity.mana < entity.max_mana ->
+              regen = max(div(entity.max_mana, 35), 1)
+              new_mana = min(entity.mana + regen, entity.max_mana)
+              entity = %{entity | mana: new_mana}
+              if new_mana >= entity.max_mana do
+                Helpers.send_to_session(state.sessions, char_id,
+                  {:send_raw, Encoder.encode({:console_msg, %{message: "Has terminado de meditar.", font_index: 0}})})
+                %{entity | meditating: false}
+              else
+                entity
+              end
+
+            true ->
+              entity
           end
 
-          %{state | players: Map.put(state.players, char_id, entity)}
+        # Send updates
+        if vitals_changed do
+          Helpers.send_to_session(state.sessions, char_id,
+            {:send_raw, Encoder.encode({:update_hunger_and_thirst, %{
+              max_hunger: 100, min_hunger: entity.hunger,
+              max_thirst: 100, min_thirst: entity.thirst
+            }})})
+        end
 
-        true ->
+        if hp_changed or entity.hp != state.players[char_id].hp do
+          Helpers.send_to_session(state.sessions, char_id,
+            {:send_raw, Encoder.encode({:update_hp, %{min_hp: entity.hp, shield: 0}})})
+        end
+
+        if entity.mana != state.players[char_id].mana do
+          Helpers.send_to_session(state.sessions, char_id,
+            {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+        end
+
+        if entity.dead and not state.players[char_id].dead do
+          Helpers.send_to_session(state.sessions, char_id,
+            {:send_raw, Encoder.encode({:console_msg, %{message: "Has muerto de inanición.", font_index: 0}})})
+          state = %{state | players: Map.put(state.players, char_id, entity)}
+          Helpers.broadcast_character_change(state, entity)
           state
+        else
+          %{state | players: Map.put(state.players, char_id, entity)}
+        end
       end
     end)
+  end
+
+  defp drain_hunger_thirst(entity) do
+    new_hunger = max(entity.hunger - 1, 0)
+    new_thirst = max(entity.thirst - 1, 0)
+    changed = new_hunger != entity.hunger or new_thirst != entity.thirst
+    {%{entity | hunger: new_hunger, thirst: new_thirst}, changed}
   end
 end
