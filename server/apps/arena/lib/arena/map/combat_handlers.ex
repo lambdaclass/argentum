@@ -348,7 +348,13 @@ defmodule Arena.Map.CombatHandlers do
                 players = state.players
                   |> Map.put(char_id, entity)
                   |> Map.put(defender_id, defender)
-                %{state | players: players}
+                state = %{state | players: players}
+
+                if defender.dead do
+                  Helpers.broadcast_character_change(state, defender)
+                end
+
+                state
               end
             else
               players = Map.put(state.players, char_id, entity)
@@ -670,7 +676,13 @@ defmodule Arena.Map.CombatHandlers do
             end
 
             players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, defender)
-            %{state | players: players}
+            state = %{state | players: players}
+
+            if defender.dead do
+              Helpers.broadcast_character_change(state, defender)
+            end
+
+            state
         end
 
       _ ->
@@ -818,7 +830,9 @@ defmodule Arena.Map.CombatHandlers do
         Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
 
       players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, revived)
-      %{state | players: players}
+      state = %{state | players: players}
+      Helpers.broadcast_character_change(state, revived)
+      state
     else
       # No dead player at target -- just update caster mana
       Helpers.send_to_session(state.sessions, char_id, {:send_raw,
@@ -986,7 +1000,8 @@ defmodule Arena.Map.CombatHandlers do
     entity = %{entity | buffs: active}
 
     # Check poison death
-    entity = if entity.hp <= 0 and not entity.dead do
+    was_alive = not entity.dead
+    entity = if entity.hp <= 0 and was_alive do
       Helpers.send_to_session(state.sessions, char_id, {:send_raw,
         Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})})
       %{entity | dead: true}
@@ -995,7 +1010,13 @@ defmodule Arena.Map.CombatHandlers do
     end
 
     players = Map.put(state.players, char_id, entity)
-    %{state | players: players}
+    state = %{state | players: players}
+
+    if was_alive and entity.dead do
+      Helpers.broadcast_character_change(state, entity)
+    end
+
+    state
   end
 
   def maybe_gain_skill(entity, skill_name) do

@@ -98,6 +98,7 @@ defmodule Arena.Map.InventoryHandlers do
                       entity.equipment
                     end
 
+                  visual_changed = item.equipped and entity.equipment != new_equipment
                   entity = %{entity | inventory: new_inventory, equipment: new_equipment}
                   players = Map.put(state.players, char_id, entity)
 
@@ -105,6 +106,7 @@ defmodule Arena.Map.InventoryHandlers do
                     # Destruye items are destroyed on drop, not placed on ground
                     state = %{state | players: players}
                     Helpers.send_inventory_slot(state.sessions, char_id, new_inventory, slot)
+                    if visual_changed, do: Helpers.broadcast_character_change(state, entity)
                     {:reply, :ok, state}
                   else
                     # Stack with existing ground item or create new
@@ -113,6 +115,7 @@ defmodule Arena.Map.InventoryHandlers do
                     state = %{state | players: players, ground_items: ground_items}
                     Helpers.send_inventory_slot(state.sessions, char_id, new_inventory, slot)
                     Helpers.broadcast_object_create(state, entity.x, entity.y, item.item_id, new_amount)
+                    if visual_changed, do: Helpers.broadcast_character_change(state, entity)
                     {:reply, :ok, state}
                   end
 
@@ -142,6 +145,8 @@ defmodule Arena.Map.InventoryHandlers do
           for s <- changed_slots do
             Helpers.send_inventory_slot(state.sessions, char_id, new_inventory, s)
           end
+
+          Helpers.broadcast_character_change(state, entity)
 
           {:reply, :ok, state}
 

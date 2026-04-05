@@ -343,7 +343,9 @@ defmodule Arena.NpcAi do
                   player
                 end
                 players = Map.put(state.players, target_id, player)
-                %{state | players: players}
+                state = %{state | players: players}
+                if player.dead, do: Helpers.broadcast_character_change(state, player)
+                state
 
               true -> state
             end
@@ -413,7 +415,9 @@ defmodule Arena.NpcAi do
               end
 
               players = Map.put(state.players, npc.target_id, player)
-              %{state | players: players}
+              state = %{state | players: players}
+              if player.dead, do: Helpers.broadcast_character_change(state, player)
+              state
             else
               state
             end

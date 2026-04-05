@@ -161,7 +161,7 @@ defmodule Arena.Map.Social do
             # VB6: show meditate FX (varies by level/faction; simplified to fx_id 4 here)
             if new_meditating do
               Visibility.broadcast_visible_all(state, entity.x, entity.y, fn pid ->
-                send(pid, {:send_raw, Encoder.encode({:create_fx, %{char_index: entity.char_index, fx_id: 4, loops: 0}})})
+                send(pid, {:send_raw, Encoder.encode({:create_fx, %{char_index: entity.char_index, fx: 4, loops: 0}})})
               end)
             end
 
@@ -251,11 +251,14 @@ defmodule Arena.Map.Social do
                 Helpers.send_to_session(state.sessions, char_id,
                   {:send_raw, Encoder.encode({:console_msg, %{message: "Has sido resucitado.", font_index: 0}})})
 
+                state = %{state | players: players}
+                Helpers.broadcast_character_change(state, entity)
+
                 Visibility.broadcast_visible_all(state, entity.x, entity.y, fn pid ->
-                  send(pid, {:send_raw, Encoder.encode({:create_fx, %{char_index: entity.char_index, fx_id: 15, loops: 0}})})
+                  send(pid, {:send_raw, Encoder.encode({:create_fx, %{char_index: entity.char_index, fx: 15, loops: 0}})})
                 end)
 
-                {:noreply, %{state | players: players}}
+                {:noreply, state}
               end
 
             :not_found ->

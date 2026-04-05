@@ -77,15 +77,37 @@ defmodule Arena.Map.Helpers do
   def opposite_heading(other), do: other
 
   # Packet builders
+
+  @ghost_body_id 829
+
+  defp visual_state(entity) do
+    if entity.dead do
+      %{body_id: @ghost_body_id, head_id: 0, weapon_id: 0, shield_id: 0, helmet_id: 0}
+    else
+      %{
+        body_id: entity.body_id,
+        head_id: entity.head_id,
+        weapon_id: entity.equipment[:weapon] || 0,
+        shield_id: entity.equipment[:shield] || 0,
+        helmet_id: entity.equipment[:helmet] || 0
+      }
+    end
+  end
+
   def character_create_packet(entity) do
+    visual = visual_state(entity)
+
     {:character_create, %{
       char_index: entity.char_index,
-      body_id: entity.body_id,
-      head_id: entity.head_id,
+      body_id: visual.body_id,
+      head_id: visual.head_id,
       heading: heading_to_int(entity.heading),
       x: entity.x,
       y: entity.y,
       name: entity.name || "Unknown",
+      weapon_id: visual.weapon_id,
+      shield_id: visual.shield_id,
+      helmet_id: visual.helmet_id,
       min_hp: entity.hp,
       max_hp: entity.max_hp,
       min_mana: entity.mana,
@@ -95,12 +117,28 @@ defmodule Arena.Map.Helpers do
   end
 
   def character_change_packet(entity) do
+    visual = visual_state(entity)
+
     {:character_change, %{
       char_index: entity.char_index,
-      body_id: entity.body_id,
-      head_id: entity.head_id,
-      heading: heading_to_int(entity.heading)
+      body_id: visual.body_id,
+      head_id: visual.head_id,
+      heading: heading_to_int(entity.heading),
+      weapon_id: visual.weapon_id,
+      shield_id: visual.shield_id,
+      helmet_id: visual.helmet_id
     }}
+  end
+
+  @doc """
+  Broadcast a character_change packet to all players that can see (x, y).
+  Used after death, revive, and equipment changes.
+  """
+  def broadcast_character_change(state, entity) do
+    raw = Encoder.encode(character_change_packet(entity))
+    Arena.Map.Visibility.broadcast_visible_all(state, entity.x, entity.y, fn pid ->
+      send(pid, {:send_raw, raw})
+    end)
   end
 
   # NPC create packet (used by visibility and NPC AI)

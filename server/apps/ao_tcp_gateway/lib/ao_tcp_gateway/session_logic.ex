@@ -131,7 +131,7 @@ defmodule AoTcpGateway.SessionLogic do
           {:user_index_in_server, %{user_index: 1}},
           {:change_map, %{map_id: map_id, version: 0}},
           {:user_char_index_in_server, %{char_index: char_index}},
-          character_create_packet(entity),
+          Arena.Map.Helpers.character_create_packet(entity),
           {:pos_update, %{x: entity.x, y: entity.y}},
           {:intervals, %{walk: 210}},
           {:update_hp, %{min_hp: entity.hp}},
@@ -150,7 +150,7 @@ defmodule AoTcpGateway.SessionLogic do
           spell_login_packets(entity) ++
           skill_login_packets(entity) ++
           for {cid, other} <- all_players, cid != entity.char_id do
-            character_create_packet(other)
+            Arena.Map.Helpers.character_create_packet(other)
           end ++
           [{:console_msg, %{message: "Welcome to Argentum Online!", font_index: 0}}]
 
@@ -184,11 +184,11 @@ defmodule AoTcpGateway.SessionLogic do
         [
           {:change_map, %{map_id: dest_map, version: 0}},
           {:user_char_index_in_server, %{char_index: char_index}},
-          character_create_packet(entity),
+          Arena.Map.Helpers.character_create_packet(entity),
           {:pos_update, %{x: entity.x, y: entity.y}}
         ] ++
           for {cid, other} <- all_players, cid != entity.char_id do
-            character_create_packet(other)
+            Arena.Map.Helpers.character_create_packet(other)
           end
 
       AoSession.OnlineDirectory.update_map(state.character_id, dest_map)
@@ -573,24 +573,6 @@ defmodule AoTcpGateway.SessionLogic do
 
   # ---- Packet builders ----
 
-  def character_create_packet(entity) do
-    {:character_create,
-     %{
-       char_index: entity.char_index,
-       body_id: entity.body_id,
-       head_id: entity.head_id,
-       heading: heading_to_int(entity.heading),
-       x: entity.x,
-       y: entity.y,
-       name: entity.name || "Unknown",
-       min_hp: entity.hp,
-       max_hp: entity.max_hp,
-       min_mana: entity.mana,
-       max_mana: entity.max_mana,
-       speed: entity.speeding
-     }}
-  end
-
   def inventory_login_packets(entity) do
     entity.inventory
     |> Enum.with_index()
@@ -660,12 +642,6 @@ defmodule AoTcpGateway.SessionLogic do
   end
 
   # ---- Heading conversion ----
-
-  def heading_to_int(:north), do: 1
-  def heading_to_int(:east), do: 2
-  def heading_to_int(:south), do: 3
-  def heading_to_int(:west), do: 4
-  def heading_to_int(_), do: 3
 
   def int_to_heading(1), do: :north
   def int_to_heading(2), do: :east
