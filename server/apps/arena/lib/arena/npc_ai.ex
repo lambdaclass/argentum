@@ -31,7 +31,8 @@ defmodule Arena.NpcAi do
 
   defp process_respawns(state, now) do
     Enum.reduce(state.npcs_live, state, fn {instance_id, npc}, state ->
-      if not npc.alive and npc.respawn_at != nil and now >= npc.respawn_at do
+      # Pets don't respawn — they are removed on death/despawn
+      if not npc.alive and npc.respawn_at != nil and now >= npc.respawn_at and npc.owner_id == nil do
         respawn_npc(state, instance_id, npc)
       else
         state
@@ -91,6 +92,11 @@ defmodule Arena.NpcAi do
 
   defp process_single_npc(state, _instance_id, _npc, nil, _now), do: state
 
+  # Pet AI — owner_id is set
+  defp process_single_npc(state, instance_id, %{owner_id: owner_id} = npc, npc_def, now) when owner_id != nil do
+    process_pet_npc(state, instance_id, npc, npc_def, now)
+  end
+
   defp process_single_npc(state, instance_id, npc, npc_def, now) do
     # Skip static/non-hostile NPCs with no target
     if npc_def.movement == 1 and not npc_def.hostile and npc.target_id == nil do
@@ -112,6 +118,154 @@ defmodule Arena.NpcAi do
       # Attack if adjacent to target
       maybe_attack(state, instance_id, npc, npc_def, now)
     end
+  end
+
+  # --- Pet AI ---
+
+  @pet_follow_distance 5
+  @pet_idle_range 3
+  @pet_aggro_range 8
+
+  defp process_pet_npc(state, instance_id, npc, npc_def, now) do
+    case Map.get(state.players, npc.owner_id) do
+      nil ->
+        # Owner left the map — despawn the pet
+        despawn_pet(state, instance_id, npc)
+
+      owner ->
+        if owner.dead do
+          # Owner is dead — idle in place
+          state
+        else
+          dist_x = abs(npc.x - owner.x)
+          dist_y = abs(npc.y - owner.y)
+          interval = max(npc_def.intervalo_movimiento, 200)
+
+          cond do
+            # Owner is far away — follow
+            dist_x > @pet_follow_distance or dist_y > @pet_follow_distance ->
+              if now >= npc.next_move_at do
+                {dx, dy} = direction_toward(npc.x, npc.y, owner.x, owner.y)
+                {state, _npc} = move_npc_to(state, instance_id, npc, npc.x + dx, npc.y + dy, now + interval)
+                state
+              else
+                state
+              end
+
+            # Look for nearby hostile wild NPC to attack
+            true ->
+              case find_nearest_wild_npc(state, npc) do
+                nil ->
+                  # No enemy nearby — idle with random movement
+                  pet_idle(state, instance_id, npc, owner, now, interval)
+
+                {target_instance_id, target_npc} ->
+                  if adjacent?(npc.x, npc.y, target_npc.x, target_npc.y) do
+                    maybe_pet_attack(state, instance_id, npc, npc_def, now, target_instance_id, target_npc)
+                  else
+                    if now >= npc.next_move_at do
+                      {dx, dy} = direction_toward(npc.x, npc.y, target_npc.x, target_npc.y)
+                      {state, _npc} = move_npc_to(state, instance_id, npc, npc.x + dx, npc.y + dy, now + interval)
+                      state
+                    else
+                      state
+                    end
+                  end
+              end
+          end
+        end
+    end
+  end
+
+  defp pet_idle(state, instance_id, npc, owner, now, interval) do
+    if now >= npc.next_move_at and :rand.uniform(4) == 1 do
+      {dx, dy} = Enum.random([{0, -1}, {0, 1}, {-1, 0}, {1, 0}])
+      nx = npc.x + dx
+      ny = npc.y + dy
+
+      if abs(nx - owner.x) <= @pet_idle_range and abs(ny - owner.y) <= @pet_idle_range do
+        {state, _npc} = move_npc_to(state, instance_id, npc, nx, ny, now + interval)
+        state
+      else
+        npc = %{npc | next_move_at: now + interval}
+        put_in(state.npcs_live[instance_id], npc)
+      end
+    else
+      state
+    end
+  end
+
+  # Find the nearest alive wild (non-pet) hostile NPC within aggro range of the pet.
+  defp find_nearest_wild_npc(state, pet) do
+    state.npcs_live
+    |> Enum.filter(fn {_id, n} ->
+      n.alive and n.owner_id == nil and
+        abs(n.x - pet.x) <= @pet_aggro_range and
+        abs(n.y - pet.y) <= @pet_aggro_range and
+        n.instance_id != pet.instance_id
+    end)
+    |> Enum.filter(fn {_id, n} ->
+      npc_def = GameData.get_npc(n.npc_id)
+      npc_def != nil and npc_def.hostile
+    end)
+    |> Enum.min_by(fn {_id, n} -> abs(n.x - pet.x) + abs(n.y - pet.y) end, fn -> nil end)
+  end
+
+  defp maybe_pet_attack(state, instance_id, npc, npc_def, now, target_instance_id, target_npc) do
+    if now < npc.next_attack_at do
+      state
+    else
+      interval = max(npc_def.intervalo_ataque, 500)
+      npc = %{npc | next_attack_at: now + interval}
+      state = put_in(state.npcs_live[instance_id], npc)
+
+      # Broadcast swing
+      swing_raw = Encoder.encode({:char_swing, %{char_index: npc.char_index}})
+      broadcast_to_nearby_players(state, npc.x, npc.y, swing_raw)
+
+      # Damage calc: use NPC min/max hit from def
+      raw_damage = if npc_def.max_hit > npc_def.min_hit do
+        Enum.random(npc_def.min_hit..npc_def.max_hit)
+      else
+        max(npc_def.min_hit, 1)
+      end
+
+      target_def = GameData.get_npc(target_npc.npc_id)
+      defense = if target_def, do: target_def.def, else: 0
+      final_damage = max(raw_damage - defense, 0)
+      new_hp = max(target_npc.hp - final_damage, 0)
+      target_npc = %{target_npc | hp: new_hp}
+
+      if new_hp <= 0 do
+        # Target NPC died
+        respawn_delay = if target_def, do: target_def.intervalo_respawn, else: 60
+        target_npc = %{target_npc | alive: false, respawn_at: System.monotonic_time(:millisecond) + respawn_delay * 1000}
+        state = put_in(state.npcs_live[target_instance_id], target_npc)
+        occupancy = Helpers.clear_occupancy(state.occupancy, target_npc.x, target_npc.y)
+        state = %{state | occupancy: occupancy}
+
+        remove_raw = Encoder.encode({:character_remove, %{char_index: target_npc.char_index}})
+        broadcast_to_nearby_players(state, target_npc.x, target_npc.y, remove_raw)
+        state
+      else
+        put_in(state.npcs_live[target_instance_id], target_npc)
+      end
+    end
+  end
+
+  @doc false
+  def despawn_pet(state, instance_id, npc) do
+    # Remove pet from occupancy grid
+    occupancy = Helpers.clear_occupancy(state.occupancy, npc.x, npc.y)
+    state = %{state | occupancy: occupancy}
+
+    # Broadcast removal to nearby players
+    remove_raw = Encoder.encode({:character_remove, %{char_index: npc.char_index}})
+    broadcast_to_nearby_players(state, npc.x, npc.y, remove_raw)
+
+    # Remove pet from npcs_live entirely (no respawn for pets)
+    npcs_live = Map.delete(state.npcs_live, instance_id)
+    %{state | npcs_live: npcs_live}
   end
 
   # --- Target acquisition ---

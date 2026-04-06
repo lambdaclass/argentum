@@ -244,8 +244,45 @@ defmodule AoTcpGateway.SessionLogic do
         {state, []}
 
       :not_party_command ->
-        Arena.Map.MapServer.chat(state.map_id, state.character_id, message)
-        {state, []}
+        case parse_guild_command(message) do
+          {:guild_create, name} ->
+            Arena.GuildServer.create_guild(state.character_id, name)
+            {state, []}
+
+          {:guild_invite, target_name} ->
+            case AoSession.OnlineDirectory.lookup_by_name(target_name) do
+              {:ok, target_id, _info} ->
+                Arena.GuildServer.invite(state.character_id, target_id)
+              :not_found ->
+                send_console(state, "Jugador no encontrado.")
+            end
+            {state, []}
+
+          :guild_accept ->
+            Arena.GuildServer.accept_invite(state.character_id)
+            {state, []}
+
+          :guild_leave ->
+            Arena.GuildServer.leave(state.character_id)
+            {state, []}
+
+          {:guild_kick, target_name} ->
+            case AoSession.OnlineDirectory.lookup_by_name(target_name) do
+              {:ok, target_id, _info} ->
+                Arena.GuildServer.kick(state.character_id, target_id)
+              :not_found ->
+                send_console(state, "Jugador no encontrado.")
+            end
+            {state, []}
+
+          {:guild_chat, guild_message} ->
+            Arena.GuildServer.guild_chat(state.character_id, guild_message)
+            {state, []}
+
+          :not_guild_command ->
+            Arena.Map.MapServer.chat(state.map_id, state.character_id, message)
+            {state, []}
+        end
     end
   end
 
@@ -683,6 +720,40 @@ defmodule AoTcpGateway.SessionLogic do
         {:party_kick, name}
       upper == "/ACEPTARGRUPO" -> :party_accept
       true -> :not_party_command
+    end
+  end
+
+  defp parse_guild_command(message) do
+    upper = String.upcase(String.trim(message))
+    cond do
+      String.starts_with?(upper, "/CREARCLAN ") ->
+        name = String.trim(String.slice(message, 11..-1//1))
+        {:guild_create, name}
+
+      String.starts_with?(upper, "/INVITARCLAN ") ->
+        name = String.trim(String.slice(message, 13..-1//1))
+        {:guild_invite, name}
+
+      upper == "/ACEPTARCLAN" ->
+        :guild_accept
+
+      upper == "/SALIRCLAN" ->
+        :guild_leave
+
+      String.starts_with?(upper, "/ECHARCLAN ") ->
+        name = String.trim(String.slice(message, 11..-1//1))
+        {:guild_kick, name}
+
+      String.starts_with?(upper, "/CC ") ->
+        msg = String.trim(String.slice(message, 4..-1//1))
+        {:guild_chat, msg}
+
+      String.starts_with?(upper, "/CLANCHAT ") ->
+        msg = String.trim(String.slice(message, 10..-1//1))
+        {:guild_chat, msg}
+
+      true ->
+        :not_guild_command
     end
   end
 

@@ -118,6 +118,9 @@ defmodule Arena.Entity.PlayerEntity do
     trade_partner_id: nil,
     trade_offer_gold: 0,
     trade_offer_items: [],
-    trade_accepted: false
+    trade_accepted: false,
+
+    # Pets: list of NPC instance IDs owned by this player (not persisted across sessions)
+    pet_ids: []
   ]
 end

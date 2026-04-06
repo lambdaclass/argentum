@@ -210,8 +210,14 @@ defmodule Arena.Map.CombatHandlers do
 
             if new_hp <= 0 do
               # NPC died
-              npc = %{npc | alive: false, respawn_at: System.monotonic_time(:millisecond) + ((if npc_def, do: npc_def.intervalo_respawn, else: 60) * 1000)}
-              state = put_in(state.npcs_live[instance_id], npc)
+              state = if npc.owner_id != nil do
+                # Pet died — remove from npcs_live and owner's pet_ids
+                handle_pet_death(state, instance_id, npc)
+              else
+                npc = %{npc | alive: false, respawn_at: System.monotonic_time(:millisecond) + ((if npc_def, do: npc_def.intervalo_respawn, else: 60) * 1000)}
+                put_in(state.npcs_live[instance_id], npc)
+              end
+
               occupancy = Helpers.clear_occupancy(state.occupancy, npc.x, npc.y)
               state = %{state | occupancy: occupancy}
 
@@ -219,25 +225,32 @@ defmodule Arena.Map.CombatHandlers do
               remove_raw = Encoder.encode({:character_remove, %{char_index: npc.char_index}})
               Visibility.broadcast_visible_all(state, npc.x, npc.y, fn pid -> send(pid, {:send_raw, remove_raw}) end)
 
-              # Award XP (with party split)
-              give_exp = if npc_def, do: npc_def.give_exp, else: 0
-              npc_level = if npc_def, do: npc_def.npc_level, else: 1
-              xp_gained = Combat.xp_gain(final_damage, give_exp, npc.max_hp, entity.level, npc_level)
-              {entity, state} = award_xp_with_party(state, char_id, entity, xp_gained)
+              # Award XP (with party split) — no XP for killing pets
+              state = if npc.owner_id == nil do
+                give_exp = if npc_def, do: npc_def.give_exp, else: 0
+                npc_level = if npc_def, do: npc_def.npc_level, else: 1
+                xp_gained = Combat.xp_gain(final_damage, give_exp, npc.max_hp, entity.level, npc_level)
+                {entity_xp, state} = award_xp_with_party(state, char_id, entity, xp_gained)
 
-              # Award gold
-              give_gld = if npc_def, do: npc_def.give_gld, else: 0
-              entity = if give_gld > 0, do: %{entity | gold: entity.gold + give_gld}, else: entity
-              if give_gld > 0 do
-                Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                  Encoder.encode({:update_gold, %{gold: entity.gold}})})
+                # Award gold
+                give_gld = if npc_def, do: npc_def.give_gld, else: 0
+                entity_xp = if give_gld > 0, do: %{entity_xp | gold: entity_xp.gold + give_gld}, else: entity_xp
+                if give_gld > 0 do
+                  Helpers.send_to_session(state.sessions, char_id, {:send_raw,
+                    Encoder.encode({:update_gold, %{gold: entity_xp.gold}})})
+                end
+
+                # Drop loot
+                state = drop_npc_loot(state, npc, npc_def)
+
+                players = Map.put(state.players, char_id, entity_xp)
+                %{state | players: players}
+              else
+                players = Map.put(state.players, char_id, entity)
+                %{state | players: players}
               end
 
-              # Drop loot
-              state = drop_npc_loot(state, npc, npc_def)
-
-              players = Map.put(state.players, char_id, entity)
-              %{state | players: players}
+              state
             else
               state = put_in(state.npcs_live[instance_id], npc)
               # NPC acquires target on being hit
@@ -612,25 +625,39 @@ defmodule Arena.Map.CombatHandlers do
               Encoder.encode({:user_hitted_user, %{char_index: npc.char_index, damage: final_damage}})})
 
             if new_hp <= 0 do
-              npc = %{npc | alive: false, respawn_at: System.monotonic_time(:millisecond) + ((if npc_def, do: npc_def.intervalo_respawn, else: 60) * 1000)}
-              state = put_in(state.npcs_live[instance_id], npc)
+              state = if npc.owner_id != nil do
+                handle_pet_death(state, instance_id, npc)
+              else
+                npc = %{npc | alive: false, respawn_at: System.monotonic_time(:millisecond) + ((if npc_def, do: npc_def.intervalo_respawn, else: 60) * 1000)}
+                put_in(state.npcs_live[instance_id], npc)
+              end
+
               occupancy = Helpers.clear_occupancy(state.occupancy, npc.x, npc.y)
               state = %{state | occupancy: occupancy}
 
               remove_raw = Encoder.encode({:character_remove, %{char_index: npc.char_index}})
               Visibility.broadcast_visible_all(state, npc.x, npc.y, fn pid -> send(pid, {:send_raw, remove_raw}) end)
 
-              give_exp = if npc_def, do: npc_def.give_exp, else: 0
-              npc_level = if npc_def, do: npc_def.npc_level, else: 1
-              xp_gained = Combat.xp_gain(final_damage, give_exp, npc.max_hp, entity.level, npc_level)
-              {entity, state} = award_xp_with_party(state, char_id, entity, xp_gained)
+              state = if npc.owner_id == nil do
+                give_exp = if npc_def, do: npc_def.give_exp, else: 0
+                npc_level = if npc_def, do: npc_def.npc_level, else: 1
+                xp_gained = Combat.xp_gain(final_damage, give_exp, npc.max_hp, entity.level, npc_level)
+                {entity_xp, state} = award_xp_with_party(state, char_id, entity, xp_gained)
 
-              Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+                Helpers.send_to_session(state.sessions, char_id, {:send_raw,
+                  Encoder.encode({:update_mana, %{min_mana: entity_xp.mana}})})
 
-              state = drop_npc_loot(state, npc, npc_def)
-              players = Map.put(state.players, char_id, entity)
-              %{state | players: players}
+                state = drop_npc_loot(state, npc, npc_def)
+                players = Map.put(state.players, char_id, entity_xp)
+                %{state | players: players}
+              else
+                Helpers.send_to_session(state.sessions, char_id, {:send_raw,
+                  Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+                players = Map.put(state.players, char_id, entity)
+                %{state | players: players}
+              end
+
+              state
             else
               npc = %{npc | target_id: char_id}
               state = put_in(state.npcs_live[instance_id], npc)
@@ -1283,5 +1310,23 @@ defmodule Arena.Map.CombatHandlers do
     new_thirst = max(entity.thirst - 1, 0)
     changed = new_hunger != entity.hunger or new_thirst != entity.thirst
     {%{entity | hunger: new_hunger, thirst: new_thirst}, changed}
+  end
+
+  # Handle pet NPC death: remove from npcs_live and owner's pet_ids
+  defp handle_pet_death(state, instance_id, npc) do
+    # Remove from npcs_live entirely (pets don't respawn)
+    npcs_live = Map.delete(state.npcs_live, instance_id)
+    state = %{state | npcs_live: npcs_live}
+
+    # Remove instance_id from owner's pet_ids
+    case Map.get(state.players, npc.owner_id) do
+      nil ->
+        state
+
+      owner ->
+        owner = %{owner | pet_ids: List.delete(owner.pet_ids, instance_id)}
+        players = Map.put(state.players, npc.owner_id, owner)
+        %{state | players: players}
+    end
   end
 end

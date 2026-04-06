@@ -10,6 +10,9 @@ defmodule Arena.Map.Bank do
 
   def handle_open_bank(state, char_id, target_x, target_y) do
     case Map.fetch(state.players, char_id) do
+      {:ok, entity} when entity.dead ->
+        {:reply, {:error, :dead}, state}
+
       {:ok, entity} ->
         npc = if target_x && target_y do
           case Helpers.get_occupancy(state.occupancy, target_x, target_y) do

@@ -62,12 +62,72 @@ defmodule Arena.Map.Crafting do
       :alchemy -> produce(state, char_id, entity, :alchemy, weapon_id, @alchemy_ids, [@npc_type_alchemy])
       :tailoring -> produce(state, char_id, entity, :tailoring, weapon_id, @sewing_ids, [@npc_type_loom])
       :taming ->
-        send_msg(state, char_id, "La doma no está disponible aún.")
-        {:noreply, state}
+        attempt_taming(state, char_id, entity)
       _ ->
         send_msg(state, char_id, "No puedes trabajar en eso.")
         {:noreply, state}
     end
+  end
+
+  @max_pets 3
+  @taming_range 3
+
+  # ---- Taming ----
+
+  defp attempt_taming(state, char_id, entity) do
+    cond do
+      length(entity.pet_ids) >= @max_pets ->
+        send_msg(state, char_id, "Ya tienes demasiadas mascotas.")
+        {:noreply, state}
+
+      true ->
+        case find_tameable_npc(state, entity) do
+          nil ->
+            send_msg(state, char_id, "No hay criaturas cerca para domar.")
+            {:noreply, state}
+
+          {instance_id, npc} ->
+            skill_value = Map.get(entity.skills, :taming, 0)
+            {entity, state} = consume_stamina(state, char_id, entity)
+
+            if skill_check(skill_value) do
+              # Taming success — set ownership
+              npc = %{npc | owner_id: char_id, target_id: nil}
+              state = put_in(state.npcs_live[instance_id], npc)
+
+              entity = %{entity | pet_ids: [instance_id | entity.pet_ids]}
+              entity = try_skill_up(entity, :taming, skill_value)
+              state = update_player(state, char_id, entity)
+              send_skills(state, char_id, entity)
+
+              npc_def = GameData.get_npc(npc.npc_id)
+              name = if npc_def, do: npc_def.name, else: "la criatura"
+              send_msg(state, char_id, "Has domado a #{name}!")
+              {:noreply, state}
+            else
+              entity = try_skill_up(entity, :taming, skill_value)
+              state = update_player(state, char_id, entity)
+              send_skills(state, char_id, entity)
+              send_msg(state, char_id, "No has podido domar a la criatura.")
+              {:noreply, state}
+            end
+        end
+    end
+  end
+
+  # Find the nearest alive hostile NPC within taming range that is not already a pet.
+  defp find_tameable_npc(state, entity) do
+    state.npcs_live
+    |> Enum.filter(fn {_id, npc} ->
+      npc.alive and npc.owner_id == nil and
+        abs(npc.x - entity.x) <= @taming_range and
+        abs(npc.y - entity.y) <= @taming_range
+    end)
+    |> Enum.filter(fn {_id, npc} ->
+      npc_def = GameData.get_npc(npc.npc_id)
+      npc_def != nil and npc_def.hostile
+    end)
+    |> Enum.min_by(fn {_id, npc} -> abs(npc.x - entity.x) + abs(npc.y - entity.y) end, fn -> nil end)
   end
 
   # ---- Gathering (mining, woodcutting) ----

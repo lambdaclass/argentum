@@ -12,6 +12,7 @@ defmodule Arena.Application do
       {Phoenix.PubSub, name: Arena.PubSub},
       Arena.Data.GameData,
       Arena.PartyServer,
+      Arena.GuildServer,
       Arena.Map.MapSupervisor,
       ArenaWeb.Endpoint
     ]

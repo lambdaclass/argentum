@@ -20,7 +20,9 @@ defmodule Arena.Entity.NpcEntity do
     next_attack_at: -1_000_000_000_000,
     next_move_at: -1_000_000_000_000,
     next_spell_at: -1_000_000_000_000,
-    respawn_at: nil
+    respawn_at: nil,
+    # Pet ownership: nil for wild NPCs, char_id for tamed pets
+    owner_id: nil
   ]
 
   @doc "Create an NpcEntity from a definition, placing it at the given coordinates."

@@ -189,7 +189,9 @@ defmodule Arena.Map.MapServer do
             tile_exits: map_data.tile_exits,
             tile_exit_map: tile_exit_map,
             triggers: map_data.triggers,
-            trigger_map: trigger_map
+            trigger_map: trigger_map,
+            rain: false,
+            snow: false
           }
 
           state = %{
@@ -508,6 +510,9 @@ defmodule Arena.Map.MapServer do
   defp do_remove_player(state, char_id, entity) do
     visible_sets = Visibility.remove_from_visibility(state, char_id, entity)
 
+    # Despawn all pets owned by this player
+    state = despawn_player_pets(state, char_id)
+
     # Demonitor session
     {ref, monitors} = Map.pop(state.monitors, char_id)
     monitor_refs = if ref do
@@ -525,6 +530,20 @@ defmodule Arena.Map.MapServer do
     %{state | players: players, sessions: sessions, monitors: monitors,
               monitor_refs: monitor_refs, occupancy: occupancy, grid: grid,
               visible_sets: visible_sets}
+  end
+
+  defp despawn_player_pets(state, char_id) do
+    pet_ids =
+      state.npcs_live
+      |> Enum.filter(fn {_id, npc} -> npc.owner_id == char_id end)
+      |> Enum.map(fn {id, _npc} -> id end)
+
+    Enum.reduce(pet_ids, state, fn instance_id, state ->
+      case Map.get(state.npcs_live, instance_id) do
+        nil -> state
+        npc -> Arena.NpcAi.despawn_pet(state, instance_id, npc)
+      end
+    end)
   end
 
   # ---- Private helpers (map-server-specific) ----

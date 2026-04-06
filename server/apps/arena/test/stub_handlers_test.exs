@@ -70,7 +70,7 @@ defmodule Arena.StubHandlersTest do
 
   defp enter_player(char_id, name, overrides \\ %{}) do
     entity = make_entity(char_id, name, overrides)
-    {:ok, _idx, _players} = MapServer.enter(@test_map_id, entity, session_pid: self())
+    {:ok, _idx, _players, _weather} = MapServer.enter(@test_map_id, entity, session_pid: self())
     on_exit(fn -> MapServer.leave(@test_map_id, char_id) end)
     entity
   end

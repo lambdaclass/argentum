@@ -547,6 +547,18 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.update_user_stats(), payload)
   end
 
+  # eSendAtributes (ID 81) — str(Int8) + agi(Int8) + int(Int8) + con(Int8) + cha(Int8)
+  def encode({:send_atributes, params}) do
+    payload =
+      Writer.write_int8(params[:str] || 0) <>
+        Writer.write_int8(params[:agi] || 0) <>
+        Writer.write_int8(params[:int] || 0) <>
+        Writer.write_int8(params[:con] || 0) <>
+        Writer.write_int8(params[:cha] || 0)
+
+    Writer.build_packet(PacketIds.Server.send_atributes(), payload)
+  end
+
   # eBankInit (ID 118) — bank_gold(Int32)
   # eBankInit (ID 11) — no payload (VB6: empty packet opens bank UI)
   def encode({:bank_init, _params}) do

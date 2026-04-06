@@ -41,29 +41,231 @@ defmodule Arena.Map.Social do
   def handle_chat(state, char_id, message) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
-        chat_raw = Encoder.encode({:chat_over_head, %{
-          message: message,
-          char_index: entity.char_index,
-          color: 0x00FFFFFF,
-          x: entity.x,
-          y: entity.y,
-          min_display_time: 2000,
-          max_display_time: 5000
-        }})
+        if String.starts_with?(message, "/") do
+          if entity.gm do
+            handle_gm_command(state, char_id, entity, message)
+          else
+            # Non-GM typed a slash command — silently ignore (don't broadcast)
+            {:noreply, state}
+          end
+        else
+          chat_raw = Encoder.encode({:chat_over_head, %{
+            message: message,
+            char_index: entity.char_index,
+            color: 0x00FFFFFF,
+            x: entity.x,
+            y: entity.y,
+            min_display_time: 2000,
+            max_display_time: 5000
+          }})
 
-        # Send to nearby players including the speaker
-        chat_recipients =
-          Visibility.broadcast_visible_all(state, entity.x, entity.y, fn pid ->
-            send(pid, {:send_raw, chat_raw})
-          end)
+          # Send to nearby players including the speaker
+          chat_recipients =
+            Visibility.broadcast_visible_all(state, entity.x, entity.y, fn pid ->
+              send(pid, {:send_raw, chat_raw})
+            end)
 
-        Arena.Metrics.inc_chat(chat_recipients)
+          Arena.Metrics.inc_chat(chat_recipients)
 
-        {:noreply, state}
+          {:noreply, state}
+        end
 
       :error ->
         {:noreply, state}
     end
+  end
+
+  # ==================================================================
+  # GM Commands
+  # ==================================================================
+
+  defp gm_console(state, char_id, message) do
+    Helpers.send_to_session(state.sessions, char_id,
+      {:send_raw, Encoder.encode({:console_msg, %{message: message, font_index: 0}})})
+  end
+
+  defp handle_gm_command(state, char_id, entity, message) do
+    upper = String.upcase(String.trim(message))
+    parts = String.split(String.trim(message), ~r/\s+/, parts: 4)
+    upper_parts = String.split(upper, ~r/\s+/, parts: 4)
+
+    case upper_parts do
+      ["/TELEPORT", map_str, x_str, y_str] ->
+        gm_teleport(state, char_id, entity, map_str, x_str, y_str)
+
+      ["/SPAWNITEM", item_str, amount_str] ->
+        gm_spawn_item(state, char_id, entity, item_str, amount_str)
+
+      ["/SPAWNITEM", item_str] ->
+        gm_spawn_item(state, char_id, entity, item_str, "1")
+
+      ["/INVISIBLE"] ->
+        gm_invisible(state, char_id, entity)
+
+      ["/GOTO", _name_upper] ->
+        # Use original-case name from parts
+        target_name = Enum.at(parts, 1)
+        gm_goto(state, char_id, entity, target_name)
+
+      ["/INFO", _name_upper] ->
+        target_name = Enum.at(parts, 1)
+        gm_info(state, char_id, target_name)
+
+      ["/KILL", _name_upper] ->
+        target_name = Enum.at(parts, 1)
+        gm_kill(state, char_id, target_name)
+
+      _ ->
+        gm_console(state, char_id, "Unknown GM command: #{message}")
+        {:noreply, state}
+    end
+  end
+
+  # /TELEPORT map_id x y — transfer GM to another map
+  defp gm_teleport(state, char_id, entity, map_str, x_str, y_str) do
+    with {map_id, ""} <- Integer.parse(map_str),
+         {x, ""} <- Integer.parse(x_str),
+         {y, ""} <- Integer.parse(y_str) do
+      Helpers.send_to_session(state.sessions, char_id,
+        {:transfer, map_id, x, y, entity})
+      gm_console(state, char_id, "Teleporting to map #{map_id} (#{x}, #{y})...")
+      {:noreply, state}
+    else
+      _ ->
+        gm_console(state, char_id, "Usage: /TELEPORT map_id x y")
+        {:noreply, state}
+    end
+  end
+
+  # /SPAWNITEM item_id [amount] — add item to GM inventory
+  defp gm_spawn_item(state, char_id, entity, item_str, amount_str) do
+    with {item_id, ""} <- Integer.parse(item_str),
+         {amount, ""} <- Integer.parse(amount_str),
+         true <- amount > 0 do
+      case Arena.Inventory.add_item(entity.inventory, item_id, amount) do
+        {:ok, new_inventory, slot} ->
+          entity = %{entity | inventory: new_inventory}
+          players = Map.put(state.players, char_id, entity)
+          state = %{state | players: players}
+
+          Helpers.send_inventory_slot(state.sessions, char_id, new_inventory, slot)
+          gm_console(state, char_id, "Spawned #{amount}x item #{item_id} in slot #{slot + 1}.")
+          {:noreply, state}
+
+        {:gold, gold_amount} ->
+          entity = %{entity | gold: entity.gold + gold_amount}
+          players = Map.put(state.players, char_id, entity)
+          state = %{state | players: players}
+
+          Helpers.send_to_session(state.sessions, char_id,
+            {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})})
+          gm_console(state, char_id, "Added #{gold_amount} gold.")
+          {:noreply, state}
+
+        {:error, :inventory_full} ->
+          gm_console(state, char_id, "Inventory full.")
+          {:noreply, state}
+      end
+    else
+      _ ->
+        gm_console(state, char_id, "Usage: /SPAWNITEM item_id [amount]")
+        {:noreply, state}
+    end
+  end
+
+  # /INVISIBLE — toggle GM invisibility
+  defp gm_invisible(state, char_id, entity) do
+    new_invisible = not entity.invisible
+    entity = %{entity | invisible: new_invisible}
+    players = Map.put(state.players, char_id, entity)
+    state = %{state | players: players}
+
+    msg = if new_invisible, do: "You are now invisible.", else: "You are now visible."
+    gm_console(state, char_id, msg)
+    Helpers.broadcast_character_change(state, entity)
+    {:noreply, state}
+  end
+
+  # /GOTO name — teleport GM to target player on the same map
+  defp gm_goto(state, char_id, entity, target_name) do
+    case find_player_by_name(state, target_name) do
+      {:ok, _target_id, target} ->
+        if target.map_id == entity.map_id do
+          # Transfer to same map at target position
+          Helpers.send_to_session(state.sessions, char_id,
+            {:transfer, entity.map_id, target.x, target.y, entity})
+          gm_console(state, char_id, "Teleporting to #{target.name} at (#{target.x}, #{target.y})...")
+          {:noreply, state}
+        else
+          # Target is on a different map — transfer there
+          Helpers.send_to_session(state.sessions, char_id,
+            {:transfer, target.map_id, target.x, target.y, entity})
+          gm_console(state, char_id, "Teleporting to #{target.name} on map #{target.map_id} (#{target.x}, #{target.y})...")
+          {:noreply, state}
+        end
+
+      :not_found ->
+        gm_console(state, char_id, "Player '#{target_name}' not found on this map.")
+        {:noreply, state}
+    end
+  end
+
+  # /INFO name — show target player stats
+  defp gm_info(state, char_id, target_name) do
+    case find_player_by_name(state, target_name) do
+      {:ok, _target_id, target} ->
+        gm_console(state, char_id, "=== Player Info: #{target.name} ===")
+        gm_console(state, char_id, "HP: #{target.hp}/#{target.max_hp} | Mana: #{target.mana}/#{target.max_mana}")
+        gm_console(state, char_id, "Level: #{target.level} | Class: #{target.class} | Race: #{target.race}")
+        gm_console(state, char_id, "Position: map #{target.map_id} (#{target.x}, #{target.y})")
+        gm_console(state, char_id, "Gold: #{target.gold} | XP: #{target.xp}")
+        gm_console(state, char_id, "Dead: #{target.dead} | Criminal: #{target.criminal} | Invisible: #{target.invisible}")
+        {:noreply, state}
+
+      :not_found ->
+        gm_console(state, char_id, "Player '#{target_name}' not found on this map.")
+        {:noreply, state}
+    end
+  end
+
+  # /KILL name — kill a target player on the same map
+  defp gm_kill(state, char_id, target_name) do
+    case find_player_by_name(state, target_name) do
+      {:ok, target_id, target} ->
+        if target.dead do
+          gm_console(state, char_id, "#{target.name} is already dead.")
+          {:noreply, state}
+        else
+          target = %{target | dead: true, hp: 0}
+          players = Map.put(state.players, target_id, target)
+          state = %{state | players: players}
+
+          # Notify the killed player
+          Helpers.send_to_session(state.sessions, target_id,
+            {:send_raw, Encoder.encode({:update_hp, %{min_hp: 0, shield: 0}})})
+          Helpers.send_to_session(state.sessions, target_id,
+            {:send_raw, Encoder.encode({:console_msg, %{message: "A GM has killed you.", font_index: 0}})})
+
+          Helpers.broadcast_character_change(state, target)
+          gm_console(state, char_id, "#{target.name} has been killed.")
+          {:noreply, state}
+        end
+
+      :not_found ->
+        gm_console(state, char_id, "Player '#{target_name}' not found on this map.")
+        {:noreply, state}
+    end
+  end
+
+  # Look up a player on this map by name (case-insensitive)
+  defp find_player_by_name(state, name) do
+    lower_name = String.downcase(name)
+
+    Enum.find_value(state.players, :not_found, fn {id, entity} ->
+      if String.downcase(entity.name) == lower_name do
+        {:ok, id, entity}
+      end
+    end)
   end
 
   def handle_yell(state, char_id, message) do
@@ -302,6 +504,15 @@ defmodule Arena.Map.Social do
             class: Helpers.class_to_int(entity.class)
           }})})
 
+        Helpers.send_to_session(state.sessions, char_id,
+          {:send_raw, Encoder.encode({:send_atributes, %{
+            str: entity.str,
+            agi: entity.agi,
+            int: entity.int,
+            con: entity.con,
+            cha: entity.cha
+          }})})
+
         {:noreply, state}
 
       :error ->
@@ -356,19 +567,30 @@ defmodule Arena.Map.Social do
 
           near_trainer ->
             current = Map.get(entity.skills, skill_atom, 0)
-            entity = %{entity |
-              skills: Map.put(entity.skills, skill_atom, current + 1),
-              skill_points: entity.skill_points - 1
-            }
-            players = Map.put(state.players, char_id, entity)
-            state = %{state | players: players}
+            cost = max(current * 10, 10)
 
-            Helpers.send_to_session(state.sessions, char_id,
-              {:send_raw, Encoder.encode({:send_skills, %{skills: entity.skills}})})
-            Helpers.send_to_session(state.sessions, char_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: "Skill points restantes: #{entity.skill_points}", font_index: 0}})})
+            if entity.gold < cost do
+              Helpers.send_to_session(state.sessions, char_id,
+                {:send_raw, Encoder.encode({:console_msg, %{message: "No tienes suficiente oro. Costo: #{cost}", font_index: 0}})})
+              {:noreply, state}
+            else
+              entity = %{entity |
+                skills: Map.put(entity.skills, skill_atom, current + 1),
+                skill_points: entity.skill_points - 1,
+                gold: entity.gold - cost
+              }
+              players = Map.put(state.players, char_id, entity)
+              state = %{state | players: players}
 
-            {:noreply, state}
+              Helpers.send_to_session(state.sessions, char_id,
+                {:send_raw, Encoder.encode({:send_skills, %{skills: entity.skills}})})
+              Helpers.send_to_session(state.sessions, char_id,
+                {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})})
+              Helpers.send_to_session(state.sessions, char_id,
+                {:send_raw, Encoder.encode({:console_msg, %{message: "Has entrenado! Costo: #{cost} oro. Skill points restantes: #{entity.skill_points}", font_index: 0}})})
+
+              {:noreply, state}
+            end
 
           # Not near trainer, but crafting skill: attempt work
           skill_atom in @crafting_skills ->
@@ -389,6 +611,23 @@ defmodule Arena.Map.Social do
   def handle_request_mini_stats(state, char_id) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
+        Helpers.send_to_session(state.sessions, char_id,
+          {:send_raw, Encoder.encode({:update_user_stats, %{
+            max_hp: entity.max_hp,
+            min_hp: entity.hp,
+            shield: 0,
+            max_mana: entity.max_mana,
+            min_mana: entity.mana,
+            max_sta: entity.max_stamina,
+            min_sta: entity.stamina,
+            gold: entity.gold,
+            gold_cap: 1_000_000,
+            level: entity.level,
+            exp_next_level: GameData.exp_for_level(entity.level + 1) || 0,
+            exp: entity.xp,
+            class: Helpers.class_to_int(entity.class)
+          }})})
+
         Helpers.send_to_session(state.sessions, char_id,
           {:send_raw, Encoder.encode({:mini_stats, %{
             ciudadanos_matados: 0,

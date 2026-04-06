@@ -146,6 +146,7 @@ defmodule AoProtocol.PacketIds do
     def update_hunger_and_thirst, do: 78
     def mini_stats, do: 79
     def level_up, do: 80
+    def send_atributes, do: 81
     def send_skills, do: 87
 
     # Error / messages

@@ -56,7 +56,7 @@ defmodule Arena.Map.MapServerBugsTest do
   describe "Bug #2: transfer should not require session to call leave" do
     test "check_tile_exit sends entity in transfer message so session skips leave" do
       entity = make_entity(9001, "TransferTest")
-      {:ok, _idx, _players} = MapServer.enter(@test_map_id, entity)
+      {:ok, _idx, _players, _weather} = MapServer.enter(@test_map_id, entity)
 
       # After a tile exit removes the player, leave should return :not_found
       # because the map already cleaned up. The fix is that the transfer
@@ -75,8 +75,8 @@ defmodule Arena.Map.MapServerBugsTest do
       e1 = make_entity(8001, "Player1")
       e2 = make_entity(8002, "Player2")
 
-      {:ok, _idx1, _} = MapServer.enter(@test_map_id, e1, position: {30, 30})
-      {:ok, _idx2, players} = MapServer.enter(@test_map_id, e2, position: {30, 30})
+      {:ok, _idx1, _, _weather} = MapServer.enter(@test_map_id, e1, position: {30, 30})
+      {:ok, _idx2, players, _weather} = MapServer.enter(@test_map_id, e2, position: {30, 30})
 
       p1 = Map.get(players, 8001)
       p2 = Map.get(players, 8002)
@@ -97,8 +97,8 @@ defmodule Arena.Map.MapServerBugsTest do
       e1 = make_entity(7001, "HeadingPlayer1")
       e2 = make_entity(7002, "HeadingPlayer2")
 
-      {:ok, _, _} = MapServer.enter(@test_map_id, e1, position: {40, 40})
-      {:ok, _, _} = MapServer.enter(@test_map_id, e2, position: {41, 40})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, e1, position: {40, 40})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, e2, position: {41, 40})
 
       # Change heading for player 1
       MapServer.change_heading(@test_map_id, 7001, :north)
@@ -131,10 +131,10 @@ defmodule Arena.Map.MapServerBugsTest do
       e1 = make_entity(6001, "AoiPlayer1")
       e2 = make_entity(6002, "AoiPlayer2")
 
-      {:ok, _, players1} = MapServer.enter(@test_map_id, e1, position: {20, 20})
+      {:ok, _, players1, _weather} = MapServer.enter(@test_map_id, e1, position: {20, 20})
       assert Map.has_key?(players1, 6001), "enter should return self in nearby players"
 
-      {:ok, _, players2} = MapServer.enter(@test_map_id, e2, position: {21, 20})
+      {:ok, _, players2, _weather} = MapServer.enter(@test_map_id, e2, position: {21, 20})
       assert Map.has_key?(players2, 6002), "enter should return self"
       assert Map.has_key?(players2, 6001), "enter should return nearby player"
 
@@ -147,7 +147,7 @@ defmodule Arena.Map.MapServerBugsTest do
       e1 = make_entity(6101, "AoiCreate1")
       e2 = make_entity(6102, "AoiCreate2")
 
-      {:ok, _, _} = MapServer.enter(@test_map_id, e1, position: {25, 25})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, e1, position: {25, 25})
       # Drain any messages from our own enter
       flush_mailbox()
 
@@ -171,11 +171,11 @@ defmodule Arena.Map.MapServerBugsTest do
       e1 = make_entity(6201, "AoiLeave1")
       e2 = make_entity(6202, "AoiLeave2")
 
-      {:ok, _, _} = MapServer.enter(@test_map_id, e1, position: {30, 30})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, e1, position: {30, 30})
       flush_mailbox()
 
       # Enter e2 via direct call (e2's session is the GenServer.call caller)
-      {:ok, _, _} = MapServer.enter(@test_map_id, e2, position: {31, 30})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, e2, position: {31, 30})
       flush_mailbox()
 
       # Now leave e2 — we (e1's session) should get character_remove
@@ -197,8 +197,8 @@ defmodule Arena.Map.MapServerBugsTest do
       e1 = make_entity(6301, "AoiMove1")
       e2 = make_entity(6302, "AoiMove2")
 
-      {:ok, _, _} = MapServer.enter(@test_map_id, e1, position: {35, 35})
-      {:ok, _, _} = MapServer.enter(@test_map_id, e2, position: {36, 35})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, e1, position: {35, 35})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, e2, position: {36, 35})
       flush_mailbox()
 
       # Move e1 — try multiple directions until one succeeds
@@ -232,7 +232,7 @@ defmodule Arena.Map.MapServerBugsTest do
       assert exit_tile != nil, "expected at least one reachable exit tile on the test map"
 
       entity = make_entity(6401, "ExitWalker")
-      {:ok, _idx, _players} = MapServer.enter(@test_map_id, entity, position: {start_x, start_y})
+      {:ok, _idx, _players, _weather} = MapServer.enter(@test_map_id, entity, position: {start_x, start_y})
       flush_mailbox()
 
       assert {:ok, _pos} = MapServer.move_character(@test_map_id, 6401, direction)
@@ -257,7 +257,7 @@ defmodule Arena.Map.MapServerBugsTest do
       ensure_map_started(dest_map_id)
 
       entity = make_entity(6501, "TransitPlayer")
-      {:ok, _idx, _players} = MapServer.enter(@test_map_id, entity, position: {start_x, start_y})
+      {:ok, _idx, _players, _weather} = MapServer.enter(@test_map_id, entity, position: {start_x, start_y})
       flush_mailbox()
 
       # Walk onto exit
@@ -269,7 +269,7 @@ defmodule Arena.Map.MapServerBugsTest do
       assert dest_y == exit_tile.dest_y
 
       # Two-step transfer: enter destination first, then leave source
-      {:ok, _new_idx, dest_players} =
+      {:ok, _new_idx, dest_players, _weather} =
         MapServer.enter(dest_map, transferred_entity, position: {dest_x, dest_y})
       MapServer.leave(@test_map_id, 6501)
 
@@ -297,14 +297,14 @@ defmodule Arena.Map.MapServerBugsTest do
         level: 7,
         inventory: [%{item_id: 100, amount: 5, equipped: false} | List.duplicate(nil, 23)]
       }
-      {:ok, _idx, _} = MapServer.enter(@test_map_id, entity, position: {start_x, start_y})
+      {:ok, _idx, _, _weather} = MapServer.enter(@test_map_id, entity, position: {start_x, start_y})
       flush_mailbox()
 
       assert {:ok, _pos} = MapServer.move_character(@test_map_id, 6601, direction)
       {dest_map, dest_x, dest_y, transferred} = receive_transfer(6601)
 
       # Two-step transfer: enter destination first, then leave source
-      {:ok, _, dest_players} = MapServer.enter(dest_map, transferred, position: {dest_x, dest_y})
+      {:ok, _, dest_players, _weather} = MapServer.enter(dest_map, transferred, position: {dest_x, dest_y})
       MapServer.leave(@test_map_id, 6601)
 
       dest_entity = Map.get(dest_players, 6601)
@@ -326,7 +326,7 @@ defmodule Arena.Map.MapServerBugsTest do
       ensure_map_started(dest_map_id)
 
       entity = make_entity(6701, "RoundTripper")
-      {:ok, _idx, _} = MapServer.enter(@test_map_id, entity, position: {start_x, start_y})
+      {:ok, _idx, _, _weather} = MapServer.enter(@test_map_id, entity, position: {start_x, start_y})
       flush_mailbox()
 
       # Forward: map 1 → dest (two-step: enter dest, then leave source)
@@ -334,7 +334,7 @@ defmodule Arena.Map.MapServerBugsTest do
       {dest_map, dest_x, dest_y, transferred} = receive_transfer(6701)
       assert dest_map == dest_map_id
 
-      {:ok, _, _} = MapServer.enter(dest_map, transferred, position: {dest_x, dest_y})
+      {:ok, _, _, _weather} = MapServer.enter(dest_map, transferred, position: {dest_x, dest_y})
       MapServer.leave(@test_map_id, 6701)
       flush_mailbox()
 
@@ -348,7 +348,7 @@ defmodule Arena.Map.MapServerBugsTest do
         MapServer.leave(dest_map, 6701)
         flush_mailbox()
         # Re-entering resets the entity, including next_move_at
-        {:ok, _, _} = MapServer.enter(dest_map, transferred, position: {ret_sx, ret_sy})
+        {:ok, _, _, _weather} = MapServer.enter(dest_map, transferred, position: {ret_sx, ret_sy})
         flush_mailbox()
         # Wait for walk cooldown
         Process.sleep(250)
@@ -360,7 +360,7 @@ defmodule Arena.Map.MapServerBugsTest do
         assert back_entity.char_id == 6701
 
         # Two-step: enter back map, then leave dest
-        {:ok, _, _} = MapServer.enter(back_map, back_entity, position: {back_x, back_y})
+        {:ok, _, _, _weather} = MapServer.enter(back_map, back_entity, position: {back_x, back_y})
         MapServer.leave(dest_map, 6701)
         MapServer.leave(back_map, 6701)
       else

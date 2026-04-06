@@ -12,6 +12,9 @@ defmodule Arena.Map.InventoryHandlers do
 
   def handle_pick_up(state, char_id) do
     Helpers.with_player_call(state, char_id, fn entity ->
+      if entity.dead do
+        {:reply, {:error, :dead}, state}
+      else
       entity = Helpers.break_invisibility(entity, state, char_id)
       pos = {entity.x, entity.y}
 
@@ -48,11 +51,15 @@ defmodule Arena.Map.InventoryHandlers do
               {:reply, {:error, :inventory_full}, state}
           end
       end
+      end
     end)
   end
 
   def handle_drop_item(state, char_id, slot, amount) do
     Helpers.with_player_call(state, char_id, fn entity ->
+      if entity.dead do
+        {:reply, {:error, :dead}, state}
+      else
       pos = {entity.x, entity.y}
 
       case Inventory.get_slot(entity.inventory, slot) do
@@ -133,11 +140,15 @@ defmodule Arena.Map.InventoryHandlers do
           end
           end
       end
+      end
     end)
   end
 
   def handle_equip_item(state, char_id, slot) do
     Helpers.with_player_call(state, char_id, fn entity ->
+      if entity.dead do
+        {:reply, {:error, :dead}, state}
+      else
       character_info = %{
         level: entity.level,
         class: entity.class,
@@ -180,6 +191,7 @@ defmodule Arena.Map.InventoryHandlers do
 
         {:error, reason} ->
           {:reply, {:error, reason}, state}
+      end
       end
     end)
   end

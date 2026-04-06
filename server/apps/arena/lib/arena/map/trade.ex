@@ -9,6 +9,9 @@ defmodule Arena.Map.Trade do
 
   def handle_user_trade_offer(state, char_id, obj_index, amount) do
     case Map.fetch(state.players, char_id) do
+      {:ok, entity} when entity.dead ->
+        {:reply, {:error, :dead}, state}
+
       {:ok, entity} when entity.trade_partner_id != nil ->
         # Validate: item must exist in player's inventory (unequipped)
         slot_idx = Enum.find_index(entity.inventory, fn
@@ -62,6 +65,9 @@ defmodule Arena.Map.Trade do
 
   def handle_user_trade_accept(state, char_id) do
     case Map.fetch(state.players, char_id) do
+      {:ok, entity} when entity.dead ->
+        {:reply, {:error, :dead}, state}
+
       {:ok, entity} when entity.trade_partner_id != nil ->
         entity = %{entity | trade_accepted: true}
         players = Map.put(state.players, char_id, entity)

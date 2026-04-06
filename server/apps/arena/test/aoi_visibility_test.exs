@@ -92,7 +92,7 @@ defmodule Arena.Map.AoiVisibilityTest do
     test "enter does NOT send character_create to a player outside AoI range" do
       # Place player A at (10, 10). We are A's session process.
       a = make_entity(10_001, "FarA", 10, 10)
-      {:ok, _, _} = MapServer.enter(@test_map_id, a, position: {10, 10})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, a, position: {10, 10})
       flush_mailbox()
 
       # Place player B far away — more than @aoi_x tiles apart in X
@@ -110,12 +110,12 @@ defmodule Arena.Map.AoiVisibilityTest do
 
     test "enter returns only nearby players in the visible set" do
       a = make_entity(10_101, "NearbyA", 10, 10)
-      {:ok, _, _} = MapServer.enter(@test_map_id, a, position: {10, 10})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, a, position: {10, 10})
 
       # B is far away
       far_x = 10 + @aoi_x + 5
       b = make_entity(10_102, "NearbyB", far_x, 10)
-      {:ok, _, players} = MapServer.enter(@test_map_id, b, position: {far_x, 10})
+      {:ok, _, players, _weather} = MapServer.enter(@test_map_id, b, position: {far_x, 10})
 
       # B's returned player map should contain B (self) but NOT A (too far)
       assert Map.has_key?(players, 10_102), "enter should return self"
@@ -131,11 +131,11 @@ defmodule Arena.Map.AoiVisibilityTest do
       far_x = 10 + @aoi_x + 5
       b = make_entity(10_202, "MoveB", far_x, 10)
 
-      {:ok, _, _} = MapServer.enter(@test_map_id, b, position: {far_x, 10})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, b, position: {far_x, 10})
       flush_mailbox()
 
       # Enter A — we are A's session
-      {:ok, _, _} = MapServer.enter(@test_map_id, a, position: {10, 10})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, a, position: {10, 10})
       flush_mailbox()
 
       # Move B (call from B's perspective, but we're A's session receiving)
@@ -178,9 +178,9 @@ defmodule Arena.Map.AoiVisibilityTest do
       b = make_entity(10_302, "LeaveB", far_x, 10)
 
       # We are A's session
-      {:ok, _, _} = MapServer.enter(@test_map_id, a, position: {10, 10})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, a, position: {10, 10})
       flush_mailbox()
-      {:ok, _, _} = MapServer.enter(@test_map_id, b, position: {far_x, 10})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, b, position: {far_x, 10})
       flush_mailbox()
 
       # B leaves — A should NOT get character_remove
@@ -196,7 +196,7 @@ defmodule Arena.Map.AoiVisibilityTest do
   describe "near players are visible" do
     test "enter sends character_create to a nearby player" do
       a = make_entity(11_001, "NearEnterA", 50, 50)
-      {:ok, _, _} = MapServer.enter(@test_map_id, a, position: {50, 50})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, a, position: {50, 50})
       flush_mailbox()
 
       # B enters 1 tile away — well within AoI
@@ -215,9 +215,9 @@ defmodule Arena.Map.AoiVisibilityTest do
       b = make_entity(11_102, "NearMoveB", 52, 50)
 
       # We are B's session
-      {:ok, _, _} = MapServer.enter(@test_map_id, b, position: {52, 50})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, b, position: {52, 50})
       flush_mailbox()
-      {:ok, _, _} = MapServer.enter(@test_map_id, a, position: {50, 50})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, a, position: {50, 50})
       flush_mailbox()
 
       # Move A — B should receive the move broadcast
@@ -240,9 +240,9 @@ defmodule Arena.Map.AoiVisibilityTest do
       b = make_entity(11_202, "NearLeaveB", 51, 50)
 
       # We are A's session
-      {:ok, _, _} = MapServer.enter(@test_map_id, a, position: {50, 50})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, a, position: {50, 50})
       flush_mailbox()
-      {:ok, _, _} = MapServer.enter(@test_map_id, b, position: {51, 50})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, b, position: {51, 50})
       flush_mailbox()
 
       # B leaves — A should get character_remove
@@ -258,9 +258,9 @@ defmodule Arena.Map.AoiVisibilityTest do
       a = make_entity(11_301, "NearHeadA", 50, 50)
       b = make_entity(11_302, "NearHeadB", 51, 50)
 
-      {:ok, _, _} = MapServer.enter(@test_map_id, b, position: {51, 50})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, b, position: {51, 50})
       flush_mailbox()
-      {:ok, _, _} = MapServer.enter(@test_map_id, a, position: {50, 50})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, a, position: {50, 50})
       flush_mailbox()
 
       # A changes heading — B (us) should receive the broadcast
@@ -279,9 +279,9 @@ defmodule Arena.Map.AoiVisibilityTest do
       far_x = 10 + @aoi_x + 5
       b = make_entity(11_402, "FarHeadB", far_x, 10)
 
-      {:ok, _, _} = MapServer.enter(@test_map_id, b, position: {far_x, 10})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, b, position: {far_x, 10})
       flush_mailbox()
-      {:ok, _, _} = MapServer.enter(@test_map_id, a, position: {10, 10})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, a, position: {10, 10})
       flush_mailbox()
 
       # A changes heading — B (us) should NOT receive it
@@ -300,13 +300,13 @@ defmodule Arena.Map.AoiVisibilityTest do
     test "moving into AoI range sends character_create to both players" do
       # A is stationary at (50, 50). We are A's session.
       a = make_entity(12_001, "BoundaryA", 50, 50)
-      {:ok, _, _} = MapServer.enter(@test_map_id, a, position: {50, 50})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, a, position: {50, 50})
       flush_mailbox()
 
       # B starts just outside AoI range (aoi_x + 1 tiles away in X)
       start_x = 50 + @aoi_x + 1
       b = make_entity(12_002, "BoundaryB", start_x, 50)
-      {:ok, _, _} = MapServer.enter(@test_map_id, b, position: {start_x, 50})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, b, position: {start_x, 50})
       flush_mailbox()
 
       # B should not be visible to A yet
@@ -338,9 +338,9 @@ defmodule Arena.Map.AoiVisibilityTest do
       b = make_entity(12_102, "LeaveRangeB", edge_x, 50)
 
       # We are A's session
-      {:ok, _, _} = MapServer.enter(@test_map_id, a, position: {50, 50})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, a, position: {50, 50})
       flush_mailbox()
-      {:ok, _, _} = MapServer.enter(@test_map_id, b, position: {edge_x, 50})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, b, position: {edge_x, 50})
       # Should get create since B is at boundary (within range)
       create_msgs = collect_raw_messages(200)
       assert length(create_msgs) > 0, "Player at AoI boundary should be visible"
@@ -368,9 +368,9 @@ defmodule Arena.Map.AoiVisibilityTest do
       far_y = 50 + @aoi_y + 5
       b = make_entity(13_002, "YRangeB", 50, far_y)
 
-      {:ok, _, _} = MapServer.enter(@test_map_id, a, position: {50, 50})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, a, position: {50, 50})
       flush_mailbox()
-      {:ok, _, _} = MapServer.enter(@test_map_id, b, position: {50, far_y})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, b, position: {50, far_y})
 
       messages = collect_raw_messages(200)
       assert messages == [], "Player outside Y AoI range should be invisible"
@@ -384,9 +384,9 @@ defmodule Arena.Map.AoiVisibilityTest do
       edge_y = 50 + @aoi_y
       b = make_entity(13_102, "YBoundB", 50, edge_y)
 
-      {:ok, _, _} = MapServer.enter(@test_map_id, a, position: {50, 50})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, a, position: {50, 50})
       flush_mailbox()
-      {:ok, _, _} = MapServer.enter(@test_map_id, b, position: {50, edge_y})
+      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, b, position: {50, edge_y})
 
       messages = collect_raw_messages(200)
       assert length(messages) > 0, "Player at Y AoI boundary should be visible"

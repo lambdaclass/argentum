@@ -7,6 +7,9 @@ defmodule Arena.Map.Commerce do
 
   def handle_open_commerce(state, char_id, target_x, target_y) do
     case Map.fetch(state.players, char_id) do
+      {:ok, entity} when entity.dead ->
+        {:reply, {:error, :dead}, state}
+
       {:ok, entity} ->
         target_occ = if target_x && target_y, do: Helpers.get_occupancy(state.occupancy, target_x, target_y)
 
@@ -30,6 +33,9 @@ defmodule Arena.Map.Commerce do
 
   def handle_commerce_buy(state, char_id, slot, amount) do
     case Map.fetch(state.players, char_id) do
+      {:ok, entity} when entity.dead ->
+        {:reply, {:error, :dead}, state}
+
       {:ok, entity} ->
         npc_id = entity.commerce_npc_id
         npc_def = if npc_id, do: GameData.get_npc(npc_id)
@@ -97,6 +103,9 @@ defmodule Arena.Map.Commerce do
 
   def handle_commerce_sell(state, char_id, slot, amount) do
     case Map.fetch(state.players, char_id) do
+      {:ok, entity} when entity.dead ->
+        {:reply, {:error, :dead}, state}
+
       {:ok, entity} ->
         if entity.commerce_npc_id == nil do
           {:reply, {:error, :no_commerce}, state}

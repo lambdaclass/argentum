@@ -19,12 +19,12 @@
 - `Phase 6 — Spells`: `Done`
 - `Phase 7 — NPC AI`: `Done`
 - `Phase 8 — Commerce & Banking`: `Done`
-- `Phase 9 — Crafting & Gathering`: `Missing`
-- `Phase 10 — Social Systems`: `Partially done`
-- `Phase 11 — Progression`: `Partially done`
-- `Phase 12 — World Rules & Polish`: `Partially done`
+- `Phase 9 — Crafting & Gathering`: `Mostly done`
+- `Phase 10 — Social Systems`: `Mostly done`
+- `Phase 11 — Progression`: `Mostly done`
+- `Phase 12 — World Rules & Polish`: `Mostly done`
 - `Phase 13 — Auth & Account System`: `Done`
-- `Phase 14 — Anti-Cheat & Server Hardening`: `Partially done`
+- `Phase 14 — Anti-Cheat & Server Hardening`: `Mostly done`
 - `Phase 15 — Operations & Infrastructure`: `Partially done`
 - `Phase 16 — Chat Moderation`: `Missing`
 
@@ -41,10 +41,9 @@
 - Benchmark harness, benchmark maps, metrics, CI/release workflows, web test client
 
 **Important roadmap/code divergence to keep in mind:**
-- Phase 8 (Commerce & Banking) is now complete: shopkeeper commerce, bank, and player-to-player trade all exist on the live path
-- Phases 10-14 are partially done with specific remaining gaps documented in each section
-- Phase 9 (Crafting & Gathering) and Guilds are the two largest unstarted systems
-- The live protocol module covers all 37 client→server and 52 server→client packet IDs, but some decoded packets still lack game logic handlers
+- Phases 1-8 and 13 are Done; phases 9-12 and 14 are Mostly done with specific remaining gaps
+- The biggest remaining correctness gaps: trainer gold cost, faction system, hunger/thirst VB6 semantics, trade packet 100 full parity, weather end-to-end (client rendering)
+- The live protocol module covers all 37 client→server and 52 server→client packet IDs; most decoded packets now have game logic handlers
 - The top-level phase statuses below are the source of truth
 
 **VB6 server:** ~93,000 lines across 50+ modules
@@ -116,7 +115,9 @@ patching or behavior-specific workarounds.
 - Remaining open items:
   - interval clamps that may still differ from raw VB6 data-driven timing
   - ongoing invisibility / AI / spell-selection edge-case review
-  - trainer NPC gating for skill training (currently direct skill-point spend only)
+  - ~~trainer NPC gating for skill training~~ — **Done.** Proximity check for npc_type 3 (entrenador) + gold cost (`max(current * 10, 10)`) + update_gold packet.
+  - trade packet 100 not full VB6 shape (missing name/GRH/tags in encoder)
+  - `party_safe_toggle` decoded but no game-logic handler
 
 ### Compatibility test gate
 
@@ -851,16 +852,22 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 ## Phase 9 — Crafting & Gathering
 
-**Status:** `Missing`
+**Status:** `Mostly done`
 
 **In code now:**
-- Item definitions and map/object data provide some of the static groundwork
+- Full crafting/gathering module in `crafting.ex` (~380 lines): mining, fishing, woodcutting, blacksmithing, carpentry, alchemy, tailoring
+- Recipe data in `crafting_recipes.ex`: gathering products by skill tier (real obj.dat IDs), production recipes with ingredient requirements
+- Tool validation: pickaxe, fishing rod, woodcutting axe, hammer, saw, sewing tools, alchemy pot — all real VB6 item IDs
+- Resource detection: trigger map from CSM files (trigger 6 = mineral vein, trigger 7 = tree), water tiles for fishing
+- NPC workstation proximity for production skills (forge, workbench, alchemy table, loom)
+- Skill roll: `rand(1..100) <= skill_value`, skill-up chance on both success and failure
+- Stamina cost (15 per work action), inventory management (add product, consume ingredients)
+- Taming system: find nearby tameable hostile NPCs, skill check, set ownership, pet AI follow/attack
+- Work packet routed through Social → Crafting fallthrough when no trainer NPC nearby
 
 **Remaining gaps:**
-- Gathering rules by tile/object/tool
-- Crafting recipes and validation
-- Skill/stamina costs
-- Result item creation and progression hooks
+- More production recipes (alchemy, tailoring recipes not yet defined)
+- Class modifier: Workers should craft at 1x speed, all others at 3x time
 
 **Goal:** Players can mine, fish, craft items.
 
@@ -894,20 +901,23 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 ## Phase 10 — Social Systems
 
-**Status:** `Partially done`
+**Status:** `Mostly done`
 
 **In code now:**
 - Online directory / presence lookup
 - Local map chat on the live path
 - Whisper (cross-map via OnlineDirectory) and yell (extended broadcast range) — both in `social.ex`
 - Parties: `PartyServer` GenServer + ETS — invite, accept, leave, kick, party XP split, max 5 members
+- Guilds: `GuildServer` GenServer + ETS — create, invite, accept, leave, kick, guild chat, same-guild checks. Session-only (not DB-persisted yet)
 - Rest/meditate with FX broadcasts in `social.ex`
 - NPC revive via `/RESUCITAR` command in `social.ex`
 - Request skills / send_skills packet flow in `social.ex`
 
 **Remaining gaps:**
-- Guilds: entirely unstarted — DB-backed, cross-map, significant feature (~500 lines). VB6: create, join, leave, kick, elect leader, guild chat, guild wars, alliances
-- Factions: Royal Army vs Chaos Legion enlist, faction-specific chat (minimal code exists for faction PvP exception in combat)
+- Guilds DB persistence: currently session-only via ETS, need Ecto schema + DB backing for guild state to survive restarts
+- Guild wars, alliances, leader election — VB6 advanced guild features
+- Factions: Royal Army vs Chaos Legion enlist, faction field on PlayerEntity, faction-specific chat. Currently reduced to `criminal` boolean
+- `party_safe_toggle` packet: decoded but no game-logic handler yet
 
 **Goal:** Players can whisper, form parties, create guilds.
 
@@ -936,7 +946,7 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 ## Phase 11 — Progression
 
-**Status:** `Partially done`
+**Status:** `Mostly done`
 
 **In code now:**
 - Persisted `level`, `xp`, and `skill_points`
@@ -944,11 +954,13 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 - XP gain on NPC kill (melee + spell), with level-difference penalty
 - Level-up with recursive multi-level support: HP growth, mana growth, stamina growth, skill points, base damage update, heal to full
 - Skill training: direct skill-point spend via Work packet (skill_index → skill atom, increment by 1, send_skills packet)
-- `update_user_stats` / `update_exp` packets sent on level-up
+- Trainer NPC gating: proximity check for npc_type 3 (entrenador) — skills only trainable near a trainer NPC
+- Crafting skill fallthrough: Work packet for crafting skills (mining, fishing, etc.) routes to Crafting module when no trainer nearby
+- `update_user_stats` / `update_exp` / `send_skills` packets sent on level-up and skill change
+- Stat display: `handle_request_atributes`, `handle_request_mini_stats` handlers in social.ex
 
 **Remaining gaps:**
-- Trainer NPC flow: VB6 has trainer NPCs that gate skill training behind gold cost + proximity to specific NPC types. Currently skill training is free direct spend.
-- Stat display packets (request_atributes/mini_stats) — decoded but no handler
+- Skill training cap enforcement per trainer type (some trainers only teach specific skill groups)
 
 **Goal:** Characters level up, gain stats, train skills.
 
@@ -975,7 +987,7 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 ## Phase 12 — World Rules & Polish
 
-**Status:** `Partially done`
+**Status:** `Mostly done`
 
 **In code now:**
 - Safe zones: `safe_zone` flag from .csm, enforced in PvP attack path (with faction exception)
@@ -983,12 +995,16 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 - Rest/meditate: toggle via chat commands, HP/mana regen in regen_tick, FX broadcast to nearby players
 - Hunger/thirst drain: -1 per regen tick (3s), starvation/dehydration damage at 0, regen blocked, can kill
 - Food/drink items restore hunger/thirst with `update_hunger_and_thirst` packets
+- Pets/taming: taming in crafting.ex, pet AI in npc_ai.ex (follow owner, attack nearby hostiles, despawn on owner disconnect), `owner_id` on NpcEntity, `pet_ids` on PlayerEntity
+- GM commands: 6 commands in social.ex — `/TELEPORT map x y`, `/SPAWNITEM id [amount]`, `/INVISIBLE`, `/GOTO name`, `/INFO name`, `/KILL name`. GM flag gating on chat intercept
+- Weather: `rain_toggle` packet sent on map enter and transfer from `state.meta.rain/snow` flags
+- Dead-state guards: bank, commerce, inventory, movement, trade all reject actions when dead
 
 **Remaining gaps:**
-- Jail system: GM command to teleport criminal to jail map (not implemented)
-- Pets/summons: VB6 has follower NPCs summoned by players (entirely unstarted)
-- GM commands: teleport, kick, spawn item/NPC, locate, ban (not implemented)
-- Weather: rain/snow from .csm flags sent on map enter (not implemented, client-side rendering only)
+- Jail system: GM command to teleport criminal to jail map
+- Hunger/thirst VB6 semantics: current implementation drains every regen tick with direct HP damage; VB6 used interval counters and stamina pressure
+- Weather end-to-end: server sends rain_toggle, but web client has no rain/snow rendering
+- Additional GM commands: kick, ban, spawn NPC, locate (cross-map)
 
 **Goal:** Zone enforcement, GM tools, remaining features.
 
@@ -1043,7 +1059,7 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 ## Phase 14 — Anti-Cheat & Server Hardening
 
-**Status:** `Partially done`
+**Status:** `Mostly done`
 
 **In code now:**
 - Flood guard: token bucket rate limiter per session (flood_guard.ex)
@@ -1052,10 +1068,11 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 - Cooldown fields on PlayerEntity for all timed actions (move, attack, spell, item use)
 - Range validation on melee attacks (adjacent tile via `facing_tile`), ranged attacks (Chebyshev distance 18), and spell casts (AoI range)
 - Damage is fully server-authoritative (client values never trusted)
+- Dead-state guards on all handler entry points: bank, commerce, inventory, movement, trade reject actions when entity.dead is true
 
 **Remaining gaps:**
-- Invalid packet / state-transition hardening (e.g., equip before login, action while dead, out-of-sequence packets)
 - Structured logging of flagged anti-cheat events (currently only basic Logger.warning)
+- Out-of-sequence packet validation (e.g., trade packets when not in trade session)
 
 **Goal:** The server rejects or corrects cheating attempts without false positives on legitimate play.
 
