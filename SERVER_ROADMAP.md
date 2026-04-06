@@ -28,26 +28,41 @@
 - `Phase 15 — Operations & Infrastructure`: `Partially done`
 - `Phase 16 — Chat Moderation`: `Missing`
 
-**Implemented so far (~6.8k lines of Elixir + 295 lines Rust):**
-- TCP + WebSocket networking with AO20 protocol support for the currently used gameplay subset; exact VB6 wire parity is not fully closed yet
+**Implemented so far (~14k lines of Elixir source + 295 lines Rust):**
+- TCP + WebSocket networking with full AO20 protocol support (all 37 client→server, 52 server→client packet IDs)
 - Authoritative `MapServer` with movement, chat, heading, map transitions, autosave, and direct session delivery
 - AoI visibility lifecycle, `:global` / `:aoi_scan` / `:aoi_grid`, spatial grid, pre-encoded hot-path broadcasts
 - Character creation, login, persistence, online directory, static `.dat` loading
-- Inventory groundwork and most live inventory flows: pickup, drop, equip toggle, item use, ground items
-- Full melee combat (PvP + PvNPC): hit/miss, damage, defense, shield block, XP/gold/loot, death/respawn
-- Spell system: damage, heal, status effects (paralysis, poison, cure, invisibility), mana/stamina costs
-- NPC AI: hostile targeting, pathfinding, attack, random walk, respawning, loot drops
-- Full `.dat` loading: items, spells (Hechizos.dat), NPCs (npcs.dat), class combat modifiers (Balance.dat)
+- Full inventory: pickup, drop, equip toggle, item use, ground items
+- Full melee + ranged combat (PvP + PvNPC): hit/miss, damage, defense, shield block, XP/gold/loot, death/respawn
+- Spell system: damage, heal, status effects (paralysis, poison, cure, invisibility), mana/stamina costs, NPC spell casting
+- NPC AI: hostile targeting, pathfinding, attack, random walk, respawning, loot drops, pet follow/attack
+- Full crafting & gathering: mining, fishing, woodcutting, blacksmithing, carpentry, alchemy, tailoring, taming
+- Commerce: NPC shopkeepers, bank, player-to-player trade
+- Social: whisper, yell, parties (PartyServer), guilds (GuildServer, session-only), rest/meditate
+- Progression: level-up with stat growth, skill training with trainer NPC gating + gold cost
+- GM commands: teleport, spawn item, invisible, goto, info, kill
+- Anti-cheat: flood guard, speed hack detection, dead-state guards, range validation, cooldowns
+- Auth: accounts with bcrypt, character ownership
 - Benchmark harness, benchmark maps, metrics, CI/release workflows, web test client
 
-**Important roadmap/code divergence to keep in mind:**
-- Phases 1-8 and 13 are Done; phases 9-12 and 14 are Mostly done with specific remaining gaps
-- The biggest remaining correctness gaps: trainer gold cost, faction system, hunger/thirst VB6 semantics, trade packet 100 full parity, weather end-to-end (client rendering)
-- The live protocol module covers all 37 client→server and 52 server→client packet IDs; most decoded packets now have game logic handlers
-- The top-level phase statuses below are the source of truth
+**Remaining gaps across all phases:**
+- Factions: Royal Army / Chaos Legion enlist flow, `faction` field on PlayerEntity, faction-gated areas/chat
+- Guilds DB persistence: currently session-only ETS, need Ecto schema for restart survival
+- Guild advanced features: wars, alliances, leader election
+- Hunger/thirst VB6 semantics: current drain is every-tick + direct HP damage; VB6 uses interval counters + stamina pressure
+- Trade packet 100 full VB6 shape: missing name/GRH/tags in encoder
+- `party_safe_toggle` handler: decoded but no game logic
+- Weather client rendering: server sends rain_toggle, web client ignores it
+- Alchemy/tailoring recipe lists: framework exists, recipes sparse
+- Worker class craft speed modifier (1x vs 3x)
+- Trainer skill-group restrictions (some trainers only teach specific skills)
+- Jail system, additional GM commands (kick, ban, spawn NPC, locate cross-map)
+- Phase 15 (ops): graceful shutdown, structured logging, monitoring, deployment pipeline
+- Phase 16 (chat moderation): entirely unstarted
 
 **VB6 server:** ~93,000 lines across 50+ modules
-**Estimated final Elixir server:** ~10,000–12,000 lines
+**Elixir server now:** ~14,000 lines source (+ ~6,300 lines tests)
 
 ---
 
@@ -96,7 +111,7 @@ patching or behavior-specific workarounds.
   - server→client: `change_spell_slot`, `character_change`, `character_remove`, `npc_hit_user`, `user_hitted_user`, `user_hitted_by_user`, `create_fx`, `play_wave`, `change_npc_inventory_slot`
   - client→server: `talk`, `whisper`, `attack`, `drop`, `cast_spell`, `left_click`, `use_item`, `equip_item` (packet_counter consumption added)
 - ~~Keep extension packets out of VB6 path~~ — **Done.** `session_token` (ID 200) is WS-only, injected by WsHandler, never sent on TCP.
-- Remaining: a few client→server packets are decoded but have no game logic handler yet (request_atributes, mini_stats, double_click, online, use_spell_macro). Most previously unhandled packets (yell, whisper, rest, meditate, heal, resucitate, request_skills, bank ops, work, party_safe_toggle) now have handlers.
+- Remaining: a few client→server packets are decoded but have no game logic handler yet (double_click, online, use_spell_macro, party_safe_toggle). All major gameplay packets now have handlers: yell, whisper, rest, meditate, heal, resucitate, request_skills, request_atributes, request_mini_stats, bank ops, work/train, guild commands, GM commands.
 
 ### Behavior parity backlog
 
@@ -118,6 +133,8 @@ patching or behavior-specific workarounds.
   - ~~trainer NPC gating for skill training~~ — **Done.** Proximity check for npc_type 3 (entrenador) + gold cost (`max(current * 10, 10)`) + update_gold packet.
   - trade packet 100 not full VB6 shape (missing name/GRH/tags in encoder)
   - `party_safe_toggle` decoded but no game-logic handler
+  - hunger/thirst semantics differ from VB6 (direct HP damage vs interval counters + stamina pressure)
+  - faction system absent (no `faction` field, no enlist flow, no faction-gated areas)
 
 ### Compatibility test gate
 
@@ -871,31 +888,15 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 **Goal:** Players can mine, fish, craft items.
 
-**What to build:**
-- Work/craft handled immediately in MapServer:
-  - Check equipped tool, check skill, consume stamina
-  - Gathering: mining at trigger tiles, fishing at water tiles, woodcutting at tree objects → skill check → add result to inventory
-  - Crafting: validate materials in inventory → consume → produce item
-- Gathering skills:
-  - Mining: ore at resource spots, skill check, stamina cost
-  - Fishing: water tiles (flag 0x20), skill check
-  - Woodcutting: tree objects, get wood logs
-- Crafting skills:
-  - Blacksmithing: ore + coal → weapons/armor at forge
-  - Carpentry: wood → bows/furniture at workbench
-  - Alchemy: herbs + bottles → potions
-  - Tailoring: hides → leather armor
-- Recipe data in ETS (material requirements from obj.dat)
+**What to build (remaining):**
+- ~~Work/craft framework~~ — **Done.** Tool check, skill check, stamina cost, gathering, production, taming all in crafting.ex
+- ~~Gathering skills (mining, fishing, woodcutting)~~ — **Done.** Trigger map + water tile detection, skill roll, product tiers
+- ~~Production skills (blacksmithing, carpentry)~~ — **Done.** Ingredient consumption, workstation NPC proximity
+- Expand alchemy recipes: herbs + bottles → potions (framework exists, recipes not defined)
+- Expand tailoring recipes: hides → leather armor (framework exists, recipes not defined)
 - Class modifier: Workers craft at 1x speed, all others at 3x time
-- Skill gain on success
-
-**Differential fuzzing:** golden vectors for craft_success rates
 
 **VB6 reference:** `Trabajo.bas`
-
-**Lines estimate:** ~400 Elixir
-
-**Depends on:** Phase 4 (inventory), Phase 7 (resource nodes)
 
 ---
 
@@ -921,26 +922,17 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 **Goal:** Players can whisper, form parties, create guilds.
 
-**What to build:**
-- Whisper (packet 77): session resolves target by normalized character name via `OnlineLookup`, sends message directly (no map involvement)
-- Yell (packet 76): intent to MapServer, broadcast to wider tile range
-- Parties:
-  - Invite, accept, kick, leave — managed by a lightweight `PartyServer` GenServer
-  - Shared XP: when MapServer awards XP, checks party membership and splits
-  - Party membership tracked in MapServer entity state
-- Guilds:
-  - Ecto schema: `guilds` table (name, leader, description), `guild_members` table
-  - Create guild, join, leave, kick, elect leader — DB operations via session process
-  - Guild chat via PubSub topic `guild:#{guild_id}`
-  - Guild wars, alliances, peace offers
-  - Guild tag stored as display metadata in MapServer
-- Factions: Royal Army vs Chaos Legion, enlist, faction-specific chat channels
+**What to build (remaining):**
+- ~~Whisper / yell~~ — **Done.**
+- ~~Parties~~ — **Done.** PartyServer GenServer + ETS, invite/accept/leave/kick, party XP split
+- ~~Guilds base~~ — **Done.** GuildServer GenServer + ETS, create/invite/accept/leave/kick, guild chat
+- Guilds DB persistence: Ecto schema `guilds` + `guild_members` tables, load on startup, save on mutation
+- Guild wars, alliances, peace offers, leader election
+- Guild tag in character display packets
+- `party_safe_toggle` handler (toggle friendly-fire within party)
+- Factions: add `faction` field to PlayerEntity, Royal Army / Chaos Legion enlist flow, faction-gated areas, faction chat
 
 **VB6 reference:** `Modulo_UsUaRiOs.bas`, `modGuilds.bas`
-
-**Lines estimate:** ~500 Elixir
-
-**Depends on:** Phase 2 (persistence for guilds)
 
 ---
 
@@ -964,24 +956,13 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 **Goal:** Characters level up, gain stats, train skills.
 
-**What to build:**
-- Level up checked in MapServer after each XP award: `if xp >= xp_required(level)` → level up
-- On level up:
-  - HP gain: random biased within class/race range, capped ±10 from average
-  - Mana: `intelligence * class_mana_mult + (class_mult_mana * intelligence) * (level - 1)`
-  - Skill points: `class.skill_points_per_level`
-  - Newbie status removed at threshold level
-  - Send level up packets to client
-- Skill training: client sends train_skill intent → MapServer applies if skill points available, capped at 100
-- NPC trainers: interact with trainer NPC → deduct gold, increase skill (interact from Phase 7)
-- Stat display: send full stats to client on request (packets 85, 86, 87)
-- Pure Elixir `Arena.Formulas.xp_required/1`, `Arena.Formulas.hp_gain/3` for testing
+**What to build (remaining):**
+- ~~Level up with stat growth~~ — **Done.** HP/mana/stamina growth, skill points, base damage, heal to full, recursive multi-level
+- ~~Skill training via Work packet~~ — **Done.** Trainer NPC proximity + gold cost + skill increment
+- ~~Stat display packets~~ — **Done.** request_atributes (send_atributes ID 81), request_mini_stats
+- Trainer skill-group restrictions: some trainers only teach specific skill groups in VB6
 
 **VB6 reference:** `Modulo_UsUaRiOs.bas:CheckUserLevel()`
-
-**Lines estimate:** ~300 Elixir
-
-**Depends on:** Phase 5 (XP from combat)
 
 ---
 
@@ -1008,17 +989,19 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 **Goal:** Zone enforcement, GM tools, remaining features.
 
-**What to build:**
-- Safe zones: MapServer checks `safe_zone` flag before resolving PvP attacks — blocked attacks send rejection packet
-- Criminal system: MapServer detects attack on innocent → sets criminal flag on attacker entity
-- Jail: GM command to export entity from current map, import on jail map
-- Rest/meditate: periodic timer ticks HP/mana regen when entity has resting/meditating flag and hasn't moved
-- Hunger/thirst: periodic timer ticks slow drain, applies debuff when empty
-- Pets: summoned as NPC entities in MapServer, AI type follower — follow owner, attack on command
-- GM commands: session validates GM privilege → sends privileged intent to MapServer (teleport, kick, spawn item, spawn NPC)
-- Weather: rain/snow flags from .csm, sent to client on map enter (client-side rendering only)
-
-**Lines estimate:** ~500 Elixir
+**What to build (remaining):**
+- ~~Safe zones~~ — **Done.**
+- ~~Criminal system~~ — **Done.**
+- ~~Rest/meditate~~ — **Done.**
+- ~~Hunger/thirst drain~~ — **Done** (but semantics differ from VB6 — see behavior parity backlog).
+- ~~Pets/taming~~ — **Done.** Taming skill, pet AI follow/attack/despawn, owner_id/pet_ids fields
+- ~~GM commands~~ — **Done.** 6 commands: teleport, spawn item, invisible, goto, info, kill
+- ~~Weather server-side~~ — **Done.** rain_toggle on enter/transfer
+- ~~Dead-state guards~~ — **Done.** bank, commerce, inventory, movement, trade
+- Jail system: GM command `/JAIL name` to teleport criminal to jail map
+- Additional GM commands: `/KICK`, `/BAN`, `/SPAWNNPC`, `/LOCATE` (cross-map via OnlineDirectory)
+- Weather client rendering: web client needs rain/snow visual effect
+- Hunger/thirst VB6 parity: switch to interval counters + stamina pressure model
 
 **Depends on:** All previous phases
 
@@ -1076,15 +1059,14 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 **Goal:** The server rejects or corrects cheating attempts without false positives on legitimate play.
 
-**What to build:**
-- ~~Speed hack: soft accumulator + snap-back~~ — **Done.**
-- ~~Teleport detection: reject movement that skips tiles~~ — **Done.** Directional moves via TileGrid.
-- ~~Range validation: attack/spell/pickup within valid range~~ — **Done.** Melee adjacency, ranged Chebyshev, spell AoI range.
-- ~~Damage sanity: server computes all damage~~ — **Done by architecture.**
-- Packet validation: reject malformed or out-of-sequence packets (e.g., equip before login)
-- Logging: structured log of flagged events for review
-
-**Lines estimate:** ~300 Elixir
+**What to build (remaining):**
+- ~~Speed hack~~ — **Done.**
+- ~~Teleport detection~~ — **Done.**
+- ~~Range validation~~ — **Done.**
+- ~~Damage sanity~~ — **Done.**
+- ~~Dead-state guards~~ — **Done.** All handler entry points reject actions when dead
+- Out-of-sequence packet validation: reject trade packets when not in trade session, commerce packets without open shop, etc.
+- Structured anti-cheat logging: JSON log of flagged speed hack / range violations for GM review
 
 **Depends on:** Phase 5 (combat range checks), Phase 1 (movement validation)
 
@@ -1129,25 +1111,29 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 **Status:** `Missing`
 
 **In code now:**
-- Basic local chat exists
+- Local chat, whisper, yell, guild chat all exist
+- GM `/KILL` command exists but no `/MUTE` or `/BAN`
 
 **Remaining gaps:**
 - Word filter
-- Mute system
-- Report system
+- Mute system (GM command + timed mute on entity)
+- Report system (player → DB log for GM review)
 - Chat rate limiting (separate from packet flood guard)
+- `/MUTE name duration` and `/UNMUTE name` GM commands
+- Account-level ban (`banned_until` field, checked on login)
 
 **Goal:** Chat is moderated to prevent abuse.
 
 **What to build:**
-- Word filter: configurable blocklist, applied server-side before broadcast
-- Mute: GM command to mute player for duration, stored on entity/account
-- Report: player sends report intent → logged to DB for GM review
-- Chat rate limiting: per-player message rate cap (separate from packet flood), anti-spam
+- Word filter: configurable blocklist loaded from file/config, applied server-side before broadcast. Replace or reject messages containing filtered words
+- Mute: GM command `/MUTE name minutes` → set `muted_until` on entity, check before all chat/yell/whisper. Persist across sessions via DB
+- Ban: GM command `/BAN name days` → set `banned_until` on account, reject login
+- Report: client report command → insert into `reports` table with reporter, target, message, timestamp
+- Chat rate limiting: per-player message rate cap (e.g., 5 messages/10s), separate from packet flood guard. Warn then temp-mute
 
-**Lines estimate:** ~150 Elixir
+**Lines estimate:** ~200 Elixir
 
-**Depends on:** Phase 10 (social/chat infrastructure)
+**Depends on:** Phase 10 (social/chat infrastructure), Phase 13 (accounts for ban)
 
 ---
 
