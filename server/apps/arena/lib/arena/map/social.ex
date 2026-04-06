@@ -6,6 +6,7 @@ defmodule Arena.Map.Social do
   alias AoProtocol.Server.Encoder
 
   @npc_type_revividor 1
+  @npc_type_entrenador 3
   @npc_type_banquero 4
   @npc_type_resucitador_newbie 9
   @yell_range_x (Application.compile_env(:arena, :aoi_range_x, 11)) * 2
@@ -338,6 +339,12 @@ defmodule Arena.Map.Social do
           skill_atom == nil ->
             {:noreply, state}
 
+          # VB6: must be near a trainer NPC (npc_type 3)
+          find_nearby_npc_of_type(state, entity, [@npc_type_entrenador]) == :not_found ->
+            Helpers.send_to_session(state.sessions, char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "No hay un entrenador cerca.", font_index: 0}})})
+            {:noreply, state}
+
           entity.skill_points <= 0 ->
             Helpers.send_to_session(state.sessions, char_id,
               {:send_raw, Encoder.encode({:console_msg, %{message: "No tienes puntos de skill disponibles.", font_index: 0}})})
@@ -457,6 +464,12 @@ defmodule Arena.Map.Social do
           npc_def.npc_type == @npc_type_banquero ->
             Helpers.send_to_session(state.sessions, char_id,
               {:send_raw, Encoder.encode({:console_msg, %{message: "#{npc_def.name} dice: Bienvenido al banco.", font_index: 0}})})
+            {:noreply, state}
+
+          # Trainer
+          npc_def.npc_type == @npc_type_entrenador ->
+            Helpers.send_to_session(state.sessions, char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "#{npc_def.name} dice: Puedo entrenarte. Usa el boton Entrenar.", font_index: 0}})})
             {:noreply, state}
 
           # Default: show NPC name

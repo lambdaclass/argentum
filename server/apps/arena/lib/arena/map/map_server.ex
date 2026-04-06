@@ -497,7 +497,8 @@ defmodule Arena.Map.MapServer do
     Logger.info("#{entity.name} (#{entity.char_id}) entered map #{state.map_id} at (#{x}, #{y}) index=#{char_index}")
 
     state = %{state | visible_sets: visible_sets, next_char_index: char_index + 1}
-    {:reply, {:ok, char_index, reply_players}, state}
+    weather = %{rain: state.meta.rain, snow: state.meta.snow}
+    {:reply, {:ok, char_index, reply_players, weather}, state}
   end
 
   # Shared cleanup for leave + :DOWN — single source of truth

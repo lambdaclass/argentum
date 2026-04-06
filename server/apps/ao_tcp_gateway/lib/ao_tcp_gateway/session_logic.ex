@@ -108,7 +108,7 @@ defmodule AoTcpGateway.SessionLogic do
     map_id = entity.map_id || @default_map_id
 
     with :ok <- ensure_map_started(map_id),
-         {:ok, char_index, all_players} <-
+         {:ok, char_index, all_players, weather} <-
            Arena.Map.MapServer.enter(map_id, entity, position: {entity.x, entity.y}) do
       entity = Map.get(all_players, entity.char_id)
 
@@ -124,6 +124,8 @@ defmodule AoTcpGateway.SessionLogic do
           map_id: map_id,
           entity: entity
       }
+
+      weather_packets = if weather.rain, do: [{:rain_toggle, %{raining: true}}], else: []
 
       packets =
         [
@@ -145,6 +147,7 @@ defmodule AoTcpGateway.SessionLogic do
             min_thirst: entity.thirst
           }}
         ] ++
+          weather_packets ++
           exp_login_packets(entity) ++
           inventory_login_packets(entity) ++
           spell_login_packets(entity) ++
@@ -169,7 +172,7 @@ defmodule AoTcpGateway.SessionLogic do
     source_map = state.map_id
 
     with :ok <- ensure_map_started(dest_map),
-         {:ok, char_index, all_players} <-
+         {:ok, char_index, all_players, weather} <-
            Arena.Map.MapServer.enter(dest_map, entity, position: {dest_x, dest_y}) do
       # Destination entry succeeded — now remove from source
       Arena.Map.MapServer.leave(source_map, entity.char_id)
@@ -180,6 +183,8 @@ defmodule AoTcpGateway.SessionLogic do
 
       state = %{state | map_id: dest_map, char_index: char_index, entity: entity}
 
+      weather_packets = if weather.rain, do: [{:rain_toggle, %{raining: true}}], else: [{:rain_toggle, %{raining: false}}]
+
       packets =
         [
           {:change_map, %{map_id: dest_map, version: 0}},
@@ -187,6 +192,7 @@ defmodule AoTcpGateway.SessionLogic do
           Arena.Map.Helpers.character_create_packet(entity),
           {:pos_update, %{x: entity.x, y: entity.y}}
         ] ++
+          weather_packets ++
           for {cid, other} <- all_players, cid != entity.char_id do
             Arena.Map.Helpers.character_create_packet(other)
           end
