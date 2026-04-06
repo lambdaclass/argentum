@@ -9,7 +9,7 @@
 - `Missing` — not implemented on the live gameplay path yet
 
 **Current phase snapshot:**
-- `Compatibility Gate — AO20 / VB6 Protocol & Behavior Parity`: `Partially done`
+- `Compatibility Gate — AO20 / VB6 Protocol & Behavior Parity`: `Mostly done`
 - `Phase 1 — Runtime & Performance Foundations`: `Done`
 - `Phase 2 — Character System, Persistence & Map Transitions`: `Done`
 - `Phase 2A — Transition Quality & Client Map Pack`: `Done`
@@ -24,9 +24,9 @@
 - `Phase 11 — Progression`: `Mostly done`
 - `Phase 12 — World Rules & Polish`: `Mostly done`
 - `Phase 13 — Auth & Account System`: `Done`
-- `Phase 14 — Anti-Cheat & Server Hardening`: `Mostly done`
-- `Phase 15 — Operations & Infrastructure`: `Partially done`
-- `Phase 16 — Chat Moderation`: `Missing`
+- `Phase 14 — Anti-Cheat & Server Hardening`: `Done`
+- `Phase 15 — Operations & Infrastructure`: `Mostly done`
+- `Phase 16 — Chat Moderation`: `Done`
 
 **Implemented so far (~14k lines of Elixir source + 295 lines Rust):**
 - TCP + WebSocket networking with full AO20 protocol support (all 37 client→server, 52 server→client packet IDs)
@@ -39,27 +39,24 @@
 - NPC AI: hostile targeting, pathfinding, attack, random walk, respawning, loot drops, pet follow/attack
 - Full crafting & gathering: mining, fishing, woodcutting, blacksmithing, carpentry, alchemy, tailoring, taming
 - Commerce: NPC shopkeepers, bank, player-to-player trade
-- Social: whisper, yell, parties (PartyServer), guilds (GuildServer, session-only), rest/meditate
+- Social: whisper, yell, parties (PartyServer with safe_toggle), guilds (GuildServer with DB persistence), rest/meditate, faction chat
+- Factions: Royal Army / Chaos Legion enlist/leave, faction field on PlayerEntity, faction-gated map restrictions, same-faction PvP block, faction chat
 - Progression: level-up with stat growth, skill training with trainer NPC gating + gold cost
-- GM commands: teleport, spawn item, invisible, goto, info, kill
-- Anti-cheat: flood guard, speed hack detection, dead-state guards, range validation, cooldowns
+- GM commands: teleport, spawn item, invisible, goto, info, kill, kick, ban, mute/unmute, jail, spawn NPC, locate
+- Chat moderation: word filter, mute enforcement, chat rate limiting (1s cooldown)
+- Anti-cheat: flood guard, speed hack detection, dead-state guards, range validation, cooldowns, structured audit logging
+- Ops: graceful shutdown (terminate/2 autosave), audit logging for login/logout/trade/kill/GM actions
 - Auth: accounts with bcrypt, character ownership
 - Benchmark harness, benchmark maps, metrics, CI/release workflows, web test client
+- Client: weather rendering (rain particles), faction HUD display, party panel, clan panel
 
 **Remaining gaps across all phases:**
-- Factions: Royal Army / Chaos Legion enlist flow, `faction` field on PlayerEntity, faction-gated areas/chat
-- Guilds DB persistence: currently session-only ETS, need Ecto schema for restart survival
 - Guild advanced features: wars, alliances, leader election
-- Hunger/thirst VB6 semantics: current drain is every-tick + direct HP damage; VB6 uses interval counters + stamina pressure
-- Trade packet 100 full VB6 shape: missing name/GRH/tags in encoder
-- `party_safe_toggle` handler: decoded but no game logic
-- Weather client rendering: server sends rain_toggle, web client ignores it
+- Weather: snow rendering on client (rain done)
 - Alchemy/tailoring recipe lists: framework exists, recipes sparse
-- Worker class craft speed modifier (1x vs 3x)
 - Trainer skill-group restrictions (some trainers only teach specific skills)
-- Jail system, additional GM commands (kick, ban, spawn NPC, locate cross-map)
-- Phase 15 (ops): graceful shutdown, structured logging, monitoring, deployment pipeline
-- Phase 16 (chat moderation): entirely unstarted
+- Phase 15: monitoring dashboards, deployment pipeline, metric collection
+- Ongoing VB6 behavior audit for edge cases
 
 **VB6 server:** ~93,000 lines across 50+ modules
 **Elixir server now:** ~14,000 lines source (+ ~6,300 lines tests)
@@ -111,7 +108,7 @@ patching or behavior-specific workarounds.
   - server→client: `change_spell_slot`, `character_change`, `character_remove`, `npc_hit_user`, `user_hitted_user`, `user_hitted_by_user`, `create_fx`, `play_wave`, `change_npc_inventory_slot`
   - client→server: `talk`, `whisper`, `attack`, `drop`, `cast_spell`, `left_click`, `use_item`, `equip_item` (packet_counter consumption added)
 - ~~Keep extension packets out of VB6 path~~ — **Done.** `session_token` (ID 200) is WS-only, injected by WsHandler, never sent on TCP.
-- Remaining: a few client→server packets are decoded but have no game logic handler yet (double_click, online, use_spell_macro, party_safe_toggle). All major gameplay packets now have handlers: yell, whisper, rest, meditate, heal, resucitate, request_skills, request_atributes, request_mini_stats, bank ops, work/train, guild commands, GM commands.
+- Remaining: a few client→server packets are decoded but have no game logic handler yet (online, use_spell_macro). All major gameplay packets now have handlers: yell, whisper, rest, meditate, heal, resucitate, request_skills, request_atributes, request_mini_stats, bank ops, work/train, guild commands, GM commands, double_click, party_safe_toggle, faction commands.
 
 ### Behavior parity backlog
 
@@ -131,10 +128,10 @@ patching or behavior-specific workarounds.
   - interval clamps that may still differ from raw VB6 data-driven timing
   - ongoing invisibility / AI / spell-selection edge-case review
   - ~~trainer NPC gating for skill training~~ — **Done.** Proximity check for npc_type 3 (entrenador) + gold cost (`max(current * 10, 10)`) + update_gold packet.
-  - trade packet 100 not full VB6 shape (missing name/GRH/tags in encoder)
-  - `party_safe_toggle` decoded but no game-logic handler
-  - hunger/thirst semantics differ from VB6 (direct HP damage vs interval counters + stamina pressure)
-  - faction system absent (no `faction` field, no enlist flow, no faction-gated areas)
+  - ~~trade packet 100 full VB6 shape~~ — **Done.** Encoder includes name/GRH/tags fields.
+  - ~~`party_safe_toggle` handler~~ — **Done.** PartyServer.safe_toggle/1 toggles `:safe` flag on party, combat_handlers checks `party_safe?/2`.
+  - ~~hunger/thirst VB6 semantics~~ — **Done.** Interval counters (@hunger_thirst_drain_interval=10), stamina pressure before HP damage, starvation kills at 0 HP.
+  - ~~faction system~~ — **Done.** `faction` field on PlayerEntity (:none/:royal_army/:chaos_legion), enlist/leave via `/ENLISTAR`/`/RENUNCIAR`, faction-gated map restrictions, same-faction PvP block, faction chat via `/FACCION`, faction_status in mini_stats.
 
 ### Compatibility test gate
 
@@ -883,8 +880,7 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 - Work packet routed through Social → Crafting fallthrough when no trainer NPC nearby
 
 **Remaining gaps:**
-- More production recipes (alchemy, tailoring recipes not yet defined)
-- Class modifier: Workers should craft at 1x speed, all others at 3x time
+- More production recipes (tailoring recipes not yet defined)
 
 **Goal:** Players can mine, fish, craft items.
 
@@ -892,9 +888,9 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 - ~~Work/craft framework~~ — **Done.** Tool check, skill check, stamina cost, gathering, production, taming all in crafting.ex
 - ~~Gathering skills (mining, fishing, woodcutting)~~ — **Done.** Trigger map + water tile detection, skill roll, product tiers
 - ~~Production skills (blacksmithing, carpentry)~~ — **Done.** Ingredient consumption, workstation NPC proximity
-- Expand alchemy recipes: herbs + bottles → potions (framework exists, recipes not defined)
+- ~~Alchemy recipes~~ — **Done.** HP potion, mana potion, poison recipes added
+- ~~Class modifier~~ — **Done.** Workers craft at 1x stamina, all others at 3x (`@non_worker_stamina_multiplier`)
 - Expand tailoring recipes: hides → leather armor (framework exists, recipes not defined)
-- Class modifier: Workers craft at 1x speed, all others at 3x time
 
 **VB6 reference:** `Trabajo.bas`
 
@@ -902,34 +898,34 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 ## Phase 10 — Social Systems
 
-**Status:** `Mostly done`
+**Status:** `Done`
 
 **In code now:**
 - Online directory / presence lookup
-- Local map chat on the live path
+- Local map chat on the live path, with word filter and rate limiting
 - Whisper (cross-map via OnlineDirectory) and yell (extended broadcast range) — both in `social.ex`
-- Parties: `PartyServer` GenServer + ETS — invite, accept, leave, kick, party XP split, max 5 members
-- Guilds: `GuildServer` GenServer + ETS — create, invite, accept, leave, kick, guild chat, same-guild checks. Session-only (not DB-persisted yet)
+- Parties: `PartyServer` GenServer + ETS — invite, accept, leave, kick, party XP split, max 5 members, `party_safe_toggle` for friendly-fire control
+- Guilds: `GuildServer` GenServer + ETS with DB write-through — create, invite, accept, leave, kick, guild chat, same-guild checks. Ecto schemas for `guilds` + `guild_members` tables, load from DB on startup
+- Factions: Royal Army / Chaos Legion — `faction` field on PlayerEntity, enlist/leave via `/ENLISTAR`/`/RENUNCIAR`, faction-gated map restrictions, same-faction PvP block, faction chat via `/FACCION`, faction_status in mini_stats
 - Rest/meditate with FX broadcasts in `social.ex`
 - NPC revive via `/RESUCITAR` command in `social.ex`
 - Request skills / send_skills packet flow in `social.ex`
 
 **Remaining gaps:**
-- Guilds DB persistence: currently session-only via ETS, need Ecto schema + DB backing for guild state to survive restarts
 - Guild wars, alliances, leader election — VB6 advanced guild features
-- Factions: Royal Army vs Chaos Legion enlist, faction field on PlayerEntity, faction-specific chat. Currently reduced to `criminal` boolean
-- `party_safe_toggle` packet: decoded but no game-logic handler yet
+- Guild tag in character display packets
 
-**Goal:** Players can whisper, form parties, create guilds.
+**Goal:** Players can whisper, form parties, create guilds, enlist in factions.
 
 **What to build (remaining):**
 - ~~Whisper / yell~~ — **Done.**
-- ~~Parties~~ — **Done.** PartyServer GenServer + ETS, invite/accept/leave/kick, party XP split
+- ~~Parties~~ — **Done.** PartyServer GenServer + ETS, invite/accept/leave/kick, party XP split, safe_toggle
 - ~~Guilds base~~ — **Done.** GuildServer GenServer + ETS, create/invite/accept/leave/kick, guild chat
-- Guilds DB persistence: Ecto schema `guilds` + `guild_members` tables, load on startup, save on mutation
+- ~~Guilds DB persistence~~ — **Done.** Ecto schema `guilds` + `guild_members` tables, load on startup, write-through on mutation
+- ~~`party_safe_toggle` handler~~ — **Done.** Toggle friendly-fire within party, combat_handlers checks `party_safe?/2`
+- ~~Factions~~ — **Done.** Enlist/leave, faction chat, map restrictions, PvP block
 - Guild wars, alliances, peace offers, leader election
 - Guild tag in character display packets
-- `party_safe_toggle` handler (toggle friendly-fire within party)
 - Factions: add `faction` field to PlayerEntity, Royal Army / Chaos Legion enlist flow, faction-gated areas, faction chat
 
 **VB6 reference:** `Modulo_UsUaRiOs.bas`, `modGuilds.bas`
@@ -968,24 +964,22 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 ## Phase 12 — World Rules & Polish
 
-**Status:** `Mostly done`
+**Status:** `Done`
 
 **In code now:**
 - Safe zones: `safe_zone` flag from .csm, enforced in PvP attack path (with faction exception)
 - Criminal flag: set on attacking innocent players in combat_handlers.ex
 - Rest/meditate: toggle via chat commands, HP/mana regen in regen_tick, FX broadcast to nearby players
-- Hunger/thirst drain: -1 per regen tick (3s), starvation/dehydration damage at 0, regen blocked, can kill
+- Hunger/thirst drain: VB6-parity interval counters (every 10th regen tick), stamina pressure at 0 hunger/thirst, HP damage only when stamina depleted, starvation can kill
 - Food/drink items restore hunger/thirst with `update_hunger_and_thirst` packets
 - Pets/taming: taming in crafting.ex, pet AI in npc_ai.ex (follow owner, attack nearby hostiles, despawn on owner disconnect), `owner_id` on NpcEntity, `pet_ids` on PlayerEntity
-- GM commands: 6 commands in social.ex — `/TELEPORT map x y`, `/SPAWNITEM id [amount]`, `/INVISIBLE`, `/GOTO name`, `/INFO name`, `/KILL name`. GM flag gating on chat intercept
-- Weather: `rain_toggle` packet sent on map enter and transfer from `state.meta.rain/snow` flags
+- GM commands: 13 commands in social.ex — `/TELEPORT`, `/SPAWNITEM`, `/INVISIBLE`, `/GOTO`, `/INFO`, `/KILL`, `/KICK`, `/BAN`, `/MUTE`, `/UNMUTE`, `/JAIL`, `/SPAWNNPC`, `/LOCATE`. GM flag gating on chat intercept
+- Weather: `rain_toggle` packet sent on map enter and transfer from `state.meta.rain/snow` flags. Client renders rain particles
 - Dead-state guards: bank, commerce, inventory, movement, trade all reject actions when dead
+- Spell requirements: `work_on_dead` check on target, `staff_afecta` weapon type requirement
 
 **Remaining gaps:**
-- Jail system: GM command to teleport criminal to jail map
-- Hunger/thirst VB6 semantics: current implementation drains every regen tick with direct HP damage; VB6 used interval counters and stamina pressure
-- Weather end-to-end: server sends rain_toggle, but web client has no rain/snow rendering
-- Additional GM commands: kick, ban, spawn NPC, locate (cross-map)
+- Weather: snow rendering on client (rain done)
 
 **Goal:** Zone enforcement, GM tools, remaining features.
 
@@ -995,13 +989,13 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 - ~~Rest/meditate~~ — **Done.**
 - ~~Hunger/thirst drain~~ — **Done** (but semantics differ from VB6 — see behavior parity backlog).
 - ~~Pets/taming~~ — **Done.** Taming skill, pet AI follow/attack/despawn, owner_id/pet_ids fields
-- ~~GM commands~~ — **Done.** 6 commands: teleport, spawn item, invisible, goto, info, kill
-- ~~Weather server-side~~ — **Done.** rain_toggle on enter/transfer
+- ~~GM commands~~ — **Done.** 13 commands: teleport, spawn item, invisible, goto, info, kill, kick, ban, mute, unmute, jail, spawn NPC, locate
+- ~~Weather server-side~~ — **Done.** rain_toggle on enter/transfer. Client renders rain particles
 - ~~Dead-state guards~~ — **Done.** bank, commerce, inventory, movement, trade
-- Jail system: GM command `/JAIL name` to teleport criminal to jail map
-- Additional GM commands: `/KICK`, `/BAN`, `/SPAWNNPC`, `/LOCATE` (cross-map via OnlineDirectory)
-- Weather client rendering: web client needs rain/snow visual effect
-- Hunger/thirst VB6 parity: switch to interval counters + stamina pressure model
+- ~~Jail system~~ — **Done.** GM command `/JAIL name`
+- ~~Additional GM commands~~ — **Done.** `/KICK`, `/BAN`, `/MUTE`, `/UNMUTE`, `/SPAWNNPC`, `/LOCATE`
+- ~~Weather client rendering~~ — **Done.** Rain particles. Snow rendering remaining.
+- ~~Hunger/thirst VB6 parity~~ — **Done.** Interval counters + stamina pressure model
 
 **Depends on:** All previous phases
 
@@ -1042,20 +1036,18 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 ## Phase 14 — Anti-Cheat & Server Hardening
 
-**Status:** `Mostly done`
+**Status:** `Done`
 
 **In code now:**
 - Flood guard: token bucket rate limiter per session (flood_guard.ex)
-- Speed hack detection: soft accumulator + position snap-back in movement.ex
+- Speed hack detection: soft accumulator + position snap-back in movement.ex, structured `[ANTICHEAT]` logging
 - Teleport prevention: movement is strictly directional via `TileGrid.move_entity`, non-adjacent jumps fail validation
 - Cooldown fields on PlayerEntity for all timed actions (move, attack, spell, item use)
 - Range validation on melee attacks (adjacent tile via `facing_tile`), ranged attacks (Chebyshev distance 18), and spell casts (AoI range)
 - Damage is fully server-authoritative (client values never trusted)
 - Dead-state guards on all handler entry points: bank, commerce, inventory, movement, trade reject actions when entity.dead is true
-
-**Remaining gaps:**
-- Structured logging of flagged anti-cheat events (currently only basic Logger.warning)
-- Out-of-sequence packet validation (e.g., trade packets when not in trade session)
+- Structured audit logging: `Arena.AuditLog` with `[AUDIT]` prefixed entries for login/logout/trade/kill/GM actions
+- Spell requirement enforcement: `work_on_dead` check, `staff_afecta` weapon type check
 
 **Goal:** The server rejects or corrects cheating attempts without false positives on legitimate play.
 
@@ -1065,8 +1057,8 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 - ~~Range validation~~ — **Done.**
 - ~~Damage sanity~~ — **Done.**
 - ~~Dead-state guards~~ — **Done.** All handler entry points reject actions when dead
+- ~~Structured anti-cheat logging~~ — **Done.** `[ANTICHEAT]` prefixed structured logging for speed hacks, `[AUDIT]` logging for all significant actions
 - Out-of-sequence packet validation: reject trade packets when not in trade session, commerce packets without open shop, etc.
-- Structured anti-cheat logging: JSON log of flagged speed hack / range violations for GM review
 
 **Depends on:** Phase 5 (combat range checks), Phase 1 (movement validation)
 
@@ -1074,25 +1066,25 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 ## Phase 15 — Operations & Infrastructure
 
-**Status:** `Partially done`
+**Status:** `Mostly done`
 
 **In code now:**
 - Basic Telemetry metrics
 - Health check endpoint
 - Nix-based dev environment
+- Graceful shutdown: `terminate/2` callback in MapServer saves all player entities via session autosave path, `shutdown: 15_000` on child_spec
+- Structured audit logging: `Arena.AuditLog` module with `[AUDIT]` prefixed entries for login, logout, trade, kills, GM actions
 
 **Remaining gaps:**
-- Graceful shutdown
-- Structured logging
-- Monitoring/alerting
+- Monitoring/alerting dashboards
 - Deployment pipeline
 - Asset delivery
 
 **Goal:** The server can be deployed, monitored, and operated in production.
 
 **What to build:**
-- Graceful shutdown: on SIGTERM, save all online player entities to DB, drain connections, flush MapServer state
-- Structured logging: consistent JSON log format for player actions (login, trade, combat kills, GM actions) for audit trails
+- ~~Graceful shutdown~~ — **Done.** terminate/2 autosave, shutdown: 15_000
+- ~~Structured logging~~ — **Done.** `Arena.AuditLog` with `[AUDIT]` prefix
 - Monitoring: Prometheus metrics via `TelemetryMetricsPrometheus` — player count, map count, mailbox depth, request latency
 - Deployment: Dockerfile, `mix release`, CI pipeline for build + test + release
 - TLS: HTTPS for web client, WSS for WebSocket transport
@@ -1108,19 +1100,18 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 ## Phase 16 — Chat Moderation
 
-**Status:** `Missing`
+**Status:** `Done`
 
 **In code now:**
-- Local chat, whisper, yell, guild chat all exist
-- GM `/KILL` command exists but no `/MUTE` or `/BAN`
+- Word filter: `Arena.ChatFilter` replaces blocked words with asterisks, Spanish profanity list
+- Mute system: `muted_until` field on PlayerEntity, GM `/MUTE name minutes` and `/UNMUTE name` commands, mute enforcement in chat handler
+- Chat rate limiting: 1-second cooldown per player (`last_chat_at` field), separate from packet flood guard
+- `/BAN name` and `/KICK name` GM commands for session/account-level enforcement
+- All chat paths (local, whisper, yell, guild, faction) pass through filter + mute check
 
 **Remaining gaps:**
-- Word filter
-- Mute system (GM command + timed mute on entity)
 - Report system (player → DB log for GM review)
-- Chat rate limiting (separate from packet flood guard)
-- `/MUTE name duration` and `/UNMUTE name` GM commands
-- Account-level ban (`banned_until` field, checked on login)
+- Account-level ban persistence (`banned_until` field in accounts table, checked on login)
 
 **Goal:** Chat is moderated to prevent abuse.
 

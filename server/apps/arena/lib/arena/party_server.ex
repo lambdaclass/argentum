@@ -40,6 +40,23 @@ defmodule Arena.PartyServer do
     GenServer.cast(__MODULE__, {:kick, leader_id, target_id})
   end
 
+  @doc "Toggle party safe mode (prevents party members from damaging each other)."
+  def safe_toggle(char_id) do
+    GenServer.cast(__MODULE__, {:safe_toggle, char_id})
+  end
+
+  @doc "Check if party safe mode is on for a player's party. Pure ETS read."
+  def party_safe?(char_id) do
+    case :ets.lookup(@table, {:member, char_id}) do
+      [{_, party_id}] ->
+        case :ets.lookup(@table, {:party, party_id}) do
+          [{_, party}] -> Map.get(party, :safe, false)
+          [] -> false
+        end
+      [] -> false
+    end
+  end
+
   @doc "Get party info for a player. Pure ETS read."
   def get_party(char_id) do
     case :ets.lookup(@table, {:member, char_id}) do
@@ -159,6 +176,24 @@ defmodule Arena.PartyServer do
   end
 
   @impl true
+  def handle_cast({:safe_toggle, char_id}, state) do
+    case :ets.lookup(@table, {:member, char_id}) do
+      [{_, party_id}] ->
+        case :ets.lookup(@table, {:party, party_id}) do
+          [{_, party}] ->
+            new_safe = not Map.get(party, :safe, false)
+            :ets.insert(@table, {{:party, party_id}, Map.put(party, :safe, new_safe)})
+            msg = if new_safe, do: "Seguro de grupo activado.", else: "Seguro de grupo desactivado."
+            broadcast_party(party.members, msg)
+          [] -> :ok
+        end
+      [] ->
+        notify(char_id, "No perteneces a un grupo.")
+    end
+    {:noreply, state}
+  end
+
+  @impl true
   def handle_cast({:kick, leader_id, target_id}, state) do
     case :ets.lookup(@table, {:member, leader_id}) do
       [{_, party_id}] ->
@@ -197,7 +232,7 @@ defmodule Arena.PartyServer do
         {state, party_id}
       [] ->
         party_id = state.next_party_id
-        :ets.insert(@table, {{:party, party_id}, %{leader: char_id, members: [char_id]}})
+        :ets.insert(@table, {{:party, party_id}, %{leader: char_id, members: [char_id], safe: false}})
         :ets.insert(@table, {{:member, char_id}, party_id})
         {%{state | next_party_id: party_id + 1}, party_id}
     end

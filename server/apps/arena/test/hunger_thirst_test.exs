@@ -22,13 +22,16 @@ defmodule Arena.HungerThirstTest do
     :ok
   end
 
-  defp make_state(players) do
+  # Counter at 9 so the next process_regen_tick triggers hunger/thirst drain
+  # (drain happens every @hunger_thirst_drain_interval = 10 ticks)
+  defp make_state(players, opts \\ []) do
     %{
       players: players,
       sessions: %{},
       npcs: %{},
       meta: %{safe_zone: false},
-      visibility_mode: :global
+      visibility_mode: :global,
+      hunger_thirst_tick_counter: Keyword.get(opts, :counter, 9)
     }
   end
 
@@ -67,7 +70,8 @@ defmodule Arena.HungerThirstTest do
     end
 
     test "starvation deals damage when hunger reaches 0" do
-      entity = %PlayerEntity{char_id: 1, hp: 100, max_hp: 100, hunger: 0, thirst: 50}
+      # VB6: HP damage only when stamina == 0 AND starving
+      entity = %PlayerEntity{char_id: 1, hp: 100, max_hp: 100, hunger: 0, thirst: 50, stamina: 0}
       state = make_state(%{1 => entity})
 
       new_state = CombatHandlers.process_regen_tick(state)
@@ -77,7 +81,8 @@ defmodule Arena.HungerThirstTest do
     end
 
     test "dehydration deals damage when thirst reaches 0" do
-      entity = %PlayerEntity{char_id: 1, hp: 100, max_hp: 100, hunger: 50, thirst: 0}
+      # VB6: HP damage only when stamina == 0 AND dehydrated
+      entity = %PlayerEntity{char_id: 1, hp: 100, max_hp: 100, hunger: 50, thirst: 0, stamina: 0}
       state = make_state(%{1 => entity})
 
       new_state = CombatHandlers.process_regen_tick(state)
@@ -116,7 +121,8 @@ defmodule Arena.HungerThirstTest do
     end
 
     test "starvation can kill a player" do
-      entity = %PlayerEntity{char_id: 1, hp: 1, max_hp: 100, hunger: 0, thirst: 50}
+      # VB6: HP damage only when stamina == 0 AND starving
+      entity = %PlayerEntity{char_id: 1, hp: 1, max_hp: 100, hunger: 0, thirst: 50, stamina: 0}
       state = make_state(%{1 => entity})
 
       new_state = CombatHandlers.process_regen_tick(state)

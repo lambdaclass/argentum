@@ -692,6 +692,9 @@ export class WorldRenderer {
   private runtimeTick: ((now: number) => void) | null = null;
   private tileInteractionHandler: ((payload: TileInteractionPayload) => void) | null = null;
   private renderLoopActive = false;
+  private rainLayer: Container | null = null;
+  private rainDrops: Graphics[] = [];
+  private rainActive = false;
   /**
    * Imperative fast path: immediately start a motion animation for the self
    * character without waiting for React to commit state and trigger render().
@@ -752,6 +755,16 @@ export class WorldRenderer {
     this.ensureRenderLoop();
   }
 
+  setRaining(active: boolean) {
+    this.rainActive = active;
+    if (this.rainLayer) {
+      this.rainLayer.visible = active;
+    }
+    if (active) {
+      this.ensureRenderLoop();
+    }
+  }
+
   setRuntimeTick(runtimeTick: ((now: number) => void) | null) {
     this.runtimeTick = runtimeTick;
   }
@@ -778,8 +791,9 @@ export class WorldRenderer {
     const motionsAnimating = this.updateCharacterMotions(now);
     this.updateCamera(this.lastWorld);
     this.updateHud(this.lastWorld);
+    this.updateRain();
 
-    const needsContinuousRender = motionsAnimating || this.transferInProgress;
+    const needsContinuousRender = motionsAnimating || this.transferInProgress || this.rainActive;
     if (!needsContinuousRender) {
       this.stopRenderLoop();
     }
@@ -828,6 +842,20 @@ export class WorldRenderer {
     this.hudText.y = 12;
     this.hudText.visible = false;
     this.app.stage.addChild(this.hudText);
+
+    this.rainLayer = new Container();
+    this.rainLayer.visible = false;
+    for (let i = 0; i < 120; i++) {
+      const drop = new Graphics();
+      drop.beginFill(0x8888ff, 0.5);
+      drop.drawRect(0, 0, 1, 8);
+      drop.endFill();
+      drop.x = Math.random() * VIEWPORT_WIDTH;
+      drop.y = Math.random() * VIEWPORT_HEIGHT;
+      this.rainLayer.addChild(drop);
+      this.rainDrops.push(drop);
+    }
+    this.app.stage.addChild(this.rainLayer);
 
     this.canvas.addEventListener("click", this.handleCanvasClick);
     this.app.ticker.add(this.tick);
@@ -1611,6 +1639,24 @@ export class WorldRenderer {
     this.worldLayer.y = centerY;
   }
 
+  private updateRain() {
+    if (!this.rainActive) {
+      return;
+    }
+
+    for (const drop of this.rainDrops) {
+      drop.y += 8 + Math.random() * 4;
+      drop.x -= 2;
+      if (drop.y > VIEWPORT_HEIGHT) {
+        drop.y = -10;
+        drop.x = Math.random() * VIEWPORT_WIDTH;
+      }
+      if (drop.x < -10) {
+        drop.x = VIEWPORT_WIDTH + Math.random() * 10;
+      }
+    }
+  }
+
   private updateHud(world: WorldState) {
     if (!this.hudText) {
       return;
@@ -1658,6 +1704,9 @@ export class WorldRenderer {
     this.effectsLayer = null;
     this.tileInteractionHandler = null;
     this.transferInProgress = false;
+    this.rainLayer = null;
+    this.rainDrops = [];
+    this.rainActive = false;
     this.clearStaticSceneCache();
   }
 }

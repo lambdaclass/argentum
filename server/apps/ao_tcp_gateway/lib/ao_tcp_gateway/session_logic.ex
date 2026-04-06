@@ -280,8 +280,23 @@ defmodule AoTcpGateway.SessionLogic do
             {state, []}
 
           :not_guild_command ->
-            Arena.Map.MapServer.chat(state.map_id, state.character_id, message)
-            {state, []}
+            case parse_faction_command(message) do
+              {:enlist, faction} ->
+                Arena.Map.MapServer.enlist_faction(state.map_id, state.character_id, faction)
+                {state, []}
+
+              :leave_faction ->
+                Arena.Map.MapServer.leave_faction(state.map_id, state.character_id)
+                {state, []}
+
+              {:faction_chat, faction_msg} ->
+                Arena.Map.MapServer.faction_chat(state.map_id, state.character_id, faction_msg)
+                {state, []}
+
+              :not_faction_command ->
+                Arena.Map.MapServer.chat(state.map_id, state.character_id, message)
+                {state, []}
+            end
         end
     end
   end
@@ -512,6 +527,11 @@ defmodule AoTcpGateway.SessionLogic do
 
   def handle_command(state, {:work, %{skill: skill_index}}) when state.character_id != nil do
     Arena.Map.MapServer.train_skill(state.map_id, state.character_id, skill_index)
+    {state, []}
+  end
+
+  def handle_command(state, {:party_safe_toggle, _}) when state.character_id != nil do
+    Arena.PartyServer.safe_toggle(state.character_id)
     {state, []}
   end
 
@@ -754,6 +774,19 @@ defmodule AoTcpGateway.SessionLogic do
 
       true ->
         :not_guild_command
+    end
+  end
+
+  defp parse_faction_command(message) do
+    upper = String.upcase(String.trim(message))
+    cond do
+      upper == "/ENLISTAR REAL" -> {:enlist, :royal_army}
+      upper == "/ENLISTAR CAOS" -> {:enlist, :chaos_legion}
+      upper == "/RENUNCIAR" -> :leave_faction
+      String.starts_with?(upper, "/FACCION ") ->
+        msg = String.trim(String.slice(message, 9..-1//1))
+        {:faction_chat, msg}
+      true -> :not_faction_command
     end
   end
 

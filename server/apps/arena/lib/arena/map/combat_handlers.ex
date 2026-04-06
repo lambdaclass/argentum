@@ -283,6 +283,18 @@ defmodule Arena.Map.CombatHandlers do
             players = Map.put(state.players, char_id, entity)
             %{state | players: players}
 
+          same_faction?(entity, defender) ->
+            Helpers.send_to_session(state.sessions, char_id, {:send_raw,
+              Encoder.encode({:console_msg, %{message: "No puedes atacar a un miembro de tu faccion.", font_index: 0}})})
+            players = Map.put(state.players, char_id, entity)
+            %{state | players: players}
+
+          party_safe_block?(char_id, defender) ->
+            Helpers.send_to_session(state.sessions, char_id, {:send_raw,
+              Encoder.encode({:console_msg, %{message: "No puedes atacar a un miembro de tu grupo.", font_index: 0}})})
+            players = Map.put(state.players, char_id, entity)
+            %{state | players: players}
+
           state.meta.safe_zone and not faction_pvp_exception?(state.map_id, entity, defender) ->
             Helpers.send_to_session(state.sessions, char_id, {:send_raw,
               Encoder.encode({:console_msg, %{message: "Zona segura.", font_index: 0}})})
@@ -474,6 +486,16 @@ defmodule Arena.Map.CombatHandlers do
                   band(req, @req_on_water) != 0 and target_x != nil and
                     not tile_is_water?(state, target_x, target_y) ->
                     spell_req_fail(state, char_id, "El objetivo debe estar en agua.")
+
+                  # VB6: WorkOnDead -- reject if target is dead and spell cannot work on dead
+                  not spell_def.work_on_dead and target_x != nil and target_y != nil and
+                    target_is_dead?(state, target_x, target_y) ->
+                    spell_req_fail(state, char_id, "No puedes lanzar ese hechizo sobre un muerto.")
+
+                  # VB6: StaffAfecta -- requires a weapon of specific obj_type
+                  spell_def.staff_afecta > 0 and
+                    not has_required_weapon_type?(entity, spell_def.staff_afecta) ->
+                    spell_req_fail(state, char_id, "Necesitas el arma adecuada para lanzar ese hechizo.")
 
                   true ->
                     entity = Helpers.break_invisibility(entity, state, char_id)
@@ -679,6 +701,24 @@ defmodule Arena.Map.CombatHandlers do
             %{state | players: players}
 
           defender ->
+            cond do
+              same_faction?(entity, defender) ->
+                Helpers.send_to_session(state.sessions, char_id, {:send_raw,
+                  Encoder.encode({:console_msg, %{message: "No puedes atacar a un miembro de tu faccion.", font_index: 0}})})
+                Helpers.send_to_session(state.sessions, char_id, {:send_raw,
+                  Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+                players = Map.put(state.players, char_id, entity)
+                %{state | players: players}
+
+              party_safe_block?(char_id, defender) ->
+                Helpers.send_to_session(state.sessions, char_id, {:send_raw,
+                  Encoder.encode({:console_msg, %{message: "No puedes atacar a un miembro de tu grupo.", font_index: 0}})})
+                Helpers.send_to_session(state.sessions, char_id, {:send_raw,
+                  Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+                players = Map.put(state.players, char_id, entity)
+                %{state | players: players}
+
+              true ->
             final_damage = damage
             new_hp = max(defender.hp - final_damage, 0)
             defender = %{defender | hp: new_hp}
@@ -710,6 +750,7 @@ defmodule Arena.Map.CombatHandlers do
             end
 
             state
+            end
         end
 
       _ ->
@@ -1188,6 +1229,29 @@ defmodule Arena.Map.CombatHandlers do
     end
   end
 
+  # VB6: WorkOnDead -- check if the targeted tile has a dead player
+  defp target_is_dead?(state, target_x, target_y) do
+    case Helpers.get_occupancy(state.occupancy, target_x, target_y) do
+      {:player, target_id} ->
+        case Map.get(state.players, target_id) do
+          nil -> false
+          target_entity -> target_entity.dead
+        end
+      _ -> false
+    end
+  end
+
+  # VB6: StaffAfecta -- check if the caster's weapon obj_type matches required type
+  defp has_required_weapon_type?(entity, required_obj_type) do
+    weapon_id = entity.equipment[:weapon]
+    if weapon_id do
+      item_def = GameData.get_item(weapon_id)
+      item_def != nil and item_def.obj_type == required_obj_type
+    else
+      false
+    end
+  end
+
   # VB6: requirement mask failure -- send message and return error reply
   def spell_req_fail(state, char_id, message) do
     Helpers.send_to_session(state.sessions, char_id, {:send_raw,
@@ -1202,39 +1266,82 @@ defmodule Arena.Map.CombatHandlers do
 
   # VB6: Armada vs Caos PvP is allowed in faction city maps even in safe zones.
   # Maps 58-60 = Armada cities, 195-196 = Caos cities.
-  def faction_pvp_exception?(map_id, attacker, defender) do
-    map_id in @faction_pvp_maps and
-      attacker.criminal != defender.criminal
+  # Also, different-faction players can attack each other in safe zones anywhere.
+  def faction_pvp_exception?(_map_id, attacker, defender) do
+    attacker.faction != :none and defender.faction != :none and
+      attacker.faction != defender.faction
+  end
+
+  # Same-faction players cannot attack each other regardless of zone.
+  defp same_faction?(attacker, defender) do
+    attacker.faction != :none and defender.faction != :none and
+      attacker.faction == defender.faction
+  end
+
+  # Party safe mode: if both players are in the same party and party safe is on, block the attack.
+  defp party_safe_block?(attacker_id, defender) do
+    Arena.PartyServer.same_party?(attacker_id, defender.char_id) and
+      Arena.PartyServer.party_safe?(attacker_id)
   end
 
   # ==================================================================
   # Regen tick (rest + meditate)
   # ==================================================================
 
-  # VB6: starvation/dehydration damage per tick
+  # VB6 parity:
+  # - Hunger/thirst drain every 10th regen tick (~30s), not every tick.
+  # - At 0 hunger OR 0 thirst: stamina regen blocked, stamina drains by 1/tick.
+  # - HP/mana regen also blocked when starving or dehydrated.
+  # - HP damage only when stamina reaches 0 AND (hunger == 0 OR thirst == 0).
   @hunger_thirst_damage 5
+  @hunger_thirst_drain_interval 10
 
   def process_regen_tick(state) do
+    # Increment the map-wide hunger/thirst tick counter.
+    counter = Map.get(state, :hunger_thirst_tick_counter, 0) + 1
+    drain_vitals? = counter >= @hunger_thirst_drain_interval
+    counter = if drain_vitals?, do: 0, else: counter
+    state = Map.put(state, :hunger_thirst_tick_counter, counter)
+
     Enum.reduce(state.players, state, fn {char_id, entity}, state ->
       if entity.dead do
         state
       else
-        {entity, vitals_changed} = drain_hunger_thirst(entity)
+        original_entity = state.players[char_id]
+
+        # Drain hunger/thirst only every Nth tick (~30s)
+        {entity, vitals_changed} =
+          if drain_vitals? do
+            drain_hunger_thirst(entity)
+          else
+            {entity, false}
+          end
+
         starving = entity.hunger == 0
         dehydrated = entity.thirst == 0
 
-        # Starvation/dehydration damage
+        # VB6: at 0 hunger or 0 thirst, drain stamina by 1 per tick
+        entity =
+          if (starving or dehydrated) and entity.stamina > 0 do
+            %{entity | stamina: max(entity.stamina - 1, 0)}
+          else
+            entity
+          end
+
+        stamina_changed = entity.stamina != original_entity.stamina
+
+        # VB6: HP damage only when stamina == 0 AND (starving or dehydrated)
         entity =
           cond do
-            starving and dehydrated ->
+            entity.stamina == 0 and starving and dehydrated ->
               %{entity | hp: max(entity.hp - @hunger_thirst_damage * 2, 0)}
-            starving or dehydrated ->
+            entity.stamina == 0 and (starving or dehydrated) ->
               %{entity | hp: max(entity.hp - @hunger_thirst_damage, 0)}
             true ->
               entity
           end
 
-        hp_changed = entity.hp != state.players[char_id].hp
+        hp_changed = entity.hp != original_entity.hp
 
         # Kill on starvation
         entity = if entity.hp <= 0, do: %{entity | hp: 0, dead: true}, else: entity
@@ -1282,17 +1389,22 @@ defmodule Arena.Map.CombatHandlers do
             }})})
         end
 
-        if hp_changed or entity.hp != state.players[char_id].hp do
+        if hp_changed or entity.hp != original_entity.hp do
           Helpers.send_to_session(state.sessions, char_id,
             {:send_raw, Encoder.encode({:update_hp, %{min_hp: entity.hp, shield: 0}})})
         end
 
-        if entity.mana != state.players[char_id].mana do
+        if entity.mana != original_entity.mana do
           Helpers.send_to_session(state.sessions, char_id,
             {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
         end
 
-        if entity.dead and not state.players[char_id].dead do
+        if stamina_changed or entity.stamina != original_entity.stamina do
+          Helpers.send_to_session(state.sessions, char_id,
+            {:send_raw, Encoder.encode({:update_stamina, %{min_sta: entity.stamina}})})
+        end
+
+        if entity.dead and not original_entity.dead do
           Helpers.send_to_session(state.sessions, char_id,
             {:send_raw, Encoder.encode({:console_msg, %{message: "Has muerto de inanición.", font_index: 0}})})
           state = %{state | players: Map.put(state.players, char_id, entity)}

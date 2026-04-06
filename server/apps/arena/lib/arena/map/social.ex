@@ -1,7 +1,10 @@
 defmodule Arena.Map.Social do
   @moduledoc "Chat, social commands, stat requests, and NPC interaction."
 
+  require Logger
+
   alias Arena.Map.{Helpers, Visibility, Crafting}
+  alias Arena.Entity.NpcEntity
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
@@ -12,6 +15,10 @@ defmodule Arena.Map.Social do
   @yell_range_x (Application.compile_env(:arena, :aoi_range_x, 11)) * 2
   @yell_range_y (Application.compile_env(:arena, :aoi_range_y, 9)) * 2
   @magical_classes [:mage, :cleric, :druid, :bard, :paladin]
+  @jail_map_id 66
+  @jail_x 33
+  @jail_y 33
+  @chat_cooldown_ms 1000
 
   # ==================================================================
   # Safe toggle
@@ -49,25 +56,50 @@ defmodule Arena.Map.Social do
             {:noreply, state}
           end
         else
-          chat_raw = Encoder.encode({:chat_over_head, %{
-            message: message,
-            char_index: entity.char_index,
-            color: 0x00FFFFFF,
-            x: entity.x,
-            y: entity.y,
-            min_display_time: 2000,
-            max_display_time: 5000
-          }})
+          now = System.monotonic_time(:millisecond)
 
-          # Send to nearby players including the speaker
-          chat_recipients =
-            Visibility.broadcast_visible_all(state, entity.x, entity.y, fn pid ->
-              send(pid, {:send_raw, chat_raw})
-            end)
+          cond do
+            # Mute enforcement
+            entity.muted_until > 0 and now < entity.muted_until ->
+              Helpers.send_to_session(state.sessions, char_id,
+                {:send_raw, Encoder.encode({:console_msg, %{message: "Estás silenciado.", font_index: 0}})})
+              {:noreply, state}
 
-          Arena.Metrics.inc_chat(chat_recipients)
+            # Chat rate limit: 1 message per second
+            now - entity.last_chat_at < @chat_cooldown_ms ->
+              Helpers.send_to_session(state.sessions, char_id,
+                {:send_raw, Encoder.encode({:console_msg, %{message: "Estás hablando demasiado rápido.", font_index: 0}})})
+              {:noreply, state}
 
-          {:noreply, state}
+            true ->
+              # Apply word filter
+              filtered_message = Arena.ChatFilter.filter(message)
+
+              # Update last_chat_at
+              entity = %{entity | last_chat_at: now}
+              players = Map.put(state.players, char_id, entity)
+              state = %{state | players: players}
+
+              chat_raw = Encoder.encode({:chat_over_head, %{
+                message: filtered_message,
+                char_index: entity.char_index,
+                color: 0x00FFFFFF,
+                x: entity.x,
+                y: entity.y,
+                min_display_time: 2000,
+                max_display_time: 5000
+              }})
+
+              # Send to nearby players including the speaker
+              chat_recipients =
+                Visibility.broadcast_visible_all(state, entity.x, entity.y, fn pid ->
+                  send(pid, {:send_raw, chat_raw})
+                end)
+
+              Arena.Metrics.inc_chat(chat_recipients)
+
+              {:noreply, state}
+          end
         end
 
       :error ->
@@ -114,6 +146,33 @@ defmodule Arena.Map.Social do
       ["/KILL", _name_upper] ->
         target_name = Enum.at(parts, 1)
         gm_kill(state, char_id, target_name)
+
+      ["/KICK", _name_upper] ->
+        target_name = Enum.at(parts, 1)
+        gm_kick(state, char_id, target_name)
+
+      ["/BAN", _name_upper, days_str] ->
+        target_name = Enum.at(parts, 1)
+        gm_ban(state, char_id, target_name, days_str)
+
+      ["/MUTE", _name_upper, minutes_str] ->
+        target_name = Enum.at(parts, 1)
+        gm_mute(state, char_id, target_name, minutes_str)
+
+      ["/UNMUTE", _name_upper] ->
+        target_name = Enum.at(parts, 1)
+        gm_unmute(state, char_id, target_name)
+
+      ["/JAIL", _name_upper] ->
+        target_name = Enum.at(parts, 1)
+        gm_jail(state, char_id, target_name)
+
+      ["/SPAWNNPC", npc_id_str] ->
+        gm_spawn_npc(state, char_id, entity, npc_id_str)
+
+      ["/LOCATE", _name_upper] ->
+        target_name = Enum.at(parts, 1)
+        gm_locate(state, char_id, target_name)
 
       _ ->
         gm_console(state, char_id, "Unknown GM command: #{message}")
@@ -254,6 +313,181 @@ defmodule Arena.Map.Social do
       :not_found ->
         gm_console(state, char_id, "Player '#{target_name}' not found on this map.")
         {:noreply, state}
+    end
+  end
+
+  # /KICK name — kick player from the server
+  defp gm_kick(state, char_id, target_name) do
+    case find_player_by_name(state, target_name) do
+      {:ok, target_id, _target} ->
+        Helpers.send_to_session(state.sessions, target_id,
+          {:send_raw, Encoder.encode({:console_msg, %{message: "Has sido expulsado del servidor.", font_index: 0}})})
+        Helpers.send_to_session(state.sessions, target_id, :disconnect)
+        gm_console(state, char_id, "#{target_name} has been kicked.")
+        {:noreply, state}
+
+      :not_found ->
+        gm_console(state, char_id, "Player '#{target_name}' not found on this map.")
+        {:noreply, state}
+    end
+  end
+
+  # /BAN name days — ban player (kick + log; DB ban needs GameBackend.Account.ban/2)
+  # TODO: Implement persistent ban via GameBackend.Account.ban/2
+  defp gm_ban(state, char_id, target_name, days_str) do
+    case Integer.parse(days_str) do
+      {days, ""} when days > 0 ->
+        case find_player_by_name(state, target_name) do
+          {:ok, target_id, _target} ->
+            Logger.warning("GM ban: #{target_name} for #{days} days")
+            Helpers.send_to_session(state.sessions, target_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "Has sido baneado por #{days} día(s).", font_index: 0}})})
+            Helpers.send_to_session(state.sessions, target_id, :disconnect)
+            gm_console(state, char_id, "#{target_name} banned for #{days} day(s). (Note: persistent ban not yet implemented)")
+            {:noreply, state}
+
+          :not_found ->
+            gm_console(state, char_id, "Player '#{target_name}' not found on this map.")
+            {:noreply, state}
+        end
+
+      _ ->
+        gm_console(state, char_id, "Usage: /BAN name days")
+        {:noreply, state}
+    end
+  end
+
+  # /MUTE name minutes — mute a player for N minutes
+  defp gm_mute(state, char_id, target_name, minutes_str) do
+    case Integer.parse(minutes_str) do
+      {minutes, ""} when minutes > 0 ->
+        case find_player_by_name(state, target_name) do
+          {:ok, target_id, target} ->
+            muted_until = System.monotonic_time(:millisecond) + minutes * 60_000
+            target = %{target | muted_until: muted_until}
+            players = Map.put(state.players, target_id, target)
+            state = %{state | players: players}
+
+            Helpers.send_to_session(state.sessions, target_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "Has sido silenciado por #{minutes} minuto(s).", font_index: 0}})})
+            gm_console(state, char_id, "#{target.name} muted for #{minutes} minute(s).")
+            {:noreply, state}
+
+          :not_found ->
+            gm_console(state, char_id, "Player '#{target_name}' not found on this map.")
+            {:noreply, state}
+        end
+
+      _ ->
+        gm_console(state, char_id, "Usage: /MUTE name minutes")
+        {:noreply, state}
+    end
+  end
+
+  # /UNMUTE name — remove mute from a player
+  defp gm_unmute(state, char_id, target_name) do
+    case find_player_by_name(state, target_name) do
+      {:ok, target_id, target} ->
+        target = %{target | muted_until: 0}
+        players = Map.put(state.players, target_id, target)
+        state = %{state | players: players}
+
+        Helpers.send_to_session(state.sessions, target_id,
+          {:send_raw, Encoder.encode({:console_msg, %{message: "Ya no estás silenciado.", font_index: 0}})})
+        gm_console(state, char_id, "#{target.name} has been unmuted.")
+        {:noreply, state}
+
+      :not_found ->
+        gm_console(state, char_id, "Player '#{target_name}' not found on this map.")
+        {:noreply, state}
+    end
+  end
+
+  # /JAIL name — teleport player to jail map (Cárcel de Ullathorpe)
+  defp gm_jail(state, char_id, target_name) do
+    case find_player_by_name(state, target_name) do
+      {:ok, target_id, target} ->
+        Helpers.send_to_session(state.sessions, target_id,
+          {:send_raw, Encoder.encode({:console_msg, %{message: "Has sido enviado a la cárcel.", font_index: 0}})})
+        Helpers.send_to_session(state.sessions, target_id,
+          {:transfer, @jail_map_id, @jail_x, @jail_y, target})
+        gm_console(state, char_id, "#{target.name} has been jailed (map #{@jail_map_id}).")
+        {:noreply, state}
+
+      :not_found ->
+        gm_console(state, char_id, "Player '#{target_name}' not found on this map.")
+        {:noreply, state}
+    end
+  end
+
+  # /SPAWNNPC npc_id — spawn an NPC at the GM's facing tile
+  defp gm_spawn_npc(state, char_id, entity, npc_id_str) do
+    case Integer.parse(npc_id_str) do
+      {npc_id, ""} ->
+        case GameData.get_npc(npc_id) do
+          nil ->
+            gm_console(state, char_id, "NPC #{npc_id} not found in data.")
+            {:noreply, state}
+
+          npc_def ->
+            {tx, ty} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
+
+            if tx >= 1 and tx <= Helpers.map_width() and
+               ty >= 1 and ty <= Helpers.map_height() and
+               TileGrid.is_walkable(state.map_id, tx, ty) and
+               Helpers.get_occupancy(state.occupancy, tx, ty) == nil do
+              instance_id = state.next_char_index
+              npc_entity = NpcEntity.from_def(npc_def, instance_id, instance_id, tx, ty)
+
+              npcs_live = Map.put(state.npcs_live, instance_id, npc_entity)
+              npc_char_indices = Map.put(state.npc_char_indices, instance_id, instance_id)
+              occupancy = Helpers.set_occupancy(state.occupancy, tx, ty, {:npc, instance_id})
+
+              state = %{state |
+                npcs_live: npcs_live,
+                npc_char_indices: npc_char_indices,
+                occupancy: occupancy,
+                next_char_index: instance_id + 1
+              }
+
+              # Broadcast character_create for the new NPC
+              raw = Encoder.encode(Helpers.npc_create_packet(npc_entity, npc_def))
+              Visibility.broadcast_visible_all(state, tx, ty, fn pid ->
+                send(pid, {:send_raw, raw})
+              end)
+
+              gm_console(state, char_id, "Spawned NPC #{npc_def.name} (id #{npc_id}) at (#{tx}, #{ty}).")
+              {:noreply, state}
+            else
+              gm_console(state, char_id, "Cannot spawn NPC: facing tile (#{tx}, #{ty}) is blocked or occupied.")
+              {:noreply, state}
+            end
+        end
+
+      _ ->
+        gm_console(state, char_id, "Usage: /SPAWNNPC npc_id")
+        {:noreply, state}
+    end
+  end
+
+  # /LOCATE name — find a player's location (uses OnlineDirectory if available)
+  defp gm_locate(state, char_id, target_name) do
+    case AoSession.OnlineDirectory.lookup_by_name(target_name) do
+      {:ok, _target_char_id, info} ->
+        gm_console(state, char_id, "#{target_name} está en mapa #{info.map_id}")
+        {:noreply, state}
+
+      :not_found ->
+        # Fall back to searching current map only
+        case find_player_by_name(state, target_name) do
+          {:ok, _target_id, target} ->
+            gm_console(state, char_id, "#{target.name} está en mapa #{state.map_id} (#{target.x}, #{target.y})")
+            {:noreply, state}
+
+          :not_found ->
+            gm_console(state, char_id, "Player '#{target_name}' not found.")
+            {:noreply, state}
+        end
     end
   end
 
@@ -544,6 +778,23 @@ defmodule Arena.Map.Social do
   @crafting_skills [:woodcutting, :fishing, :mining, :blacksmithing,
                     :carpentry, :alchemy, :tailoring, :taming]
 
+  @doc """
+  Train a skill via a nearby Entrenador NPC, or attempt crafting work if no
+  trainer is present.
+
+  Known simplification: VB6 trainers have subtypes (combat, magic, trade) that
+  restrict which skill groups they can teach. Our NPC data currently stores only
+  npc_type 3 (entrenador) with no subtype field, so every trainer accepts every
+  skill. Once NPC subtype data is loaded from the .dat files, this function
+  should match skill groups to trainer subtypes:
+    - Combat trainers: combat_tactics, combat_weapons, combat_defense,
+      short_weapons, ranged_weapons, wrestling, resistance
+    - Magic trainers: magic, meditation
+    - Trade/craft trainers: woodcutting, fishing, mining, blacksmithing,
+      carpentry, alchemy, tailoring, taming, trading, navigation, survival,
+      riding, leadership
+    - Stealth trainers: stealing, hiding
+  """
   def handle_train_skill(state, char_id, skill_index) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
@@ -632,7 +883,11 @@ defmodule Arena.Map.Social do
           {:send_raw, Encoder.encode({:mini_stats, %{
             ciudadanos_matados: 0,
             criminales_matados: 0,
-            faction_status: if(entity.criminal, do: 1, else: 0),
+            faction_status: case Map.get(entity, :faction, :none) do
+              :royal_army -> 1
+              :chaos_legion -> 2
+              :none -> if entity.criminal, do: 3, else: 0
+            end,
             npcs_killed: 0,
             class: Helpers.class_to_int(entity.class),
             penalty: 0,
@@ -728,6 +983,90 @@ defmodule Arena.Map.Social do
         end
     end
   end
+
+  # ==================================================================
+  # Faction commands
+  # ==================================================================
+
+  def handle_enlist_faction(state, char_id, faction) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        cond do
+          entity.criminal ->
+            Helpers.send_to_session(state.sessions, char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "Los criminales no pueden enlistarse.", font_index: 0}})})
+            {:noreply, state}
+
+          entity.faction != :none ->
+            Helpers.send_to_session(state.sessions, char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "Ya perteneces a una faccion. Usa /RENUNCIAR primero.", font_index: 0}})})
+            {:noreply, state}
+
+          true ->
+            entity = %{entity | faction: faction}
+            players = Map.put(state.players, char_id, entity)
+
+            faction_name = faction_display_name(faction)
+            Helpers.send_to_session(state.sessions, char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "Te has enlistado en #{faction_name}.", font_index: 0}})})
+
+            {:noreply, %{state | players: players}}
+        end
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_leave_faction(state, char_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        if entity.faction == :none do
+          Helpers.send_to_session(state.sessions, char_id,
+            {:send_raw, Encoder.encode({:console_msg, %{message: "No perteneces a ninguna faccion.", font_index: 0}})})
+          {:noreply, state}
+        else
+          entity = %{entity | faction: :none}
+          players = Map.put(state.players, char_id, entity)
+
+          Helpers.send_to_session(state.sessions, char_id,
+            {:send_raw, Encoder.encode({:console_msg, %{message: "Has renunciado a tu faccion.", font_index: 0}})})
+
+          {:noreply, %{state | players: players}}
+        end
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_faction_chat(state, char_id, message) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        if entity.faction == :none do
+          Helpers.send_to_session(state.sessions, char_id,
+            {:send_raw, Encoder.encode({:console_msg, %{message: "No perteneces a ninguna faccion.", font_index: 0}})})
+          {:noreply, state}
+        else
+          faction_name = faction_display_name(entity.faction)
+          chat_msg = "[#{faction_name}] #{entity.name}: #{message}"
+          raw = Encoder.encode({:console_msg, %{message: chat_msg, font_index: 0}})
+
+          for {_cid, other} <- state.players, other.faction == entity.faction do
+            Helpers.send_to_session(state.sessions, other.char_id, {:send_raw, raw})
+          end
+
+          {:noreply, state}
+        end
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  defp faction_display_name(:royal_army), do: "Armada Real"
+  defp faction_display_name(:chaos_legion), do: "Legion del Caos"
+  defp faction_display_name(_), do: "Ninguna"
 
   def find_nearby_npc_of_type(state, entity, npc_types) do
     result =

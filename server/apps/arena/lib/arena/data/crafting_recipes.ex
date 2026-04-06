@@ -67,6 +67,20 @@ defmodule Arena.Data.CraftingRecipes do
     ]
   end
 
+  def production_recipes(:alchemy) do
+    [
+      %{min_skill: 0,  result_id: 37,  result_amount: 1, ingredients: [{38, 1}, {529, 1}]},   # Poción HP roja: flor + frasco
+      %{min_skill: 30, result_id: 38,  result_amount: 1, ingredients: [{529, 2}, {691, 1}]},   # Poción Mana azul: 2x frasco + mandrágora
+      %{min_skill: 50, result_id: 166, result_amount: 1, ingredients: [{529, 1}, {691, 2}]}    # Poción Envenenar: frasco + 2x mandrágora
+    ]
+  end
+
+  # TODO: Tailoring recipes need real hide/cloth item IDs verified from obj.dat.
+  # Placeholder — the sewing tool IDs and loom NPC type are already wired in crafting.ex.
+  def production_recipes(:tailoring) do
+    []
+  end
+
   def production_recipes(_), do: []
 
   @doc "Find the best recipe the player can craft with current skill and inventory."

@@ -142,9 +142,9 @@ defmodule Arena.Map.Trade do
                      trade_offer_gold: 0, trade_offer_items: [], trade_accepted: false}
 
           Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-            Encoder.encode({:user_commerce_init, %{}})})
+            Encoder.encode({:user_commerce_init, %{name: target.name}})})
           Helpers.send_to_session(state.sessions, target_id, {:send_raw,
-            Encoder.encode({:user_commerce_init, %{}})})
+            Encoder.encode({:user_commerce_init, %{name: entity.name}})})
 
           players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, target)
           {:reply, :ok, %{state | players: players}}

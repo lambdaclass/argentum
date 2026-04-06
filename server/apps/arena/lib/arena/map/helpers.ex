@@ -244,17 +244,29 @@ defmodule Arena.Map.Helpers do
     if entity.level <= 12 and not entity.criminal, do: :ok,
       else: {:error, "No puedes entrar a este mapa."}
   end
+  # VB6: ARMADA/REAL maps -- only Royal Army faction can enter
   def check_map_restriction("ARMADA", entity) do
+    if Map.get(entity, :faction, :none) == :royal_army, do: :ok,
+      else: {:error, "Solo miembros del Ejercito Real pueden entrar a este mapa."}
+  end
+  def check_map_restriction("REAL", entity) do
+    if Map.get(entity, :faction, :none) == :royal_army, do: :ok,
+      else: {:error, "Solo miembros del Ejercito Real pueden entrar a este mapa."}
+  end
+  # VB6: CAOS maps -- only Chaos Legion faction can enter
+  def check_map_restriction("CAOS", entity) do
+    if Map.get(entity, :faction, :none) == :chaos_legion, do: :ok,
+      else: {:error, "Solo miembros de la Legion del Caos pueden entrar a este mapa."}
+  end
+  # VB6: CIUDADANO maps -- no criminals allowed (citizens and faction members OK)
+  def check_map_restriction("CIUDADANO", entity) do
     if not entity.criminal, do: :ok,
       else: {:error, "Criminales no pueden entrar a este mapa."}
   end
-  def check_map_restriction("CAOS", entity) do
-    if entity.criminal, do: :ok,
-      else: {:error, "Solo criminales pueden entrar a este mapa."}
-  end
-  # VB6: FACCION maps require belonging to a faction (Armada or Caos)
+  # VB6: FACCION maps require belonging to a faction (Royal Army or Chaos Legion)
   def check_map_restriction("FACCION", entity) do
-    if entity.criminal or Map.get(entity, :faction, nil) != nil, do: :ok,
+    faction = Map.get(entity, :faction, :none)
+    if faction in [:royal_army, :chaos_legion], do: :ok,
       else: {:error, "Necesitas pertenecer a una faccion para entrar."}
   end
   def check_map_restriction(_unknown, _entity), do: :ok

@@ -28,16 +28,31 @@ defmodule Arena.Map.Crafting do
 
   @work_stamina_cost 15
 
+  # VB6 parity: workers (clase Trabajador) craft at normal stamina cost.
+  # All other classes pay 3x the stamina cost per work action.
+  @non_worker_stamina_multiplier 3
+  @worker_classes [:worker, :trabajador]
+
+  defp effective_stamina_cost(entity) do
+    if entity.class in @worker_classes do
+      @work_stamina_cost
+    else
+      @work_stamina_cost * @non_worker_stamina_multiplier
+    end
+  end
+
   @doc "Main entry point — called from Social when work packet targets a crafting skill."
   def handle_work(state, char_id, skill_atom) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
+        cost = effective_stamina_cost(entity)
+
         cond do
           entity.dead ->
             send_msg(state, char_id, "No puedes trabajar estando muerto.")
             {:noreply, state}
 
-          entity.stamina < @work_stamina_cost ->
+          entity.stamina < cost ->
             send_msg(state, char_id, "Estás muy cansado para trabajar.")
             {:noreply, state}
 
@@ -318,7 +333,8 @@ defmodule Arena.Map.Crafting do
   end
 
   defp consume_stamina(state, char_id, entity) do
-    new_stamina = max(entity.stamina - @work_stamina_cost, 0)
+    cost = effective_stamina_cost(entity)
+    new_stamina = max(entity.stamina - cost, 0)
     entity = %{entity | stamina: new_stamina}
     state = update_player(state, char_id, entity)
 

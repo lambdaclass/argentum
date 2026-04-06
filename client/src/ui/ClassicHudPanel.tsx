@@ -3,6 +3,20 @@ import type { ClientState } from "../app/types";
 import type { AssetCatalog } from "../render/assetCatalog";
 import { getObjectIconFrame, getObjectName } from "../render/assetCatalog";
 
+function factionLabel(factionStatus: number | null): string {
+  switch (factionStatus) {
+    case 1:
+      return "Ejercito Real";
+    case 2:
+      return "Legion del Caos";
+    case 3:
+      return "Criminal";
+    case 0:
+    default:
+      return "Ciudadano";
+  }
+}
+
 interface ClassicHudPanelProps {
   assetCatalog: AssetCatalog | null;
   state: ClientState;
@@ -364,6 +378,10 @@ export function ClassicHudPanel({
             <strong>
               {state.world.self.x ?? "--"},{state.world.self.y ?? "--"}
             </strong>
+          </div>
+          <div className="meta-card">
+            <span>Faccion</span>
+            <strong>{factionLabel(state.world.self.factionStatus)}</strong>
           </div>
         </div>
       </div>

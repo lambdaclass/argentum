@@ -18,6 +18,8 @@ import { SkillsPanel } from "../ui/SkillsPanel";
 import { MerchantPanel } from "../ui/MerchantPanel";
 import { TradePanel } from "../ui/TradePanel";
 import { BankPanel } from "../ui/BankPanel";
+import { PartyPanel } from "../ui/PartyPanel";
+import { ClansPanel } from "../ui/ClansPanel";
 
 const MOVE_KEYS: Record<string, Direction> = {
   ArrowUp: "north",
@@ -719,6 +721,7 @@ export function App() {
                   world={state.world}
                   assetCatalog={assetCatalog}
                   showTileDebug={showTileDebug}
+                  raining={state.weather.raining}
                   session={session}
                   onTileInteraction={({ x, y, detail }) => {
                     session.sendLeftClick(x, y);
@@ -926,6 +929,23 @@ export function App() {
               />
             ) : null}
 
+            {state.party.open ? (
+              <PartyPanel
+                state={state}
+                onSendChat={(msg) => session.sendChat(msg)}
+                onSendPartySafeToggle={() => session.sendPartySafeToggle()}
+                onClose={() => dispatch({ type: "party/toggle" })}
+              />
+            ) : null}
+
+            {state.clan.open ? (
+              <ClansPanel
+                state={state}
+                onSendChat={(msg) => session.sendChat(msg)}
+                onClose={() => dispatch({ type: "clan/toggle" })}
+              />
+            ) : null}
+
             {activeRightTab === "skills" ? (
               <SkillsPanel
                 state={state}
@@ -1010,20 +1030,12 @@ export function App() {
                 key={action.key}
                 onClick={() => {
                   if (action.key === "party") {
-                    dispatch({
-                      type: "log/add",
-                      level: "info",
-                      message: "Grupo panel not wired yet."
-                    });
+                    dispatch({ type: "party/toggle" });
                     return;
                   }
 
                   if (action.key === "clans") {
-                    dispatch({
-                      type: "log/add",
-                      level: "info",
-                      message: "Clanes panel not wired yet."
-                    });
+                    dispatch({ type: "clan/toggle" });
                     return;
                   }
 

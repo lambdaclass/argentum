@@ -1,7 +1,8 @@
 defmodule Arena.GuildServer do
   @moduledoc """
   Global guild/clan system. GenServer serializes mutations; ETS provides O(1) reads.
-  Guilds are session-only (not persisted to DB for now).
+  Guilds are persisted to DB via write-through (GameBackend.Guilds).
+  ETS is the fast-read path; DB is loaded into ETS on init.
   """
 
   use GenServer
@@ -9,6 +10,7 @@ defmodule Arena.GuildServer do
   require Logger
 
   alias AoSession.OnlineDirectory
+  alias GameBackend.Guilds
 
   @table :ao_guilds
   @max_members 50
@@ -113,7 +115,11 @@ defmodule Arena.GuildServer do
   def init(_opts) do
     :ets.new(@table, [:named_table, :set, :public, read_concurrency: true])
     Process.send_after(self(), :cleanup_invites, @invite_ttl_ms)
-    {:ok, %{next_guild_id: 1}}
+
+    # Load persisted guilds from DB into ETS
+    next_id = load_guilds_from_db()
+
+    {:ok, %{next_guild_id: next_id}}
   end
 
   @impl true
@@ -134,20 +140,29 @@ defmodule Arena.GuildServer do
         {:reply, {:error, :already_in_guild}, state}
 
       true ->
-        guild_id = state.next_guild_id
+        case Guilds.create_guild(char_id, name) do
+          {:ok, db_guild} ->
+            guild_id = db_guild.id
 
-        guild = %{
-          id: guild_id,
-          name: name,
-          leader: char_id,
-          members: [char_id]
-        }
+            guild = %{
+              id: guild_id,
+              name: name,
+              leader: char_id,
+              members: [char_id]
+            }
 
-        :ets.insert(@table, {{:guild, guild_id}, guild})
-        :ets.insert(@table, {{:member, char_id}, guild_id})
+            :ets.insert(@table, {{:guild, guild_id}, guild})
+            :ets.insert(@table, {{:member, char_id}, guild_id})
 
-        notify(char_id, "Clan '#{name}' creado exitosamente.")
-        {:reply, :ok, %{state | next_guild_id: guild_id + 1}}
+            next_id = max(state.next_guild_id, guild_id + 1)
+            notify(char_id, "Clan '#{name}' creado exitosamente.")
+            {:reply, :ok, %{state | next_guild_id: next_id}}
+
+          {:error, _reason} ->
+            Logger.error("Failed to persist guild creation for char #{char_id}")
+            notify(char_id, "Error al crear el clan. Intenta de nuevo.")
+            {:reply, {:error, :db_error}, state}
+        end
     end
   end
 
@@ -221,16 +236,24 @@ defmodule Arena.GuildServer do
                   notify(char_id, "El clan esta lleno.")
                   {:reply, {:error, :full}, state}
                 else
-                  new_members = guild.members ++ [char_id]
-                  :ets.insert(@table, {{:guild, guild_id}, %{guild | members: new_members}})
-                  :ets.insert(@table, {{:member, char_id}, guild_id})
+                  case Guilds.add_member(guild_id, char_id) do
+                    {:ok, _member} ->
+                      new_members = guild.members ++ [char_id]
+                      :ets.insert(@table, {{:guild, guild_id}, %{guild | members: new_members}})
+                      :ets.insert(@table, {{:member, char_id}, guild_id})
 
-                  broadcast_guild(
-                    new_members,
-                    "Un jugador se ha unido al clan. Miembros: #{length(new_members)}"
-                  )
+                      broadcast_guild(
+                        new_members,
+                        "Un jugador se ha unido al clan. Miembros: #{length(new_members)}"
+                      )
 
-                  {:reply, :ok, state}
+                      {:reply, :ok, state}
+
+                    {:error, _reason} ->
+                      Logger.error("Failed to persist guild join for char #{char_id}")
+                      notify(char_id, "Error al unirse al clan. Intenta de nuevo.")
+                      {:reply, {:error, :db_error}, state}
+                  end
                 end
 
               [] ->
@@ -258,6 +281,7 @@ defmodule Arena.GuildServer do
         case :ets.lookup(@table, {:guild, guild_id}) do
           [{_, %{leader: ^leader_id} = guild}] ->
             if target_id in guild.members and target_id != leader_id do
+              Guilds.remove_member(guild_id, target_id)
               new_members = List.delete(guild.members, target_id)
               :ets.insert(@table, {{:guild, guild_id}, %{guild | members: new_members}})
               :ets.delete(@table, {:member, target_id})
@@ -297,7 +321,9 @@ defmodule Arena.GuildServer do
 
         case :ets.lookup(@table, {:guild, guild_id}) do
           [{_, %{leader: ^char_id} = guild}] ->
-            # Leader left -- dissolve guild
+            # Leader left -- dissolve guild (DB + ETS)
+            Guilds.delete_guild(guild_id)
+
             for mid <- guild.members, mid != char_id do
               :ets.delete(@table, {:member, mid})
               notify(mid, "El clan se ha disuelto.")
@@ -306,9 +332,11 @@ defmodule Arena.GuildServer do
             :ets.delete(@table, {:guild, guild_id})
 
           [{_, guild}] ->
+            Guilds.remove_member(guild_id, char_id)
             new_members = List.delete(guild.members, char_id)
 
             if new_members == [] do
+              Guilds.delete_guild(guild_id)
               :ets.delete(@table, {:guild, guild_id})
             else
               :ets.insert(@table, {{:guild, guild_id}, %{guild | members: new_members}})
@@ -341,5 +369,38 @@ defmodule Arena.GuildServer do
 
   defp broadcast_guild(member_ids, message) do
     for mid <- member_ids, do: notify(mid, message)
+  end
+
+  # Load all guilds from DB into ETS. Returns the next available guild_id.
+  # Gracefully handles missing DB (e.g. test environment without Repo).
+  defp load_guilds_from_db do
+    guilds = Guilds.list_all()
+
+    next_id =
+      Enum.reduce(guilds, 1, fn db_guild, acc ->
+        member_ids = Enum.map(db_guild.members, & &1.char_id)
+
+        guild = %{
+          id: db_guild.id,
+          name: db_guild.name,
+          leader: db_guild.leader_id,
+          members: member_ids
+        }
+
+        :ets.insert(@table, {{:guild, db_guild.id}, guild})
+
+        for mid <- member_ids do
+          :ets.insert(@table, {{:member, mid}, db_guild.id})
+        end
+
+        max(acc, db_guild.id + 1)
+      end)
+
+    Logger.info("GuildServer loaded #{length(guilds)} guild(s) from DB")
+    next_id
+  rescue
+    e ->
+      Logger.warning("GuildServer: DB not available, starting with empty state: #{inspect(e)}")
+      1
   end
 end

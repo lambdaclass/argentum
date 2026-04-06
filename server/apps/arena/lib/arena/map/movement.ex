@@ -47,7 +47,7 @@ defmodule Arena.Map.Movement do
 
           if new_counter > @speed_hack_threshold do
             # Snap back — reject move, apply penalty
-            Logger.warning("Speed hack: char_id=#{char_id} counter=#{Float.round(new_counter, 2)}")
+            Logger.warning("[ANTICHEAT] speed_hack char_id=#{char_id} counter=#{Float.round(new_counter, 2)}")
             entity = %{entity | speed_hack_counter: 0.0, next_move_at: now + min_interval * 2}
             players = Map.put(state.players, char_id, entity)
             Helpers.send_to_session(state.sessions, char_id, {:send_raw,

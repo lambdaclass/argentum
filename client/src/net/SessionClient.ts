@@ -26,6 +26,7 @@ import {
   encodeLoginExisting,
   encodeMeditate,
   encodeOnline,
+  encodePartySafeToggle,
   encodePickUp,
   encodeQuit,
   encodeRequestAttributes,
@@ -505,6 +506,47 @@ export class SessionClient {
     this.dispatch({ type: "log/add", level: "packet-out", message: "USER_TRADE_END" });
   }
 
+  sendPartySafeToggle() {
+    this.sendRaw(encodePartySafeToggle());
+    this.dispatch({ type: "log/add", level: "packet-out", message: "PARTY_SAFE_TOGGLE" });
+  }
+
+  sendPartyInvite(name: string) {
+    this.sendChat(`/PARTY ${name}`);
+  }
+
+  sendPartyAccept() {
+    this.sendChat("/ACEPTARGRUPO");
+  }
+
+  sendPartyLeave() {
+    this.sendChat("/SALIRGRUPO");
+  }
+
+  sendPartyKick(name: string) {
+    this.sendChat(`/ECHARGRUPO ${name}`);
+  }
+
+  sendClanCreate(name: string) {
+    this.sendChat(`/CREARCLAN ${name}`);
+  }
+
+  sendClanInvite(name: string) {
+    this.sendChat(`/INVITARCLAN ${name}`);
+  }
+
+  sendClanAccept() {
+    this.sendChat("/ACEPTARCLAN");
+  }
+
+  sendClanLeave() {
+    this.sendChat("/SALIRCLAN");
+  }
+
+  sendClanChat(msg: string) {
+    this.sendChat(`/CC ${msg}`);
+  }
+
   requestPositionUpdate() {
     this.runtime.requestPositionUpdate();
   }
@@ -892,6 +934,7 @@ export class SessionClient {
         if (packet.message === "Has sido resucitado." || packet.message === "Has sido resucitado!") {
           this.dispatch({ type: "world/setSelfDead", dead: false });
         }
+        this.parsePartyMessage(packet.message);
         this.setLastEvent(packet.message);
         this.dispatch({ type: "log/add", level: "info", message: packet.message });
         return;
@@ -955,6 +998,15 @@ export class SessionClient {
           type: "log/add",
           level: "packet-in",
           message: `CHAT[${packet.charIndex}] ${packet.message} @ ${packet.x},${packet.y}`
+        });
+        return;
+
+      case "rain_toggle":
+        this.dispatch({ type: "weather/rain", raining: packet.raining });
+        this.dispatch({
+          type: "log/add",
+          level: "info",
+          message: packet.raining ? "Rain started." : "Rain stopped."
         });
         return;
 
@@ -1087,6 +1139,42 @@ export class SessionClient {
           message: `Unhandled packet ${packet.packetId}`
         });
         return;
+    }
+  }
+
+  private parsePartyMessage(message: string) {
+    const lower = message.toLowerCase();
+
+    if (lower.includes("te invita") || lower.includes("has sido invitado")) {
+      const nameMatch = message.match(/^(\S+)\s+te invita/i);
+      const inviterName = nameMatch ? nameMatch[1] : "";
+      this.dispatch({ type: "party/setInvite", invited: true, inviterName });
+      return;
+    }
+
+    if (lower.includes("has ingresado al grupo") || lower.includes("se ha unido al grupo")) {
+      const nameMatch = message.match(/^(\S+)\s+se ha unido/i);
+      if (nameMatch) {
+        const currentMembers = this.getState().party.members;
+        if (!currentMembers.includes(nameMatch[1])) {
+          this.dispatch({ type: "party/setMembers", members: [...currentMembers, nameMatch[1]] });
+        }
+      }
+      this.dispatch({ type: "party/setInvite", invited: false, inviterName: "" });
+      return;
+    }
+
+    if (lower.includes("ha salido del grupo") || lower.includes("has salido del grupo")) {
+      const nameMatch = message.match(/^(\S+)\s+ha salido/i);
+      if (nameMatch) {
+        const currentMembers = this.getState().party.members;
+        this.dispatch({
+          type: "party/setMembers",
+          members: currentMembers.filter((m) => m !== nameMatch[1])
+        });
+      } else if (lower.startsWith("has salido")) {
+        this.dispatch({ type: "party/clear" });
+      }
     }
   }
 

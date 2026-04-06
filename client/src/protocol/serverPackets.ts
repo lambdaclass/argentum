@@ -282,6 +282,11 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
         localize: reader.readUint8() !== 0
       };
 
+    case 59: {
+      const raining = reader.readUint8() !== 0;
+      return { type: "rain_toggle", raining };
+    }
+
     case 60:
       return {
         type: "create_fx",

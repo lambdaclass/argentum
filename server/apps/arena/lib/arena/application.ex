@@ -13,7 +13,7 @@ defmodule Arena.Application do
       Arena.Data.GameData,
       Arena.PartyServer,
       Arena.GuildServer,
-      Arena.Map.MapSupervisor,
+      Supervisor.child_spec(Arena.Map.MapSupervisor, shutdown: 30_000),
       ArenaWeb.Endpoint
     ]
 

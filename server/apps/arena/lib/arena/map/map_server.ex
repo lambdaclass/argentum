@@ -39,7 +39,8 @@ defmodule Arena.Map.MapServer do
     %{
       id: {__MODULE__, map_id},
       start: {__MODULE__, :start_link, [map_id]},
-      restart: :transient
+      restart: :transient,
+      shutdown: 15_000
     }
   end
 
@@ -114,6 +115,9 @@ defmodule Arena.Map.MapServer do
   def double_click(map_id, char_id, x, y), do: GenServer.cast(via(map_id), {:double_click, char_id, x, y})
   def snapshot_entity(map_id, char_id), do: GenServer.call(via(map_id), {:snapshot, char_id})
   def player_count(map_id), do: GenServer.call(via(map_id), :player_count)
+  def enlist_faction(map_id, char_id, faction), do: GenServer.cast(via(map_id), {:enlist_faction, char_id, faction})
+  def leave_faction(map_id, char_id), do: GenServer.cast(via(map_id), {:leave_faction, char_id})
+  def faction_chat(map_id, char_id, message), do: GenServer.cast(via(map_id), {:faction_chat, char_id, message})
 
   @doc "Check if a map process is loaded and ready to accept commands."
   def ready?(map_id) do
@@ -400,6 +404,12 @@ defmodule Arena.Map.MapServer do
   def handle_cast({:request_mini_stats, char_id}, state), do: Social.handle_request_mini_stats(state, char_id)
   @impl true
   def handle_cast({:double_click, char_id, x, y}, state), do: Social.handle_double_click(state, char_id, x, y)
+  @impl true
+  def handle_cast({:enlist_faction, char_id, faction}, state), do: Social.handle_enlist_faction(state, char_id, faction)
+  @impl true
+  def handle_cast({:leave_faction, char_id}, state), do: Social.handle_leave_faction(state, char_id)
+  @impl true
+  def handle_cast({:faction_chat, char_id, message}, state), do: Social.handle_faction_chat(state, char_id, message)
 
   # ---- Timers ----
 
@@ -465,7 +475,16 @@ defmodule Arena.Map.MapServer do
   def handle_info(_msg, state), do: {:noreply, state}
 
   @impl true
-  def terminate(_reason, state) do
+  def terminate(reason, state) do
+    player_count = if is_map(state[:players]), do: map_size(state.players), else: 0
+    Logger.info("MapServer #{state.map_id} shutting down (#{inspect(reason)}), saving #{player_count} players")
+
+    if is_map(state[:players]) and is_map(state[:sessions]) do
+      for {char_id, entity} <- state.players do
+        Helpers.send_to_session(state.sessions, char_id, {:autosave, entity})
+      end
+    end
+
     TileGrid.unload_map(state.map_id)
     :ok
   end
@@ -500,6 +519,7 @@ defmodule Arena.Map.MapServer do
     {visible_sets, reply_players} = Visibility.enter_visibility(state, entity, sessions)
 
     Logger.info("#{entity.name} (#{entity.char_id}) entered map #{state.map_id} at (#{x}, #{y}) index=#{char_index}")
+    Arena.AuditLog.log_login(entity.char_id, entity.name, state.map_id)
 
     state = %{state | visible_sets: visible_sets, next_char_index: char_index + 1}
     weather = %{rain: state.meta.rain, snow: state.meta.snow}
@@ -508,6 +528,7 @@ defmodule Arena.Map.MapServer do
 
   # Shared cleanup for leave + :DOWN — single source of truth
   defp do_remove_player(state, char_id, entity) do
+    Arena.AuditLog.log_logout(char_id, entity.name, state.map_id)
     visible_sets = Visibility.remove_from_visibility(state, char_id, entity)
 
     # Despawn all pets owned by this player

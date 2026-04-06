@@ -40,7 +40,8 @@ const CLIENT_PACKET = {
   changeHeading: 6,
   equipItem: 5,
   useItem: 99,
-  quit: 39
+  quit: 39,
+  partySafeToggle: 83
 } as const;
 
 const CLIENT_VERSION = {
@@ -346,4 +347,8 @@ export function encodeHeal() {
 
 export function encodeQuit() {
   return buildPacket(CLIENT_PACKET.quit);
+}
+
+export function encodePartySafeToggle() {
+  return buildPacket(CLIENT_PACKET.partySafeToggle);
 }

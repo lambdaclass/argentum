@@ -421,9 +421,18 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.commerce_end(), <<>>)
   end
 
-  # eUserCommerceInit (ID 12) — no payload (VB6: opens user trade UI)
+  # eUserCommerceInit (ID 12) — name(String8)
+  # VB6 parity: the trade initiation packet includes the target player's name
+  # so the client can display who you are trading with.
+  def encode({:user_commerce_init, %{name: name}}) do
+    payload = Writer.write_string8(name)
+    Writer.build_packet(PacketIds.Server.user_commerce_init(), payload)
+  end
+
+  # Fallback for callers that don't pass a name yet (backwards-compatible).
   def encode({:user_commerce_init, _params}) do
-    Writer.build_packet(PacketIds.Server.user_commerce_init(), <<>>)
+    payload = Writer.write_string8("")
+    Writer.build_packet(PacketIds.Server.user_commerce_init(), payload)
   end
 
   # eUserCommerceEnd (ID 13) — no payload

@@ -240,6 +240,23 @@ export function createInitialState(): ClientState {
       selectedKey: null,
       source: "none"
     },
+    party: {
+      open: false,
+      members: [],
+      invited: false,
+      inviterName: "",
+      safeMode: false
+    },
+    clan: {
+      open: false,
+      name: "",
+      members: [],
+      rank: ""
+    },
+    weather: {
+      raining: false,
+      snowing: false
+    },
     log: [createLogEntry("info", "Client initialized.")]
   };
 }
@@ -1157,6 +1174,15 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
         }
       };
 
+    case "weather/rain":
+      return {
+        ...state,
+        weather: {
+          ...state.weather,
+          raining: action.raining
+        }
+      };
+
     case "log/add":
       return {
         ...state,
@@ -1231,6 +1257,103 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
           entries: [],
           selectedKey: null,
           source: "none"
+        },
+        party: {
+          open: false,
+          members: [],
+          invited: false,
+          inviterName: "",
+          safeMode: false
+        },
+        clan: {
+          open: false,
+          name: "",
+          members: [],
+          rank: ""
+        },
+        weather: {
+          raining: false,
+          snowing: false
+        }
+      };
+
+    case "party/toggle":
+      return {
+        ...state,
+        party: {
+          ...state.party,
+          open: !state.party.open
+        }
+      };
+
+    case "party/setMembers":
+      return {
+        ...state,
+        party: {
+          ...state.party,
+          members: action.members
+        }
+      };
+
+    case "party/setInvite":
+      return {
+        ...state,
+        party: {
+          ...state.party,
+          invited: action.invited,
+          inviterName: action.inviterName
+        }
+      };
+
+    case "party/clear":
+      return {
+        ...state,
+        party: {
+          ...state.party,
+          members: [],
+          invited: false,
+          inviterName: "",
+          safeMode: false
+        }
+      };
+
+    case "party/toggleSafe":
+      return {
+        ...state,
+        party: {
+          ...state.party,
+          safeMode: !state.party.safeMode
+        }
+      };
+
+    case "clan/toggle":
+      return {
+        ...state,
+        clan: {
+          ...state.clan,
+          open: !state.clan.open
+        }
+      };
+
+    case "clan/setInfo":
+      return {
+        ...state,
+        clan: {
+          ...state.clan,
+          name: action.name,
+          members: action.members,
+          rank: action.rank
+        }
+      };
+
+    case "clan/clear":
+      return {
+        ...state,
+        clan: {
+          ...state.clan,
+          name: "",
+          members: [],
+          rank: ""
         }
       };
 

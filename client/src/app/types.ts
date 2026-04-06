@@ -259,6 +259,23 @@ export interface ClientState {
     selectedKey: string | null;
     source: "none" | "server";
   };
+  party: {
+    open: boolean;
+    members: string[];
+    invited: boolean;
+    inviterName: string;
+    safeMode: boolean;
+  };
+  clan: {
+    open: boolean;
+    name: string;
+    members: string[];
+    rank: string;
+  };
+  weather: {
+    raining: boolean;
+    snowing: boolean;
+  };
   log: PacketLogEntry[];
 }
 
@@ -380,6 +397,7 @@ export type ServerPacket =
     }
   | { type: "mini_stats"; classId: number; raceId: number; genderId: number; factionStatus: number }
   | { type: "send_skills"; skills: SkillEntry[] }
+  | { type: "rain_toggle"; raining: boolean }
   | { type: "unknown"; packetId: number };
 
 export type ClientAction =
@@ -478,6 +496,15 @@ export type ClientAction =
   | { type: "trade/markPartnerAccepted"; accepted: boolean }
   | { type: "skills/setAll"; entries: SkillEntry[]; source?: "server" }
   | { type: "skills/select"; key: string | null }
+  | { type: "party/toggle" }
+  | { type: "party/setMembers"; members: string[] }
+  | { type: "party/setInvite"; invited: boolean; inviterName: string }
+  | { type: "party/clear" }
+  | { type: "party/toggleSafe" }
+  | { type: "clan/toggle" }
+  | { type: "clan/setInfo"; name: string; members: string[]; rank: string }
+  | { type: "clan/clear" }
+  | { type: "weather/rain"; raining: boolean }
   | { type: "log/add"; level: LogLevel; message: string }
   | { type: "log/clear" }
   | { type: "session/resetRuntime" };

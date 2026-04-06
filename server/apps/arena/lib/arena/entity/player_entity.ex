@@ -86,6 +86,7 @@ defmodule Arena.Entity.PlayerEntity do
     safe_mode: false,
     navigating: false,
     gm: false,
+    faction: :none,
 
     # Cooldowns use System.monotonic_time(:millisecond).
     # Default to far-past so first action is always allowed.
@@ -121,6 +122,11 @@ defmodule Arena.Entity.PlayerEntity do
     trade_accepted: false,
 
     # Pets: list of NPC instance IDs owned by this player (not persisted across sessions)
-    pet_ids: []
+    pet_ids: [],
+
+    # Chat moderation: mute expiry (monotonic ms, 0 = not muted)
+    muted_until: 0,
+    # Chat rate limit: last chat timestamp (monotonic ms, 0 = never)
+    last_chat_at: 0
   ]
 end

@@ -8,6 +8,7 @@ interface WorldCanvasProps {
   world: WorldState;
   assetCatalog: AssetCatalog | null;
   showTileDebug: boolean;
+  raining: boolean;
   session: SessionClient;
   onTileInteraction?: (payload: TileInteractionPayload) => void;
 }
@@ -16,6 +17,7 @@ export function WorldCanvas({
   world,
   assetCatalog,
   showTileDebug,
+  raining,
   session,
   onTileInteraction
 }: WorldCanvasProps) {
@@ -47,6 +49,10 @@ export function WorldCanvas({
   useEffect(() => {
     rendererRef.current?.setTileInteractionHandler(onTileInteraction ?? null);
   }, [onTileInteraction]);
+
+  useEffect(() => {
+    rendererRef.current?.setRaining(raining);
+  }, [raining]);
 
   useEffect(() => {
     rendererRef.current?.render(world, assetCatalog, showTileDebug);

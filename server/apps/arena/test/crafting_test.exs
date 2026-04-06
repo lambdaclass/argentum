@@ -125,7 +125,8 @@ defmodule Arena.CraftingTest do
       state = make_state(%{1 => entity}, trigger_map: %{{50, 49} => 6})
 
       {:noreply, new_state} = Crafting.handle_work(state, 1, :mining)
-      assert new_state.players[1].stamina == 85
+      # Warrior (non-worker) pays 3x stamina: 15 * 3 = 45
+      assert new_state.players[1].stamina == 55
     end
   end
 
