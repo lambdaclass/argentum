@@ -1,7 +1,7 @@
 defmodule Arena.Map.Social do
   @moduledoc "Chat, social commands, stat requests, and NPC interaction."
 
-  alias Arena.Map.{Helpers, Visibility}
+  alias Arena.Map.{Helpers, Visibility, Crafting}
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
@@ -330,32 +330,31 @@ defmodule Arena.Map.Social do
     :carpentry, :alchemy, :tailoring, :taming
   ]
 
+  @crafting_skills [:woodcutting, :fishing, :mining, :blacksmithing,
+                    :carpentry, :alchemy, :tailoring, :taming]
+
   def handle_train_skill(state, char_id, skill_index) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         skill_atom = Enum.at(@skill_order, skill_index)
+        near_trainer = find_nearby_npc_of_type(state, entity, [@npc_type_entrenador]) != :not_found
 
         cond do
           skill_atom == nil ->
             {:noreply, state}
 
-          # VB6: must be near a trainer NPC (npc_type 3)
-          find_nearby_npc_of_type(state, entity, [@npc_type_entrenador]) == :not_found ->
-            Helpers.send_to_session(state.sessions, char_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: "No hay un entrenador cerca.", font_index: 0}})})
-            {:noreply, state}
-
-          entity.skill_points <= 0 ->
+          # Near trainer: train with skill points (all skills)
+          near_trainer and entity.skill_points <= 0 ->
             Helpers.send_to_session(state.sessions, char_id,
               {:send_raw, Encoder.encode({:console_msg, %{message: "No tienes puntos de skill disponibles.", font_index: 0}})})
             {:noreply, state}
 
-          Map.get(entity.skills, skill_atom, 0) >= 100 ->
+          near_trainer and Map.get(entity.skills, skill_atom, 0) >= 100 ->
             Helpers.send_to_session(state.sessions, char_id,
               {:send_raw, Encoder.encode({:console_msg, %{message: "Ya tienes el maximo en esa habilidad.", font_index: 0}})})
             {:noreply, state}
 
-          true ->
+          near_trainer ->
             current = Map.get(entity.skills, skill_atom, 0)
             entity = %{entity |
               skills: Map.put(entity.skills, skill_atom, current + 1),
@@ -369,6 +368,16 @@ defmodule Arena.Map.Social do
             Helpers.send_to_session(state.sessions, char_id,
               {:send_raw, Encoder.encode({:console_msg, %{message: "Skill points restantes: #{entity.skill_points}", font_index: 0}})})
 
+            {:noreply, state}
+
+          # Not near trainer, but crafting skill: attempt work
+          skill_atom in @crafting_skills ->
+            Crafting.handle_work(state, char_id, skill_atom)
+
+          # Not near trainer, not a crafting skill
+          true ->
+            Helpers.send_to_session(state.sessions, char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "No hay un entrenador cerca.", font_index: 0}})})
             {:noreply, state}
         end
 

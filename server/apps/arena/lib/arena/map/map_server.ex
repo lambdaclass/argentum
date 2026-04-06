@@ -171,6 +171,8 @@ defmodule Arena.Map.MapServer do
 
           # Build O(1) tile exit map from list
           tile_exit_map = Map.new(map_data.tile_exits, fn ex -> {{ex.x, ex.y}, ex} end)
+          # Build O(1) trigger map for crafting resource detection
+          trigger_map = Map.new(map_data.triggers, fn t -> {{t.x, t.y}, t.trigger} end)
 
           # Static metadata — never changes after init
           meta = %{
@@ -186,7 +188,8 @@ defmodule Arena.Map.MapServer do
             objects: map_data.objects,
             tile_exits: map_data.tile_exits,
             tile_exit_map: tile_exit_map,
-            triggers: map_data.triggers
+            triggers: map_data.triggers,
+            trigger_map: trigger_map
           }
 
           state = %{
