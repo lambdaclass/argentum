@@ -1046,25 +1046,24 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 **Status:** `Partially done`
 
 **In code now:**
-- Flood guard (packet rate limiting per session)
+- Flood guard: token bucket rate limiter per session (flood_guard.ex)
 - Speed hack detection: soft accumulator + position snap-back in movement.ex
+- Teleport prevention: movement is strictly directional via `TileGrid.move_entity`, non-adjacent jumps fail validation
 - Cooldown fields on PlayerEntity for all timed actions (move, attack, spell, item use)
-- Range validation on melee attacks (adjacent tile check)
+- Range validation on melee attacks (adjacent tile via `facing_tile`), ranged attacks (Chebyshev distance 18), and spell casts (AoI range)
 - Damage is fully server-authoritative (client values never trusted)
 
 **Remaining gaps:**
-- Teleport detection: reject movement that skips tiles (movement currently only checks walkability, not adjacency)
-- Range validation on ranged attacks and spell casts (target_x/target_y bounds check)
-- Invalid packet rejection hardening (e.g., equip before login, action while dead)
-- Structured logging of flagged anti-cheat events
+- Invalid packet / state-transition hardening (e.g., equip before login, action while dead, out-of-sequence packets)
+- Structured logging of flagged anti-cheat events (currently only basic Logger.warning)
 
 **Goal:** The server rejects or corrects cheating attempts without false positives on legitimate play.
 
 **What to build:**
-- Speed hack: implement the soft accumulator described in Phase 1 architecture (track `speed_hack_counter`, snap position when threshold exceeded)
-- Teleport detection: reject movement that skips tiles
-- Range validation: attack/spell/pickup must be within valid range of entity position
-- Damage sanity: server computes all damage, client damage values are never trusted (already the case by architecture)
+- ~~Speed hack: soft accumulator + snap-back~~ — **Done.**
+- ~~Teleport detection: reject movement that skips tiles~~ — **Done.** Directional moves via TileGrid.
+- ~~Range validation: attack/spell/pickup within valid range~~ — **Done.** Melee adjacency, ranged Chebyshev, spell AoI range.
+- ~~Damage sanity: server computes all damage~~ — **Done by architecture.**
 - Packet validation: reject malformed or out-of-sequence packets (e.g., equip before login)
 - Logging: structured log of flagged events for review
 
