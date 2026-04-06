@@ -9,7 +9,7 @@
 - `Missing` — not implemented on the live gameplay path yet
 
 **Current phase snapshot:**
-- `Compatibility Gate — AO20 / VB6 Protocol & Behavior Parity`: `Mostly done`
+- `Compatibility Gate — AO20 / VB6 Protocol & Behavior Parity`: `Partially done`
 - `Phase 1 — Runtime & Performance Foundations`: `Done`
 - `Phase 2 — Character System, Persistence & Map Transitions`: `Done`
 - `Phase 2A — Transition Quality & Client Map Pack`: `Done`
