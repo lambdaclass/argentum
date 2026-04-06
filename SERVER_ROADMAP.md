@@ -9,7 +9,7 @@
 - `Missing` — not implemented on the live gameplay path yet
 
 **Current phase snapshot:**
-- `Compatibility Gate — AO20 / VB6 Protocol & Behavior Parity`: `Partially done`
+- `Compatibility Gate — AO20 / VB6 Protocol & Behavior Parity`: `Mostly done`
 - `Phase 1 — Runtime & Performance Foundations`: `Done`
 - `Phase 2 — Character System, Persistence & Map Transitions`: `Done`
 - `Phase 2A — Transition Quality & Client Map Pack`: `Done`
@@ -18,11 +18,11 @@
 - `Phase 5 — Combat`: `Done`
 - `Phase 6 — Spells`: `Done`
 - `Phase 7 — NPC AI`: `Done`
-- `Phase 8 — Commerce & Banking`: `Partially done`
+- `Phase 8 — Commerce & Banking`: `Done`
 - `Phase 9 — Crafting & Gathering`: `Missing`
 - `Phase 10 — Social Systems`: `Partially done`
 - `Phase 11 — Progression`: `Partially done`
-- `Phase 12 — World Rules & Polish`: `Missing`
+- `Phase 12 — World Rules & Polish`: `Partially done`
 - `Phase 13 — Auth & Account System`: `Done`
 - `Phase 14 — Anti-Cheat & Server Hardening`: `Partially done`
 - `Phase 15 — Operations & Infrastructure`: `Partially done`
@@ -41,10 +41,11 @@
 - Benchmark harness, benchmark maps, metrics, CI/release workflows, web test client
 
 **Important roadmap/code divergence to keep in mind:**
-- Phase 8 is no longer entirely missing: shopkeeper commerce exists on the live path, but banking/trade and VB6 protocol cleanup still remain
-- Exact AO20 parity is still incomplete even where features exist; some packet IDs and payload layouts still diverge from the VB6 client/server
-- The live protocol module still covers only a subset of the old VB6 enums, so "feature done" does not automatically mean "VB6-compatible"
-- The top-level phase statuses below are the source of truth; the old “not done” summary is no longer accurate
+- Phase 8 (Commerce & Banking) is now complete: shopkeeper commerce, bank, and player-to-player trade all exist on the live path
+- Phases 10-14 are partially done with specific remaining gaps documented in each section
+- Phase 9 (Crafting & Gathering) and Guilds are the two largest unstarted systems
+- The live protocol module covers all 37 client→server and 52 server→client packet IDs, but some decoded packets still lack game logic handlers
+- The top-level phase statuses below are the source of truth
 
 **VB6 server:** ~93,000 lines across 50+ modules
 **Estimated final Elixir server:** ~10,000–12,000 lines
@@ -76,7 +77,7 @@
 
 ## Compatibility Gate — AO20 / VB6 Protocol & Behavior Parity
 
-**Status:** `Partially done`
+**Status:** `Mostly done`
 
 This gate sits above the feature phases. A phase is only truly complete when the
 Elixir server remains playable by the original VB6 client without protocol
@@ -96,18 +97,26 @@ patching or behavior-specific workarounds.
   - server→client: `change_spell_slot`, `character_change`, `character_remove`, `npc_hit_user`, `user_hitted_user`, `user_hitted_by_user`, `create_fx`, `play_wave`, `change_npc_inventory_slot`
   - client→server: `talk`, `whisper`, `attack`, `drop`, `cast_spell`, `left_click`, `use_item`, `equip_item` (packet_counter consumption added)
 - ~~Keep extension packets out of VB6 path~~ — **Done.** `session_token` (ID 200) is WS-only, injected by WsHandler, never sent on TCP.
-- Remaining: 15 client→server packets are decoded but have no game logic handler yet (yell, whisper, rest, meditate, heal, resucitate, request_atributes/skills/mini_stats, bank ops, double_click, work, online, party_safe_toggle, use_spell_macro). These decode cleanly and don't break the stream; handlers will be added as features are implemented.
+- Remaining: a few client→server packets are decoded but have no game logic handler yet (request_atributes, mini_stats, double_click, online, use_spell_macro). Most previously unhandled packets (yell, whisper, rest, meditate, heal, resucitate, request_skills, bank ops, work, party_safe_toggle) now have handlers.
 
 ### Behavior parity backlog
 
 - Keep auditing gameplay semantics against VB6 and treat "close enough" as incomplete.
-- Remaining open items already identified:
-  - ranged attacks (bow/arrow, ammo consumption, distance targeting)
-  - buff/debuff timers (paralysis, poison, invisibility never expire)
-  - resurrection spells (spell_def.revivir parsed but unchecked)
-  - NPC spell casting (npc_def.lanza_spells parsed but unused)
+- Closed items:
+  - ~~ranged attacks (bow/arrow, ammo consumption, distance targeting)~~ — **Done.** Bow/arrow with ammo consumption in combat_handlers.ex.
+  - ~~buff/debuff timers (paralysis, poison, invisibility never expire)~~ — **Done.** Buff expiry via `expires_at` + `process_player_buffs` in buff_tick.
+  - ~~resurrection spells (spell_def.revivir parsed but unchecked)~~ — **Done.** `apply_spell_resurrect` in combat_handlers.ex + NPC revive in social.ex.
+  - ~~NPC spell casting (npc_def.lanza_spells parsed but unused)~~ — **Done.** `maybe_cast_spell` in npc_ai.ex.
+  - ~~appearance packets missing equipment fields~~ — **Done.** character_create/character_change include weapon/shield/helmet/body from equipment.
+  - ~~death/revive not broadcasting character_change~~ — **Done.** All death/revive paths broadcast ghost body (829) / alive body.
+  - ~~armor equip not updating body_id~~ — **Done.** Ropaje lookup from obj.dat, base_body_id for naked body restoration.
+  - ~~FX packets using wrong field name (fx_id vs fx)~~ — **Done.** Fixed in social.ex meditate/resurrect.
+  - ~~duplicated packet builder in SessionLogic~~ — **Done.** Removed; all sites use Helpers.character_create_packet.
+  - ~~hunger/thirst drain missing~~ — **Done.** Drain by 1 per regen tick, starvation damage at 0, regen blocked.
+- Remaining open items:
   - interval clamps that may still differ from raw VB6 data-driven timing
   - ongoing invisibility / AI / spell-selection edge-case review
+  - trainer NPC gating for skill training (currently direct skill-point spend only)
 
 ### Compatibility test gate
 
@@ -116,12 +125,12 @@ patching or behavior-specific workarounds.
 - Add explicit VB6-client smoke coverage for:
   - ~~login~~ / reconnect
   - ~~walk~~ / map transfer
-  - whisper / yell / console flow
-  - ~~melee~~ / ranged / spell cast
+  - ~~whisper / yell~~ / console flow
+  - ~~melee~~ / ~~ranged~~ / ~~spell cast~~
   - ~~equip / use / drop / pickup~~
   - ~~shop open / buy / sell~~
-  - bank open / deposit / withdraw
-  - death / resurrect / relog persistence
+  - ~~bank open / deposit / withdraw~~
+  - ~~death / resurrect~~ / relog persistence
 
 No server phase that changes networking or gameplay semantics should be marked
 `Done` if this gate regresses.
@@ -805,17 +814,16 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 ## Phase 8 — Commerce & Banking
 
-**Status:** `Partially done`
+**Status:** `Done`
 
 **In code now:**
 - Shopkeeper commerce on the live path: open / buy / sell / close, pricing formulas, and inventory mutations
-- `bank_gold` and `bank_items` persistence/static data shape exist
-- Basic protocol hooks for commerce already exist, but they still need AO20 / VB6 compatibility cleanup
+- Bank: open / deposit / withdraw / bank gold — fully implemented in `bank.ex`
+- Player-to-player trade: request / accept / offer items+gold / confirm / cancel — fully implemented in `trade.ex`
+- Commerce protocol uses correct VB6 packet IDs (verified against VB6 source)
 
 **Remaining gaps:**
-- Bank open / deposit / withdraw
-- Player-to-player trade
-- Protocol cleanup so commerce/banking use the exact VB6 packet IDs and payloads instead of the current remapped shop/commerce shape
+- None blocking. Minor edge cases may surface during VB6 client testing.
 
 **Goal:** Players can buy/sell from NPC shops and store items in bank.
 
@@ -890,13 +898,16 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 **In code now:**
 - Online directory / presence lookup
-- Local map chat already exists as part of the runtime foundation
+- Local map chat on the live path
+- Whisper (cross-map via OnlineDirectory) and yell (extended broadcast range) — both in `social.ex`
+- Parties: `PartyServer` GenServer + ETS — invite, accept, leave, kick, party XP split, max 5 members
+- Rest/meditate with FX broadcasts in `social.ex`
+- NPC revive via `/RESUCITAR` command in `social.ex`
+- Request skills / send_skills packet flow in `social.ex`
 
 **Remaining gaps:**
-- Whisper and yell
-- Parties
-- Guilds and guild chat
-- Factions and faction-specific social rules
+- Guilds: entirely unstarted — DB-backed, cross-map, significant feature (~500 lines). VB6: create, join, leave, kick, elect leader, guild chat, guild wars, alliances
+- Factions: Royal Army vs Chaos Legion enlist, faction-specific chat (minimal code exists for faction PvP exception in combat)
 
 **Goal:** Players can whisper, form parties, create guilds.
 
@@ -930,13 +941,14 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 **In code now:**
 - Persisted `level`, `xp`, and `skill_points`
 - Race/class stat tables and initial stat computation
+- XP gain on NPC kill (melee + spell), with level-difference penalty
+- Level-up with recursive multi-level support: HP growth, mana growth, stamina growth, skill points, base damage update, heal to full
+- Skill training: direct skill-point spend via Work packet (skill_index → skill atom, increment by 1, send_skills packet)
+- `update_user_stats` / `update_exp` packets sent on level-up
 
 **Remaining gaps:**
-- Real XP gain integration on the combat path
-- Level-up formulas and stat growth
-- Skill training
-- Trainer NPC flow
-- Progression packets and client refresh flow
+- Trainer NPC flow: VB6 has trainer NPCs that gate skill training behind gold cost + proximity to specific NPC types. Currently skill training is free direct spend.
+- Stat display packets (request_atributes/mini_stats) — decoded but no handler
 
 **Goal:** Characters level up, gain stats, train skills.
 
@@ -963,17 +975,20 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 ## Phase 12 — World Rules & Polish
 
-**Status:** `Missing`
+**Status:** `Partially done`
 
 **In code now:**
-- Some map metadata and character flags exist (`safe_zone`, `criminal`, `gm`, hunger/thirst fields)
+- Safe zones: `safe_zone` flag from .csm, enforced in PvP attack path (with faction exception)
+- Criminal flag: set on attacking innocent players in combat_handlers.ex
+- Rest/meditate: toggle via chat commands, HP/mana regen in regen_tick, FX broadcast to nearby players
+- Hunger/thirst drain: -1 per regen tick (3s), starvation/dehydration damage at 0, regen blocked, can kill
+- Food/drink items restore hunger/thirst with `update_hunger_and_thirst` packets
 
 **Remaining gaps:**
-- Safe-zone enforcement
-- Criminal/jail system
-- Rest/meditation and hunger/thirst gameplay loops
-- Pets and GM commands
-- Remaining world-rule polish features like weather/client polish integration
+- Jail system: GM command to teleport criminal to jail map (not implemented)
+- Pets/summons: VB6 has follower NPCs summoned by players (entirely unstarted)
+- GM commands: teleport, kick, spawn item/NPC, locate, ban (not implemented)
+- Weather: rain/snow from .csm flags sent on map enter (not implemented, client-side rendering only)
 
 **Goal:** Zone enforcement, GM tools, remaining features.
 
@@ -1032,15 +1047,16 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 **In code now:**
 - Flood guard (packet rate limiting per session)
-- Speed hack accumulator spec in roadmap but not fully implemented
-- Cooldown fields on PlayerEntity
+- Speed hack detection: soft accumulator + position snap-back in movement.ex
+- Cooldown fields on PlayerEntity for all timed actions (move, attack, spell, item use)
+- Range validation on melee attacks (adjacent tile check)
+- Damage is fully server-authoritative (client values never trusted)
 
 **Remaining gaps:**
-- Speed hack detection and position snapping
-- Damage sanity checks
-- Teleport detection
-- Invalid packet rejection hardening
-- Action validation (e.g., can't attack from 50 tiles away)
+- Teleport detection: reject movement that skips tiles (movement currently only checks walkability, not adjacency)
+- Range validation on ranged attacks and spell casts (target_x/target_y bounds check)
+- Invalid packet rejection hardening (e.g., equip before login, action while dead)
+- Structured logging of flagged anti-cheat events
 
 **Goal:** The server rejects or corrects cheating attempts without false positives on legitimate play.
 
