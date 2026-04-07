@@ -82,23 +82,35 @@ defmodule AoTcpGateway.SessionLogic do
   end
 
   defp do_login(state, account_id, character) do
-    entity = GameBackend.Characters.to_entity(character)
-    char_id = entity.char_id
+    account = GameBackend.Repo.get(GameBackend.Account, account_id)
 
-    case AoSession.register(account_id, char_id, self()) do
-      :ok ->
-        {state, packets} = enter_world(state, account_id, entity)
+    if account != nil and GameBackend.Account.banned?(account) do
+      formatted = Calendar.strftime(account.banned_until, "%Y-%m-%d %H:%M UTC")
 
-        if state.character_id do
-          {state, packets}
-        else
-          AoSession.unregister(char_id)
-          {state, packets}
-        end
+      {state,
+       [
+         {:console_msg, %{message: "Tu cuenta está baneada hasta #{formatted}.", font_index: 0}},
+         {:error_msg, %{message: "Account banned."}}
+       ]}
+    else
+      entity = GameBackend.Characters.to_entity(character)
+      char_id = entity.char_id
 
-      {:error, :already_connected} ->
-        Logger.warning("char_id #{char_id} already connected")
-        {state, [{:error_msg, %{message: "Already connected."}}]}
+      case AoSession.register(account_id, char_id, self()) do
+        :ok ->
+          {state, packets} = enter_world(state, account_id, entity)
+
+          if state.character_id do
+            {state, packets}
+          else
+            AoSession.unregister(char_id)
+            {state, packets}
+          end
+
+        {:error, :already_connected} ->
+          Logger.warning("char_id #{char_id} already connected")
+          {state, [{:error_msg, %{message: "Already connected."}}]}
+      end
     end
   end
 
@@ -294,8 +306,15 @@ defmodule AoTcpGateway.SessionLogic do
                 {state, []}
 
               :not_faction_command ->
-                Arena.Map.MapServer.chat(state.map_id, state.character_id, message)
-                {state, []}
+                case parse_report_command(message) do
+                  {:report, target_name, reason} ->
+                    Arena.AuditLog.log_report(state.character_id, target_name, reason)
+                    {state, [{:console_msg, %{message: "Denuncia registrada.", font_index: 0}}]}
+
+                  :not_report_command ->
+                    Arena.Map.MapServer.chat(state.map_id, state.character_id, message)
+                    {state, []}
+                end
             end
         end
     end
@@ -491,15 +510,8 @@ defmodule AoTcpGateway.SessionLogic do
   end
 
   def handle_command(state, {:online, _}) when state.character_id != nil do
-    # VB6: /online is GM-only. Check GM flag from entity snapshot.
-    case Arena.Map.MapServer.snapshot_entity(state.map_id, state.character_id) do
-      {:ok, entity} when entity.gm ->
-        count = AoSession.OnlineDirectory.online_count()
-        {state, [{:console_msg, %{message: "Jugadores en linea: #{count}", font_index: 0}}]}
-
-      _ ->
-        {state, [{:console_msg, %{message: "Comando deshabilitado.", font_index: 0}}]}
-    end
+    count = AoSession.OnlineDirectory.online_count()
+    {state, [{:console_msg, %{message: "Jugadores en linea: #{count}", font_index: 0}}]}
   end
 
   # ---- User-to-user trade ----
@@ -787,6 +799,21 @@ defmodule AoTcpGateway.SessionLogic do
         msg = String.trim(String.slice(message, 9..-1//1))
         {:faction_chat, msg}
       true -> :not_faction_command
+    end
+  end
+
+  defp parse_report_command(message) do
+    upper = String.upcase(String.trim(message))
+    cond do
+      String.starts_with?(upper, "/DENUNCIAR ") ->
+        # /DENUNCIAR name reason_text
+        rest = String.trim(String.slice(message, 11..-1//1))
+        case String.split(rest, ~r/\s+/, parts: 2) do
+          [target_name, reason] -> {:report, target_name, reason}
+          [target_name] -> {:report, target_name, ""}
+          _ -> :not_report_command
+        end
+      true -> :not_report_command
     end
   end
 

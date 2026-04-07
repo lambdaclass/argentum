@@ -96,6 +96,7 @@ defmodule Arena.Map.Helpers do
 
   def character_create_packet(entity) do
     visual = visual_state(entity)
+    {clan_index, clan_nivel} = guild_display_info(entity.char_id)
 
     {:character_create, %{
       char_index: entity.char_index,
@@ -112,8 +113,20 @@ defmodule Arena.Map.Helpers do
       max_hp: entity.max_hp,
       min_mana: entity.mana,
       max_mana: entity.max_mana,
-      speed: entity.speeding
+      speed: entity.speeding,
+      clan_index: clan_index,
+      clan_nivel: clan_nivel
     }}
+  end
+
+  defp guild_display_info(char_id) do
+    case Arena.GuildServer.get_guild(char_id) do
+      {:ok, guild} -> {guild.id, 1}
+      :not_in_guild -> {0, 0}
+    end
+  rescue
+    # GuildServer may not be running in tests
+    _ -> {0, 0}
   end
 
   def character_change_packet(entity) do

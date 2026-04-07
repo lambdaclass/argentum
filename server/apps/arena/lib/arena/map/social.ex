@@ -332,18 +332,29 @@ defmodule Arena.Map.Social do
     end
   end
 
-  # /BAN name days — ban player (kick + log; DB ban needs GameBackend.Account.ban/2)
-  # TODO: Implement persistent ban via GameBackend.Account.ban/2
+  # /BAN name days — ban player and persist to the database
   defp gm_ban(state, char_id, target_name, days_str) do
     case Integer.parse(days_str) do
       {days, ""} when days > 0 ->
         case find_player_by_name(state, target_name) do
-          {:ok, target_id, _target} ->
-            Logger.warning("GM ban: #{target_name} for #{days} days")
-            Helpers.send_to_session(state.sessions, target_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: "Has sido baneado por #{days} día(s).", font_index: 0}})})
-            Helpers.send_to_session(state.sessions, target_id, :disconnect)
-            gm_console(state, char_id, "#{target_name} banned for #{days} day(s). (Note: persistent ban not yet implemented)")
+          {:ok, target_id, target} ->
+            banned_until = DateTime.add(DateTime.utc_now(), days * 24 * 3600, :second)
+
+            case GameBackend.Account.ban(target.account_id, banned_until) do
+              {:ok, _account} ->
+                Arena.AuditLog.log_gm_action(char_id, "ban", "#{target_name} for #{days} day(s)")
+                Logger.warning("GM ban: #{target_name} for #{days} days (account_id=#{target.account_id})")
+
+                Helpers.send_to_session(state.sessions, target_id,
+                  {:send_raw, Encoder.encode({:console_msg, %{message: "Has sido baneado por #{days} día(s).", font_index: 0}})})
+                Helpers.send_to_session(state.sessions, target_id, :disconnect)
+                gm_console(state, char_id, "#{target_name} banned for #{days} day(s).")
+
+              {:error, reason} ->
+                Logger.error("Failed to persist ban for #{target_name}: #{inspect(reason)}")
+                gm_console(state, char_id, "Failed to persist ban for #{target_name}.")
+            end
+
             {:noreply, state}
 
           :not_found ->
@@ -778,31 +789,46 @@ defmodule Arena.Map.Social do
   @crafting_skills [:woodcutting, :fishing, :mining, :blacksmithing,
                     :carpentry, :alchemy, :tailoring, :taming]
 
+  # -- Trainer skill groups (VB6 subtypes) --
+  @combat_skills [:combat_tactics, :combat_weapons, :combat_defense,
+                  :short_weapons, :ranged_weapons, :wrestling, :resistance]
+  @magic_skills [:magic, :meditation]
+  @trade_skills [:woodcutting, :fishing, :mining, :blacksmithing, :carpentry,
+                 :alchemy, :tailoring, :taming, :trading, :navigation,
+                 :survival, :riding, :leadership]
+  @stealth_skills [:stealing, :hiding]
+
   @doc """
   Train a skill via a nearby Entrenador NPC, or attempt crafting work if no
   trainer is present.
 
-  Known simplification: VB6 trainers have subtypes (combat, magic, trade) that
-  restrict which skill groups they can teach. Our NPC data currently stores only
-  npc_type 3 (entrenador) with no subtype field, so every trainer accepts every
-  skill. Once NPC subtype data is loaded from the .dat files, this function
-  should match skill groups to trainer subtypes:
-    - Combat trainers: combat_tactics, combat_weapons, combat_defense,
-      short_weapons, ranged_weapons, wrestling, resistance
-    - Magic trainers: magic, meditation
-    - Trade/craft trainers: woodcutting, fishing, mining, blacksmithing,
-      carpentry, alchemy, tailoring, taming, trading, navigation, survival,
-      riding, leadership
-    - Stealth trainers: stealing, hiding
+  VB6 trainers have subtypes (combat, magic, trade, stealth) that restrict
+  which skill groups they can teach. The skill groups are defined in the
+  `@combat_skills`, `@magic_skills`, `@trade_skills`, and `@stealth_skills`
+  module attributes above. Once NPC subtype data is loaded from the .dat
+  files, `trainer_accepts_skill?/2` will gate training by group.
   """
   def handle_train_skill(state, char_id, skill_index) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         skill_atom = Enum.at(@skill_order, skill_index)
-        near_trainer = find_nearby_npc_of_type(state, entity, [@npc_type_entrenador]) != :not_found
+        trainer_result = find_nearby_npc_of_type(state, entity, [@npc_type_entrenador])
+        near_trainer = trainer_result != :not_found
+
+        trainer_npc_def =
+          case trainer_result do
+            {:ok, _npc, npc_def} -> npc_def
+            :not_found -> nil
+          end
 
         cond do
           skill_atom == nil ->
+            {:noreply, state}
+
+          # Near trainer but this trainer does not teach the requested skill group
+          near_trainer and not trainer_accepts_skill?(trainer_npc_def, skill_atom) ->
+            Helpers.send_to_session(state.sessions, char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "Este entrenador no enseña esa habilidad.", font_index: 0}})})
             {:noreply, state}
 
           # Near trainer: train with skill points (all skills)
@@ -857,6 +883,21 @@ defmodule Arena.Map.Social do
       :error ->
         {:noreply, state}
     end
+  end
+
+  # Returns which skill group a skill belongs to.
+  defp skill_group(skill) when skill in @combat_skills,  do: :combat
+  defp skill_group(skill) when skill in @magic_skills,   do: :magic
+  defp skill_group(skill) when skill in @trade_skills,   do: :trade
+  defp skill_group(skill) when skill in @stealth_skills,  do: :stealth
+  defp skill_group(_skill), do: :unknown
+
+  # Check whether an NPC trainer accepts a given skill.
+  # TODO: gate by npc_def.trainer_type when subtype data is available in npcs.dat.
+  # Once trainer_type is loaded, match skill_group(skill_atom) against it.
+  defp trainer_accepts_skill?(_npc_def, skill_atom) do
+    _group = skill_group(skill_atom)
+    true
   end
 
   def handle_request_mini_stats(state, char_id) do

@@ -7,6 +7,7 @@ defmodule GameBackend.Account do
   schema "accounts" do
     field :username, :string
     field :password_hash, :string
+    field :banned_until, :utc_datetime
     has_many :characters, GameBackend.Characters, foreign_key: :account_id
     timestamps()
   end
@@ -50,6 +51,35 @@ defmodule GameBackend.Account do
           {:error, :wrong_password}
         end
     end
+  end
+
+  @doc "Ban an account until the given `DateTime`."
+  def ban(account_id, %DateTime{} = until) do
+    case Repo.get(__MODULE__, account_id) do
+      nil -> {:error, :not_found}
+      account ->
+        account
+        |> change(%{banned_until: DateTime.truncate(until, :second)})
+        |> Repo.update()
+    end
+  end
+
+  @doc "Remove a ban from an account."
+  def unban(account_id) do
+    case Repo.get(__MODULE__, account_id) do
+      nil -> {:error, :not_found}
+      account ->
+        account
+        |> change(%{banned_until: nil})
+        |> Repo.update()
+    end
+  end
+
+  @doc "Check whether an account is currently banned."
+  def banned?(%__MODULE__{banned_until: nil}), do: false
+
+  def banned?(%__MODULE__{banned_until: until}) do
+    DateTime.compare(until, DateTime.utc_now()) == :gt
   end
 
   defp changeset(account, attrs) do

@@ -75,10 +75,13 @@ defmodule Arena.Data.CraftingRecipes do
     ]
   end
 
-  # TODO: Tailoring recipes need real hide/cloth item IDs verified from obj.dat.
-  # Placeholder — the sewing tool IDs and loom NPC type are already wired in crafting.ex.
   def production_recipes(:tailoring) do
-    []
+    [
+      %{min_skill: 0,  result_id: 184, result_amount: 1, ingredients: [{568, 2}]},              # 2x Tela → Ropa Comun
+      %{min_skill: 20, result_id: 261, result_amount: 1, ingredients: [{568, 3}]},              # 3x Tela → Tunica
+      %{min_skill: 40, result_id: 406, result_amount: 1, ingredients: [{473, 2}, {886, 1}]},   # 2x Cuero de Lobo + 1x Hilo → Ropa de cuero
+      %{min_skill: 60, result_id: 407, result_amount: 1, ingredients: [{473, 3}, {474, 1}]}    # 3x Cuero de Lobo + 1x Cuero de Oso → Armadura de cuero
+    ]
   end
 
   def production_recipes(_), do: []

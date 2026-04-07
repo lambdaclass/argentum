@@ -37,4 +37,9 @@ defmodule Arena.AuditLog do
   def log_anticheat(char_id, type, details) do
     Logger.warning("[ANTICHEAT] #{type} char_id=#{char_id} #{details}")
   end
+
+  @doc "Log a player report (/DENUNCIAR)."
+  def log_report(char_id, target_name, reason) do
+    Logger.info("[REPORT] char_id=#{char_id} reported '#{target_name}': #{reason}")
+  end
 end
