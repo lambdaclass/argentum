@@ -74,6 +74,11 @@ defmodule Arena.Entity.PlayerEntity do
     str_buff: 0,
     agi_buff: 0,
 
+    # Faction kill counters (persisted)
+    faction_kills_royal: 0,
+    faction_kills_chaos: 0,
+    citizens_killed: 0,
+
     # Flags
     dead: false,
     poisoned: false,

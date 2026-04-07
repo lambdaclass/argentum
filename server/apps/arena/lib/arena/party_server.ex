@@ -185,6 +185,15 @@ defmodule Arena.PartyServer do
             :ets.insert(@table, {{:party, party_id}, Map.put(party, :safe, new_safe)})
             msg = if new_safe, do: "Seguro de grupo activado.", else: "Seguro de grupo desactivado."
             broadcast_party(party.members, msg)
+
+            # Send party safe confirmation packet to the toggling player
+            packet = if new_safe, do: :party_safe_mode_on, else: :party_safe_mode_off
+            case OnlineDirectory.lookup_by_id(char_id) do
+              {:ok, %{session_pid: pid}} ->
+                raw = AoProtocol.Server.Encoder.encode({packet, %{}})
+                send(pid, {:send_raw, raw})
+              _ -> :ok
+            end
           [] -> :ok
         end
       [] ->

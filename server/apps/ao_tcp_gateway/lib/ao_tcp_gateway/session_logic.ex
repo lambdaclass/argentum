@@ -137,7 +137,9 @@ defmodule AoTcpGateway.SessionLogic do
           entity: entity
       }
 
-      weather_packets = if weather.rain, do: [{:rain_toggle, %{raining: true}}], else: []
+      weather_packets =
+        (if weather.rain, do: [{:rain_toggle, %{raining: true}}], else: []) ++
+        (if weather.snow, do: [{:snow_toggle, %{snowing: true}}], else: [])
 
       packets =
         [
@@ -195,7 +197,9 @@ defmodule AoTcpGateway.SessionLogic do
 
       state = %{state | map_id: dest_map, char_index: char_index, entity: entity}
 
-      weather_packets = if weather.rain, do: [{:rain_toggle, %{raining: true}}], else: [{:rain_toggle, %{raining: false}}]
+      weather_packets =
+        (if weather.rain, do: [{:rain_toggle, %{raining: true}}], else: [{:rain_toggle, %{raining: false}}]) ++
+        (if weather.snow, do: [{:snow_toggle, %{snowing: true}}], else: [{:snow_toggle, %{snowing: false}}])
 
       packets =
         [

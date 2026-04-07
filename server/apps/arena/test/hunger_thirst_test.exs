@@ -36,15 +36,15 @@ defmodule Arena.HungerThirstTest do
   end
 
   describe "hunger/thirst drain in regen tick" do
-    test "hunger and thirst decrement by 1 each tick" do
+    test "hunger and thirst decrement by 10 each tick" do
       entity = %PlayerEntity{char_id: 1, hunger: 50, thirst: 60}
       state = make_state(%{1 => entity})
 
       new_state = CombatHandlers.process_regen_tick(state)
       player = new_state.players[1]
 
-      assert player.hunger == 49, "hunger should drain by 1, got #{player.hunger}"
-      assert player.thirst == 59, "thirst should drain by 1, got #{player.thirst}"
+      assert player.hunger == 40, "hunger should drain by 10, got #{player.hunger}"
+      assert player.thirst == 50, "thirst should drain by 10, got #{player.thirst}"
     end
 
     test "hunger and thirst don't go below 0" do

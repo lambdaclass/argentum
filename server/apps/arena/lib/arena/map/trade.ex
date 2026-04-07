@@ -193,7 +193,14 @@ defmodule Arena.Map.Trade do
 
   def send_trade_slot_update(state, char_id, entity) do
     items = Enum.map(entity.trade_offer_items, fn {obj_index, amount} ->
-      %{obj_index: obj_index, amount: amount}
+      item_def = Arena.Data.GameData.get_item(obj_index)
+      %{
+        obj_index: obj_index,
+        name: (item_def && item_def.name) || "",
+        grh_index: (item_def && item_def.grh_index) || 0,
+        amount: amount,
+        equipped: 0
+      }
     end)
 
     # Send to self (my_offer: true)

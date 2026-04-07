@@ -40,6 +40,19 @@ defmodule Arena.Combat do
   end
 
   @doc """
+  VB6 critical hit check. Chance based on weapon skill, ~10-15% at high skill.
+  Returns true if the attack is a critical hit.
+  """
+  @crit_divisor 100
+  def critical_hit?(weapon_skill) do
+    chance = div(weapon_skill, @crit_divisor) * 10 + 5
+    :rand.uniform(100) <= min(chance, 15)
+  end
+
+  @crit_multiplier 1.5
+  def apply_critical(damage), do: round(damage * @crit_multiplier)
+
+  @doc """
   Apply defense reduction. Random hit location: 1/6 head (helmet only), 5/6 body (armor + shield).
   Returns {reduced_damage, hit_location}.
   """

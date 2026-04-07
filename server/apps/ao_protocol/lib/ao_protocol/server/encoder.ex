@@ -441,16 +441,26 @@ defmodule AoProtocol.Server.Encoder do
   end
 
   # eChangeUserTradeSlot (ID 100) — my_offer(Bool) + gold(Int32) + items[10]
-  # Each item: obj_index(Int16) + amount(Int32)
+  # Each item: obj_index(Int16) + name(String8) + grh_index(Int16) + amount(Int32) + equipped(Int8)
   def encode({:change_user_trade_slot, params}) do
     items = params[:items] || []
     item_payload =
       Enum.reduce(0..9, <<>>, fn i, acc ->
         item = Enum.at(items, i)
         if item do
-          acc <> Writer.write_int16(item.obj_index) <> Writer.write_int32(item.amount)
+          acc <>
+            Writer.write_int16(item.obj_index) <>
+            Writer.write_string8(Map.get(item, :name, "")) <>
+            Writer.write_int16(Map.get(item, :grh_index, 0)) <>
+            Writer.write_int32(item.amount) <>
+            Writer.write_int8(Map.get(item, :equipped, 0))
         else
-          acc <> Writer.write_int16(0) <> Writer.write_int32(0)
+          acc <>
+            Writer.write_int16(0) <>
+            Writer.write_string8("") <>
+            Writer.write_int16(0) <>
+            Writer.write_int32(0) <>
+            Writer.write_int8(0)
         end
       end)
 
@@ -501,6 +511,22 @@ defmodule AoProtocol.Server.Encoder do
   def encode({:rain_toggle, %{raining: raining}}) do
     payload = Writer.write_bool(raining)
     Writer.build_packet(PacketIds.Server.rain_toggle(), payload)
+  end
+
+  # eSnowToggle (ID 76) — snowing(Bool)
+  def encode({:snow_toggle, %{snowing: snowing}}) do
+    payload = Writer.write_bool(snowing)
+    Writer.build_packet(PacketIds.Server.snow_toggle(), payload)
+  end
+
+  # ePartySafeModeOn (ID 22) — no payload
+  def encode({:party_safe_mode_on, _params}) do
+    Writer.build_packet(PacketIds.Server.party_safe_mode_on(), <<>>)
+  end
+
+  # ePartySafeModeOff (ID 23) — no payload
+  def encode({:party_safe_mode_off, _params}) do
+    Writer.build_packet(PacketIds.Server.party_safe_mode_off(), <<>>)
   end
 
   # eBlind (ID 74) — no payload

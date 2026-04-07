@@ -57,10 +57,11 @@ defmodule Arena.Map.Social do
           end
         else
           now = System.monotonic_time(:millisecond)
+          wall_now = System.system_time(:millisecond)
 
           cond do
-            # Mute enforcement
-            entity.muted_until > 0 and now < entity.muted_until ->
+            # Mute enforcement (wall-clock ms for persistence across restarts)
+            entity.muted_until > 0 and wall_now < entity.muted_until ->
               Helpers.send_to_session(state.sessions, char_id,
                 {:send_raw, Encoder.encode({:console_msg, %{message: "Estás silenciado.", font_index: 0}})})
               {:noreply, state}
@@ -374,7 +375,7 @@ defmodule Arena.Map.Social do
       {minutes, ""} when minutes > 0 ->
         case find_player_by_name(state, target_name) do
           {:ok, target_id, target} ->
-            muted_until = System.monotonic_time(:millisecond) + minutes * 60_000
+            muted_until = System.system_time(:millisecond) + minutes * 60_000
             target = %{target | muted_until: muted_until}
             players = Map.put(state.players, target_id, target)
             state = %{state | players: players}
@@ -893,11 +894,23 @@ defmodule Arena.Map.Social do
   defp skill_group(_skill), do: :unknown
 
   # Check whether an NPC trainer accepts a given skill.
-  # TODO: gate by npc_def.trainer_type when subtype data is available in npcs.dat.
-  # Once trainer_type is loaded, match skill_group(skill_atom) against it.
-  defp trainer_accepts_skill?(_npc_def, skill_atom) do
-    _group = skill_group(skill_atom)
-    true
+  # Infers the trainer specialization from the NPC name since npcs.dat
+  # does not carry a trainer_type field.
+  defp trainer_accepts_skill?(npc_def, skill_atom) do
+    group = skill_group(skill_atom)
+    trainer_group = infer_trainer_group(npc_def)
+    trainer_group == :all or trainer_group == group
+  end
+
+  defp infer_trainer_group(npc_def) do
+    name = String.downcase(npc_def.name || "")
+    cond do
+      String.contains?(name, ["combate", "guerrero", "armas"]) -> :combat
+      String.contains?(name, ["magia", "mago", "hechicero"]) -> :magic
+      String.contains?(name, ["oficio", "trabajo", "artesano"]) -> :trade
+      String.contains?(name, ["ladron", "asesino", "sigilo"]) -> :stealth
+      true -> :all
+    end
   end
 
   def handle_request_mini_stats(state, char_id) do
@@ -922,8 +935,8 @@ defmodule Arena.Map.Social do
 
         Helpers.send_to_session(state.sessions, char_id,
           {:send_raw, Encoder.encode({:mini_stats, %{
-            ciudadanos_matados: 0,
-            criminales_matados: 0,
+            ciudadanos_matados: entity.citizens_killed,
+            criminales_matados: entity.faction_kills_royal + entity.faction_kills_chaos,
             faction_status: case Map.get(entity, :faction, :none) do
               :royal_army -> 1
               :chaos_legion -> 2

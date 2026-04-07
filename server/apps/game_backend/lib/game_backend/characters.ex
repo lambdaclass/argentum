@@ -25,6 +25,7 @@ defmodule GameBackend.Characters do
     field :class, :string, default: "warrior"
     field :gender, :string, default: "male"
     field :home_city, :string, default: "ullathorpe"
+    field :faction, :string, default: "none"
 
     field :level, :integer, default: 1
     field :xp, :integer, default: 0
@@ -56,10 +57,17 @@ defmodule GameBackend.Characters do
     field :body_id, :integer, default: 1
     field :head_id, :integer, default: 1
 
+    # Faction kill counters
+    field :faction_kills_royal, :integer, default: 0
+    field :faction_kills_chaos, :integer, default: 0
+    field :citizens_killed, :integer, default: 0
+
     # Flags stored as booleans
     field :dead, :boolean, default: false
     field :criminal, :boolean, default: false
     field :gm, :boolean, default: false
+
+    field :muted_until, :integer, default: 0
 
     field :session_token, :string
 
@@ -74,14 +82,16 @@ defmodule GameBackend.Characters do
 
   @required_fields [:name, :account_id]
   @optional_fields [
-    :race, :class, :gender, :home_city,
+    :race, :class, :gender, :home_city, :faction,
     :level, :xp, :skill_points,
     :map_id, :pos_x, :pos_y, :heading,
     :hp, :max_hp, :mana, :max_mana, :stamina, :max_stamina,
     :hunger, :thirst,
     :str, :agi, :int, :con, :cha,
     :gold, :bank_gold, :body_id, :head_id,
+    :faction_kills_royal, :faction_kills_chaos, :citizens_killed,
     :dead, :criminal, :gm,
+    :muted_until,
     :session_token
   ]
 
@@ -208,6 +218,7 @@ defmodule GameBackend.Characters do
       race: String.to_atom(c.race),
       gender: String.to_atom(c.gender),
       home_city: String.to_atom(c.home_city),
+      faction: String.to_atom(c.faction),
       str: c.str,
       agi: c.agi,
       int: c.int,
@@ -218,9 +229,13 @@ defmodule GameBackend.Characters do
       equipment: row_to_equipment(c.equipment),
       skills: rows_to_skills(c.character_skills),
       spells: rows_to_spells(c.character_spells),
+      faction_kills_royal: c.faction_kills_royal,
+      faction_kills_chaos: c.faction_kills_chaos,
+      citizens_killed: c.citizens_killed,
       dead: c.dead,
       criminal: c.criminal,
       gm: c.gm,
+      muted_until: c.muted_until || 0,
       map_id: c.map_id
     }
   end
@@ -234,6 +249,7 @@ defmodule GameBackend.Characters do
       class: to_string(e.class),
       gender: to_string(e.gender),
       home_city: to_string(e.home_city),
+      faction: to_string(e.faction),
       pos_x: e.x,
       pos_y: e.y,
       heading: to_string(e.heading),
@@ -256,8 +272,12 @@ defmodule GameBackend.Characters do
       con: e.con,
       cha: e.cha,
       gold: e.gold,
+      faction_kills_royal: e.faction_kills_royal,
+      faction_kills_chaos: e.faction_kills_chaos,
+      citizens_killed: e.citizens_killed,
       dead: e.dead,
       criminal: e.criminal,
+      muted_until: e.muted_until,
       map_id: e.map_id
     }
   end

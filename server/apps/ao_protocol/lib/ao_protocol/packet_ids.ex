@@ -163,6 +163,9 @@ defmodule AoProtocol.PacketIds do
     def pause_toggle, do: 58
     def blind, do: 74
     def dumb, do: 75
+    def snow_toggle, do: 76
+    def party_safe_mode_on, do: 22
+    def party_safe_mode_off, do: 23
 
     # Commerce (NPC)
     def commerce_init, do: 10

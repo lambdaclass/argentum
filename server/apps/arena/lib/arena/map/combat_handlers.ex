@@ -326,7 +326,8 @@ defmodule Arena.Map.CombatHandlers do
               shield_pct = CombatStats.shield_defense_pct(defender.equipment)
               def_skill = Map.get(defender.skills, :combat_defense, 50)
 
-              if shield_pct > 0 and Combat.shield_block?(shield_pct, def_skill, weapon_skill) do
+              # VB6: shield block uses attacker's weapon skill, not tactics
+              if shield_pct > 0 and Combat.shield_block?(shield_pct, def_skill, Map.get(entity.skills, :combat_weapons, 50)) do
                 # VB6: defense skill gain on block
                 defender = maybe_gain_skill(defender, :combat_defense)
 
@@ -345,6 +346,8 @@ defmodule Arena.Map.CombatHandlers do
                 # VB6: base user damage added to weapon damage
                 {user_min, user_max} = Combat.base_user_damage(entity.level, class_id)
                 raw_damage = Combat.melee_damage(min_weapon, max_weapon, entity.str + entity.str_buff, class_id, user_min, user_max)
+                # VB6: critical hit check
+                raw_damage = if Combat.critical_hit?(weapon_skill), do: Combat.apply_critical(raw_damage), else: raw_damage
                 {min_def, max_def} = CombatStats.effective_defense(defender.equipment)
                 {final_damage, _location} = Combat.apply_defense(raw_damage, {min_def, max_def})
 
@@ -719,7 +722,9 @@ defmodule Arena.Map.CombatHandlers do
                 %{state | players: players}
 
               true ->
-            final_damage = damage
+            # VB6: apply magic resistance in PvP (resistance skill as percentage)
+            resist_pct = Map.get(defender.skills, :resistance, 0)
+            final_damage = Combat.apply_magic_resistance(damage, resist_pct)
             new_hp = max(defender.hp - final_damage, 0)
             defender = %{defender | hp: new_hp}
 
@@ -1295,6 +1300,8 @@ defmodule Arena.Map.CombatHandlers do
   # - HP damage only when stamina reaches 0 AND (hunger == 0 OR thirst == 0).
   @hunger_thirst_damage 5
   @hunger_thirst_drain_interval 10
+  # VB6 drains hunger/thirst by 10 per interval (not 1)
+  @hunger_thirst_drain_amount 10
 
   def process_regen_tick(state) do
     # Increment the map-wide hunger/thirst tick counter.
@@ -1353,7 +1360,8 @@ defmodule Arena.Map.CombatHandlers do
               entity
 
             entity.resting and entity.hp < entity.max_hp ->
-              regen = max(div(entity.max_hp, 50), 1)
+              # VB6: rest regen = con / 6, min 1
+              regen = max(div(entity.con, 6), 1)
               new_hp = min(entity.hp + regen, entity.max_hp)
               entity = %{entity | hp: new_hp}
               if new_hp >= entity.max_hp do
@@ -1365,7 +1373,9 @@ defmodule Arena.Map.CombatHandlers do
               end
 
             entity.meditating and entity.mana < entity.max_mana ->
-              regen = max(div(entity.max_mana, 35), 1)
+              # VB6: meditate regen = int * meditation_skill / 35, min 1
+              med_skill = Map.get(entity.skills, :meditation, 0)
+              regen = max(div(entity.int * max(med_skill, 1), 35), 1)
               new_mana = min(entity.mana + regen, entity.max_mana)
               entity = %{entity | mana: new_mana}
               if new_mana >= entity.max_mana do
@@ -1378,6 +1388,33 @@ defmodule Arena.Map.CombatHandlers do
 
             true ->
               entity
+          end
+
+        # VB6: passive HP regen (1/5 of rest rate) when not resting
+        entity =
+          if not entity.resting and not (starving or dehydrated) and entity.hp < entity.max_hp do
+            passive_hp = max(div(entity.con, 30), 1)
+            %{entity | hp: min(entity.hp + passive_hp, entity.max_hp)}
+          else
+            entity
+          end
+
+        # VB6: passive mana regen when not meditating
+        entity =
+          if not entity.meditating and not (starving or dehydrated) and entity.mana < entity.max_mana do
+            passive_mana = max(div(entity.int, 35), 1)
+            %{entity | mana: min(entity.mana + passive_mana, entity.max_mana)}
+          else
+            entity
+          end
+
+        # VB6: stamina regen (agi-based, ~1-3 per tick)
+        entity =
+          if not (starving or dehydrated) and entity.stamina < entity.max_stamina do
+            sta_regen = max(div(entity.agi, 6), 1)
+            %{entity | stamina: min(entity.stamina + sta_regen, entity.max_stamina)}
+          else
+            entity
           end
 
         # Send updates
@@ -1418,8 +1455,8 @@ defmodule Arena.Map.CombatHandlers do
   end
 
   defp drain_hunger_thirst(entity) do
-    new_hunger = max(entity.hunger - 1, 0)
-    new_thirst = max(entity.thirst - 1, 0)
+    new_hunger = max(entity.hunger - @hunger_thirst_drain_amount, 0)
+    new_thirst = max(entity.thirst - @hunger_thirst_drain_amount, 0)
     changed = new_hunger != entity.hunger or new_thirst != entity.thirst
     {%{entity | hunger: new_hunger, thirst: new_thirst}, changed}
   end
