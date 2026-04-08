@@ -46,7 +46,8 @@ defmodule Arena.Data.SpellDef do
     need_staff: false,
     staff_afecta: 0,
     cooldown: 2,
-    requirement_mask: 0
+    requirement_mask: 0,
+    require_weapon_type: 0
   ]
 
   @doc "Build a SpellDef from a parsed INI section (downcased keys)."
@@ -94,7 +95,8 @@ defmodule Arena.Data.SpellDef do
       need_staff: parse_bool(section["needstaff"]),
       staff_afecta: parse_int(section["staffafecta"]),
       cooldown: parse_cooldown(section["cooldown"]),
-      requirement_mask: parse_int(section["req"])
+      requirement_mask: parse_int(section["req"]),
+      require_weapon_type: parse_int(section["requireweapontype"])
     }
   end
 

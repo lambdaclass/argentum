@@ -36,6 +36,7 @@ defmodule Arena.Data.ItemDef do
     instransferible: false,
     staff_power: 0,
     staff_damage_bonus: 0,
+    weapon_type: 0,
     ropaje: nil
   ]
 
@@ -96,6 +97,7 @@ defmodule Arena.Data.ItemDef do
       instransferible: parse_int(section["instransferible"]) == 1,
       staff_power: parse_int(section["staffpower"]),
       staff_damage_bonus: parse_int(section["staffdamagebonus"]),
+      weapon_type: parse_int(section["weapontype"]),
       ropaje: parse_ropaje(section)
     }
   end

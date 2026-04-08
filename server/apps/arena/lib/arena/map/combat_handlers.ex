@@ -509,6 +509,11 @@ defmodule Arena.Map.CombatHandlers do
                     not has_required_weapon_type?(entity, spell_def.staff_afecta) ->
                     spell_req_fail(state, char_id, "Necesitas el arma adecuada para lanzar ese hechizo.")
 
+                  # VB6: RequireWeaponType -- requires weapon of specific e_WeaponType enum
+                  spell_def.require_weapon_type > 0 and
+                    not has_required_weapon_enum?(entity, spell_def.require_weapon_type) ->
+                    spell_req_fail(state, char_id, "Necesitas el tipo de arma correcto para lanzar ese hechizo.")
+
                   true ->
                     entity = Helpers.break_invisibility(entity, state, char_id)
                     # VB6: per-spell cooldown in seconds
@@ -1270,6 +1275,17 @@ defmodule Arena.Map.CombatHandlers do
     if weapon_id do
       item_def = GameData.get_item(weapon_id)
       item_def != nil and item_def.obj_type == required_obj_type
+    else
+      false
+    end
+  end
+
+  # VB6: RequireWeaponType -- check weapon_type enum (sword=1, dagger=2, etc.)
+  defp has_required_weapon_enum?(entity, required_weapon_type) do
+    weapon_id = entity.equipment[:weapon]
+    if weapon_id do
+      item_def = GameData.get_item(weapon_id)
+      item_def != nil and item_def.weapon_type == required_weapon_type
     else
       false
     end
