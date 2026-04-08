@@ -9,6 +9,7 @@ defmodule Arena.Data.GameData do
 
   require Logger
 
+  alias Arena.Data.FactionData
   alias Arena.Data.IniParser
   alias Arena.Data.ItemDef
   alias Arena.Data.NpcDef
@@ -227,6 +228,22 @@ defmodule Arena.Data.GameData do
     end
   end
 
+  @doc "Get faction ranks for :royal_army or :chaos_legion. Returns sorted list of rank maps."
+  def faction_ranks(faction) when faction in [:royal_army, :chaos_legion] do
+    case :ets.lookup(@table, {:faction_ranks, faction}) do
+      [{_, ranks}] -> ranks
+      [] -> []
+    end
+  end
+
+  @doc "Get faction rewards for :royal_army or :chaos_legion. Returns list of %{rank, obj_index}."
+  def faction_rewards(faction) when faction in [:royal_army, :chaos_legion] do
+    case :ets.lookup(@table, {:faction_rewards, faction}) do
+      [{_, rewards}] -> rewards
+      [] -> []
+    end
+  end
+
   @doc "Get XP threshold associated with a level."
   def exp_for_level(level) when is_integer(level) and level > 0 do
     case :ets.lookup(@table, {:exp_for_level, level}) do
@@ -246,6 +263,7 @@ defmodule Arena.Data.GameData do
     load_obj_dat()
     load_hechizos_dat()
     load_npcs_dat()
+    load_faction_data()
 
     Logger.info("GameData loaded into ETS (#{:ets.info(table, :size)} entries)")
     {:ok, %{}}
@@ -446,6 +464,17 @@ defmodule Arena.Data.GameData do
       {:error, reason} ->
         Logger.warning("Could not load npcs.dat: #{inspect(reason)}. No NPC data available.")
     end
+  end
+
+  defp load_faction_data do
+    dir = dat_dir()
+    {armada_ranks, chaos_ranks} = FactionData.load_ranks(dir)
+    {armada_rewards, chaos_rewards} = FactionData.load_rewards(dir)
+
+    :ets.insert(@table, {{:faction_ranks, :royal_army}, armada_ranks})
+    :ets.insert(@table, {{:faction_ranks, :chaos_legion}, chaos_ranks})
+    :ets.insert(@table, {{:faction_rewards, :royal_army}, armada_rewards})
+    :ets.insert(@table, {{:faction_rewards, :chaos_legion}, chaos_rewards})
   end
 
   defp parse_int_or_float(str) do

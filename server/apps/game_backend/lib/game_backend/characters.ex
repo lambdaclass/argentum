@@ -62,6 +62,12 @@ defmodule GameBackend.Characters do
     field :faction_kills_chaos, :integer, default: 0
     field :citizens_killed, :integer, default: 0
 
+    # Faction progression
+    field :faction_score, :integer, default: 0
+    field :faction_rank_armada, :integer, default: 0
+    field :faction_rank_chaos, :integer, default: 0
+    field :faction_reenlistadas, :integer, default: 0
+
     # Lifetime counters (mini_stats)
     field :npcs_killed, :integer, default: 0
     field :deaths, :integer, default: 0
@@ -96,6 +102,7 @@ defmodule GameBackend.Characters do
     :str, :agi, :int, :con, :cha,
     :gold, :bank_gold, :body_id, :head_id,
     :faction_kills_royal, :faction_kills_chaos, :citizens_killed,
+    :faction_score, :faction_rank_armada, :faction_rank_chaos, :faction_reenlistadas,
     :npcs_killed, :deaths, :penalty, :fishing_points,
     :dead, :criminal, :gm,
     :muted_until,
@@ -239,6 +246,10 @@ defmodule GameBackend.Characters do
       faction_kills_royal: c.faction_kills_royal,
       faction_kills_chaos: c.faction_kills_chaos,
       citizens_killed: c.citizens_killed,
+      faction_score: c.faction_score,
+      faction_rank_armada: c.faction_rank_armada,
+      faction_rank_chaos: c.faction_rank_chaos,
+      faction_reenlistadas: c.faction_reenlistadas,
       npcs_killed: c.npcs_killed,
       deaths: c.deaths,
       penalty: c.penalty,
@@ -286,6 +297,10 @@ defmodule GameBackend.Characters do
       faction_kills_royal: e.faction_kills_royal,
       faction_kills_chaos: e.faction_kills_chaos,
       citizens_killed: e.citizens_killed,
+      faction_score: e.faction_score,
+      faction_rank_armada: e.faction_rank_armada,
+      faction_rank_chaos: e.faction_rank_chaos,
+      faction_reenlistadas: e.faction_reenlistadas,
       npcs_killed: e.npcs_killed,
       deaths: e.deaths,
       penalty: e.penalty,

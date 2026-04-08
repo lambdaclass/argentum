@@ -11,6 +11,7 @@ defmodule Arena.Map.Social do
   @npc_type_revividor 1
   @npc_type_entrenador 3
   @npc_type_banquero 4
+  @npc_type_enlistador 5
   @npc_type_resucitador_newbie 9
   @yell_range_x (Application.compile_env(:arena, :aoi_range_x, 11)) * 2
   @yell_range_y (Application.compile_env(:arena, :aoi_range_y, 9)) * 2
@@ -1017,6 +1018,10 @@ defmodule Arena.Map.Social do
             end
             {:noreply, state}
 
+          # Enlistador — faction NPC
+          npc_def.npc_type == @npc_type_enlistador ->
+            handle_enlistador_click(state, char_id, entity, npc_def)
+
           # Banker
           npc_def.npc_type == @npc_type_banquero ->
             Helpers.send_to_session(state.sessions, char_id,
@@ -1039,32 +1044,148 @@ defmodule Arena.Map.Social do
   end
 
   # ==================================================================
-  # Faction commands
+  # Faction system (VB6: ModFacciones)
   # ==================================================================
+
+  # NPC faccion values: 3 = Armada, 2 = Caos (from npcs.dat)
+  defp npc_faccion_to_atom(3), do: :royal_army
+  defp npc_faccion_to_atom(2), do: :chaos_legion
+  defp npc_faccion_to_atom(_), do: :none
+
+  defp handle_enlistador_click(state, char_id, entity, npc_def) do
+    npc_faction = npc_faccion_to_atom(npc_def.faccion)
+
+    cond do
+      entity.dead ->
+        msg(state, char_id, "Estas muerto!")
+        {:noreply, state}
+
+      npc_faction == :none ->
+        msg(state, char_id, "#{npc_def.name} no puede enlistarte.")
+        {:noreply, state}
+
+      # Already in this faction — offer rank advancement
+      entity.faction == npc_faction ->
+        handle_faction_rank_up(state, char_id, entity, npc_faction)
+
+      # In opposing faction — must leave first
+      entity.faction != :none ->
+        msg(state, char_id, "Ya perteneces a una faccion. Usa /RENUNCIAR primero.")
+        {:noreply, state}
+
+      # Royal Army blocks criminals and citizen killers
+      npc_faction == :royal_army and entity.criminal ->
+        msg(state, char_id, "Los criminales no pueden enlistarse en la Armada Real.")
+        {:noreply, state}
+
+      npc_faction == :royal_army and entity.citizens_killed > 0 ->
+        msg(state, char_id, "Has asesinado ciudadanos inocentes. No puedes enlistarte en la Armada Real.")
+        {:noreply, state}
+
+      # Thieves cannot join Royal Army
+      npc_faction == :royal_army and entity.class in [:thief, :bandit, :assassin, :pirate] ->
+        msg(state, char_id, "Tu clase no puede enlistarse en la Armada Real.")
+        {:noreply, state}
+
+      true ->
+        # Check rank 1 requirements
+        ranks = GameData.faction_ranks(npc_faction)
+        rank1 = List.first(ranks)
+
+        cond do
+          rank1 != nil and entity.level < rank1.required_level ->
+            msg(state, char_id, "Necesitas nivel #{rank1.required_level} para enlistarte.")
+            {:noreply, state}
+
+          true ->
+            entity = %{entity | faction: npc_faction}
+            # Assign first rank
+            entity = assign_rank(entity, npc_faction, 1)
+            # Give rank 1 rewards
+            {entity, state} = give_faction_rewards(entity, state, char_id, npc_faction, 0, 1)
+            players = Map.put(state.players, char_id, entity)
+
+            faction_name = faction_display_name(npc_faction)
+            msg(%{state | players: players}, char_id, "Te has enlistado en #{faction_name}.")
+            {:noreply, %{state | players: players}}
+        end
+    end
+  end
+
+  defp handle_faction_rank_up(state, char_id, entity, faction) do
+    current_rank = current_faction_rank(entity, faction)
+    ranks = GameData.faction_ranks(faction)
+    next_rank_def = Enum.find(ranks, fn r -> r.rank == current_rank + 1 end)
+
+    cond do
+      next_rank_def == nil ->
+        msg(state, char_id, "Ya tienes el rango maximo.")
+        {:noreply, state}
+
+      entity.level < next_rank_def.required_level ->
+        needed = next_rank_def.required_level - entity.level
+        msg(state, char_id, "Te faltan #{needed} niveles para poder recibir la proxima recompensa.")
+        {:noreply, state}
+
+      entity.faction_score < next_rank_def.required_score ->
+        needed = next_rank_def.required_score - entity.faction_score
+        msg(state, char_id, "Te faltan #{needed} puntos de faccion para subir de rango.")
+        {:noreply, state}
+
+      true ->
+        new_rank = next_rank_def.rank
+        entity = assign_rank(entity, faction, new_rank)
+        {entity, state} = give_faction_rewards(entity, state, char_id, faction, current_rank, new_rank)
+        players = Map.put(state.players, char_id, entity)
+
+        msg(%{state | players: players}, char_id, "Has ascendido al rango #{new_rank}: #{next_rank_def.title}!")
+        {:noreply, %{state | players: players}}
+    end
+  end
+
+  defp current_faction_rank(entity, :royal_army), do: entity.faction_rank_armada
+  defp current_faction_rank(entity, :chaos_legion), do: entity.faction_rank_chaos
+
+  defp assign_rank(entity, :royal_army, rank), do: %{entity | faction_rank_armada: rank}
+  defp assign_rank(entity, :chaos_legion, rank), do: %{entity | faction_rank_chaos: rank}
+
+  defp give_faction_rewards(entity, state, char_id, faction, old_rank, new_rank) do
+    rewards = GameData.faction_rewards(faction)
+
+    rewards_to_give =
+      Enum.filter(rewards, fn r -> r.rank > old_rank and r.rank <= new_rank end)
+
+    Enum.reduce(rewards_to_give, {entity, state}, fn reward, {ent, st} ->
+      item_def = GameData.get_item(reward.obj_index)
+      if item_def == nil do
+        {ent, st}
+      else
+        case Arena.Inventory.add_item(ent.inventory, reward.obj_index, 1) do
+          {:ok, new_inv, slot} ->
+            ent = %{ent | inventory: new_inv}
+            Helpers.send_inventory_slot(st.sessions, char_id, new_inv, slot)
+            msg(st, char_id, "Has recibido #{item_def.name}.")
+            {ent, st}
+
+          _ ->
+            msg(st, char_id, "No tienes espacio para #{item_def.name}.")
+            {ent, st}
+        end
+      end
+    end)
+  end
 
   def handle_enlist_faction(state, char_id, faction) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
-        cond do
-          entity.criminal ->
-            Helpers.send_to_session(state.sessions, char_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: "Los criminales no pueden enlistarse.", font_index: 0}})})
+        # Require nearby Enlistador NPC of the correct faction
+        case find_nearby_enlistador(state, entity, faction) do
+          {:ok, _npc, npc_def} ->
+            handle_enlistador_click(state, char_id, entity, npc_def)
+
+          :not_found ->
+            msg(state, char_id, "Necesitas estar cerca de un enlistador para enlistarte.")
             {:noreply, state}
-
-          entity.faction != :none ->
-            Helpers.send_to_session(state.sessions, char_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: "Ya perteneces a una faccion. Usa /RENUNCIAR primero.", font_index: 0}})})
-            {:noreply, state}
-
-          true ->
-            entity = %{entity | faction: faction}
-            players = Map.put(state.players, char_id, entity)
-
-            faction_name = faction_display_name(faction)
-            Helpers.send_to_session(state.sessions, char_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: "Te has enlistado en #{faction_name}.", font_index: 0}})})
-
-            {:noreply, %{state | players: players}}
         end
 
       :error ->
@@ -1072,25 +1193,100 @@ defmodule Arena.Map.Social do
     end
   end
 
+  defp find_nearby_enlistador(state, entity, faction) do
+    expected_faccion = case faction do
+      :royal_army -> 3
+      :chaos_legion -> 2
+    end
+
+    result =
+      Enum.find_value(state.npcs_live, fn {_id, npc} ->
+        npc_def = GameData.get_npc(npc.npc_id)
+        if npc_def != nil and
+          npc_def.npc_type == @npc_type_enlistador and
+          npc_def.faccion == expected_faccion and
+          abs(npc.x - entity.x) <= 5 and
+          abs(npc.y - entity.y) <= 5 do
+          {npc, npc_def}
+        end
+      end)
+
+    case result do
+      {npc, npc_def} -> {:ok, npc, npc_def}
+      nil -> :not_found
+    end
+  end
+
   def handle_leave_faction(state, char_id) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         if entity.faction == :none do
-          Helpers.send_to_session(state.sessions, char_id,
-            {:send_raw, Encoder.encode({:console_msg, %{message: "No perteneces a ninguna faccion.", font_index: 0}})})
+          msg(state, char_id, "No perteneces a ninguna faccion.")
           {:noreply, state}
         else
-          entity = %{entity | faction: :none}
+          # VB6: strip faction items from inventory
+          entity = strip_faction_items(entity)
+          entity = %{entity | faction: :none, faction_reenlistadas: entity.faction_reenlistadas + 1}
           players = Map.put(state.players, char_id, entity)
 
-          Helpers.send_to_session(state.sessions, char_id,
-            {:send_raw, Encoder.encode({:console_msg, %{message: "Has renunciado a tu faccion.", font_index: 0}})})
+          # Resend full inventory after stripping
+          Enum.each(0..23, fn slot ->
+            Helpers.send_inventory_slot(state.sessions, char_id, entity.inventory, slot)
+          end)
 
+          msg(%{state | players: players}, char_id, "Has renunciado a tu faccion.")
           {:noreply, %{state | players: players}}
         end
 
       :error ->
         {:noreply, state}
+    end
+  end
+
+  defp strip_faction_items(entity) do
+    # VB6: remove items with Real=1 or Caos=1 flag
+    # For now we don't have those flags on ItemDef, so this is a no-op placeholder.
+    # TODO: add Real/Caos flags to ItemDef and strip faction-exclusive gear here.
+    entity
+  end
+
+  @doc """
+  Calculate faction score for a PvP kill. VB6: HandleFactionScoreForKill.
+
+  Returns the score delta (can be 0 if same alignment or no faction relevance).
+  """
+  def faction_score_for_kill(attacker, defender) do
+    att_faction = attacker.faction
+    def_faction = defender.faction
+
+    cond do
+      # Same faction — fratricide penalty (no score)
+      att_faction != :none and att_faction == def_faction -> 0
+
+      # Cross-faction kills earn score
+      att_faction != :none and def_faction != :none and att_faction != def_faction ->
+        base = faction_score_base(attacker.level, defender.level)
+        # 1.5x bonus for opposing faction kills
+        min(trunc(base * 1.5), 20)
+
+      # Faction member kills criminal
+      att_faction == :royal_army and defender.criminal ->
+        min(faction_score_base(attacker.level, defender.level), 20)
+
+      # Criminal/chaos kills citizen
+      (att_faction == :chaos_legion or attacker.criminal) and
+        def_faction == :none and not defender.criminal ->
+        min(faction_score_base(attacker.level, defender.level), 20)
+
+      true -> 0
+    end
+  end
+
+  defp faction_score_base(att_level, def_level) do
+    if att_level < def_level do
+      10 + def_level - max(att_level, 0)
+    else
+      max(10 - (att_level - def_level), 0)
     end
   end
 
@@ -1121,6 +1317,11 @@ defmodule Arena.Map.Social do
   defp faction_display_name(:royal_army), do: "Armada Real"
   defp faction_display_name(:chaos_legion), do: "Legion del Caos"
   defp faction_display_name(_), do: "Ninguna"
+
+  defp msg(state, char_id, message) do
+    Helpers.send_to_session(state.sessions, char_id,
+      {:send_raw, Encoder.encode({:console_msg, %{message: message, font_index: 0}})})
+  end
 
   def find_nearby_npc_of_type(state, entity, npc_types) do
     result =

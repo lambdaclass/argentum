@@ -79,6 +79,12 @@ defmodule Arena.Entity.PlayerEntity do
     faction_kills_chaos: 0,
     citizens_killed: 0,
 
+    # Faction progression (persisted)
+    faction_score: 0,
+    faction_rank_armada: 0,
+    faction_rank_chaos: 0,
+    faction_reenlistadas: 0,
+
     # Lifetime counters (persisted, shown in mini_stats)
     npcs_killed: 0,
     deaths: 0,

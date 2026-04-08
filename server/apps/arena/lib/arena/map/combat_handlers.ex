@@ -374,6 +374,14 @@ defmodule Arena.Map.CombatHandlers do
                   defender
                 end
 
+                # Faction score on PvP kill
+                entity = if defender.dead do
+                  score = Arena.Map.Social.faction_score_for_kill(entity, defender)
+                  if score > 0, do: %{entity | faction_score: entity.faction_score + score}, else: entity
+                else
+                  entity
+                end
+
                 players = state.players
                   |> Map.put(char_id, entity)
                   |> Map.put(defender_id, defender)
@@ -747,6 +755,14 @@ defmodule Arena.Map.CombatHandlers do
               %{defender | dead: true, deaths: defender.deaths + 1}
             else
               defender
+            end
+
+            # Faction score on PvP spell kill
+            entity = if defender.dead do
+              score = Arena.Map.Social.faction_score_for_kill(entity, defender)
+              if score > 0, do: %{entity | faction_score: entity.faction_score + score}, else: entity
+            else
+              entity
             end
 
             players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, defender)
