@@ -440,27 +440,27 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.user_commerce_end(), <<>>)
   end
 
-  # eChangeUserTradeSlot (ID 100) — my_offer(Bool) + gold(Int32) + items[10]
-  # Each item: obj_index(Int16) + name(String8) + grh_index(Int16) + amount(Int32) + equipped(Int8)
+  # eChangeUserTradeSlot (ID 100) — my_offer(Bool) + gold(Int32) + items[6]
+  # Each item: obj_index(Int16) + name(String8) + grh_index(Int32) + amount(Int32) + elemental_tags(Int32)
   def encode({:change_user_trade_slot, params}) do
     items = params[:items] || []
     item_payload =
-      Enum.reduce(0..9, <<>>, fn i, acc ->
+      Enum.reduce(0..5, <<>>, fn i, acc ->
         item = Enum.at(items, i)
         if item do
           acc <>
             Writer.write_int16(item.obj_index) <>
             Writer.write_string8(Map.get(item, :name, "")) <>
-            Writer.write_int16(Map.get(item, :grh_index, 0)) <>
+            Writer.write_int32(Map.get(item, :grh_index, 0)) <>
             Writer.write_int32(item.amount) <>
-            Writer.write_int8(Map.get(item, :equipped, 0))
+            Writer.write_int32(Map.get(item, :elemental_tags, 0))
         else
           acc <>
             Writer.write_int16(0) <>
             Writer.write_string8("") <>
-            Writer.write_int16(0) <>
             Writer.write_int32(0) <>
-            Writer.write_int8(0)
+            Writer.write_int32(0) <>
+            Writer.write_int32(0)
         end
       end)
 

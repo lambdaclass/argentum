@@ -5,7 +5,7 @@ defmodule Arena.Map.Trade do
   alias Arena.Inventory
   alias AoProtocol.Server.Encoder
 
-  @trade_max_items 10
+  @trade_max_items 6
 
   def handle_user_trade_offer(state, char_id, obj_index, amount) do
     case Map.fetch(state.players, char_id) do
@@ -199,7 +199,7 @@ defmodule Arena.Map.Trade do
         name: (item_def && item_def.name) || "",
         grh_index: (item_def && item_def.grh_index) || 0,
         amount: amount,
-        equipped: 0
+        elemental_tags: 0
       }
     end)
 
