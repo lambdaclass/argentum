@@ -1356,6 +1356,8 @@ defmodule Arena.Map.CombatHandlers do
   @hunger_thirst_drain_interval 10
   # VB6 drains hunger/thirst by 10 per interval (not 1)
   @hunger_thirst_drain_amount 10
+  # VB6: penalty (jail) decrements by 1 per minute. Tick = 3s, so 20 ticks = 1 min.
+  @penalty_decrement_interval 20
 
   def process_regen_tick(state) do
     # Increment the map-wide hunger/thirst tick counter.
@@ -1364,11 +1366,24 @@ defmodule Arena.Map.CombatHandlers do
     counter = if drain_vitals?, do: 0, else: counter
     state = Map.put(state, :hunger_thirst_tick_counter, counter)
 
+    # VB6: penalty (jail timer) decrements by 1 per minute
+    penalty_counter = Map.get(state, :penalty_tick_counter, 0) + 1
+    decrement_penalty? = penalty_counter >= @penalty_decrement_interval
+    penalty_counter = if decrement_penalty?, do: 0, else: penalty_counter
+    state = Map.put(state, :penalty_tick_counter, penalty_counter)
+
     Enum.reduce(state.players, state, fn {char_id, entity}, state ->
       if entity.dead do
         state
       else
         original_entity = state.players[char_id]
+
+        # VB6: decrement jail penalty every minute
+        entity = if decrement_penalty? and entity.penalty > 0 do
+          %{entity | penalty: entity.penalty - 1}
+        else
+          entity
+        end
 
         # Drain hunger/thirst only every Nth tick (~30s)
         {entity, vitals_changed} =

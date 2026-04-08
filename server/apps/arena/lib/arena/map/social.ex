@@ -13,6 +13,7 @@ defmodule Arena.Map.Social do
   @npc_type_banquero 4
   @npc_type_enlistador 5
   @npc_type_resucitador_newbie 9
+  @npc_type_entrega_pesca 20
   @yell_range_x (Application.compile_env(:arena, :aoi_range_x, 11)) * 2
   @yell_range_y (Application.compile_env(:arena, :aoi_range_y, 9)) * 2
   @magical_classes [:mage, :cleric, :druid, :bard, :paladin]
@@ -165,9 +166,16 @@ defmodule Arena.Map.Social do
         target_name = Enum.at(parts, 1)
         gm_unmute(state, char_id, target_name)
 
-      ["/JAIL", _name_upper] ->
+      ["/JAIL", _name_upper | _rest] ->
         target_name = Enum.at(parts, 1)
-        gm_jail(state, char_id, target_name)
+        minutes = case Enum.at(parts, 2) do
+          nil -> 10
+          str -> case Integer.parse(str) do
+            {m, _} when m > 0 -> m
+            _ -> 10
+          end
+        end
+        gm_jail(state, char_id, target_name, minutes)
 
       ["/SPAWNNPC", npc_id_str] ->
         gm_spawn_npc(state, char_id, entity, npc_id_str)
@@ -416,15 +424,19 @@ defmodule Arena.Map.Social do
     end
   end
 
-  # /JAIL name — teleport player to jail map (Cárcel de Ullathorpe)
-  defp gm_jail(state, char_id, target_name) do
+  # /JAIL name [minutes] — teleport player to jail map and set penalty timer
+  defp gm_jail(state, char_id, target_name, minutes) do
     case find_player_by_name(state, target_name) do
       {:ok, target_id, target} ->
+        target = %{target | penalty: minutes}
+        players = Map.put(state.players, target_id, target)
+        state = %{state | players: players}
+
         Helpers.send_to_session(state.sessions, target_id,
-          {:send_raw, Encoder.encode({:console_msg, %{message: "Has sido enviado a la cárcel.", font_index: 0}})})
+          {:send_raw, Encoder.encode({:console_msg, %{message: "Has sido enviado a la cárcel por #{minutes} minutos.", font_index: 0}})})
         Helpers.send_to_session(state.sessions, target_id,
           {:transfer, @jail_map_id, @jail_x, @jail_y, target})
-        gm_console(state, char_id, "#{target.name} has been jailed (map #{@jail_map_id}).")
+        gm_console(state, char_id, "#{target.name} jailed for #{minutes} min (map #{@jail_map_id}).")
         {:noreply, state}
 
       :not_found ->
@@ -807,8 +819,8 @@ defmodule Arena.Map.Social do
   VB6 trainers have subtypes (combat, magic, trade, stealth) that restrict
   which skill groups they can teach. The skill groups are defined in the
   `@combat_skills`, `@magic_skills`, `@trade_skills`, and `@stealth_skills`
-  module attributes above. Once NPC subtype data is loaded from the .dat
-  files, `trainer_accepts_skill?/2` will gate training by group.
+  module attributes above. VB6 trainers teach all skills; the creature
+  list (CI1..CI5) is for the summoning feature, not skill gating.
   """
   def handle_train_skill(state, char_id, skill_index) do
     case Map.fetch(state.players, char_id) do
@@ -1011,6 +1023,10 @@ defmodule Arena.Map.Social do
             Helpers.send_to_session(state.sessions, char_id,
               {:send_raw, Encoder.encode({:console_msg, %{message: "#{npc_def.name} dice: Puedo entrenarte. Usa el boton Entrenar.", font_index: 0}})})
             {:noreply, state}
+
+          # EntregaPesca — fish delivery NPC
+          npc_def.npc_type == @npc_type_entrega_pesca ->
+            handle_fish_delivery(state, char_id, entity, npc_def)
 
           # Default: show NPC name
           true ->
@@ -1324,6 +1340,65 @@ defmodule Arena.Map.Social do
     case result do
       {npc, npc_def} -> {:ok, npc, npc_def}
       nil -> :not_found
+    end
+  end
+
+  # ==================================================================
+  # Fish delivery (VB6: EntregaPesca NPC type 20)
+  # ==================================================================
+
+  defp handle_fish_delivery(state, char_id, entity, npc_def) do
+    # VB6: only Trabajador (worker) class can deliver fish
+    if entity.class != :trabajador do
+      msg(state, char_id, "#{npc_def.name} dice: Solo los trabajadores pueden entregar peces.")
+      {:noreply, state}
+    else
+      # Scan inventory for items with puntos_pesca > 0
+      {total_points, total_gold, slots_to_clear} =
+        entity.inventory
+        |> Enum.with_index()
+        |> Enum.reduce({0, 0, []}, fn {item, idx}, {pts, gold, slots} ->
+          case item do
+            %{item_id: item_id, amount: amount} when amount > 0 ->
+              item_def = GameData.get_item(item_id)
+              if item_def != nil and item_def.puntos_pesca > 0 do
+                {pts + item_def.puntos_pesca * amount, gold + item_def.valor * amount, [idx | slots]}
+              else
+                {pts, gold, slots}
+              end
+            _ ->
+              {pts, gold, slots}
+          end
+        end)
+
+      if total_points == 0 do
+        msg(state, char_id, "#{npc_def.name} dice: No tienes peces especiales para entregar.")
+        {:noreply, state}
+      else
+        # Remove fish from inventory
+        new_inv =
+          Enum.reduce(slots_to_clear, entity.inventory, fn idx, inv ->
+            List.replace_at(inv, idx, nil)
+          end)
+
+        entity = %{entity |
+          inventory: new_inv,
+          fishing_points: entity.fishing_points + total_points,
+          gold: entity.gold + total_gold
+        }
+        players = Map.put(state.players, char_id, entity)
+        state = %{state | players: players}
+
+        # Send inventory updates for cleared slots
+        Enum.each(slots_to_clear, fn slot ->
+          Helpers.send_inventory_slot(state.sessions, char_id, entity.inventory, slot)
+        end)
+        Helpers.send_to_session(state.sessions, char_id,
+          {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})})
+
+        msg(state, char_id, "Has entregado peces. Puntos: +#{total_points}, Oro: +#{total_gold}.")
+        {:noreply, state}
+      end
     end
   end
 end
