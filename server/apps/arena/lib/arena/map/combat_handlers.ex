@@ -374,10 +374,12 @@ defmodule Arena.Map.CombatHandlers do
                   defender
                 end
 
-                # Faction score on PvP kill
+                # Faction score + kill counters on PvP kill
                 entity = if defender.dead do
                   score = Arena.Map.Social.faction_score_for_kill(entity, defender)
-                  if score > 0, do: %{entity | faction_score: entity.faction_score + score}, else: entity
+                  entity = if score > 0, do: %{entity | faction_score: entity.faction_score + score}, else: entity
+                  entity = update_pvp_kill_counters(entity, defender)
+                  entity
                 else
                   entity
                 end
@@ -762,10 +764,12 @@ defmodule Arena.Map.CombatHandlers do
               defender
             end
 
-            # Faction score on PvP spell kill
+            # Faction score + kill counters on PvP spell kill
             entity = if defender.dead do
               score = Arena.Map.Social.faction_score_for_kill(entity, defender)
-              if score > 0, do: %{entity | faction_score: entity.faction_score + score}, else: entity
+              entity = if score > 0, do: %{entity | faction_score: entity.faction_score + score}, else: entity
+              entity = update_pvp_kill_counters(entity, defender)
+              entity
             else
               entity
             end
@@ -1277,6 +1281,22 @@ defmodule Arena.Map.CombatHandlers do
       item_def != nil and item_def.obj_type == required_obj_type
     else
       false
+    end
+  end
+
+  # VB6: CriminalesMatados / ciudadanosMatados — track kill type based on victim status
+  defp update_pvp_kill_counters(attacker, defender) do
+    cond do
+      # Victim is criminal or chaos faction → increment criminals_killed
+      defender.criminal or defender.faction in [:chaos_legion] ->
+        %{attacker | criminals_killed: attacker.criminals_killed + 1}
+
+      # Victim is citizen or armada faction → increment citizens_killed
+      not defender.criminal and defender.faction in [:none, :royal_army] ->
+        %{attacker | citizens_killed: attacker.citizens_killed + 1}
+
+      true ->
+        attacker
     end
   end
 

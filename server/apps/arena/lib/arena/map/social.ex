@@ -915,7 +915,7 @@ defmodule Arena.Map.Social do
         Helpers.send_to_session(state.sessions, char_id,
           {:send_raw, Encoder.encode({:mini_stats, %{
             ciudadanos_matados: entity.citizens_killed,
-            criminales_matados: entity.faction_kills_royal + entity.faction_kills_chaos,
+            criminales_matados: entity.criminals_killed,
             faction_status: case Map.get(entity, :faction, :none) do
               :royal_army -> 1
               :chaos_legion -> 2

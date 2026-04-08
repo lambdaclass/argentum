@@ -78,6 +78,7 @@ defmodule Arena.Entity.PlayerEntity do
     faction_kills_royal: 0,
     faction_kills_chaos: 0,
     citizens_killed: 0,
+    criminals_killed: 0,
 
     # Faction progression (persisted)
     faction_score: 0,
