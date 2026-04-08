@@ -68,7 +68,10 @@ export interface BankSlot {
 
 export interface TradeOfferSlot {
   itemId: number;
+  name: string;
+  grhIndex: number;
   amount: number;
+  elementalTags: number;
 }
 
 export interface TradeOfferState {
@@ -310,6 +313,8 @@ export type ServerPacket =
   | { type: "pos_update"; x: number; y: number }
   | { type: "chat_over_head"; message: string; charIndex: number; x: number; y: number }
   | { type: "console_msg"; message: string; fontIndex: number }
+  | { type: "console_faction_message"; message: string; fontIndex: number; factionLabel: string }
+  | { type: "guild_chat"; status: number; message: string }
   | { type: "character_create"; character: CharacterCreatePacket }
   | { type: "character_remove"; charIndex: number }
   | { type: "character_move"; charIndex: number; x: number; y: number }
@@ -361,7 +366,7 @@ export type ServerPacket =
   | { type: "change_spell_slot"; slotIndex: number; slot: SpellSlot | null }
   | { type: "commerce_init"; npcName: string }
   | { type: "bank_init" }
-  | { type: "user_commerce_init" }
+  | { type: "user_commerce_init"; partnerName: string }
   | { type: "user_commerce_end" }
   | {
       type: "change_npc_inventory_slot";

@@ -939,6 +939,14 @@ export class SessionClient {
         this.dispatch({ type: "log/add", level: "info", message: packet.message });
         return;
 
+      case "console_faction_message":
+        this.dispatch({ type: "log/add", level: "info", message: `[${packet.factionLabel}] ${packet.message}` });
+        return;
+
+      case "guild_chat":
+        this.dispatch({ type: "log/add", level: "info", message: `[Clan] ${packet.message}` });
+        return;
+
       case "error_msg":
       {
         const credentials = this.getState().connection.credentials;

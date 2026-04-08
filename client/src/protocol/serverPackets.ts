@@ -93,7 +93,7 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
       return { type: "bank_init" };
 
     case 12:
-      return { type: "user_commerce_init" };
+      return { type: "user_commerce_init", partnerName: reader.readString8() };
 
     case 16:
       return { type: "npc_kill_user" };
@@ -198,6 +198,21 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
         type: "console_msg",
         message: reader.readString8(),
         fontIndex: reader.readUint8()
+      };
+
+    case 38:
+      return {
+        type: "console_faction_message",
+        message: reader.readString8(),
+        fontIndex: reader.readUint8(),
+        factionLabel: reader.readString8()
+      };
+
+    case 39:
+      return {
+        type: "guild_chat",
+        status: reader.readUint8(),
+        message: reader.readString8()
       };
 
     case 42:
@@ -422,10 +437,13 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
       const gold = reader.readInt32();
       const items: Array<TradeOfferSlot | null> = [];
 
-      for (let index = 0; index < 10; index += 1) {
+      for (let index = 0; index < 6; index += 1) {
         const itemId = reader.readInt16();
+        const name = reader.readString8();
+        const grhIndex = reader.readInt32();
         const amount = reader.readInt32();
-        items.push(itemId > 0 && amount > 0 ? { itemId, amount } : null);
+        const elementalTags = reader.readInt32();
+        items.push(itemId > 0 && amount > 0 ? { itemId, name, grhIndex, amount, elementalTags } : null);
       }
 
       return {
