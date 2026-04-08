@@ -227,6 +227,7 @@ defmodule Arena.Map.CombatHandlers do
 
               # Award XP (with party split) — no XP for killing pets
               state = if npc.owner_id == nil do
+                entity = %{entity | npcs_killed: entity.npcs_killed + 1}
                 give_exp = if npc_def, do: npc_def.give_exp, else: 0
                 npc_level = if npc_def, do: npc_def.npc_level, else: 1
                 xp_gained = Combat.xp_gain(final_damage, give_exp, npc.max_hp, entity.level, npc_level)
@@ -368,7 +369,7 @@ defmodule Arena.Map.CombatHandlers do
                 defender = if new_hp <= 0 do
                   Helpers.send_to_session(state.sessions, defender_id, {:send_raw,
                     Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})})
-                  %{defender | dead: true}
+                  %{defender | dead: true, deaths: defender.deaths + 1}
                 else
                   defender
                 end
@@ -664,6 +665,7 @@ defmodule Arena.Map.CombatHandlers do
               Visibility.broadcast_visible_all(state, npc.x, npc.y, fn pid -> send(pid, {:send_raw, remove_raw}) end)
 
               state = if npc.owner_id == nil do
+                entity = %{entity | npcs_killed: entity.npcs_killed + 1}
                 give_exp = if npc_def, do: npc_def.give_exp, else: 0
                 npc_level = if npc_def, do: npc_def.npc_level, else: 1
                 xp_gained = Combat.xp_gain(final_damage, give_exp, npc.max_hp, entity.level, npc_level)
@@ -742,7 +744,7 @@ defmodule Arena.Map.CombatHandlers do
             defender = if new_hp <= 0 do
               Helpers.send_to_session(state.sessions, target_id, {:send_raw,
                 Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})})
-              %{defender | dead: true}
+              %{defender | dead: true, deaths: defender.deaths + 1}
             else
               defender
             end
@@ -1077,7 +1079,7 @@ defmodule Arena.Map.CombatHandlers do
     entity = if entity.hp <= 0 and was_alive do
       Helpers.send_to_session(state.sessions, char_id, {:send_raw,
         Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})})
-      %{entity | dead: true}
+      %{entity | dead: true, deaths: entity.deaths + 1}
     else
       entity
     end
@@ -1351,7 +1353,7 @@ defmodule Arena.Map.CombatHandlers do
         hp_changed = entity.hp != original_entity.hp
 
         # Kill on starvation
-        entity = if entity.hp <= 0, do: %{entity | hp: 0, dead: true}, else: entity
+        entity = if entity.hp <= 0 and not entity.dead, do: %{entity | hp: 0, dead: true, deaths: entity.deaths + 1}, else: entity
 
         # Regen (blocked by starvation/dehydration)
         entity =

@@ -62,6 +62,12 @@ defmodule GameBackend.Characters do
     field :faction_kills_chaos, :integer, default: 0
     field :citizens_killed, :integer, default: 0
 
+    # Lifetime counters (mini_stats)
+    field :npcs_killed, :integer, default: 0
+    field :deaths, :integer, default: 0
+    field :penalty, :integer, default: 0
+    field :fishing_points, :integer, default: 0
+
     # Flags stored as booleans
     field :dead, :boolean, default: false
     field :criminal, :boolean, default: false
@@ -90,6 +96,7 @@ defmodule GameBackend.Characters do
     :str, :agi, :int, :con, :cha,
     :gold, :bank_gold, :body_id, :head_id,
     :faction_kills_royal, :faction_kills_chaos, :citizens_killed,
+    :npcs_killed, :deaths, :penalty, :fishing_points,
     :dead, :criminal, :gm,
     :muted_until,
     :session_token
@@ -232,6 +239,10 @@ defmodule GameBackend.Characters do
       faction_kills_royal: c.faction_kills_royal,
       faction_kills_chaos: c.faction_kills_chaos,
       citizens_killed: c.citizens_killed,
+      npcs_killed: c.npcs_killed,
+      deaths: c.deaths,
+      penalty: c.penalty,
+      fishing_points: c.fishing_points,
       dead: c.dead,
       criminal: c.criminal,
       gm: c.gm,
@@ -275,6 +286,10 @@ defmodule GameBackend.Characters do
       faction_kills_royal: e.faction_kills_royal,
       faction_kills_chaos: e.faction_kills_chaos,
       citizens_killed: e.citizens_killed,
+      npcs_killed: e.npcs_killed,
+      deaths: e.deaths,
+      penalty: e.penalty,
+      fishing_points: e.fishing_points,
       dead: e.dead,
       criminal: e.criminal,
       muted_until: e.muted_until,

@@ -296,7 +296,7 @@ defmodule Arena.Map.Social do
           gm_console(state, char_id, "#{target.name} is already dead.")
           {:noreply, state}
         else
-          target = %{target | dead: true, hp: 0}
+          target = %{target | dead: true, hp: 0, deaths: target.deaths + 1}
           players = Map.put(state.players, target_id, target)
           state = %{state | players: players}
 
@@ -942,12 +942,12 @@ defmodule Arena.Map.Social do
               :chaos_legion -> 2
               :none -> if entity.criminal, do: 3, else: 0
             end,
-            npcs_killed: 0,
+            npcs_killed: entity.npcs_killed,
             class: Helpers.class_to_int(entity.class),
-            penalty: 0,
-            deaths: 0,
+            penalty: entity.penalty,
+            deaths: entity.deaths,
             gender: if(entity.gender == :male, do: 1, else: 2),
-            fishing_points: 0,
+            fishing_points: entity.fishing_points,
             race: Helpers.race_to_int(entity.race)
           }})})
 

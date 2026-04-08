@@ -79,6 +79,12 @@ defmodule Arena.Entity.PlayerEntity do
     faction_kills_chaos: 0,
     citizens_killed: 0,
 
+    # Lifetime counters (persisted, shown in mini_stats)
+    npcs_killed: 0,
+    deaths: 0,
+    penalty: 0,
+    fishing_points: 0,
+
     # Flags
     dead: false,
     poisoned: false,

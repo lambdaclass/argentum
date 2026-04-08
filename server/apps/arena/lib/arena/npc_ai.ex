@@ -492,7 +492,7 @@ defmodule Arena.NpcAi do
                     send(pid, {:send_raw, Encoder.encode({:npc_kill_user, %{}})})
                     send(pid, {:send_raw, Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})})
                   end
-                  %{player | dead: true}
+                  %{player | dead: true, deaths: player.deaths + 1}
                 else
                   player
                 end
@@ -563,7 +563,7 @@ defmodule Arena.NpcAi do
                 end
                 npc = %{npc | target_id: nil}
                 state = put_in(state.npcs_live[instance_id], npc)
-                {%{player | dead: true}, state}
+                {%{player | dead: true, deaths: player.deaths + 1}, state}
               else
                 {player, state}
               end
