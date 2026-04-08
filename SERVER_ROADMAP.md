@@ -27,6 +27,7 @@
 - `Phase 14 — Anti-Cheat & Server Hardening`: `Done`
 - `Phase 15 — Operations & Infrastructure`: `Mostly done`
 - `Phase 16 — Chat Moderation`: `Done`
+- `Post-Compatibility — Web Account Auth & Character Lobby`: `Missing`
 
 **Implemented so far (~14k lines of Elixir source + 295 lines Rust):**
 - TCP + WebSocket networking with full AO20 protocol support (all 37 client→server, 52 server→client packet IDs)
@@ -57,6 +58,7 @@
 - Trainer skill-group restrictions (some trainers only teach specific skills)
 - Phase 15: monitoring dashboards, deployment pipeline, metric collection
 - Ongoing VB6 behavior audit for edge cases
+- Post-compatibility web account flow: username/password or Google sign-in, account session, character list/create/select, token issue for `login_existing_char`
 
 **VB6 server:** ~93,000 lines across 50+ modules
 **Elixir server now:** ~14,000 lines source (+ ~6,300 lines tests)
@@ -1019,6 +1021,11 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 
 **Goal:** Players have real accounts with password protection. The web client uses a login form; the VB6 client uses the existing packet flow.
 
+**Scope note:** This phase is intentionally compatibility-preserving. It covers
+account ownership and password auth on the existing AO packet path. The richer
+web-first account lobby flow is tracked separately below because it is not
+required for VB6 parity.
+
 **What to build:**
 - Ecto schema: `accounts` table (username, password_hash, email, banned_until, created_at)
 - Registration: validate username uniqueness + password strength, hash with `Bcrypt`
@@ -1031,6 +1038,64 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 **Lines estimate:** ~400 Elixir
 
 **Depends on:** None (can be built at any time)
+
+---
+
+## Post-Compatibility — Web Account Auth & Character Lobby
+
+**Status:** `Missing`
+
+**This is not part of VB6 parity.** It is a web-first account layer to add
+after the Compatibility Gate is closed, so the browser can use modern account
+auth without changing the traditional AO gameplay socket flow.
+
+**Goal:** Browser users authenticate at the account level with either
+username/password or Google, choose or create a character, and only then enter
+the world through the unchanged `login_existing_char(char_id, session_token)`
+path.
+
+**Target flow:**
+1. Browser authenticates account via HTTP API
+2. Backend creates or loads the account session
+3. Browser loads account info plus owned characters
+4. Browser creates or selects a character
+5. Backend issues or rotates a per-character session token
+6. Browser opens the AO socket and sends `login_existing_char`
+
+**What to build:**
+- Account auth API on the web path:
+  - `POST /api/auth/login` for username/password
+  - `POST /api/auth/google` for Google ID token or OAuth callback result
+  - `GET /api/auth/session`
+  - `POST /api/auth/logout`
+- Character lobby API:
+  - `GET /api/characters`
+  - `POST /api/characters`
+  - `POST /api/characters/:id/session`
+- Account model support for:
+  - password-only accounts
+  - Google-only accounts
+  - linked accounts that can use either method
+- Character ownership checks before issuing gameplay session tokens
+- Browser lobby UI for:
+  - sign in
+  - sign out
+  - list characters
+  - create character
+  - select character and enter world
+
+**Important constraints:**
+- Keep the auth API on the same origin as the web client, or proxy it there.
+  Do not create unnecessary CORS/cookie/session complexity between `:7667` and
+  `:4000`.
+- Keep account auth separate from AO packet login. The browser should stop
+  using `login_new_char` as its primary account-login mechanism.
+- Reuse the existing gameplay socket auth path instead of inventing a second
+  in-world login protocol.
+
+**Lines estimate:** ~300-700 backend + ~300-700 frontend
+
+**Depends on:** Compatibility Gate, Phase 13
 
 ---
 
@@ -1143,6 +1208,7 @@ Each server phase unlocks corresponding client work. Neither roadmap should be r
 | Phase 11 — Progression | Client Phase 9 — Stats | Level-up packets, stat display packets, skill training packets |
 | Phase 12 — World Rules | Client Phase 10 — Polish | Weather data on map enter, safe zone flag, criminal flag |
 | Phase 13 — Auth | Client Foundation — Login screen | Auth endpoint/packet, account creation endpoint |
+| Post-Compatibility — Web Account Auth & Character Lobby | Client Foundation — Account lobby | Account session API, character list/create/select, Google sign-in, per-character token issue |
 | Phase 15 — Operations | Client Foundation — Asset delivery | CDN URL for assets, TLS for WebSocket |
 
 ---
