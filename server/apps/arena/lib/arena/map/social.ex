@@ -887,32 +887,10 @@ defmodule Arena.Map.Social do
     end
   end
 
-  # Returns which skill group a skill belongs to.
-  defp skill_group(skill) when skill in @combat_skills,  do: :combat
-  defp skill_group(skill) when skill in @magic_skills,   do: :magic
-  defp skill_group(skill) when skill in @trade_skills,   do: :trade
-  defp skill_group(skill) when skill in @stealth_skills,  do: :stealth
-  defp skill_group(_skill), do: :unknown
-
-  # Check whether an NPC trainer accepts a given skill.
-  # Infers the trainer specialization from the NPC name since npcs.dat
-  # does not carry a trainer_type field.
-  defp trainer_accepts_skill?(npc_def, skill_atom) do
-    group = skill_group(skill_atom)
-    trainer_group = infer_trainer_group(npc_def)
-    trainer_group == :all or trainer_group == group
-  end
-
-  defp infer_trainer_group(npc_def) do
-    name = String.downcase(npc_def.name || "")
-    cond do
-      String.contains?(name, ["combate", "guerrero", "armas"]) -> :combat
-      String.contains?(name, ["magia", "mago", "hechicero"]) -> :magic
-      String.contains?(name, ["oficio", "trabajo", "artesano"]) -> :trade
-      String.contains?(name, ["ladron", "asesino", "sigilo"]) -> :stealth
-      true -> :all
-    end
-  end
+  # VB6: trainers teach ALL skills — ModifySkills has no NPC or skill-group check.
+  # The trainer NPC's creature list (CI1..CI5) is for the creature summoning feature,
+  # not for restricting which skills can be trained.
+  defp trainer_accepts_skill?(_npc_def, _skill_atom), do: true
 
   def handle_request_mini_stats(state, char_id) do
     case Map.fetch(state.players, char_id) do
