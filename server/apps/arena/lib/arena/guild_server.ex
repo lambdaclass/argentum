@@ -87,8 +87,8 @@ defmodule Arena.GuildServer do
 
             raw =
               AoProtocol.Server.Encoder.encode(
-                {:console_msg,
-                 %{message: "[Clan] #{sender_name}: #{message}", font_index: 3}}
+                {:guild_chat,
+                 %{status: 0, message: "#{sender_name}: #{message}"}}
               )
 
             for mid <- guild.members do

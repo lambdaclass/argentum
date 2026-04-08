@@ -109,6 +109,8 @@ defmodule AoProtocol.PacketIds do
     # Chat
     def chat_over_head, do: 35
     def console_msg, do: 37
+    def console_faction_message, do: 38
+    def guild_chat, do: 39
 
     # Characters
     def character_create, do: 42

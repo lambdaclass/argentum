@@ -1294,13 +1294,17 @@ defmodule Arena.Map.Social do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         if entity.faction == :none do
-          Helpers.send_to_session(state.sessions, char_id,
-            {:send_raw, Encoder.encode({:console_msg, %{message: "No perteneces a ninguna faccion.", font_index: 0}})})
+          msg(state, char_id, "No perteneces a ninguna faccion.")
           {:noreply, state}
         else
-          faction_name = faction_display_name(entity.faction)
-          chat_msg = "[#{faction_name}] #{entity.name}: #{message}"
-          raw = Encoder.encode({:console_msg, %{message: chat_msg, font_index: 0}})
+          # VB6: uses eConsoleFactionMessage (ID 38) with faction label key
+          {faction_label, font_index} = faction_chat_style(entity.faction)
+          chat_msg = "#{entity.name}: #{message}"
+          raw = Encoder.encode({:console_faction_message, %{
+            message: chat_msg,
+            font_index: font_index,
+            faction_label: faction_label
+          }})
 
           for {_cid, other} <- state.players, other.faction == entity.faction do
             Helpers.send_to_session(state.sessions, other.char_id, {:send_raw, raw})
@@ -1313,6 +1317,10 @@ defmodule Arena.Map.Social do
         {:noreply, state}
     end
   end
+
+  defp faction_chat_style(:royal_army), do: {"MENSAJE_ARMADA", 0}
+  defp faction_chat_style(:chaos_legion), do: {"MENSAJE_LEGION", 0}
+  defp faction_chat_style(_), do: {"", 0}
 
   defp faction_display_name(:royal_army), do: "Armada Real"
   defp faction_display_name(:chaos_legion), do: "Legion del Caos"

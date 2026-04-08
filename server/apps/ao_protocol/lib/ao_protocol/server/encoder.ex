@@ -182,6 +182,23 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.console_msg(), payload)
   end
 
+  # eConsoleFactionMessage (ID 38) — chat(String8) + font_index(Int8) + faction_label(String8)
+  def encode({:console_faction_message, params}) do
+    payload =
+      Writer.write_string8(params[:message] || "") <>
+        Writer.write_int8(params[:font_index] || 0) <>
+        Writer.write_string8(params[:faction_label] || "")
+    Writer.build_packet(PacketIds.Server.console_faction_message(), payload)
+  end
+
+  # eGuildChat (ID 39) — status(Int8) + chat(String8)
+  def encode({:guild_chat, params}) do
+    payload =
+      Writer.write_int8(params[:status] || 0) <>
+        Writer.write_string8(params[:message] || "")
+    Writer.build_packet(PacketIds.Server.guild_chat(), payload)
+  end
+
   # eChatOverHead (ID 35) — chat(String8) + charindex(Int16) + Color(Int32) +
   #   EsSpell(Bool) + x(Int8) + y(Int8) + RequiredMinDisplayTime(Int16) + MaxDisplayTime(Int16)
   def encode({:chat_over_head, params}) do
