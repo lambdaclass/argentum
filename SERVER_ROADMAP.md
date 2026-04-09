@@ -65,7 +65,7 @@ reference and historical phase plan.
 
 **Remaining backend gaps (gameplay tail):**
 1. **Death recovery / home travel** — implement `/HOGAR` / home-city recovery, or explicitly replace it with a documented modern flow.
-2. **Old guild UI client packet hardening** — gameplay and many UI responses exist. Finish decoder/routing parity for the old guild window, including payload-consuming no-op packets, and add packet replay tests.
+2. **Old guild UI route hardening** — gameplay, many UI responses, and payload consumption for known old-client guild packets exist. Finish routing behavior for the old guild window, especially elections/votes/relation-proposal lists, and add packet replay tests.
 3. **Elemental/rune content support** — per-instance tags are persisted/protocol-visible. Current raw data scan found no active `IsElementalTagsOnly`, nonzero static `ElementalTags`, or elemental matrix values; defer unless content enables it. If enabled, parse static item/NPC tags, apply runes, enforce elemental-only spells, and apply `ElementalMatrixForNpcs`.
 4. **Automated parity gate missing** — Packet trace replay, AO smoke bot, VB6 formula golden tests, property/fuzz, lifecycle tests, load/soak. Biggest "are we really done?" gap.
 5. **Recent migrations need real DB verification** — Run clean-db + existing-dev-db migration path; verify character/inventory/bank/guild/faction loads after migration.
@@ -87,7 +87,7 @@ For the full product order, use `ROADMAP.md`. Backend sequencing is:
 
 1. Stabilize the current branch: track all migrations, run migrations, run compile/tests from a clean checkout.
 2. Build the automated parity gate: VB6 packet replay, formula golden fixtures, property/fuzz tests, lifecycle tests, AO smoke bot, browser E2E, load/soak.
-3. Close backend compatibility tail in this order: `/HOGAR` death recovery, old guild UI packet hardening + replay tests, elemental/rune content only if data enables it, migration/runtime verification.
+3. Close backend compatibility tail in this order: `/HOGAR` death recovery, old guild UI route behavior + replay tests, elemental/rune content only if data enables it, migration/runtime verification.
 4. Close operations tail: metrics, dashboards, alerts, release/deploy pipeline, backup/restore and shutdown runbooks.
 5. Build post-compat account API only after the compatibility gate is green: username/password or Google account login, character list/create/select, character token issue, unchanged AO socket login.
 
@@ -138,9 +138,9 @@ patching or behavior-specific workarounds.
   - server→client: `change_spell_slot`, `character_change`, `character_remove`, `npc_hit_user`, `user_hitted_user`, `user_hitted_by_user`, `create_fx`, `play_wave`, `change_npc_inventory_slot`
   - client→server: `talk`, `whisper`, `attack`, `drop`, `cast_spell`, `left_click`, `use_item`, `equip_item` (packet_counter consumption added)
 - ~~Keep extension packets out of VB6 path~~ — **Done.** `session_token` (ID 200) is WS-only, injected by WsHandler, never sent on TCP.
-- Remaining: old guild/clan UI response encoders and core routes exist. Harden
-  the remaining client→server UI packet decoders/routes and add VB6 packet
-  replay tests. `online` returns player count; `use_spell_macro` is
+- Remaining: old guild/clan UI response encoders, core routes, and payload
+  consumption for known old-client guild packets exist. Harden the remaining
+  route behaviors and add VB6 packet replay tests. `online` returns player count; `use_spell_macro` is
   intentionally server-side no-op because the client resolves macros into
   `cast_spell`.
 
@@ -168,7 +168,7 @@ patching or behavior-specific workarounds.
   - ~~NPC gold drop~~ — **Done.** NPC `GiveGLD` drops as a gold ground object.
 - Remaining open items:
   - `/HOGAR` / home-city death recovery
-  - old guild UI decoder/route hardening and replay tests
+  - old guild UI route/election behavior and replay tests
   - interval clamps that may still differ from raw VB6 data-driven timing
   - ongoing invisibility / AI / spell-selection edge-case review
 

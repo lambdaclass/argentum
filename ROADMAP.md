@@ -110,9 +110,11 @@ Still open before calling backend compatibility done:
 - **Death recovery / home travel:** implement the `/HOGAR` / home-city recovery
   path and/or document the replacement flow. Spell/NPC resurrection alone is not
   enough for the classic "dead player returns home" loop.
-- **Old guild UI client packet hardening:** gameplay and many UI responses
-  exist. Finish decoder/routing parity for the old guild window and add packet
-  replay tests so a wrong payload length cannot desync the TCP stream.
+- **Old guild UI route hardening:** gameplay, many UI responses, and payload
+  consumption for known old-client guild packets exist. Finish routing behavior
+  for the old guild window, especially elections/votes/relation-proposal lists,
+  and add packet replay tests so payload regressions cannot desync the TCP
+  stream again.
 - **Elemental/rune content:** per-instance `elemental_tags` are persisted,
   banked, traded, and sent. Current raw data appears dormant for elemental-only
   spells / NPC tags / damage matrix; keep this as future content support unless

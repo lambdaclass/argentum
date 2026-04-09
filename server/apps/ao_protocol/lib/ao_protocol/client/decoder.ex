@@ -323,17 +323,41 @@ defmodule AoProtocol.Client.Decoder do
     end
   end
 
-  # eGuildAcceptPeace=17 (no payload)
-  defp decode_packet(17, rest), do: {:ok, {:guild_accept_peace, %{}}, rest}
+  # eGuildAcceptPeace=17 — guild(S8)
+  defp decode_packet(17, rest) do
+    with {:ok, guild, rest} <- Reader.read_string8(rest) do
+      {:ok, {:guild_accept_peace, %{guild: guild}}, rest}
+    else
+      _ -> :incomplete
+    end
+  end
 
-  # eGuildRejectAlliance=18 (no payload)
-  defp decode_packet(18, rest), do: {:ok, {:guild_reject_alliance, %{}}, rest}
+  # eGuildRejectAlliance=18 — guild(S8)
+  defp decode_packet(18, rest) do
+    with {:ok, guild, rest} <- Reader.read_string8(rest) do
+      {:ok, {:guild_reject_alliance, %{guild: guild}}, rest}
+    else
+      _ -> :incomplete
+    end
+  end
 
-  # eGuildRejectPeace=19 (no payload)
-  defp decode_packet(19, rest), do: {:ok, {:guild_reject_peace, %{}}, rest}
+  # eGuildRejectPeace=19 — guild(S8)
+  defp decode_packet(19, rest) do
+    with {:ok, guild, rest} <- Reader.read_string8(rest) do
+      {:ok, {:guild_reject_peace, %{guild: guild}}, rest}
+    else
+      _ -> :incomplete
+    end
+  end
 
-  # eGuildAcceptAlliance=20 (no payload)
-  defp decode_packet(20, rest), do: {:ok, {:guild_accept_alliance, %{}}, rest}
+  # eGuildAcceptAlliance=20 — guild(S8)
+  defp decode_packet(20, rest) do
+    with {:ok, guild, rest} <- Reader.read_string8(rest) do
+      {:ok, {:guild_accept_alliance, %{guild: guild}}, rest}
+    else
+      _ -> :incomplete
+    end
+  end
 
   # eGuildOfferPeace=21 — guild(S8) + proposal(S8)
   defp decode_packet(21, rest) do
@@ -382,10 +406,25 @@ defmodule AoProtocol.Client.Decoder do
     end
   end
 
+  # eGuildAlliancePropList=26 (no payload)
+  defp decode_packet(26, rest), do: {:ok, {:guild_alliance_prop_list, %{}}, rest}
+
+  # eGuildPeacePropList=27 (no payload)
+  defp decode_packet(27, rest), do: {:ok, {:guild_peace_prop_list, %{}}, rest}
+
   # eGuildDeclareWar=28 — guild(S8)
   defp decode_packet(28, rest) do
     with {:ok, guild, rest} <- Reader.read_string8(rest) do
       {:ok, {:guild_declare_war, %{guild: guild}}, rest}
+    else
+      _ -> :incomplete
+    end
+  end
+
+  # eGuildNewWebsite=29 — website(S8)
+  defp decode_packet(29, rest) do
+    with {:ok, website, rest} <- Reader.read_string8(rest) do
+      {:ok, {:guild_new_website, %{website: website}}, rest}
     else
       _ -> :incomplete
     end
@@ -462,9 +501,10 @@ defmodule AoProtocol.Client.Decoder do
   # eGuildLeave=40 (no payload)
   defp decode_packet(40, rest), do: {:ok, {:guild_leave, %{}}, rest}
 
-  # eGuildMessage=59 — chat(S8)
+  # eGuildMessage=59 — chat(S8) + packet_counter(I32)
   defp decode_packet(59, rest) do
-    with {:ok, chat, rest} <- Reader.read_string8(rest) do
+    with {:ok, chat, rest} <- Reader.read_string8(rest),
+         {:ok, _packet_count, rest} <- Reader.read_int32(rest) do
       {:ok, {:guild_message, %{message: chat}}, rest}
     else
       _ -> :incomplete

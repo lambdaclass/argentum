@@ -760,6 +760,9 @@ defmodule AoTcpGateway.SessionLogic do
   def handle_command(state, {:guild_alliance_details, _}) when state.character_id != nil, do: {state, []}
   def handle_command(state, {:guild_peace_details, _}) when state.character_id != nil, do: {state, []}
   def handle_command(state, {:guild_request_joiner_info, _}) when state.character_id != nil, do: {state, []}
+  def handle_command(state, {:guild_alliance_prop_list, _}) when state.character_id != nil, do: {state, []}
+  def handle_command(state, {:guild_peace_prop_list, _}) when state.character_id != nil, do: {state, []}
+  def handle_command(state, {:guild_new_website, _}) when state.character_id != nil, do: {state, []}
   def handle_command(state, {:guild_member_info, _}) when state.character_id != nil, do: {state, []}
   def handle_command(state, {:guild_open_elections, _}) when state.character_id != nil, do: {state, []}
   def handle_command(state, {:guild_vote, _}) when state.character_id != nil, do: {state, []}
