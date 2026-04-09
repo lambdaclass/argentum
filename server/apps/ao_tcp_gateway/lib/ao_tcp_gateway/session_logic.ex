@@ -846,39 +846,60 @@ defmodule AoTcpGateway.SessionLogic do
 
   # ---- /HOGAR — dead player home recovery (VB6 parity) ----
 
+  # VB6 e_Ciudad enum order (reverse of character_creation @home_city_atom)
   @home_city_ids %{
-    ullathorpe: 1, arghal: 2, forgat: 3, nix: 4,
-    lindos: 5, banderbill: 6, arkhein: 7, eldoria: 8, penthar: 9
+    ullathorpe: 1, nix: 2, banderbill: 3, lindos: 4,
+    arghal: 5, arkhein: 6, forgat: 7, eldoria: 8, penthar: 9
   }
 
   defp handle_hogar(state) do
     case Arena.Map.MapServer.snapshot_entity(state.map_id, state.character_id) do
       {:ok, entity} ->
-        if entity.dead do
-          city_id = Map.get(@home_city_ids, entity.home_city, 1)
-          spawn = Arena.Data.GameData.city_spawn(city_id)
+        cond do
+          # VB6: must be dead
+          not entity.dead ->
+            {state, [{:console_msg, %{message: "Debes estar muerto para utilizar este comando.", font_index: 0}}]}
 
-          # Resurrect before transferring — transfer passes this entity to MapServer.enter
-          # on the destination map, so the player arrives alive.
-          resurrected = %{entity |
-            dead: false,
-            hp: entity.max_hp,
-            mana: 0,
-            buffs: [],
-            paralyzed: false,
-            poisoned: false,
-            invisible: false
-          }
+          # VB6: cannot use in prison (penalty counter > 0)
+          (entity.penalty || 0) > 0 ->
+            {state, [{:console_msg, %{message: "No puedes usar este comando en prisión.", font_index: 0}}]}
 
-          transfer(state, spawn.map, spawn.x, spawn.y, resurrected)
-        else
-          {state, [{:console_msg, %{message: "No estas muerto.", font_index: 0}}]}
+          # VB6: check if already on home map
+          true ->
+            city_id = Map.get(@home_city_ids, entity.home_city, 1)
+            spawn = Arena.Data.GameData.city_spawn(city_id)
+
+            if state.map_id == spawn.map do
+              {state, [{:console_msg, %{message: "Ya te encuentras en tu hogar.", font_index: 0}}]}
+            else
+              # VB6 gold cost: level^2 if L>24, else (L*15) + floor(L^1.5)
+              cost = hogar_gold_cost(entity.level)
+
+              if entity.gold < cost do
+                {state, [{:console_msg, %{message: "Para utilizar este comando necesitas #{cost} monedas de oro.", font_index: 0}}]}
+              else
+                # Deduct gold but do NOT resurrect — VB6 teleports the corpse.
+                # Player must visit a Revividor NPC to actually revive.
+                new_gold = entity.gold - cost
+                corpse = %{entity | gold: new_gold}
+
+                {state, packets} = transfer(state, spawn.map, spawn.x, spawn.y, corpse)
+                packets = packets ++ [
+                  {:update_gold, %{gold: new_gold}},
+                  {:console_msg, %{message: "Has regresado a tu ciudad de origen.", font_index: 0}}
+                ]
+                {state, packets}
+              end
+            end
         end
 
       _ ->
         {state, []}
     end
   end
+
+  defp hogar_gold_cost(level) when level > 24, do: level * level
+  defp hogar_gold_cost(level), do: level * 15 + trunc(:math.pow(level, 1.5))
 
   # ---- Cleanup & autosave ----
 

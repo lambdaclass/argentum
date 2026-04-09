@@ -61,27 +61,33 @@ defmodule Arena.Data.GameData do
     cha: "carisma"
   }
 
-  # City name → VB6 section name mapping
+  # VB6 e_Ciudad enum → Ciudades.Dat section name.
+  # Order MUST match VB6: 1=Ullathorpe, 2=Nix, 3=Banderbill, 4=Lindos,
+  # 5=Arghal, 6=Arkhein, 7=Forgat, 8=Eldoria, 9=Penthar.
   @city_sections %{
     1 => "Ullathorpe",
-    2 => "Arghal",
-    3 => "NIX",
-    4 => "Banderbill",
-    5 => "Lindos",
-    6 => "Arkhein"
+    2 => "NIX",
+    3 => "Banderbill",
+    4 => "Lindos",
+    5 => "Arghal",
+    6 => "Arkhein",
+    7 => "Forgat",
+    8 => "Eldoria",
+    9 => "Penthar"
   }
 
-  # Fallback city spawns (from VB6 ConnectNewUser) if Ciudades.Dat missing
+  # Fallback city spawns from Ciudades.Dat values (used when .Dat missing).
+  # VB6 e_Ciudad enum order.
   @fallback_city_spawns %{
-    1 => %{map: 1, x: 57, y: 45},      # Ullathorpe
-    2 => %{map: 151, x: 53, y: 37},     # Arghal
-    3 => %{map: 517, x: 49, y: 65},     # Forgat
-    4 => %{map: 34, x: 41, y: 87},      # Nix
-    5 => %{map: 408, x: 64, y: 40},     # Lindos
-    6 => %{map: 59, x: 48, y: 42},      # Banderbill
-    7 => %{map: 196, x: 44, y: 59},     # Arkhein
-    8 => %{map: 440, x: 51, y: 89},     # Eldoria
-    9 => %{map: 560, x: 41, y: 70}      # Penthar
+    1 => %{map: 1, x: 57, y: 44},      # Ullathorpe
+    2 => %{map: 34, x: 40, y: 87},     # Nix
+    3 => %{map: 59, x: 47, y: 41},     # Banderbill
+    4 => %{map: 62, x: 63, y: 43},     # Lindos
+    5 => %{map: 151, x: 41, y: 50},    # Arghal
+    6 => %{map: 196, x: 49, y: 61},    # Arkhein
+    7 => %{map: 517, x: 49, y: 65},    # Forgat (no Ciudades.Dat section)
+    8 => %{map: 440, x: 51, y: 89},    # Eldoria (no Ciudades.Dat section)
+    9 => %{map: 560, x: 41, y: 70}     # Penthar (no Ciudades.Dat section)
   }
 
   # ---- Public API ----

@@ -16,9 +16,10 @@ defmodule Arena.CharacterCreation do
   @valid_cities 1..9
 
   @gender_names %{1 => :male, 2 => :female}
+  # VB6 e_Ciudad enum order
   @home_city_atom %{
-    1 => :ullathorpe, 2 => :arghal, 3 => :forgat, 4 => :nix,
-    5 => :lindos, 6 => :banderbill, 7 => :arkhein, 8 => :eldoria, 9 => :penthar
+    1 => :ullathorpe, 2 => :nix, 3 => :banderbill, 4 => :lindos,
+    5 => :arghal, 6 => :arkhein, 7 => :forgat, 8 => :eldoria, 9 => :penthar
   }
 
   # Body IDs per {race_id, gender_id} — from VB6 DarCuerpo

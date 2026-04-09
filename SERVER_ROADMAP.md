@@ -34,7 +34,8 @@ reference and historical phase plan.
 - `Post-Compatibility — Web Account Auth & Character Lobby`: `Missing`
 
 **Implemented so far (~16k lines of Elixir source + 295 lines Rust):**
-- TCP + WebSocket networking with full AO20 protocol support (all 37 client→server, 52 server→client packet IDs)
+- TCP + WebSocket networking with the core AO20 gameplay/web protocol covered.
+  Full old-client packet/UI coverage remains an explicit parity backlog below.
 - Authoritative `MapServer` with movement, chat, heading, map transitions, autosave, and direct session delivery
 - AoI visibility lifecycle, `:global` / `:aoi_scan` / `:aoi_grid`, spatial grid, pre-encoded hot-path broadcasts
 - Character creation, login, persistence, online directory, static `.dat` loading
@@ -64,16 +65,27 @@ reference and historical phase plan.
 6. **Guild backend depth** — persistence, tags, levels/XP, metadata, alignment, requests/aspirants, wars, peace, alliances, successor promotion, and old UI response encoders are implemented.
 
 **Recently closed:**
-7. **Death recovery / home travel** — `/HOGAR` command implemented: dead players resurrect and teleport to home city.
-8. **Guild UI route hardening** — all 27 guild packets decoded/routed. Elections reply "disabled" (VB6 parity). Accept/reject peace/alliance, website, member info wired.
-9. **VB6 parity test suite** — `vb6_parity_test.exs` covers XP formulas, exp_count pool, death cleanup, unequip, gold drops, combat bounds, city spawns.
+7. **Guild UI route hardening** — guild packet decoders/routes exist for the current clan UI pass. Elections reply "disabled" (VB6 parity). Accept/reject peace/alliance, website, member info have backend routes.
+8. **VB6 parity test suite seed** — `vb6_parity_test.exs` covers XP formulas, exp_count pool, death cleanup, unequip, gold drops, combat bounds, city spawns.
 
 **Remaining backend gaps (gameplay tail):**
-1. **Elemental/rune content support** — per-instance tags are persisted/protocol-visible. Current raw data scan found no active elemental values; defer unless content enables it.
-2. **Automated parity gate expansion** — Initial parity test suite exists. Still needed: packet trace replay, AO smoke bot, property/fuzz, lifecycle tests, load/soak.
-3. **Recent migrations need real DB verification** — Run clean-db + existing-dev-db migration path; verify character/inventory/bank/guild/faction loads after migration.
-4. **Ops tail** — Dashboards, alerts, deploy pipeline, backup-restore, runbooks. Not gameplay, but backend production work (Phase 15 + 17).
-5. **Perf tail** — NPC aggro still scans all players; pet targeting scans all NPCs; no outbound backpressure; no load/soak gate. NPC broadcast AoI is fixed (Phase 17).
+1. **`/HOGAR` / home travel** — must match VB6: dead-only, paid, delayed
+   travel/bar/effect, jail/newbie/carcel/penalty/reto restrictions, already-home
+   handling, cancel existing travel, home arrival still dead. Do not
+   resurrect/full-heal in this flow.
+2. **Raw `ehome` packet** — decode and route the old client home command packet;
+   text chat `/HOGAR` is not enough for old-client parity.
+3. **Home-city mapping** — VB6 city enum, character creation, `Ciudades.Dat`,
+   fallback spawns, and home travel lookup must use one documented mapping.
+4. **Guild UI proposal behavior** — finish old-client peace/alliance/list/detail
+   behavior and add packet replay tests for the old clan windows.
+5. **Elemental/rune content support** — per-instance tags are persisted/protocol-visible. Current raw data scan found no active elemental values; defer unless content enables it.
+6. **Automated parity gate expansion** — Initial parity test suite exists. Still needed: packet trace replay, AO smoke bot, property/fuzz, lifecycle tests, load/soak.
+7. **Recent migrations need real DB verification** — Run clean-db + existing-dev-db migration path; verify character/inventory/bank/guild/faction loads after migration.
+8. **Pending test files** — Commit or intentionally remove `server/apps/ao_protocol/test/ao_protocol/guild_protocol_test.exs` and `server/apps/arena/test/combat_lifecycle_test.exs`.
+9. **Local test toolchain** — Fix the Elixir/Hex/OTP mismatch so `mix compile` and `mix test` run reliably from a clean checkout.
+10. **Ops tail** — Dashboards, alerts, deploy pipeline, backup-restore, runbooks. Not gameplay, but backend production work (Phase 15 + 17).
+11. **Perf tail** — NPC aggro still scans all players; pet targeting scans all NPCs; no outbound backpressure; no load/soak gate. NPC broadcast AoI is fixed (Phase 17).
 
 **Remaining non-backend gaps:**
 - Weather: snow rendering on client (server packet/state exists; rain rendering done)
@@ -88,11 +100,19 @@ reference and historical phase plan.
 
 For the full product order, use `ROADMAP.md`. Backend sequencing is:
 
-1. Stabilize the current branch: track all migrations, run migrations, run compile/tests from a clean checkout.
+1. Stabilize the current branch: track pending test files, track all migrations, run migrations, fix the local Hex/OTP toolchain if needed, and run compile/tests from a clean checkout.
 2. Build the automated parity gate: VB6 packet replay, formula golden fixtures, property/fuzz tests, lifecycle tests, AO smoke bot, browser E2E, load/soak.
-3. Close backend compatibility tail in this order: `/HOGAR` death recovery, old guild UI route behavior + replay tests, elemental/rune content only if data enables it, migration/runtime verification.
-4. Close operations tail: metrics, dashboards, alerts, release/deploy pipeline, backup/restore and shutdown runbooks.
-5. Build post-compat account API only after the compatibility gate is green: username/password or Google account login, character list/create/select, character token issue, unchanged AO socket login.
+3. Close the core backend parity tail in this order: `/HOGAR` death recovery,
+   raw `ehome`, city mapping, old guild UI route behavior + replay tests,
+   elemental/rune content only if data enables it, migration/runtime verification.
+4. Close the old-client packet/UI tail: pet UI packets, crafting UI packets,
+   trainer/spell UI packets, info/service packets, faction/council packets,
+   and the selected GM/admin binary packet target.
+5. Close old VB6 side systems that are in-scope for this shard: quests, auction,
+   forum, events/tournaments, duels/reto, invasions, treasure search, marriage,
+   gambling/arena payment, mounts, and old account/lobby packets if not replaced.
+6. Close operations tail: metrics, dashboards, alerts, release/deploy pipeline, backup/restore and shutdown runbooks.
+7. Build post-compat account API only after the compatibility gate is green: username/password or Google account login, character list/create/select, character token issue, unchanged AO socket login.
 
 ---
 
@@ -135,7 +155,9 @@ patching or behavior-specific workarounds.
 
 ### Protocol parity backlog
 
-- ~~Expand `AoProtocol` packet coverage~~ — **Done.** All 37 client→server packet IDs have decoders; all 52 server→client packet IDs have encoders. No reduced subset.
+- ~~Expand core gameplay/web `AoProtocol` packet coverage~~ — **Done.** The
+  current core client→server / server→client packet set has decoders/encoders.
+  Full old-client packet/UI coverage is still open below.
 - ~~Fix server packet ID mismatches (commerce/shop flows)~~ — **Done.** Commerce IDs (10/8) were verified correct against VB6 source; stale encoder comments fixed.
 - ~~Fix payload layout mismatches~~ — **Done.** All known mismatches fixed:
   - server→client: `change_spell_slot`, `character_change`, `character_remove`, `npc_hit_user`, `user_hitted_user`, `user_hitted_by_user`, `create_fx`, `play_wave`, `change_npc_inventory_slot`
@@ -146,6 +168,10 @@ patching or behavior-specific workarounds.
   route behaviors and add VB6 packet replay tests. `online` returns player count; `use_spell_macro` is
   intentionally server-side no-op because the client resolves macros into
   `cast_spell`.
+- Remaining old-client packets that are not part of the current core web path:
+  pet commands, crafting windows, training/spell windows, help/MOTD/uptime/info
+  windows, faction/council command packets, raw `ehome`, raw account/lobby
+  packet flow if kept, and the selected GM/admin binary packet family.
 
 ### Behavior parity backlog
 
@@ -170,7 +196,10 @@ patching or behavior-specific workarounds.
   - ~~deep player death helper~~ — **Done.** PvP, NPC, poison, starvation, and GM kill enter the same cleanup path.
   - ~~NPC gold drop~~ — **Done.** NPC `GiveGLD` drops as a gold ground object.
 - Remaining open items:
-  - `/HOGAR` / home-city death recovery
+  - `/HOGAR` / home-city death recovery: dead-only paid delayed travel, no
+    resurrection, full VB6 restrictions, raw `ehome` packet route
+  - home-city mapping: one VB6-compatible enum across creation, persistence,
+    `Ciudades.Dat`, fallback spawns, and home travel
   - old guild UI route/election behavior and replay tests
   - interval clamps that may still differ from raw VB6 data-driven timing
   - ongoing invisibility / AI / spell-selection edge-case review
@@ -191,6 +220,40 @@ patching or behavior-specific workarounds.
 
 No server phase that changes networking or gameplay semantics should be marked
 `Done` if this gate regresses.
+
+### Full old-server parity backlog
+
+These items are larger than the core web gameplay path. Keep them visible until
+the product owner either implements them or explicitly declares them out of scope.
+
+**Old-client packet / UI families still to cover:**
+- `ehome` raw packet for `/HOGAR`.
+- Pet commands: stand, follow, leave, follow-all, leave-all.
+- Crafting commands/windows: old carpenter / blacksmith / alchemy / tailor
+  forms, work-left-click, open crafting, add/remove ingredients and catalysts,
+  move craft item, craft item, close crafting.
+- Training/spell commands/windows: train list, train target list, train action,
+  spell info, move spell.
+- Info/service windows: account balance, help, stats/info, reward, MOTD,
+  uptime, punishments, map entrance price, online faction/GM/map lists.
+- Faction/council packet commands: faction message, council message,
+  leave-faction, online royal/chaos, royal/chaos GM broadcast paths.
+- GM/admin binary commands selected for the target shard. Slash GM commands are
+  useful, but are not old-client packet parity.
+
+**Old backend systems still to implement if kept in scope:**
+- Quests and quest NPC protocol.
+- Auction / subasta.
+- Forum / in-game message board.
+- Events, tournaments, lobby/capture events, invasions, and global world-event
+  announcements.
+- Duels / reto.
+- Treasure search.
+- Marriage.
+- Gambling and paid arena / map-entrance side flows.
+- Mounts, if target data expects mounts as a separate system from boats.
+- Old account/lobby packets, unless the HTTP account/character lobby is the
+  explicit replacement after compatibility.
 
 ---
 

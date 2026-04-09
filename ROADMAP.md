@@ -6,10 +6,9 @@ of truth for sequencing.
 
 ## Current Status
 
-- **Backend gameplay:** close, but not finishable until the explicit VB6 parity
-  tail below is closed or deliberately reclassified. The highest-risk tail is
-  death recovery, old guild UI packet hardening, runtime/migration validation,
-  parity automation, and the ops/performance tail.
+- **Backend gameplay:** close for the modern web path, but not full VB6 parity.
+  Do not call the backend compatible until the explicit backend parity backlog
+  below is either implemented or deliberately removed from the target.
 - **Web client:** playable development client. The remaining work is the modern
   account/character lobby, weather/social polish, authoritative party/clan UI
   state, trade metadata display, E2E coverage, and UX polish.
@@ -24,7 +23,12 @@ of truth for sequencing.
 ### 0. Stabilize the current branch
 
 - Commit or intentionally discard any leftover generated migrations/files.
+- Commit the pending protocol/combat tests if they are wanted:
+  `server/apps/ao_protocol/test/ao_protocol/guild_protocol_test.exs` and
+  `server/apps/arena/test/combat_lifecycle_test.exs`.
 - Finish/review any active local combat patch before doing unrelated work.
+- Fix any local Elixir/Hex/OTP toolchain mismatch. `mix compile` and `mix test`
+  must run from a clean checkout before compatibility sign-off.
 - Run the new migrations on a dev database.
 - Run the current server and client checks once from a clean checkout.
 - Update the top-level current-status sections after every large merge.
@@ -49,6 +53,75 @@ protocol change must pass it.
   end-to-end smoke pass.
 
 Detailed plan: `research/parity-automation-plan.md`.
+
+### Backend parity tail checklist
+
+Close this list in order if the target is the old VB6 server plus old client UI,
+not just the playable web core.
+
+#### A. Core VB6 parity still to close
+
+1. **`/HOGAR` final parity:** no revive/full-heal; paid delayed home travel;
+   travel bar/effect; jail restricted area, NEWBIE zone, CARCEL trigger,
+   penalty/jail timer, reto, traveling cancel, already-home, no-gold handling.
+2. **Raw `ehome` packet:** decode and route old-client packet ID 264 for home
+   travel.
+3. **Home-city mapping:** commit/verify one VB6 enum everywhere: 1 Ulla, 2 Nix,
+   3 Banderbill, 4 Lindos, 5 Arghal, 6 Arkhein, 7 Forgat, 8 Eldoria, 9 Penthar.
+4. **Elemental/rune combat effect:** tags are stored/sent; add active damage
+   modifier only if target data actually enables elemental content.
+5. **Guild proposal UI fidelity:** finish old peace/alliance/list/detail mailbox
+   behavior instead of console-only placeholders.
+
+#### B. Old VB6 client packet coverage
+
+6. **Pet command packets:** `/QUIETO`, `/ACOMPANAR`, `/LIBERAR`, follow-all,
+   leave-all.
+7. **Crafting UI packets:** open/add/remove/move/craft item; blacksmith,
+   carpenter, alchemy, tailor windows.
+8. **Training/spell UI packets:** train list, trainer creature list, spell info,
+   move spell.
+9. **Info UI packets:** `/AYUDA`, `/MOTD`, `/UPTIME`, `/BALANCE`, `/EST`,
+   `/INFO`, `/RECOMPENSA`.
+10. **Faction/council binary command packets:** keep slash behavior, but expose
+    the old packet surface too.
+11. **Full GM/admin binary packet family:** practical slash GM commands exist;
+    either route the old packet family or formally define the replacement.
+
+#### C. Big old systems not fully rebuilt
+
+12. **Quests and quest NPC protocol.**
+13. **Auction / subasta.**
+14. **Forum / in-game message board.**
+15. **Events / tournaments / lobby events / capture events.**
+16. **Duels / reto exact flow.**
+17. **Invasions / global world events.**
+18. **Treasure search.**
+19. **Marriage.**
+20. **Gambling / arena-payment side systems.**
+21. **Mounts**, if target data has mounts separate from boats/navigation.
+22. **Old account/lobby packet system**, unless explicitly replaced with the
+    HTTP account API below.
+
+#### D. Verification / release blockers
+
+23. **Track pending tests:** commit or intentionally remove
+    `guild_protocol_test.exs` and `combat_lifecycle_test.exs`.
+24. **Real Postgres migration run:** clean database and copy of a dev database.
+25. **Automated parity gate:** VB6 formula golden tests, packet replay, smoke
+    bot, decoder fuzz, combat/death integration, migration tests.
+26. **Reliable local test toolchain:** fix Hex/OTP so `mix test` runs.
+27. **Load/soak gate:** maps, NPC AI, trade, bank, guild, autosave, respawn,
+    crash cleanup, and shutdown under many sessions.
+
+#### E. After VB6 backend parity
+
+28. **HTTP account-auth API.**
+29. **Username/password account login.**
+30. **Google login.**
+31. **Multi-character list/create/select API.**
+32. **Character session issuance:** selected character enters with the normal AO
+    socket `login_existing_char(char_id, session_token)`.
 
 #### Parity test checklist
 
@@ -86,7 +159,7 @@ Create these suites and keep them green:
 - **Manual VB6 release smoke:** use the unmodified VB6 client for one full
   player journey before claiming compatibility.
 
-### 2. Close the backend compatibility tail
+### 2. Close the core backend compatibility tail
 
 Done in the recent backend parity pass; keep covered by tests:
 
@@ -105,8 +178,6 @@ Done in the recent backend parity pass; keep covered by tests:
   alignment, requests/aspirants, wars, peace, alliances, successor promotion,
   and old guild UI response encoders are implemented.
 
-- **Death recovery / home travel:** `/HOGAR` command implemented — dead players
-  are resurrected and teleported to their home city spawn point.
 - **Guild UI route hardening:** all 27 client→server guild packets are decoded
   and routed. Elections/vote reply with VB6-parity "disabled" message.
   Accept/reject peace/alliance, website, member info are now wired to backend.
@@ -116,6 +187,18 @@ Done in the recent backend parity pass; keep covered by tests:
 
 Still open before calling backend compatibility done:
 
+- **Death recovery / home travel:** make `/HOGAR` match VB6 exactly. A dead
+  ghost starts a paid delayed home travel; it must not resurrect or full-heal.
+  Preserve VB6 restrictions: jail restricted area, NEWBIE zone, CARCEL trigger,
+  penalty/jail timer, reto, already-at-home, existing-travel cancel, gold cost,
+  travel bar/effect, home arrival while still dead.
+- **Raw `/HOGAR` packet:** decode and route old client `ehome` in addition to
+  any web-client text command.
+- **Home-city mapping:** keep city enum, creation storage, `Ciudades.Dat`
+  loading, fallback spawns, and `/HOGAR` lookup on one documented mapping.
+- **Guild proposal UI behavior:** keep old guild UI packets decoded, but finish
+  the remaining peace/alliance proposal-list/detail behavior and cover it with
+  packet replay tests.
 - **Elemental/rune content:** per-instance `elemental_tags` are persisted,
   banked, traded, and sent. Current raw data appears dormant for elemental-only
   spells / NPC tags / damage matrix; keep this as future content support unless
@@ -126,7 +209,46 @@ Still open before calling backend compatibility done:
 - Keep auditing edge cases against VB6 only by adding a failing parity test
   first.
 
-### 3. Close the web gameplay client tail
+### 3. Close old VB6 client packet / UI parity
+
+This is required if "everything equal" means the unmodified old client can use
+the whole old UI surface, not just the modern web UI and slash-command subset.
+
+- **Pet UI packets:** `/QUIETO`, `/ACOMPANAR`, `/LIBERAR`, follow-all,
+  leave-all. Route them to the existing pet ownership/AI system.
+- **Crafting UI packets:** old open/add/remove/move/craft item packets,
+  blacksmith/carpenter/alchemy/tailor forms, and close-crafting flow. Route
+  them to the existing crafting backend.
+- **Trainer/spell UI packets:** train list, trainer creature list, spell info,
+  move spell, and related response packets.
+- **Info/service packets:** help, MOTD, uptime, account balance, stats/info,
+  reward, punishments, map entrance price, online faction lists.
+- **Faction/council packets:** binary faction/council messages and leave-faction
+  command packets. Keep the slash/web commands, but do not require them for the
+  old client.
+- **GM/admin binary packets:** decide exact compatibility target, then decode
+  and route the old GM packet family or explicitly document the replacement.
+
+### 4. Rebuild any VB6 side systems kept in the target
+
+These are backend/product systems from the old server. They are not required for
+the narrow combat/shop/bank/trade loop, but they are required for "everything
+equal" if the target shard used them.
+
+- Quests and quest-NPC protocol.
+- Auction / subasta.
+- Forum / in-game message board.
+- Events, tournaments, lobby events, capture events, invasions, and global
+  world-event announcements.
+- Duels / reto flow.
+- Treasure-search system.
+- Marriage.
+- Gambling and arena / paid-entrance side flows.
+- Mounts, if required separately from boats/navigation.
+- Old account/lobby packet system, unless replaced by the HTTP account lobby
+  below as an explicit product decision.
+
+### 5. Close the web gameplay client tail
 
 - Decode, dispatch, and render snow when `snow_toggle` is active.
 - Make party and clan panels use authoritative state packets or a documented
@@ -138,7 +260,7 @@ Still open before calling backend compatibility done:
 - Update `CLIENT_ROADMAP.md` whenever a client feature moves from "planned" to
   "done".
 
-### 4. Build the web account and character lobby
+### 6. Build the web account and character lobby
 
 This is post-compatibility. It must not change the AO20 gameplay protocol.
 
@@ -158,7 +280,7 @@ This is post-compatibility. It must not change the AO20 gameplay protocol.
 - Prefer same-origin serving or a proxy for the API; avoid cross-origin cookie
   and CORS complexity.
 
-### 5. Add admin / operations
+### 7. Add admin / operations
 
 - Add an admin surface for account lookup, character lookup, online players,
   kicks/bans/mutes/jail, item/NPC spawn, teleport/locate, logs, and health.

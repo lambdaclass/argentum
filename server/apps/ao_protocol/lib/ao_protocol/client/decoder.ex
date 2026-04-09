@@ -243,6 +243,51 @@ defmodule AoProtocol.Client.Decoder do
   # BankStart (ID 54)
   defp decode_packet(54, rest), do: {:ok, {:bank_start, %{}}, rest}
 
+  # RequestAccountState (ID 41)
+  defp decode_packet(41, rest), do: {:ok, {:request_account_state, %{}}, rest}
+
+  # PetStand (ID 42)
+  defp decode_packet(42, rest), do: {:ok, {:pet_stand, %{}}, rest}
+
+  # PetFollow (ID 43)
+  defp decode_packet(43, rest), do: {:ok, {:pet_follow, %{}}, rest}
+
+  # PetLeave (ID 44)
+  defp decode_packet(44, rest), do: {:ok, {:pet_leave, %{}}, rest}
+
+  # TrainList (ID 46)
+  defp decode_packet(46, rest), do: {:ok, {:train_list, %{}}, rest}
+
+  # Help (ID 51)
+  defp decode_packet(51, rest), do: {:ok, {:help, %{}}, rest}
+
+  # RequestStats (ID 52)
+  defp decode_packet(52, rest), do: {:ok, {:request_stats, %{}}, rest}
+
+  # Information (ID 55)
+  defp decode_packet(55, rest), do: {:ok, {:information, %{}}, rest}
+
+  # Reward (ID 56)
+  defp decode_packet(56, rest), do: {:ok, {:reward, %{}}, rest}
+
+  # RequestMOTD (ID 57)
+  defp decode_packet(57, rest), do: {:ok, {:request_motd, %{}}, rest}
+
+  # UpTime (ID 58)
+  defp decode_packet(58, rest), do: {:ok, {:uptime, %{}}, rest}
+
+  # RoleMasterRequest (ID 63)
+  defp decode_packet(63, rest), do: {:ok, {:role_master_request, %{}}, rest}
+
+  # LeaveFaction (ID 69)
+  defp decode_packet(69, rest), do: {:ok, {:leave_faction, %{}}, rest}
+
+  # Home (ID 264) — /HOGAR binary packet, no payload
+  defp decode_packet(264, rest), do: {:ok, {:home, %{}}, rest}
+
+  # PetLeaveAll (ID 282) — no payload
+  defp decode_packet(282, rest), do: {:ok, {:pet_leave_all, %{}}, rest}
+
   # ---- Packets with payloads ----
 
   # DoubleClick (ID 96) — x(Int8) + y(Int8)
@@ -526,8 +571,284 @@ defmodule AoProtocol.Client.Decoder do
   # eRequestGuildLeaderInfo=84 (no payload)
   defp decode_packet(84, rest), do: {:ok, {:request_guild_leader_info, %{}}, rest}
 
+  # ---- Crafting, training, skills, spells ----
+
+  # CraftCarpenter (ID 1) — item(I16) + cantidad(I32)
+  defp decode_packet(1, rest) do
+    with {:ok, item, rest} <- Reader.read_int16(rest),
+         {:ok, amount, rest} <- Reader.read_int32(rest) do
+      {:ok, {:craft_carpenter, %{item: item, amount: amount}}, rest}
+    end
+  end
+
+  # WorkLeftClick (ID 2) — x(I8) + y(I8) + skill(I8) + packet_count(I32)
+  defp decode_packet(2, rest) do
+    with {:ok, x, rest} <- Reader.read_int8(rest),
+         {:ok, y, rest} <- Reader.read_int8(rest),
+         {:ok, skill, rest} <- Reader.read_int8(rest),
+         {:ok, _packet_count, rest} <- Reader.read_int32(rest) do
+      {:ok, {:work_left_click, %{x: x, y: y, skill: skill}}, rest}
+    end
+  end
+
+  # SpellInfo (ID 4) — slot(I8)
+  defp decode_packet(4, rest) do
+    with {:ok, slot, rest} <- Reader.read_int8(rest) do
+      {:ok, {:spell_info, %{slot: slot}}, rest}
+    end
+  end
+
+  # ModifySkills (ID 7) — 24 × I8 (NUMSKILLS=24 in VB6)
+  defp decode_packet(7, rest) do
+    case read_skill_points(rest, 24, []) do
+      {:ok, points, rest} -> {:ok, {:modify_skills, %{points: points}}, rest}
+      :incomplete -> :incomplete
+    end
+  end
+
+  # Train (ID 8) — pet_index(I8)
+  defp decode_packet(8, rest) do
+    with {:ok, pet_index, rest} <- Reader.read_int8(rest) do
+      {:ok, {:train, %{pet_index: pet_index}}, rest}
+    end
+  end
+
+  # ForumPost (ID 13) — title(S8) + message(S8)
+  defp decode_packet(13, rest) do
+    with {:ok, title, rest} <- Reader.read_string8(rest),
+         {:ok, message, rest} <- Reader.read_string8(rest) do
+      {:ok, {:forum_post, %{title: title, message: message}}, rest}
+    end
+  end
+
+  # MoveSpell (ID 14) — upwards(Bool) + slot(I8)
+  defp decode_packet(14, rest) do
+    with {:ok, upwards, rest} <- Reader.read_bool(rest),
+         {:ok, slot, rest} <- Reader.read_int8(rest) do
+      {:ok, {:move_spell, %{upwards: upwards, slot: slot}}, rest}
+    end
+  end
+
+  # ClanCodexUpdate (ID 15) — desc(S8)
+  defp decode_packet(15, rest) do
+    with {:ok, desc, rest} <- Reader.read_string8(rest) do
+      {:ok, {:clan_codex_update, %{description: desc}}, rest}
+    end
+  end
+
+  # GrupoMsg (ID 45) — message(S8)
+  defp decode_packet(45, rest) do
+    with {:ok, message, rest} <- Reader.read_string8(rest) do
+      {:ok, {:grupo_msg, %{message: message}}, rest}
+    end
+  end
+
+  # CouncilMessage (ID 61) — message(S8)
+  defp decode_packet(61, rest) do
+    with {:ok, message, rest} <- Reader.read_string8(rest) do
+      {:ok, {:council_message, %{message: message}}, rest}
+    end
+  end
+
+  # FactionMessage (ID 62) — message(S8)
+  defp decode_packet(62, rest) do
+    with {:ok, message, rest} <- Reader.read_string8(rest) do
+      {:ok, {:faction_message, %{message: message}}, rest}
+    end
+  end
+
+  # ChangeDescription (ID 64) — desc(S8)
+  defp decode_packet(64, rest) do
+    with {:ok, desc, rest} <- Reader.read_string8(rest) do
+      {:ok, {:change_description, %{description: desc}}, rest}
+    end
+  end
+
+  # Punishments (ID 66) — name(S8)
+  defp decode_packet(66, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:punishments, %{name: name}}, rest}
+    end
+  end
+
+  # Gamble (ID 67) — amount(I32)
+  defp decode_packet(67, rest) do
+    with {:ok, amount, rest} <- Reader.read_int32(rest) do
+      {:ok, {:gamble, %{amount: amount}}, rest}
+    end
+  end
+
+  # Denounce (ID 72) — name(S8) + reason(S8)
+  defp decode_packet(72, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest),
+         {:ok, reason, rest} <- Reader.read_string8(rest) do
+      {:ok, {:denounce, %{name: name, reason: reason}}, rest}
+    end
+  end
+
+  # CraftBlacksmith (ID 100) — item(I16)
+  defp decode_packet(100, rest) do
+    with {:ok, item, rest} <- Reader.read_int16(rest) do
+      {:ok, {:craft_blacksmith, %{item: item}}, rest}
+    end
+  end
+
+  # ---- GM packets (core subset) ----
+
+  # GMMessage (ID 101) — message(S8)
+  defp decode_packet(101, rest) do
+    with {:ok, message, rest} <- Reader.read_string8(rest) do
+      {:ok, {:gm_message, %{message: message}}, rest}
+    end
+  end
+
+  # Where (ID 107) — name(S8)
+  defp decode_packet(107, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:where, %{name: name}}, rest}
+    end
+  end
+
+  # WarpMeToTarget (ID 109)
+  defp decode_packet(109, rest), do: {:ok, {:warp_me_to_target, %{}}, rest}
+
+  # WarpChar (ID 110) — name(S8) + map(I16)
+  defp decode_packet(110, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest),
+         {:ok, map, rest} <- Reader.read_int16(rest) do
+      {:ok, {:warp_char, %{name: name, map: map}}, rest}
+    end
+  end
+
+  # Silence (ID 111) — name(S8)
+  defp decode_packet(111, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:silence, %{name: name}}, rest}
+    end
+  end
+
+  # GoToChar (ID 114) — name(S8)
+  defp decode_packet(114, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:go_to_char, %{name: name}}, rest}
+    end
+  end
+
+  # Invisible (ID 115)
+  defp decode_packet(115, rest), do: {:ok, {:invisible, %{}}, rest}
+
+  # Jail (ID 120) — name(S8) + reason(S8) + minutes(I8)
+  defp decode_packet(120, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest),
+         {:ok, reason, rest} <- Reader.read_string8(rest),
+         {:ok, minutes, rest} <- Reader.read_int8(rest) do
+      {:ok, {:jail, %{name: name, reason: reason, minutes: minutes}}, rest}
+    end
+  end
+
+  # KillNPC (ID 121)
+  defp decode_packet(121, rest), do: {:ok, {:kill_npc, %{}}, rest}
+
+  # RequestCharInfo (ID 124) — name(S8)
+  defp decode_packet(124, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:request_char_info, %{name: name}}, rest}
+    end
+  end
+
+  # ReviveChar (ID 130) — name(S8)
+  defp decode_packet(130, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:revive_char, %{name: name}}, rest}
+    end
+  end
+
+  # OnlineGM (ID 131)
+  defp decode_packet(131, rest), do: {:ok, {:online_gm, %{}}, rest}
+
+  # Kick (ID 134) — name(S8)
+  defp decode_packet(134, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:kick, %{name: name}}, rest}
+    end
+  end
+
+  # Execute (ID 135) — name(S8)
+  defp decode_packet(135, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:execute, %{name: name}}, rest}
+    end
+  end
+
+  # BanChar (ID 136) — name(S8) + reason(S8)
+  defp decode_packet(136, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest),
+         {:ok, reason, rest} <- Reader.read_string8(rest) do
+      {:ok, {:ban_char, %{name: name, reason: reason}}, rest}
+    end
+  end
+
+  # UnbanChar (ID 137) — name(S8)
+  defp decode_packet(137, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:unban_char, %{name: name}}, rest}
+    end
+  end
+
+  # SummonChar (ID 139) — name(S8)
+  defp decode_packet(139, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:summon_char, %{name: name}}, rest}
+    end
+  end
+
+  # ServerMessage (ID 144) — message(S8)
+  defp decode_packet(144, rest) do
+    with {:ok, message, rest} <- Reader.read_string8(rest) do
+      {:ok, {:server_message, %{message: message}}, rest}
+    end
+  end
+
+  # RainToggle (ID 150)
+  defp decode_packet(150, rest), do: {:ok, {:rain_toggle, %{}}, rest}
+
+  # DonateGold (ID 210) — amount(I32)
+  defp decode_packet(210, rest) do
+    with {:ok, amount, rest} <- Reader.read_int32(rest) do
+      {:ok, {:donate_gold, %{amount: amount}}, rest}
+    end
+  end
+
+  # TransferGold (ID 224) — name(S8) + amount(I32)
+  defp decode_packet(224, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest),
+         {:ok, amount, rest} <- Reader.read_int32(rest) do
+      {:ok, {:transfer_gold, %{name: name, amount: amount}}, rest}
+    end
+  end
+
+  # MoveItem (ID 225) — from_slot(I8) + to_slot(I8)
+  defp decode_packet(225, rest) do
+    with {:ok, from_slot, rest} <- Reader.read_int8(rest),
+         {:ok, to_slot, rest} <- Reader.read_int8(rest) do
+      {:ok, {:move_item, %{from_slot: from_slot, to_slot: to_slot}}, rest}
+    end
+  end
+
   # Unknown packet
   defp decode_packet(id, _rest), do: {:error, {:unknown_packet, id}}
+
+  # ---- Helpers ----
+
+  # Read NUMSKILLS (24) bytes for ModifySkills
+  defp read_skill_points(rest, 0, acc), do: {:ok, Enum.reverse(acc), rest}
+
+  defp read_skill_points(rest, n, acc) do
+    case Reader.read_int8(rest) do
+      {:ok, val, rest} -> read_skill_points(rest, n - 1, [val | acc])
+      :incomplete -> :incomplete
+    end
+  end
 
   # Helper: conditionally read skin_type byte for EquipItem
   defp maybe_read_skin_type(true, rest), do: Reader.read_int8(rest)
