@@ -5,7 +5,7 @@ defmodule GameBackend.Repo.Migrations.CreateGuildRequests do
     create table(:guild_requests) do
       add :guild_id, references(:guilds, on_delete: :delete_all), null: false
       add :char_id, :integer, null: false
-      add :description, :text, default: ""
+      add :description, :string, default: ""
       timestamps()
     end
 

@@ -57,7 +57,7 @@ reference and historical phase plan.
 
 **Remaining backend gaps (gameplay tail):**
 1. ~~Weather map flags not wired~~ — **Verified: already working.** Parser reads rain/snow from .csm, MapServer stores in meta, session sends `rain_toggle`/`snow_toggle` packets on map enter.
-2. **Alchemy/tailoring/crafting data is sparse** — Framework exists; recipes need expansion from canonical tables / .dat-verified item IDs.
+2. ~~Alchemy/tailoring/crafting data is sparse~~ — **Done.** Expanded from 11 to 90+ recipes: 49 blacksmithing (26 weapons + 22 armors + smelting), 28 carpentry (arrows, bows, instruments, staves, shields, boats), 9 alchemy (6 advanced pócimas), 26 tailoring (19 garments + 5 helmets + misc). All product IDs verified against .dat files.
 3. **Automated parity gate missing** — Packet trace replay, AO smoke bot, VB6 formula golden tests, property/fuzz, lifecycle tests, load/soak. Biggest "are we really done?" gap.
 4. **Recent migrations need real DB verification** — Run clean-db + existing-dev-db migration path; verify character/inventory/bank/guild/faction loads after migration.
 5. ~~Minor protocol tail~~ — **Verified: already handled.** `online` returns player count via `OnlineDirectory.online_count/0`. `use_spell_macro` is intentional no-op (server comment explains: client-side macro resolved via `cast_spell`).

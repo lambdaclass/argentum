@@ -144,7 +144,7 @@ defmodule Arena.Inventory do
   defp gender_allowed?(%{gender_restriction: :any}, _), do: true
   defp gender_allowed?(%{gender_restriction: required}, char_gender), do: required == char_gender
 
-  defp add_stackable(inventory, item_id, amount, elemental_tags \\ 0) do
+  defp add_stackable(inventory, item_id, amount, elemental_tags) do
     case find_stack_slot(inventory, item_id, elemental_tags) do
       nil ->
         add_to_empty_slot(inventory, item_id, amount, elemental_tags)
@@ -157,7 +157,7 @@ defmodule Arena.Inventory do
     end
   end
 
-  defp add_to_empty_slot(inventory, item_id, amount, elemental_tags \\ 0) do
+  defp add_to_empty_slot(inventory, item_id, amount, elemental_tags) do
     case find_empty_slot(inventory) do
       nil ->
         {:error, :inventory_full}
@@ -168,7 +168,7 @@ defmodule Arena.Inventory do
     end
   end
 
-  defp find_stack_slot(inventory, item_id, elemental_tags \\ 0) do
+  defp find_stack_slot(inventory, item_id, elemental_tags) do
     Enum.find_index(inventory, fn
       %{item_id: ^item_id, equipped: false} = item ->
         Map.get(item, :elemental_tags, 0) == elemental_tags

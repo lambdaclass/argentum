@@ -194,8 +194,8 @@ defmodule Arena.Map.MapServer do
             tile_exit_map: tile_exit_map,
             triggers: map_data.triggers,
             trigger_map: trigger_map,
-            rain: false,
-            snow: false
+            rain: map_data.rain,
+            snow: map_data.snow
           }
 
           state = %{
