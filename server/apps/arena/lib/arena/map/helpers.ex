@@ -121,7 +121,7 @@ defmodule Arena.Map.Helpers do
 
   defp guild_display_info(char_id) do
     case Arena.GuildServer.get_guild(char_id) do
-      {:ok, guild} -> {guild.id, 1}
+      {:ok, guild} -> {guild.id, guild.level}
       :not_in_guild -> {0, 0}
     end
   rescue

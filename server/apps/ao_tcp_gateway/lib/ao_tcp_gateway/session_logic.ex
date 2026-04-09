@@ -295,6 +295,44 @@ defmodule AoTcpGateway.SessionLogic do
             Arena.GuildServer.guild_chat(state.character_id, guild_message)
             {state, []}
 
+          {:guild_news, text} ->
+            Arena.GuildServer.set_guild_news(state.character_id, text)
+            {state, []}
+
+          :guild_news_read ->
+            case Arena.GuildServer.get_guild(state.character_id) do
+              {:ok, guild} ->
+                news = if guild.news == "", do: "Sin noticias.", else: guild.news
+                msg = AoProtocol.Server.Encoder.encode({:console_msg, %{message: "Noticias del clan: #{news}", font_index: 0}})
+                {state, [{:send_raw, msg}]}
+              :not_in_guild ->
+                {state, []}
+            end
+
+          {:guild_desc, text} ->
+            Arena.GuildServer.set_guild_description(state.character_id, text)
+            {state, []}
+
+          :guild_online ->
+            case Arena.GuildServer.guild_online(state.character_id) do
+              {:ok, names} ->
+                msg = AoProtocol.Server.Encoder.encode({:console_msg, %{message: "Miembros online: #{Enum.join(names, ", ")}", font_index: 0}})
+                {state, [{:send_raw, msg}]}
+              :not_in_guild ->
+                {state, []}
+            end
+
+          :guild_info ->
+            case Arena.GuildServer.guild_info(state.character_id) do
+              {:ok, guild, required} ->
+                req_str = if required == :max, do: "MAX", else: "#{required}"
+                info = "Clan: #{guild.name} | Nivel: #{guild.level} | EXP: #{guild.current_exp}/#{req_str} | Miembros: #{length(guild.members)}"
+                msg = AoProtocol.Server.Encoder.encode({:console_msg, %{message: info, font_index: 0}})
+                {state, [{:send_raw, msg}]}
+              :not_in_guild ->
+                {state, []}
+            end
+
           :not_guild_command ->
             case parse_faction_command(message) do
               {:enlist, faction} ->
@@ -787,6 +825,23 @@ defmodule AoTcpGateway.SessionLogic do
       String.starts_with?(upper, "/CLANCHAT ") ->
         msg = String.trim(String.slice(message, 10..-1//1))
         {:guild_chat, msg}
+
+      String.starts_with?(upper, "/CLANNOTICIAS ") ->
+        text = String.trim(String.slice(message, 14..-1//1))
+        {:guild_news, text}
+
+      upper == "/CLANNOTICIAS" ->
+        :guild_news_read
+
+      String.starts_with?(upper, "/CLANDESC ") ->
+        text = String.trim(String.slice(message, 10..-1//1))
+        {:guild_desc, text}
+
+      upper == "/CLANONLINE" ->
+        :guild_online
+
+      upper == "/CLANINFO" ->
+        :guild_info
 
       true ->
         :not_guild_command

@@ -11,6 +11,7 @@ defmodule Arena.GuildServer do
 
   alias AoSession.OnlineDirectory
   alias GameBackend.Guilds
+  alias Arena.GuildConstants
 
   @table :ao_guilds
   @max_members 50
@@ -109,6 +110,60 @@ defmodule Arena.GuildServer do
     end
   end
 
+  @doc "Award guild XP (async). Triggers level-up if threshold is met."
+  def add_guild_exp(guild_id, amount) when amount > 0 do
+    GenServer.cast(__MODULE__, {:add_exp, guild_id, amount})
+  end
+
+  def add_guild_exp(_guild_id, _amount), do: :ok
+
+  @doc "Set guild news (leader only)."
+  def set_guild_news(char_id, news) do
+    GenServer.call(__MODULE__, {:set_news, char_id, news})
+  end
+
+  @doc "Set guild description (leader only)."
+  def set_guild_description(char_id, description) do
+    GenServer.call(__MODULE__, {:set_description, char_id, description})
+  end
+
+  @doc "Get guild info for display. Pure ETS read."
+  def guild_info(char_id) do
+    case get_guild(char_id) do
+      {:ok, guild} ->
+        required = GuildConstants.required_exp(guild.level)
+        {:ok, guild, required}
+
+      :not_in_guild ->
+        :not_in_guild
+    end
+  end
+
+  @doc "Get list of online guild member names. Pure ETS + OnlineDirectory read."
+  def guild_online(char_id) do
+    case get_guild(char_id) do
+      {:ok, guild} ->
+        names =
+          for mid <- guild.members,
+              {:ok, info} <- [OnlineDirectory.lookup_by_id(mid)] do
+            info.name
+          end
+
+        {:ok, names}
+
+      :not_in_guild ->
+        :not_in_guild
+    end
+  end
+
+  @doc "Look up guild_id for a char_id from ETS. Returns nil if not in a guild."
+  def guild_id_for(char_id) do
+    case :ets.lookup(@table, {:member, char_id}) do
+      [{_, guild_id}] -> guild_id
+      [] -> nil
+    end
+  end
+
   # ---- GenServer ----
 
   @impl true
@@ -148,7 +203,13 @@ defmodule Arena.GuildServer do
               id: guild_id,
               name: name,
               leader: char_id,
-              members: [char_id]
+              members: [char_id],
+              level: 1,
+              current_exp: 0,
+              description: "",
+              news: "",
+              url: "",
+              alignment: 0
             }
 
             :ets.insert(@table, {{:guild, guild_id}, guild})
@@ -301,6 +362,76 @@ defmodule Arena.GuildServer do
   end
 
   @impl true
+  def handle_cast({:add_exp, guild_id, amount}, state) do
+    case :ets.lookup(@table, {:guild, guild_id}) do
+      [{_, guild}] ->
+        max_level = GuildConstants.max_level()
+
+        if guild.level >= max_level do
+          {:noreply, state}
+        else
+          old_level = guild.level
+          new_exp = guild.current_exp + amount
+
+          {new_level, final_exp} =
+            level_up_loop(old_level, new_exp, max_level)
+
+          guild = %{guild | level: new_level, current_exp: final_exp}
+          :ets.insert(@table, {{:guild, guild_id}, guild})
+
+          if new_level > old_level do
+            broadcast_guild(
+              guild.members,
+              "El clan ha subido al nivel #{new_level}!"
+            )
+          end
+
+          # Async DB persist
+          Task.start(fn ->
+            Guilds.update_guild(guild_id, %{level: new_level, current_exp: final_exp})
+          end)
+
+          {:noreply, state}
+        end
+
+      [] ->
+        {:noreply, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:set_news, char_id, news}, _from, state) do
+    case lookup_guild_as_leader(char_id) do
+      {:ok, guild_id, guild} ->
+        news = String.slice(news, 0..1023)
+        guild = %{guild | news: news}
+        :ets.insert(@table, {{:guild, guild_id}, guild})
+        Task.start(fn -> Guilds.update_guild(guild_id, %{news: news}) end)
+        notify(char_id, "Noticias del clan actualizadas.")
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:set_description, char_id, description}, _from, state) do
+    case lookup_guild_as_leader(char_id) do
+      {:ok, guild_id, guild} ->
+        description = String.slice(description, 0..255)
+        guild = %{guild | description: description}
+        :ets.insert(@table, {{:guild, guild_id}, guild})
+        Task.start(fn -> Guilds.update_guild(guild_id, %{description: description}) end)
+        notify(char_id, "Descripcion del clan actualizada.")
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  @impl true
   def handle_info(:cleanup_invites, state) do
     now = System.monotonic_time(:millisecond)
 
@@ -352,6 +483,35 @@ defmodule Arena.GuildServer do
     end
   end
 
+  defp level_up_loop(level, exp, max_level) when level >= max_level, do: {max_level, 0}
+
+  defp level_up_loop(level, exp, max_level) do
+    required = GuildConstants.required_exp(level)
+
+    case required do
+      :max -> {level, exp}
+      req when exp >= req -> level_up_loop(level + 1, exp - req, max_level)
+      _req -> {level, exp}
+    end
+  end
+
+  defp lookup_guild_as_leader(char_id) do
+    case :ets.lookup(@table, {:member, char_id}) do
+      [{_, guild_id}] ->
+        case :ets.lookup(@table, {:guild, guild_id}) do
+          [{_, %{leader: ^char_id} = guild}] -> {:ok, guild_id, guild}
+          [{_, _guild}] ->
+            notify(char_id, "Solo el lider del clan puede hacer eso.")
+            {:error, :not_leader}
+          [] -> {:error, :no_guild}
+        end
+
+      [] ->
+        notify(char_id, "No perteneces a ningun clan.")
+        {:error, :not_in_guild}
+    end
+  end
+
   defp notify(char_id, message) do
     case OnlineDirectory.lookup_by_id(char_id) do
       {:ok, %{session_pid: pid}} ->
@@ -384,7 +544,13 @@ defmodule Arena.GuildServer do
           id: db_guild.id,
           name: db_guild.name,
           leader: db_guild.leader_id,
-          members: member_ids
+          members: member_ids,
+          level: db_guild.level || 1,
+          current_exp: db_guild.current_exp || 0,
+          description: db_guild.description || "",
+          news: db_guild.news || "",
+          url: db_guild.url || "",
+          alignment: db_guild.alignment || 0
         }
 
         :ets.insert(@table, {{:guild, db_guild.id}, guild})

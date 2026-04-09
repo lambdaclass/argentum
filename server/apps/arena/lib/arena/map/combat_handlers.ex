@@ -233,6 +233,14 @@ defmodule Arena.Map.CombatHandlers do
                 xp_gained = Combat.xp_gain(final_damage, give_exp, npc.max_hp, entity.level, npc_level)
                 {entity_xp, state} = award_xp_with_party(state, char_id, entity, xp_gained)
 
+                # Award guild XP on NPC kill
+                if xp_gained > 0 do
+                  case Arena.GuildServer.guild_id_for(char_id) do
+                    nil -> :ok
+                    gid -> Arena.GuildServer.add_guild_exp(gid, max(div(xp_gained, 10), 1))
+                  end
+                end
+
                 # Award gold
                 give_gld = if npc_def, do: npc_def.give_gld, else: 0
                 entity_xp = if give_gld > 0, do: %{entity_xp | gold: entity_xp.gold + give_gld}, else: entity_xp
@@ -374,11 +382,17 @@ defmodule Arena.Map.CombatHandlers do
                   defender
                 end
 
-                # Faction score + kill counters on PvP kill
+                # Faction score + kill counters + guild XP on PvP kill
                 entity = if defender.dead do
                   score = Arena.Map.Social.faction_score_for_kill(entity, defender)
                   entity = if score > 0, do: %{entity | faction_score: entity.faction_score + score}, else: entity
                   entity = update_pvp_kill_counters(entity, defender)
+
+                  case Arena.GuildServer.guild_id_for(char_id) do
+                    nil -> :ok
+                    gid -> Arena.GuildServer.add_guild_exp(gid, 50)
+                  end
+
                   entity
                 else
                   entity
@@ -686,6 +700,14 @@ defmodule Arena.Map.CombatHandlers do
                 xp_gained = Combat.xp_gain(final_damage, give_exp, npc.max_hp, entity.level, npc_level)
                 {entity_xp, state} = award_xp_with_party(state, char_id, entity, xp_gained)
 
+                # Award guild XP on NPC spell kill
+                if xp_gained > 0 do
+                  case Arena.GuildServer.guild_id_for(char_id) do
+                    nil -> :ok
+                    gid -> Arena.GuildServer.add_guild_exp(gid, max(div(xp_gained, 10), 1))
+                  end
+                end
+
                 Helpers.send_to_session(state.sessions, char_id, {:send_raw,
                   Encoder.encode({:update_mana, %{min_mana: entity_xp.mana}})})
 
@@ -764,11 +786,17 @@ defmodule Arena.Map.CombatHandlers do
               defender
             end
 
-            # Faction score + kill counters on PvP spell kill
+            # Faction score + kill counters + guild XP on PvP spell kill
             entity = if defender.dead do
               score = Arena.Map.Social.faction_score_for_kill(entity, defender)
               entity = if score > 0, do: %{entity | faction_score: entity.faction_score + score}, else: entity
               entity = update_pvp_kill_counters(entity, defender)
+
+              case Arena.GuildServer.guild_id_for(char_id) do
+                nil -> :ok
+                gid -> Arena.GuildServer.add_guild_exp(gid, 50)
+              end
+
               entity
             else
               entity

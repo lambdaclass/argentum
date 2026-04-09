@@ -9,15 +9,24 @@ defmodule GameBackend.Guild do
     field :name, :string
     field :leader_id, :integer
     field :description, :string, default: ""
+    field :level, :integer, default: 1
+    field :current_exp, :integer, default: 0
+    field :news, :string, default: ""
+    field :url, :string, default: ""
+    field :alignment, :integer, default: 0
     has_many :members, GameBackend.GuildMember
     timestamps()
   end
 
+  @cast_fields [:name, :leader_id, :description, :level, :current_exp, :news, :url, :alignment]
+
   def changeset(guild, attrs) do
     guild
-    |> cast(attrs, [:name, :leader_id, :description])
+    |> cast(attrs, @cast_fields)
     |> validate_required([:name, :leader_id])
     |> validate_length(:name, min: 3, max: 30)
+    |> validate_inclusion(:level, 1..7)
+    |> validate_inclusion(:alignment, 0..4)
     |> unique_constraint(:name)
   end
 end
@@ -107,6 +116,14 @@ defmodule GameBackend.Guilds do
         guild -> Repo.delete!(guild)
       end
     end)
+  end
+
+  @doc "Update guild fields (level, exp, news, etc.)."
+  def update_guild(guild_id, attrs) do
+    case Repo.get(Guild, guild_id) do
+      nil -> {:error, :not_found}
+      guild -> guild |> Guild.changeset(attrs) |> Repo.update()
+    end
   end
 
   @doc "Find the guild a character belongs to."
