@@ -174,6 +174,29 @@ defmodule GameBackend.Guilds do
     )
     |> Repo.delete_all()
   end
+
+  # ---- Guild Requests (Aspirant System) ----
+
+  @doc "Create a membership request."
+  def create_request(guild_id, char_id, description \\ "") do
+    %GameBackend.GuildRequest{}
+    |> GameBackend.GuildRequest.changeset(%{guild_id: guild_id, char_id: char_id, description: description})
+    |> Repo.insert()
+  end
+
+  @doc "List pending requests for a guild."
+  def list_requests(guild_id) do
+    from(r in GameBackend.GuildRequest, where: r.guild_id == ^guild_id)
+    |> Repo.all()
+  end
+
+  @doc "Delete a request (on accept or reject)."
+  def delete_request(guild_id, char_id) do
+    from(r in GameBackend.GuildRequest,
+      where: r.guild_id == ^guild_id and r.char_id == ^char_id
+    )
+    |> Repo.delete_all()
+  end
 end
 
 defmodule GameBackend.GuildRelation do
@@ -196,5 +219,28 @@ defmodule GameBackend.GuildRelation do
     |> validate_required([:guild_a_id, :guild_b_id, :relation_type])
     |> validate_inclusion(:relation_type, ["war", "peace", "alliance"])
     |> unique_constraint([:guild_a_id, :guild_b_id])
+  end
+end
+
+defmodule GameBackend.GuildRequest do
+  @moduledoc "Ecto schema for guild_requests table (membership petitions)."
+
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  @primary_key {:id, :id, autogenerate: true}
+  schema "guild_requests" do
+    field :guild_id, :integer
+    field :char_id, :integer
+    field :description, :string, default: ""
+    timestamps()
+  end
+
+  def changeset(request, attrs) do
+    request
+    |> cast(attrs, [:guild_id, :char_id, :description])
+    |> validate_required([:guild_id, :char_id])
+    |> validate_length(:description, max: 256)
+    |> unique_constraint([:guild_id, :char_id])
   end
 end

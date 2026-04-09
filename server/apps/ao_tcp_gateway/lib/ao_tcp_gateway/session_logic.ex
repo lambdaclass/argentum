@@ -352,6 +352,22 @@ defmodule AoTcpGateway.SessionLogic do
             Arena.GuildServer.propose_alliance(state.character_id, target_name)
             {state, []}
 
+          {:guild_request, guild_name, desc} ->
+            Arena.GuildServer.request_membership(state.character_id, guild_name, desc)
+            {state, []}
+
+          :guild_list_requests ->
+            Arena.GuildServer.list_requests(state.character_id)
+            {state, []}
+
+          {:guild_accept_request, target_name} ->
+            Arena.GuildServer.accept_request(state.character_id, target_name)
+            {state, []}
+
+          {:guild_reject_request, target_name} ->
+            Arena.GuildServer.reject_request(state.character_id, target_name)
+            {state, []}
+
           :not_guild_command ->
             case parse_faction_command(message) do
               {:enlist, faction} ->
@@ -873,6 +889,25 @@ defmodule AoTcpGateway.SessionLogic do
       String.starts_with?(upper, "/ALIANZA ") ->
         name = String.trim(String.slice(message, 9..-1//1))
         {:guild_alliance, name}
+
+      String.starts_with?(upper, "/SOLICITAR ") ->
+        rest = String.trim(String.slice(message, 11..-1//1))
+        # /SOLICITAR clan_name optional_description
+        case String.split(rest, " ", parts: 2) do
+          [guild_name, desc] -> {:guild_request, guild_name, desc}
+          [guild_name] -> {:guild_request, guild_name, ""}
+        end
+
+      upper == "/SOLICITUDES" ->
+        :guild_list_requests
+
+      String.starts_with?(upper, "/ACEPTARSOLICITUD ") ->
+        name = String.trim(String.slice(message, 18..-1//1))
+        {:guild_accept_request, name}
+
+      String.starts_with?(upper, "/RECHAZARSOLICITUD ") ->
+        name = String.trim(String.slice(message, 19..-1//1))
+        {:guild_reject_request, name}
 
       true ->
         :not_guild_command

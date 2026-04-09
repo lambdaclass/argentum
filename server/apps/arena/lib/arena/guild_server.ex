@@ -212,6 +212,26 @@ defmodule Arena.GuildServer do
     GenServer.call(__MODULE__, {:propose_alliance, char_id, target_guild_name})
   end
 
+  @doc "Request membership in a guild."
+  def request_membership(char_id, guild_name, description \\ "") do
+    GenServer.call(__MODULE__, {:request_membership, char_id, guild_name, description})
+  end
+
+  @doc "List pending requests (leader only)."
+  def list_requests(char_id) do
+    GenServer.call(__MODULE__, {:list_requests, char_id})
+  end
+
+  @doc "Accept a membership request (leader only)."
+  def accept_request(leader_id, target_name) do
+    GenServer.call(__MODULE__, {:accept_request, leader_id, target_name})
+  end
+
+  @doc "Reject a membership request (leader only)."
+  def reject_request(leader_id, target_name) do
+    GenServer.call(__MODULE__, {:reject_request, leader_id, target_name})
+  end
+
   # ---- GenServer ----
 
   @impl true
@@ -567,6 +587,127 @@ defmodule Arena.GuildServer do
   end
 
   @impl true
+  def handle_call({:request_membership, char_id, guild_name, description}, _from, state) do
+    cond do
+      :ets.lookup(@table, {:member, char_id}) != [] ->
+        notify(char_id, "Ya perteneces a un clan.")
+        {:reply, {:error, :already_in_guild}, state}
+
+      true ->
+        case find_guild_by_name(guild_name) do
+          {:ok, guild_id, guild} ->
+            case Guilds.create_request(guild_id, char_id, description) do
+              {:ok, _} ->
+                notify(char_id, "Solicitud enviada al clan '#{guild.name}'.")
+                # Notify leader
+                notify(guild.leader, "Hay una nueva solicitud de ingreso al clan. Usa /SOLICITUDES para verlas.")
+                {:reply, :ok, state}
+
+              {:error, _} ->
+                notify(char_id, "Ya tienes una solicitud pendiente en ese clan.")
+                {:reply, {:error, :already_requested}, state}
+            end
+
+          :not_found ->
+            notify(char_id, "No se encontro el clan '#{guild_name}'.")
+            {:reply, {:error, :not_found}, state}
+        end
+    end
+  end
+
+  @impl true
+  def handle_call({:list_requests, char_id}, _from, state) do
+    case lookup_guild_as_leader(char_id) do
+      {:ok, guild_id, _guild} ->
+        requests = Guilds.list_requests(guild_id)
+
+        if requests == [] do
+          notify(char_id, "No hay solicitudes pendientes.")
+        else
+          for req <- requests do
+            name =
+              case OnlineDirectory.lookup_by_id(req.char_id) do
+                {:ok, info} -> info.name
+                :not_found -> "ID:#{req.char_id}"
+              end
+
+            desc = if req.description != "", do: " - #{req.description}", else: ""
+            notify(char_id, "Solicitud: #{name}#{desc}")
+          end
+        end
+
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:accept_request, leader_id, target_name}, _from, state) do
+    case lookup_guild_as_leader(leader_id) do
+      {:ok, guild_id, guild} ->
+        case resolve_char_id(target_name) do
+          {:ok, target_id} ->
+            Guilds.delete_request(guild_id, target_id)
+
+            cond do
+              :ets.lookup(@table, {:member, target_id}) != [] ->
+                notify(leader_id, "Ese jugador ya pertenece a un clan.")
+                {:reply, {:error, :already_in_guild}, state}
+
+              length(guild.members) >= @max_members ->
+                notify(leader_id, "El clan esta lleno.")
+                {:reply, {:error, :full}, state}
+
+              true ->
+                case Guilds.add_member(guild_id, target_id) do
+                  {:ok, _} ->
+                    new_members = guild.members ++ [target_id]
+                    :ets.insert(@table, {{:guild, guild_id}, %{guild | members: new_members}})
+                    :ets.insert(@table, {{:member, target_id}, guild_id})
+                    notify(target_id, "Tu solicitud al clan '#{guild.name}' fue aceptada!")
+                    broadcast_guild(new_members, "Un jugador se ha unido al clan. Miembros: #{length(new_members)}")
+                    {:reply, :ok, state}
+
+                  {:error, _} ->
+                    notify(leader_id, "Error al aceptar la solicitud.")
+                    {:reply, {:error, :db_error}, state}
+                end
+            end
+
+          :not_found ->
+            notify(leader_id, "No se encontro al jugador '#{target_name}'.")
+            {:reply, {:error, :not_found}, state}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:reject_request, leader_id, target_name}, _from, state) do
+    case lookup_guild_as_leader(leader_id) do
+      {:ok, guild_id, _guild} ->
+        case resolve_char_id(target_name) do
+          {:ok, target_id} ->
+            Guilds.delete_request(guild_id, target_id)
+            notify(leader_id, "Solicitud rechazada.")
+            notify(target_id, "Tu solicitud de clan fue rechazada.")
+            {:reply, :ok, state}
+
+          :not_found ->
+            notify(leader_id, "No se encontro al jugador '#{target_name}'.")
+            {:reply, {:error, :not_found}, state}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  @impl true
   def handle_info(:cleanup_invites, state) do
     now = System.monotonic_time(:millisecond)
 
@@ -660,6 +801,13 @@ defmodule Arena.GuildServer do
     case result do
       nil -> :not_found
       guild -> {:ok, guild.id, guild}
+    end
+  end
+
+  defp resolve_char_id(name) do
+    case OnlineDirectory.lookup_by_name(name) do
+      {:ok, char_id, _info} -> {:ok, char_id}
+      :not_found -> :not_found
     end
   end
 
