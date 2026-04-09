@@ -55,12 +55,17 @@ reference and historical phase plan.
 - Benchmark harness, benchmark maps, metrics, CI/release workflows, web test client
 - Client: weather rendering (rain particles), faction HUD display, party panel, clan panel
 
-**Remaining gaps across all phases:**
+**Remaining backend gaps (gameplay tail):**
+1. **Weather map flags not wired** — `csm_parser.ex:85` parses rain/snow, but `map_server.ex:197` stores both as false. Weather-on-map-enter is effectively disabled.
+2. **Alchemy/tailoring/crafting data is sparse** — Framework exists; recipes need expansion from canonical tables / .dat-verified item IDs.
+3. **Automated parity gate missing** — Packet trace replay, AO smoke bot, VB6 formula golden tests, property/fuzz, lifecycle tests, load/soak. Biggest "are we really done?" gap.
+4. **Recent migrations need real DB verification** — Run clean-db + existing-dev-db migration path; verify character/inventory/bank/guild/faction loads after migration.
+5. **Minor protocol tail** — `online` and `use_spell_macro` are decoded but have no real gameplay handlers. `use_spell_macro` can stay legacy/no-op if browser resolves macros client-side.
+6. **Ops tail** — Dashboards, alerts, deploy pipeline, backup-restore, runbooks. Not gameplay, but backend production work (Phase 15 + 17).
+7. **Perf tail** — NPC aggro still scans all players; pet targeting scans all NPCs; no outbound backpressure; no load/soak gate. NPC broadcast AoI is fixed (Phase 17).
+
+**Remaining non-backend gaps:**
 - Weather: snow rendering on client (server packet/state exists; rain rendering done)
-- Alchemy/tailoring recipe lists: framework exists, recipes sparse
-- Phase 15: monitoring dashboards, deployment pipeline, metric collection
-- Automated parity gate: packet trace replay, smoke bot, formula fixtures, property/fuzz, browser E2E, load/soak
-- Ongoing VB6 behavior audit for edge cases; new drift should become a failing parity test first
 - Post-compatibility web account flow: username/password or Google sign-in, account session, character list/create/select, token issue for `login_existing_char`
 
 **VB6 server:** ~93,000 lines across 50+ modules
