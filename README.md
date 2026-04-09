@@ -1,6 +1,6 @@
 # Argentum Online
 
-Rewrite of the Argentum Online VB6 MMORPG in Elixir (server) and TypeScript (web client). The original server is ~93,000 lines of VB6 across 50+ modules; this implementation targets ~12,000 lines of Elixir.
+Rewrite of the Argentum Online VB6 MMORPG in Elixir (server) and TypeScript (web client). The original server is ~93,000 lines of VB6 across 50+ modules; the current Elixir backend app source is ~16,000 lines.
 
 ## Design Improvements over the VB6 Original
 
@@ -13,7 +13,7 @@ Rewrite of the Argentum Online VB6 MMORPG in Elixir (server) and TypeScript (web
 - **PostgreSQL replaces flat files.** Character state, inventory, and world data are stored in Postgres with Ecto. Periodic autosave while online, authoritative DB load on login.
 - **Direct pid sends on the hot path.** MapServer holds `%{char_id => pid}` and sends packets to session pids directly — no pubsub lookup, no routing layer. PubSub is reserved for cross-map features (guild chat, global announcements).
 - **Rust NIF for tile collision only.** The collision grid is a dense bitmap checked via a Rust NIF for speed. All gameplay logic stays in pure Elixir. The Rust boundary is deliberately narrow.
-- **93k lines of VB6 → ~12k lines of Elixir.** Pattern matching, immutable state, and OTP supervision replace thousands of lines of error handling, manual memory management, and global mutable state.
+- **93k lines of VB6 → ~16k lines of Elixir.** Pattern matching, immutable state, and OTP supervision replace thousands of lines of error handling, manual memory management, and global mutable state.
 
 ### Client
 
@@ -41,6 +41,7 @@ argentum/
 │   ├── indices/         # Generated sprite index JSONs
 │   └── graficos_char/   # Generated character sprite PNGs
 ├── old/                 # Original VB6 source + old clients (gitignored)
+├── ROADMAP.md           # Linear product / parity / testing plan
 ├── SERVER_ROADMAP.md
 └── CLIENT_ROADMAP.md
 ```
@@ -60,26 +61,14 @@ argentum/
 - **Periodic timers** handle background-only work: NPC AI (100ms), respawns, buff decay, regen, hunger/thirst drain, autosave.
 - **DB is authoritative only when the player is offline.** Periodic snapshots while online, final save on logout.
 
-See [SERVER_ROADMAP.md](SERVER_ROADMAP.md) and [CLIENT_ROADMAP.md](CLIENT_ROADMAP.md) for the full implementation plans.
+Start with [ROADMAP.md](ROADMAP.md) for the linear plan. See [SERVER_ROADMAP.md](SERVER_ROADMAP.md) and [CLIENT_ROADMAP.md](CLIENT_ROADMAP.md) for detailed backend/client notes.
 
 ## Current State
 
-**Phase status snapshot:**
-- `Phase 1 — Runtime & Performance Foundations`: `Done`
-- `Phase 2 — Character System, Persistence & Map Transitions`: `Mostly done`
-- `Phase 3 — Durable State & Persistence Shape`: `Partially done`
-- `Phase 4 — Inventory`: `Mostly done`
-- `Phase 5 — Combat`: `Missing`
-- `Phase 6 — Spells`: `Missing`
-- `Phase 7 — NPC AI`: `Missing`
-- `Phase 8 — Commerce & Banking`: `Missing`
-- `Phase 9 — Crafting & Gathering`: `Missing`
-- `Phase 10 — Social Systems`: `Partially done`
-- `Phase 11 — Progression`: `Partially done`
-- `Phase 12 — World Rules & Polish`: `Missing`
+**Phase status snapshot:** backend gameplay is close to VB6 compatibility; web gameplay client is playable; modern web account/login + character lobby is still missing. The next major milestone is the automated parity gate described in [ROADMAP.md](ROADMAP.md).
 
 **Implemented so far:**
-- TCP + WebSocket networking with AO20 binary protocol
+- TCP + WebSocket networking with full AO20 binary protocol coverage
 - Map loading from .csm files with Rust NIF for tile collision
 - Multiplayer movement, chat, position sync, heading changes
 - AoI visibility lifecycle with `:global`, `:aoi_scan`, and `:aoi_grid` modes
@@ -87,17 +76,20 @@ See [SERVER_ROADMAP.md](SERVER_ROADMAP.md) and [CLIENT_ROADMAP.md](CLIENT_ROADMA
 - Character creation (packet 74) with VB6-accurate stat computation
 - Database persistence (characters, snapshots, autosave on logout)
 - Map transitions via exit tiles
-- Inventory groundwork and most live inventory flows: pickup, drop, equip toggle, item use, ground items
-- Session registry, online directory, flood protection
+- Inventory, equipment, bank, NPC commerce, and user trade
+- Combat, spells, buffs, NPC AI, pets/taming, death/ghost, resurrection, XP/level-up, skill training
+- Crafting/gathering framework: mining, fishing, woodcutting, blacksmithing, carpentry, alchemy, tailoring
+- Parties, guilds (DB persistence, levels, alignment, wars/peace/alliances, aspirants), factions, whisper/yell/guild/faction chat
+- GM/admin commands in chat, chat moderation, mute/ban/report, audit logging
+- Session registry, online directory, flood protection, speed-hack detection
 - Static game data loading from VB6 .dat files (Balance.dat, Ciudades.Dat)
-- Web client with Pixi.js (4 sprite layers, NPCs, objects, MIDI music)
+- Web client with map, sprite, NPC, object, inventory, HUD, chat, party, clan, trade, bank, spell, weather/rain, and MIDI/music support
 
 **Main remaining gaps:**
-- Finish Phase 2 cleanup: auth/account model and remaining login/transfer test stabilization
-- Finish Phase 3 cleanup: normalize the remaining durable character sub-state (`skills`, `spells`, `bank_items`) and keep transient state out of the DB model
-- Finish Phase 4 cleanup: equip restrictions, effective stat recomputation, and remaining inventory edge cases
-- Build the missing gameplay backbone: combat, spells, NPC AI
-- After that: commerce, crafting, social systems, progression, and world-rule polish
+- Build and run the automated parity gate: VB6 packet replay, formula fixtures, property/fuzz, AO smoke bot, browser E2E, load/soak.
+- Close the backend compatibility tail: real per-instance item `elemental_tags`, faction-exclusive item flags/strip, recipe data expansion, operations/deploy.
+- Close the web client tail: account/login/Google + character lobby, snow rendering, authoritative party/clan state, trade metadata display, UX/error polish.
+- Keep the original VB6 client as the release smoke oracle until compatibility is formally closed.
 
 ## Scaling
 

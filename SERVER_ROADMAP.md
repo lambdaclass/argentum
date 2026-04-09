@@ -1,5 +1,8 @@
 # Argentum Online: VB6 → Elixir Migration Roadmap
 
+**Linear plan:** start with `ROADMAP.md`. This file is the detailed backend
+reference and historical phase plan.
+
 ## Current State
 
 **Status legend:**
@@ -22,14 +25,14 @@
 - `Phase 9 — Crafting & Gathering`: `Mostly done`
 - `Phase 10 — Social Systems`: `Mostly done`
 - `Phase 11 — Progression`: `Mostly done`
-- `Phase 12 — World Rules & Polish`: `Mostly done`
+- `Phase 12 — World Rules & Polish`: `Done`
 - `Phase 13 — Auth & Account System`: `Done`
 - `Phase 14 — Anti-Cheat & Server Hardening`: `Done`
 - `Phase 15 — Operations & Infrastructure`: `Mostly done`
 - `Phase 16 — Chat Moderation`: `Done`
 - `Post-Compatibility — Web Account Auth & Character Lobby`: `Missing`
 
-**Implemented so far (~14k lines of Elixir source + 295 lines Rust):**
+**Implemented so far (~16k lines of Elixir source + 295 lines Rust):**
 - TCP + WebSocket networking with full AO20 protocol support (all 37 client→server, 52 server→client packet IDs)
 - Authoritative `MapServer` with movement, chat, heading, map transitions, autosave, and direct session delivery
 - AoI visibility lifecycle, `:global` / `:aoi_scan` / `:aoi_grid`, spatial grid, pre-encoded hot-path broadcasts
@@ -52,16 +55,29 @@
 - Client: weather rendering (rain particles), faction HUD display, party panel, clan panel
 
 **Remaining gaps across all phases:**
-- Guild advanced features: wars, alliances, leader election
-- Weather: snow rendering on client (rain done)
+- Item instance metadata: real per-item `elemental_tags` are not modeled end-to-end yet
+- Faction-exclusive item flags: Real/Caos item metadata is not parsed yet, so faction gear stripping on `/RENUNCIAR` is currently a no-op placeholder
+- Weather: snow rendering on client (server packet/state exists; rain rendering done)
 - Alchemy/tailoring recipe lists: framework exists, recipes sparse
-- Trainer skill-group restrictions (some trainers only teach specific skills)
 - Phase 15: monitoring dashboards, deployment pipeline, metric collection
-- Ongoing VB6 behavior audit for edge cases
+- Automated parity gate: packet trace replay, smoke bot, formula fixtures, property/fuzz, browser E2E, load/soak
+- Ongoing VB6 behavior audit for edge cases; new drift should become a failing parity test first
 - Post-compatibility web account flow: username/password or Google sign-in, account session, character list/create/select, token issue for `login_existing_char`
 
 **VB6 server:** ~93,000 lines across 50+ modules
-**Elixir server now:** ~14,000 lines source (+ ~6,300 lines tests)
+**Elixir server now:** ~16,000 lines source (+ tests)
+
+---
+
+## Linear Backend Plan
+
+For the full product order, use `ROADMAP.md`. Backend sequencing is:
+
+1. Stabilize the current branch: track all migrations, run migrations, run compile/tests from a clean checkout.
+2. Build the automated parity gate: VB6 packet replay, formula golden fixtures, property/fuzz tests, lifecycle tests, AO smoke bot, browser E2E, load/soak.
+3. Close backend compatibility tail: real per-instance `elemental_tags`, faction-exclusive item metadata, recipe data expansion, migration/runtime verification.
+4. Close operations tail: metrics, dashboards, alerts, release/deploy pipeline, backup/restore and shutdown runbooks.
+5. Build post-compat account API only after the compatibility gate is green: username/password or Google account login, character list/create/select, character token issue, unchanged AO socket login.
 
 ---
 
@@ -914,8 +930,7 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 - Request skills / send_skills packet flow in `social.ex`
 
 **Remaining gaps:**
-- Guild wars, alliances, leader election — VB6 advanced guild features
-- Guild tag in character display packets
+- Guild levels/XP, metadata, alignment, wars, peace, alliances, aspirant/request flow, DB persistence, and guild tag display
 
 **Goal:** Players can whisper, form parties, create guilds, enlist in factions.
 
@@ -926,8 +941,12 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 - ~~Guilds DB persistence~~ — **Done.** Ecto schema `guilds` + `guild_members` tables, load on startup, write-through on mutation
 - ~~`party_safe_toggle` handler~~ — **Done.** Toggle friendly-fire within party, combat_handlers checks `party_safe?/2`
 - ~~Factions~~ — **Done.** Enlist/leave, faction chat, map restrictions, PvP block
-- Guild wars, alliances, peace offers, leader election
-- Guild tag in character display packets
+- ~~Guild tag in character display packets~~ — **Done.** `clan_index` and `clan_nivel` are populated from GuildServer.
+- ~~Guild levels / XP / metadata~~ — **Done.**
+- ~~Guild alignment~~ — **Done.** VB6 `e_ALINEACION_GUILD` parity.
+- ~~Guild wars / peace / alliances~~ — **Done.**
+- ~~Guild aspirant / request system~~ — **Done.**
+- Optional product work: leader elections / democratic succession, if required by the target shard.
 - Factions: add `faction` field to PlayerEntity, Royal Army / Chaos Legion enlist flow, faction-gated areas, faction chat
 
 **VB6 reference:** `Modulo_UsUaRiOs.bas`, `modGuilds.bas`
@@ -1299,6 +1318,10 @@ A phase is not complete just because the code exists. It is complete when the be
 
 **No mocks.** All tests use real processes with real state. The only external dependency is PostgreSQL (Ecto sandbox).
 
+For the current linear test gate, start with `ROADMAP.md` and the detailed
+automation design in `research/parity-automation-plan.md`. The sections below
+are the backend test categories; do not read them as optional future work.
+
 ### Unit tests — pure functions
 
 - `Arena.Combat.Formulas` — hit chance, damage, defense, XP gain
@@ -1357,7 +1380,8 @@ test/
 
 ## Differential Fuzzing Strategy
 
-Run alongside Phases 3–7 to verify formula correctness.
+Run continuously as part of the parity gate to verify formula and behavior
+correctness.
 
 ### Oracle: golden values from VB6, not a Python reimplementation
 
