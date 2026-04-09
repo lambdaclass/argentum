@@ -63,14 +63,17 @@ reference and historical phase plan.
 5. **NPC gold reward semantics** — active combat code drops NPC `GiveGLD` as a gold ground object at the NPC death tile.
 6. **Guild backend depth** — persistence, tags, levels/XP, metadata, alignment, requests/aspirants, wars, peace, alliances, successor promotion, and old UI response encoders are implemented.
 
+**Recently closed:**
+7. **Death recovery / home travel** — `/HOGAR` command implemented: dead players resurrect and teleport to home city.
+8. **Guild UI route hardening** — all 27 guild packets decoded/routed. Elections reply "disabled" (VB6 parity). Accept/reject peace/alliance, website, member info wired.
+9. **VB6 parity test suite** — `vb6_parity_test.exs` covers XP formulas, exp_count pool, death cleanup, unequip, gold drops, combat bounds, city spawns.
+
 **Remaining backend gaps (gameplay tail):**
-1. **Death recovery / home travel** — implement `/HOGAR` / home-city recovery, or explicitly replace it with a documented modern flow.
-2. **Old guild UI route hardening** — gameplay, many UI responses, and payload consumption for known old-client guild packets exist. Finish routing behavior for the old guild window, especially elections/votes/relation-proposal lists, and add packet replay tests.
-3. **Elemental/rune content support** — per-instance tags are persisted/protocol-visible. Current raw data scan found no active `IsElementalTagsOnly`, nonzero static `ElementalTags`, or elemental matrix values; defer unless content enables it. If enabled, parse static item/NPC tags, apply runes, enforce elemental-only spells, and apply `ElementalMatrixForNpcs`.
-4. **Automated parity gate missing** — Packet trace replay, AO smoke bot, VB6 formula golden tests, property/fuzz, lifecycle tests, load/soak. Biggest "are we really done?" gap.
-5. **Recent migrations need real DB verification** — Run clean-db + existing-dev-db migration path; verify character/inventory/bank/guild/faction loads after migration.
-6. **Ops tail** — Dashboards, alerts, deploy pipeline, backup-restore, runbooks. Not gameplay, but backend production work (Phase 15 + 17).
-7. **Perf tail** — NPC aggro still scans all players; pet targeting scans all NPCs; no outbound backpressure; no load/soak gate. NPC broadcast AoI is fixed (Phase 17).
+1. **Elemental/rune content support** — per-instance tags are persisted/protocol-visible. Current raw data scan found no active elemental values; defer unless content enables it.
+2. **Automated parity gate expansion** — Initial parity test suite exists. Still needed: packet trace replay, AO smoke bot, property/fuzz, lifecycle tests, load/soak.
+3. **Recent migrations need real DB verification** — Run clean-db + existing-dev-db migration path; verify character/inventory/bank/guild/faction loads after migration.
+4. **Ops tail** — Dashboards, alerts, deploy pipeline, backup-restore, runbooks. Not gameplay, but backend production work (Phase 15 + 17).
+5. **Perf tail** — NPC aggro still scans all players; pet targeting scans all NPCs; no outbound backpressure; no load/soak gate. NPC broadcast AoI is fixed (Phase 17).
 
 **Remaining non-backend gaps:**
 - Weather: snow rendering on client (server packet/state exists; rain rendering done)

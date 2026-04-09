@@ -105,22 +105,21 @@ Done in the recent backend parity pass; keep covered by tests:
   alignment, requests/aspirants, wars, peace, alliances, successor promotion,
   and old guild UI response encoders are implemented.
 
+- **Death recovery / home travel:** `/HOGAR` command implemented — dead players
+  are resurrected and teleported to their home city spawn point.
+- **Guild UI route hardening:** all 27 client→server guild packets are decoded
+  and routed. Elections/vote reply with VB6-parity "disabled" message.
+  Accept/reject peace/alliance, website, member info are now wired to backend.
+- **VB6 parity test suite:** `vb6_parity_test.exs` covers XP formulas,
+  exp_count pool, death state cleanup, unequip-on-death, gold floor drops,
+  combat formula bounds, and city spawn lookups.
+
 Still open before calling backend compatibility done:
 
-- **Death recovery / home travel:** implement the `/HOGAR` / home-city recovery
-  path and/or document the replacement flow. Spell/NPC resurrection alone is not
-  enough for the classic "dead player returns home" loop.
-- **Old guild UI route hardening:** gameplay, many UI responses, and payload
-  consumption for known old-client guild packets exist. Finish routing behavior
-  for the old guild window, especially elections/votes/relation-proposal lists,
-  and add packet replay tests so payload regressions cannot desync the TCP
-  stream again.
 - **Elemental/rune content:** per-instance `elemental_tags` are persisted,
   banked, traded, and sent. Current raw data appears dormant for elemental-only
   spells / NPC tags / damage matrix; keep this as future content support unless
-  new data enables it. If enabled, parse static item/NPC tags, enforce
-  elemental-only spell targeting, support elemental rune application, and apply
-  `ElementalMatrixForNpcs`.
+  new data enables it.
 - **Home/rune/mount audit:** home city is stored and boats/navigation exist.
   Audit classic runes/home travel and mounts before declaring world-item parity.
 - Run and verify all recent migrations in a real dev database.

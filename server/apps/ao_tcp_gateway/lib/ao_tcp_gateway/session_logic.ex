@@ -389,8 +389,12 @@ defmodule AoTcpGateway.SessionLogic do
                     {state, [{:console_msg, %{message: "Denuncia registrada.", font_index: 0}}]}
 
                   :not_report_command ->
-                    Arena.Map.MapServer.chat(state.map_id, state.character_id, message)
-                    {state, []}
+                    if String.upcase(String.trim(message)) == "/HOGAR" do
+                      handle_hogar(state)
+                    else
+                      Arena.Map.MapServer.chat(state.map_id, state.character_id, message)
+                      {state, []}
+                    end
                 end
             end
         end
@@ -752,24 +756,128 @@ defmodule AoTcpGateway.SessionLogic do
     end
   end
 
-  # Catch-all for unimplemented guild binary packets
-  def handle_command(state, {:guild_accept_peace, _}) when state.character_id != nil, do: {state, []}
-  def handle_command(state, {:guild_reject_alliance, _}) when state.character_id != nil, do: {state, []}
-  def handle_command(state, {:guild_reject_peace, _}) when state.character_id != nil, do: {state, []}
-  def handle_command(state, {:guild_accept_alliance, _}) when state.character_id != nil, do: {state, []}
-  def handle_command(state, {:guild_alliance_details, _}) when state.character_id != nil, do: {state, []}
-  def handle_command(state, {:guild_peace_details, _}) when state.character_id != nil, do: {state, []}
-  def handle_command(state, {:guild_request_joiner_info, _}) when state.character_id != nil, do: {state, []}
-  def handle_command(state, {:guild_alliance_prop_list, _}) when state.character_id != nil, do: {state, []}
-  def handle_command(state, {:guild_peace_prop_list, _}) when state.character_id != nil, do: {state, []}
-  def handle_command(state, {:guild_new_website, _}) when state.character_id != nil, do: {state, []}
-  def handle_command(state, {:guild_member_info, _}) when state.character_id != nil, do: {state, []}
-  def handle_command(state, {:guild_open_elections, _}) when state.character_id != nil, do: {state, []}
-  def handle_command(state, {:guild_vote, _}) when state.character_id != nil, do: {state, []}
+  # ---- Guild relation accept/reject (binary packet handlers) ----
+
+  # Accept peace proposal — our GuildServer applies peace immediately on propose,
+  # so accept is a confirmation acknowledgement. Apply peace if still at war.
+  def handle_command(state, {:guild_accept_peace, %{guild: guild_name}}) when state.character_id != nil do
+    Arena.GuildServer.propose_peace(state.character_id, guild_name)
+    {state, []}
+  end
+
+  # Reject peace — notify the proposer's guild
+  def handle_command(state, {:guild_reject_peace, %{guild: guild_name}}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: "Propuesta de paz con '#{guild_name}' rechazada.", font_index: 0}}]}
+  end
+
+  # Accept alliance proposal
+  def handle_command(state, {:guild_accept_alliance, %{guild: guild_name}}) when state.character_id != nil do
+    Arena.GuildServer.propose_alliance(state.character_id, guild_name)
+    {state, []}
+  end
+
+  # Reject alliance
+  def handle_command(state, {:guild_reject_alliance, %{guild: guild_name}}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: "Propuesta de alianza con '#{guild_name}' rechazada.", font_index: 0}}]}
+  end
+
+  # Alliance/peace details — show guild details for the named guild
+  def handle_command(state, {:guild_alliance_details, %{guild: guild_name}}) when state.character_id != nil do
+    handle_command(state, {:guild_request_details, %{guild: guild_name}})
+  end
+
+  def handle_command(state, {:guild_peace_details, %{guild: guild_name}}) when state.character_id != nil do
+    handle_command(state, {:guild_request_details, %{guild: guild_name}})
+  end
+
+  # Joiner info — show character info for a membership applicant
+  def handle_command(state, {:guild_request_joiner_info, %{username: name}}) when state.character_id != nil do
+    handle_command(state, {:guild_member_info, %{username: name}})
+  end
+
+  # Alliance/peace proposal lists — list guilds with active relations
+  def handle_command(state, {:guild_alliance_prop_list, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: "No hay propuestas de alianza pendientes.", font_index: 0}}]}
+  end
+
+  def handle_command(state, {:guild_peace_prop_list, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: "No hay propuestas de paz pendientes.", font_index: 0}}]}
+  end
+
+  # Update guild website URL
+  def handle_command(state, {:guild_new_website, %{website: url}}) when state.character_id != nil do
+    case Arena.GuildServer.get_guild(state.character_id) do
+      {:ok, guild} ->
+        if guild.leader == state.character_id do
+          Arena.GuildServer.update_website(state.character_id, url)
+          {state, [{:console_msg, %{message: "URL del clan actualizada.", font_index: 0}}]}
+        else
+          {state, [{:console_msg, %{message: "Solo el lider puede cambiar la URL.", font_index: 0}}]}
+        end
+      :not_in_guild ->
+        {state, []}
+    end
+  end
+
+  # Member info — look up a guild member's details
+  def handle_command(state, {:guild_member_info, %{username: name}}) when state.character_id != nil do
+    case AoSession.OnlineDirectory.lookup_by_name(name) do
+      {:ok, _target_id, info} ->
+        msg = "#{name} - Mapa: #{info.map_id}"
+        {state, [{:console_msg, %{message: msg, font_index: 0}}]}
+      :not_found ->
+        {state, [{:console_msg, %{message: "Jugador '#{name}' no encontrado o desconectado.", font_index: 0}}]}
+    end
+  end
+
+  # VB6: elections are disabled on the server — exact parity response
+  def handle_command(state, {:guild_open_elections, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: "Elecciones de clan desactivadas por el momento.", font_index: 0}}]}
+  end
+
+  def handle_command(state, {:guild_vote, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: "Elecciones de clan desactivadas por el momento.", font_index: 0}}]}
+  end
 
   def handle_command(state, {command_type, _}) do
     Logger.debug("Unhandled command: #{command_type}")
     {state, []}
+  end
+
+  # ---- /HOGAR — dead player home recovery (VB6 parity) ----
+
+  @home_city_ids %{
+    ullathorpe: 1, arghal: 2, forgat: 3, nix: 4,
+    lindos: 5, banderbill: 6, arkhein: 7, eldoria: 8, penthar: 9
+  }
+
+  defp handle_hogar(state) do
+    case Arena.Map.MapServer.snapshot_entity(state.map_id, state.character_id) do
+      {:ok, entity} ->
+        if entity.dead do
+          city_id = Map.get(@home_city_ids, entity.home_city, 1)
+          spawn = Arena.Data.GameData.city_spawn(city_id)
+
+          # Resurrect before transferring — transfer passes this entity to MapServer.enter
+          # on the destination map, so the player arrives alive.
+          resurrected = %{entity |
+            dead: false,
+            hp: entity.max_hp,
+            mana: 0,
+            buffs: [],
+            paralyzed: false,
+            poisoned: false,
+            invisible: false
+          }
+
+          transfer(state, spawn.map, spawn.x, spawn.y, resurrected)
+        else
+          {state, [{:console_msg, %{message: "No estas muerto.", font_index: 0}}]}
+        end
+
+      _ ->
+        {state, []}
+    end
   end
 
   # ---- Cleanup & autosave ----

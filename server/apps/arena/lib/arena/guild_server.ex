@@ -128,6 +128,11 @@ defmodule Arena.GuildServer do
     GenServer.call(__MODULE__, {:set_description, char_id, description})
   end
 
+  @doc "Set guild website URL (leader only)."
+  def update_website(char_id, url) do
+    GenServer.call(__MODULE__, {:set_website, char_id, url})
+  end
+
   @doc "Get guild info for display. Pure ETS read."
   def guild_info(char_id) do
     case get_guild(char_id) do
@@ -502,6 +507,21 @@ defmodule Arena.GuildServer do
         :ets.insert(@table, {{:guild, guild_id}, guild})
         Task.start(fn -> Guilds.update_guild(guild_id, %{description: description}) end)
         notify(char_id, "Descripcion del clan actualizada.")
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:set_website, char_id, url}, _from, state) do
+    case lookup_guild_as_leader(char_id) do
+      {:ok, guild_id, guild} ->
+        url = String.slice(url, 0..255)
+        guild = %{guild | url: url}
+        :ets.insert(@table, {{:guild, guild_id}, guild})
+        Task.start(fn -> Guilds.update_guild(guild_id, %{url: url}) end)
         {:reply, :ok, state}
 
       {:error, reason} ->
