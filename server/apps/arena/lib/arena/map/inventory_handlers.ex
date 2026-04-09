@@ -23,7 +23,7 @@ defmodule Arena.Map.InventoryHandlers do
           {:reply, {:error, :no_item}, state}
 
         ground_item ->
-          case Inventory.add_item(entity.inventory, ground_item.item_id, ground_item.amount) do
+          case Inventory.add_item(entity.inventory, ground_item.item_id, ground_item.amount, Map.get(ground_item, :elemental_tags, 0)) do
             {:gold, amount} ->
               entity = %{entity | gold: entity.gold + amount}
               players = Map.put(state.players, char_id, entity)
@@ -126,10 +126,11 @@ defmodule Arena.Map.InventoryHandlers do
                   else
                     # Stack with existing ground item or create new
                     new_amount = drop_amount + (if existing, do: existing.amount, else: 0)
-                    ground_items = Map.put(state.ground_items, pos, %{item_id: item.item_id, amount: new_amount})
+                    item_tags = Map.get(item, :elemental_tags, 0)
+                    ground_items = Map.put(state.ground_items, pos, %{item_id: item.item_id, amount: new_amount, elemental_tags: item_tags})
                     state = %{state | players: players, ground_items: ground_items}
                     Helpers.send_inventory_slot(state.sessions, char_id, new_inventory, slot)
-                    Helpers.broadcast_object_create(state, entity.x, entity.y, item.item_id, new_amount)
+                    Helpers.broadcast_object_create(state, entity.x, entity.y, item.item_id, new_amount, item_tags)
                     if visual_changed, do: Helpers.broadcast_character_change(state, entity)
                     {:reply, :ok, state}
                   end
@@ -331,7 +332,7 @@ defmodule Arena.Map.InventoryHandlers do
   def build_ground_items(objects) do
     objects
     |> Enum.reduce(%{}, fn obj, acc ->
-      Map.put(acc, {obj.x, obj.y}, %{item_id: obj.obj_index, amount: obj.amount})
+      Map.put(acc, {obj.x, obj.y}, %{item_id: obj.obj_index, amount: obj.amount, elemental_tags: 0})
     end)
   end
 

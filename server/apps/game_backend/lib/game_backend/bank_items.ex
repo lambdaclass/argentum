@@ -18,13 +18,14 @@ defmodule GameBackend.BankItems do
     field :slot, :integer
     field :item_id, :integer
     field :amount, :integer, default: 1
+    field :elemental_tags, :integer, default: 0
 
     timestamps()
   end
 
   def changeset(bank_item, attrs) do
     bank_item
-    |> cast(attrs, [:character_id, :slot, :item_id, :amount])
+    |> cast(attrs, [:character_id, :slot, :item_id, :amount, :elemental_tags])
     |> validate_required([:character_id, :slot, :item_id])
     |> unique_constraint([:character_id, :slot])
   end
@@ -38,18 +39,18 @@ defmodule GameBackend.BankItems do
   end
 
   @doc "Upsert a bank item: add to existing slot or insert new."
-  def upsert(character_id, slot, item_id, amount) do
+  def upsert(character_id, slot, item_id, amount, elemental_tags \\ 0) do
     existing = __MODULE__
       |> where(character_id: ^character_id, slot: ^slot)
       |> Repo.one()
 
     if existing do
       existing
-      |> change(%{amount: existing.amount + amount, item_id: item_id})
+      |> change(%{amount: existing.amount + amount, item_id: item_id, elemental_tags: elemental_tags})
       |> Repo.update()
     else
       %__MODULE__{}
-      |> changeset(%{character_id: character_id, slot: slot, item_id: item_id, amount: amount})
+      |> changeset(%{character_id: character_id, slot: slot, item_id: item_id, amount: amount, elemental_tags: elemental_tags})
       |> Repo.insert()
     end
   end

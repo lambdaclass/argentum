@@ -364,7 +364,9 @@ defmodule GameBackend.Characters do
 
     # Upsert occupied slots
     Enum.each(occupied, fn idx ->
-      %{item_id: item_id, amount: amount, equipped: equipped} = Enum.at(inventory, idx)
+      item = Enum.at(inventory, idx)
+      %{item_id: item_id, amount: amount, equipped: equipped} = item
+      elemental_tags = Map.get(item, :elemental_tags, 0)
 
       Repo.insert!(
         %InventorySlot{
@@ -373,10 +375,11 @@ defmodule GameBackend.Characters do
           item_id: item_id,
           amount: amount,
           equipped: equipped,
+          elemental_tags: elemental_tags,
           inserted_at: now,
           updated_at: now
         },
-        on_conflict: [set: [item_id: item_id, amount: amount, equipped: equipped, updated_at: now]],
+        on_conflict: [set: [item_id: item_id, amount: amount, equipped: equipped, elemental_tags: elemental_tags, updated_at: now]],
         conflict_target: [:character_id, :slot]
       )
     end)
@@ -418,7 +421,7 @@ defmodule GameBackend.Characters do
     base = List.duplicate(nil, 24)
 
     Enum.reduce(slots, base, fn slot, acc ->
-      item = %{item_id: slot.item_id, amount: slot.amount, equipped: slot.equipped}
+      item = %{item_id: slot.item_id, amount: slot.amount, equipped: slot.equipped, elemental_tags: slot.elemental_tags || 0}
       List.replace_at(acc, slot.slot, item)
     end)
   end

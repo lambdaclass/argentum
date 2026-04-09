@@ -1228,8 +1228,12 @@ defmodule Arena.Map.Social do
             Helpers.send_inventory_slot(state.sessions, char_id, entity.inventory, slot)
           end)
 
-          msg(%{state | players: players}, char_id, "Has renunciado a tu faccion.")
-          {:noreply, %{state | players: players}}
+          # Broadcast visual change if armor was stripped (body_id reverted)
+          state = %{state | players: players}
+          Helpers.broadcast_character_change(state, entity)
+
+          msg(state, char_id, "Has renunciado a tu faccion.")
+          {:noreply, state}
         end
 
       :error ->
@@ -1238,18 +1242,35 @@ defmodule Arena.Map.Social do
   end
 
   defp strip_faction_items(entity) do
-    # VB6: unequip items with Real=1 or Caos=1 flag when leaving a faction
+    # VB6: unequip items with Real=1 or Caos=1 flag when leaving a faction.
+    # Clears equipped flag, equipment slot, and restores body_id if armor.
     alias Arena.Data.GameData
 
     Enum.reduce(0..(length(entity.inventory) - 1), entity, fn slot_idx, ent ->
       case Enum.at(ent.inventory, slot_idx) do
-        %{obj_index: obj_index, equipped: true} when obj_index > 0 ->
-          case GameData.item_def(obj_index) do
+        %{item_id: item_id, equipped: true} when item_id > 0 ->
+          case GameData.get_item(item_id) do
             nil -> ent
             item_def ->
               if item_def.real or item_def.caos do
                 inv = List.update_at(ent.inventory, slot_idx, &%{&1 | equipped: false})
-                %{ent | inventory: inv}
+                ent = %{ent | inventory: inv}
+
+                # Clear equipment slot
+                ent =
+                  if item_def.equip_slot do
+                    equipment = Map.put(ent.equipment, item_def.equip_slot, nil)
+                    %{ent | equipment: equipment}
+                  else
+                    ent
+                  end
+
+                # Restore base body_id if it was armor
+                if item_def.equip_slot == :armor do
+                  %{ent | body_id: ent.base_body_id}
+                else
+                  ent
+                end
               else
                 ent
               end

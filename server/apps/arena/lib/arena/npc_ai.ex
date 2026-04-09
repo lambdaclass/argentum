@@ -599,11 +599,8 @@ defmodule Arena.NpcAi do
     if abs(x2 - x1) >= abs(y2 - y1), do: {dx, 0}, else: {0, dy}
   end
 
-  defp broadcast_to_nearby_players(state, _x, _y, raw) do
-    for {_cid, pid} <- state.sessions do
-      # Simple distance check for all sessions
-      send(pid, {:send_raw, raw})
-    end
+  defp broadcast_to_nearby_players(state, x, y, raw) do
+    Helpers.broadcast_visible_all(state, x, y, fn pid -> send(pid, {:send_raw, raw}) end)
   end
 
 end

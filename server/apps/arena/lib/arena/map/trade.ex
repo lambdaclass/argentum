@@ -22,19 +22,22 @@ defmodule Arena.Map.Trade do
         if slot_idx == nil or amount <= 0 do
           {:reply, {:error, :invalid_offer}, state}
         else
+          inv_item = Enum.at(entity.inventory, slot_idx)
+          item_tags = Map.get(inv_item, :elemental_tags, 0)
+
           # Add or update the offered item in trade_offer_items
-          existing = Enum.find_index(entity.trade_offer_items, fn {id, _} -> id == obj_index end)
+          existing = Enum.find_index(entity.trade_offer_items, fn {id, _, _} -> id == obj_index end)
 
           trade_items =
             if existing do
-              List.update_at(entity.trade_offer_items, existing, fn {id, old_amt} ->
-                {id, old_amt + amount}
+              List.update_at(entity.trade_offer_items, existing, fn {id, old_amt, tags} ->
+                {id, old_amt + amount, tags}
               end)
             else
               if length(entity.trade_offer_items) >= @trade_max_items do
                 entity.trade_offer_items
               else
-                entity.trade_offer_items ++ [{obj_index, amount}]
+                entity.trade_offer_items ++ [{obj_index, amount, item_tags}]
               end
             end
 
@@ -192,14 +195,14 @@ defmodule Arena.Map.Trade do
   end
 
   def send_trade_slot_update(state, char_id, entity) do
-    items = Enum.map(entity.trade_offer_items, fn {obj_index, amount} ->
+    items = Enum.map(entity.trade_offer_items, fn {obj_index, amount, tags} ->
       item_def = Arena.Data.GameData.get_item(obj_index)
       %{
         obj_index: obj_index,
         name: (item_def && item_def.name) || "",
         grh_index: (item_def && item_def.grh_index) || 0,
         amount: amount,
-        elemental_tags: 0
+        elemental_tags: tags
       }
     end)
 
@@ -269,7 +272,7 @@ defmodule Arena.Map.Trade do
   end
 
   def transfer_trade_items(giver, receiver) do
-    Enum.reduce(giver.trade_offer_items, {giver, receiver}, fn {obj_index, amount}, {g, r} ->
+    Enum.reduce(giver.trade_offer_items, {giver, receiver}, fn {obj_index, amount, tags}, {g, r} ->
       # Find the slot in giver's inventory that holds this item
       slot_idx = Enum.find_index(g.inventory, fn
         %{item_id: ^obj_index, equipped: false} -> true
@@ -280,7 +283,7 @@ defmodule Arena.Map.Trade do
         case Inventory.remove_from_slot(g.inventory, slot_idx, amount) do
           {:ok, new_inv, _} ->
             g = %{g | inventory: new_inv}
-            case Inventory.add_item(r.inventory, obj_index, amount) do
+            case Inventory.add_item(r.inventory, obj_index, amount, tags) do
               {:ok, new_inv, _slot} -> {g, %{r | inventory: new_inv}}
               {:gold, gold_amount} -> {g, %{r | gold: r.gold + gold_amount}}
               _ -> {g, r}

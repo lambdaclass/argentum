@@ -56,7 +56,8 @@ defmodule Arena.Map.Bank do
               Helpers.send_to_session(state.sessions, char_id, {:send_raw,
                 Encoder.encode({:change_bank_slot, %{
                   slot: bi.slot, obj_index: bi.item_id,
-                  amount: bi.amount, valor: valor
+                  amount: bi.amount, valor: valor,
+                  elemental_tags: bi.elemental_tags || 0
                 }})})
             end
 
@@ -106,7 +107,8 @@ defmodule Arena.Map.Bank do
 
                 # Upsert into bank DB
                 bank_slot = if slot_destino > 0, do: slot_destino, else: find_bank_slot(entity.char_id, inv_item.item_id)
-                upsert_bank_item(entity.char_id, bank_slot, inv_item.item_id, amount)
+                inv_tags = Map.get(inv_item, :elemental_tags, 0)
+                upsert_bank_item(entity.char_id, bank_slot, inv_item.item_id, amount, inv_tags)
 
                 # Send updated inventory slot
                 Helpers.send_inventory_slot(state.sessions, char_id, inventory, inv_idx)
@@ -119,7 +121,8 @@ defmodule Arena.Map.Bank do
                   Helpers.send_to_session(state.sessions, char_id, {:send_raw,
                     Encoder.encode({:change_bank_slot, %{
                       slot: bank_slot, obj_index: bank_item.item_id,
-                      amount: bank_item.amount, valor: valor
+                      amount: bank_item.amount, valor: valor,
+                      elemental_tags: bank_item.elemental_tags || 0
                     }})})
                 end
 
@@ -150,7 +153,7 @@ defmodule Arena.Map.Bank do
 
             true ->
               # Add to inventory
-              case Inventory.add_item(entity.inventory, bank_item.item_id, amount) do
+              case Inventory.add_item(entity.inventory, bank_item.item_id, amount, bank_item.elemental_tags || 0) do
                 {:ok, new_inventory, inv_slot} ->
                   entity = %{entity | inventory: new_inventory}
                   players = Map.put(state.players, char_id, entity)
@@ -166,7 +169,7 @@ defmodule Arena.Map.Bank do
                     item_def = GameData.get_item(bank_item.item_id)
                     valor = if item_def, do: item_def.valor, else: 0
                     Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                      Encoder.encode({:change_bank_slot, %{slot: slot, obj_index: bank_item.item_id, amount: new_bank_amount, valor: valor}})})
+                      Encoder.encode({:change_bank_slot, %{slot: slot, obj_index: bank_item.item_id, amount: new_bank_amount, valor: valor, elemental_tags: bank_item.elemental_tags || 0}})})
                   end
 
                   # Send updated inventory slot
@@ -283,7 +286,7 @@ defmodule Arena.Map.Bank do
     end
   end
 
-  def upsert_bank_item(char_id, bank_slot, item_id, amount) do
-    GameBackend.BankItems.upsert(char_id, bank_slot, item_id, amount)
+  def upsert_bank_item(char_id, bank_slot, item_id, amount, elemental_tags \\ 0) do
+    GameBackend.BankItems.upsert(char_id, bank_slot, item_id, amount, elemental_tags)
   end
 end

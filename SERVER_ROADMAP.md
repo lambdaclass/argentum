@@ -30,6 +30,7 @@ reference and historical phase plan.
 - `Phase 14 — Anti-Cheat & Server Hardening`: `Done`
 - `Phase 15 — Operations & Infrastructure`: `Mostly done`
 - `Phase 16 — Chat Moderation`: `Done`
+- `Phase 17 — Scalability & Performance Hardening`: `Partially done`
 - `Post-Compatibility — Web Account Auth & Character Lobby`: `Missing`
 
 **Implemented so far (~16k lines of Elixir source + 295 lines Rust):**
@@ -1209,6 +1210,36 @@ path.
 **Lines estimate:** ~200 Elixir
 
 **Depends on:** Phase 10 (social/chat infrastructure), Phase 13 (accounts for ban)
+
+---
+
+## Phase 17 — Scalability & Performance Hardening
+
+**Status:** `Partially done`
+
+**In code now:**
+- NPC broadcasts use AoI grid (`broadcast_visible_all`) instead of sending to all sessions
+- Player visibility uses spatial grid with `:aoi_grid` / `:aoi_scan` / `:global` modes
+
+**Remaining gaps:**
+
+1. **NPC aggro uses O(NPCs × players) scan** — `find_nearest_player` in `npc_ai.ex` scans all players for each hostile NPC every 500ms. Should query the spatial grid instead.
+2. **Pet targeting is O(pets × NPCs)** — `find_nearest_wild_npc` scans all NPCs per pet. Fine now, scales poorly with many pets/summons.
+3. **Load-test gate** — No automated soak test. Need a "100 players + NPCs" scenario tracking tick latency, mailbox size, packets/sec, CPU.
+4. **Batch persistence** — Autosave, logout, bank, guild writes are scattered individual DB calls. Should go through a dedicated write queue for batching.
+5. **Pre-resolve .dat references** — NPC spells, loot, item visuals, shop lists, recipes do repeated ID lookups during gameplay. Should be resolved once at load time into ready-to-use defs.
+6. **Packet backpressure** — No per-session outbound queue limits. A lagging client can grow process memory unbounded.
+7. **Map hot-spot telemetry** — Per MapServer metrics: player count, NPC count, tick duration, mailbox length, movement cmds/sec, broadcasts/sec.
+8. **Interest management for ground items/NPCs** — NPCs and ground items should use the same create/remove boundary model as players, not broadcast broadly on every map enter.
+9. **Admin/runtime tools** — Web admin or CLI for: player count per map, process health, kick/teleport, inspect mailbox, force save, restart map cleanly.
+
+**Goal:** The server can sustain 100+ concurrent players per map with stable tick latency and bounded memory.
+
+**Priority order:** NPC aggro grid → load-test gate → batch persistence → backpressure → telemetry → the rest.
+
+**Lines estimate:** ~600 Elixir
+
+**Depends on:** Phase 15 (telemetry/monitoring foundation). Should be done after VB6 parity gate.
 
 ---
 

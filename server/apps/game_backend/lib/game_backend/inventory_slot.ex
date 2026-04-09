@@ -9,12 +9,13 @@ defmodule GameBackend.InventorySlot do
     field :item_id, :integer
     field :amount, :integer, default: 1
     field :equipped, :boolean, default: false
+    field :elemental_tags, :integer, default: 0
     timestamps()
   end
 
   def changeset(slot, attrs) do
     slot
-    |> cast(attrs, [:character_id, :slot, :item_id, :amount, :equipped])
+    |> cast(attrs, [:character_id, :slot, :item_id, :amount, :equipped, :elemental_tags])
     |> validate_required([:character_id, :slot, :item_id])
     |> validate_number(:slot, greater_than_or_equal_to: 0, less_than: 24)
     |> unique_constraint([:character_id, :slot])

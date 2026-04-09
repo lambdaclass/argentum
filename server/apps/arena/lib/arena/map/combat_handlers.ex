@@ -1270,7 +1270,7 @@ defmodule Arena.Map.CombatHandlers do
       if :rand.uniform(5) == 1 do
         pos = {npc.x, npc.y}
         unless Map.has_key?(state.ground_items, pos) do
-          ground_items = Map.put(state.ground_items, pos, %{item_id: item_id, amount: amount})
+          ground_items = Map.put(state.ground_items, pos, %{item_id: item_id, amount: amount, elemental_tags: 0})
           state = %{state | ground_items: ground_items}
           Helpers.broadcast_object_create(state, npc.x, npc.y, item_id, amount)
           state

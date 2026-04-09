@@ -13,7 +13,7 @@ defmodule Arena.Inventory do
   @gold_item_id 12
 
   @doc "Add an item to inventory. Stacks if stackable, otherwise uses first empty slot."
-  def add_item(inventory, item_id, amount \\ 1) do
+  def add_item(inventory, item_id, amount \\ 1, elemental_tags \\ 0) do
     item_def = GameData.get_item(item_id)
 
     cond do
@@ -24,7 +24,7 @@ defmodule Arena.Inventory do
         add_stackable(inventory, item_id, amount)
 
       true ->
-        add_to_empty_slot(inventory, item_id, amount)
+        add_to_empty_slot(inventory, item_id, amount, elemental_tags)
     end
   end
 
@@ -157,13 +157,13 @@ defmodule Arena.Inventory do
     end
   end
 
-  defp add_to_empty_slot(inventory, item_id, amount) do
+  defp add_to_empty_slot(inventory, item_id, amount, elemental_tags \\ 0) do
     case find_empty_slot(inventory) do
       nil ->
         {:error, :inventory_full}
 
       idx ->
-        new_item = %{item_id: item_id, amount: amount, equipped: false}
+        new_item = %{item_id: item_id, amount: amount, equipped: false, elemental_tags: elemental_tags}
         {:ok, List.replace_at(inventory, idx, new_item), idx}
     end
   end

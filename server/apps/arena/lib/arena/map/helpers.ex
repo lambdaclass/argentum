@@ -180,6 +180,7 @@ defmodule Arena.Map.Helpers do
       item ->
         item_def = GameData.get_item(item.item_id)
         valor = if item_def, do: item_def.valor, else: 0
+        instance_tags = Map.get(item, :elemental_tags, 0)
 
         send_to_session(sessions, char_id, {:send_raw,
           Encoder.encode({:change_inventory_slot, %{
@@ -187,7 +188,8 @@ defmodule Arena.Map.Helpers do
             obj_index: item.item_id,
             amount: item.amount,
             equipped: item.equipped,
-            valor: valor / 1
+            valor: valor / 1,
+            elemental_tags: instance_tags
           }})})
     end
   end
@@ -235,11 +237,11 @@ defmodule Arena.Map.Helpers do
   end
 
   # Ground item helpers
-  def broadcast_object_create(state, x, y, item_id, amount) do
+  def broadcast_object_create(state, x, y, item_id, amount, elemental_tags \\ 0) do
     item_def = GameData.get_item(item_id)
     grh = if item_def, do: item_def.grh_index, else: 0
 
-    raw = Encoder.encode({:object_create, %{x: x, y: y, obj_index: grh, amount: amount}})
+    raw = Encoder.encode({:object_create, %{x: x, y: y, obj_index: grh, amount: amount, elemental_tags: elemental_tags}})
     broadcast_visible_all(state, x, y, fn pid -> send(pid, {:send_raw, raw}) end)
   end
 
