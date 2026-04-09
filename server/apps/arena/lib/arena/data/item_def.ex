@@ -38,6 +38,8 @@ defmodule Arena.Data.ItemDef do
     staff_damage_bonus: 0,
     weapon_type: 0,
     puntos_pesca: 0,
+    real: false,
+    caos: false,
     ropaje: nil
   ]
 
@@ -100,6 +102,8 @@ defmodule Arena.Data.ItemDef do
       staff_damage_bonus: parse_int(section["staffdamagebonus"]),
       weapon_type: parse_int(section["weapontype"]),
       puntos_pesca: parse_int(section["puntospesca"]),
+      real: parse_int(section["real"]) == 1,
+      caos: parse_int(section["caos"]) == 1,
       ropaje: parse_ropaje(section)
     }
   end

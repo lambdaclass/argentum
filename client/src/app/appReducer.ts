@@ -98,7 +98,9 @@ function initialCharacter(): ClientState["world"]["self"] {
     classId: null,
     raceId: null,
     genderId: null,
-    factionStatus: null
+    factionStatus: null,
+    clanIndex: 0,
+    clanLevel: 0
   };
 }
 
@@ -173,6 +175,8 @@ function applyCharacter(target: CharacterCreatePacket, character: ClientState["w
   character.hpMax = target.maxHp;
   character.manaCurrent = target.minMana;
   character.manaMax = target.maxMana;
+  character.clanIndex = target.clanIndex;
+  character.clanLevel = target.clanLevel;
 }
 
 export function createInitialState(): ClientState {

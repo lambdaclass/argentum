@@ -31,10 +31,10 @@ function decodeCharacterCreate(reader: BinaryReader): CharacterCreatePacket {
   const speed = reader.readFloat32();
 
   const isNpc = reader.readUint8() !== 0;
-  reader.readUint8();
-  reader.readInt16();
-  reader.readInt16();
-  reader.readUint8();
+  reader.readUint8(); // appear
+  reader.readInt16(); // group_index
+  const clanIndex = reader.readInt16();
+  const clanLevel = reader.readUint8();
 
   const minHp = reader.readInt32();
   const maxHp = reader.readInt32();
@@ -68,7 +68,9 @@ function decodeCharacterCreate(reader: BinaryReader): CharacterCreatePacket {
     maxHp,
     minMana,
     maxMana,
-    isNpc
+    isNpc,
+    clanIndex,
+    clanLevel
   };
 }
 

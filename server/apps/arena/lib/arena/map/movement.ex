@@ -30,7 +30,7 @@ defmodule Arena.Map.Movement do
         min_interval = trunc(@base_walk_interval_ms / entity.speeding)
 
         cond do
-          entity.paralyzed or entity.immobilized ->
+          entity.paralyzed or entity.immobilized or entity.penalty > 0 ->
             {:reply, {:error, :paralyzed}, state}
 
           now < entity.next_move_at ->

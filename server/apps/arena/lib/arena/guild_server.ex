@@ -728,15 +728,31 @@ defmodule Arena.GuildServer do
 
         case :ets.lookup(@table, {:guild, guild_id}) do
           [{_, %{leader: ^char_id} = guild}] ->
-            # Leader left -- dissolve guild (DB + ETS)
-            Guilds.delete_guild(guild_id)
+            remaining = List.delete(guild.members, char_id)
 
-            for mid <- guild.members, mid != char_id do
-              :ets.delete(@table, {:member, mid})
-              notify(mid, "El clan se ha disuelto.")
+            if remaining == [] do
+              # Last member left -- dissolve guild
+              Guilds.delete_guild(guild_id)
+              :ets.delete(@table, {:guild, guild_id})
+            else
+              # Promote the next member to leader (VB6: auto-succession)
+              new_leader = hd(remaining)
+              guild = %{guild | leader: new_leader, members: remaining}
+              :ets.insert(@table, {{:guild, guild_id}, guild})
+              Guilds.remove_member(guild_id, char_id)
+
+              Task.start(fn ->
+                Guilds.update_guild(guild_id, %{leader_id: new_leader})
+              end)
+
+              leader_name =
+                case OnlineDirectory.lookup_by_id(new_leader) do
+                  {:ok, info} -> info.name
+                  :not_found -> "ID:#{new_leader}"
+                end
+
+              broadcast_guild(remaining, "El lider abandono el clan. #{leader_name} es el nuevo lider.")
             end
-
-            :ets.delete(@table, {:guild, guild_id})
 
           [{_, guild}] ->
             Guilds.remove_member(guild_id, char_id)

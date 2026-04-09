@@ -1238,10 +1238,25 @@ defmodule Arena.Map.Social do
   end
 
   defp strip_faction_items(entity) do
-    # VB6: remove items with Real=1 or Caos=1 flag
-    # For now we don't have those flags on ItemDef, so this is a no-op placeholder.
-    # TODO: add Real/Caos flags to ItemDef and strip faction-exclusive gear here.
-    entity
+    # VB6: unequip items with Real=1 or Caos=1 flag when leaving a faction
+    alias Arena.Data.GameData
+
+    Enum.reduce(0..(length(entity.inventory) - 1), entity, fn slot_idx, ent ->
+      case Enum.at(ent.inventory, slot_idx) do
+        %{obj_index: obj_index, equipped: true} when obj_index > 0 ->
+          case GameData.item_def(obj_index) do
+            nil -> ent
+            item_def ->
+              if item_def.real or item_def.caos do
+                inv = List.update_at(ent.inventory, slot_idx, &%{&1 | equipped: false})
+                %{ent | inventory: inv}
+              else
+                ent
+              end
+          end
+        _ -> ent
+      end
+    end)
   end
 
   @doc """

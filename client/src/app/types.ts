@@ -105,6 +105,8 @@ export interface CharacterView {
   raceId: number | null;
   genderId: number | null;
   factionStatus: number | null;
+  clanIndex: number;
+  clanLevel: number;
 }
 
 export interface RemoteCharacter {
@@ -305,6 +307,8 @@ export interface CharacterCreatePacket {
   minMana: number;
   maxMana: number;
   isNpc: boolean;
+  clanIndex: number;
+  clanLevel: number;
 }
 
 export type ServerPacket =
