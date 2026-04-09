@@ -128,18 +128,6 @@ defmodule Arena.GuildServer do
     GenServer.call(__MODULE__, {:set_description, char_id, description})
   end
 
-  @doc "Find a guild by name. Pure ETS scan."
-  def find_guild_by_name(name) do
-    upper = String.upcase(name)
-    result = :ets.foldl(fn
-      {{:guild, _id}, guild}, nil ->
-        if String.upcase(guild.name) == upper, do: guild, else: nil
-      _, acc -> acc
-    end, nil, @table)
-
-    if result, do: {:ok, result}, else: :not_found
-  end
-
   @doc "Get guild info for display. Pure ETS read."
   def guild_info(char_id) do
     case get_guild(char_id) do
@@ -635,22 +623,23 @@ defmodule Arena.GuildServer do
       {:ok, guild_id, _guild} ->
         requests = Guilds.list_requests(guild_id)
 
+        request_names = for req <- requests do
+          case OnlineDirectory.lookup_by_id(req.char_id) do
+            {:ok, info} -> info.name
+            :not_found -> "ID:#{req.char_id}"
+          end
+        end
+
         if requests == [] do
           notify(char_id, "No hay solicitudes pendientes.")
         else
-          for req <- requests do
-            name =
-              case OnlineDirectory.lookup_by_id(req.char_id) do
-                {:ok, info} -> info.name
-                :not_found -> "ID:#{req.char_id}"
-              end
-
+          for {req, name} <- Enum.zip(requests, request_names) do
             desc = if req.description != "", do: " - #{req.description}", else: ""
             notify(char_id, "Solicitud: #{name}#{desc}")
           end
         end
 
-        {:reply, :ok, state}
+        {:reply, {:ok, request_names}, state}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -811,7 +800,7 @@ defmodule Arena.GuildServer do
     :ets.delete(@table, {:relation, a, b})
   end
 
-  defp find_guild_by_name(name) do
+  def find_guild_by_name(name) do
     normalized = String.downcase(String.trim(name))
 
     # Scan ETS for guild with matching name (guild count is small)
