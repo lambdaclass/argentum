@@ -165,6 +165,53 @@ defmodule Arena.GuildServer do
     end
   end
 
+  @doc "Check if two guilds are at war. Pure ETS read."
+  def at_war?(guild_a, guild_b) when is_integer(guild_a) and is_integer(guild_b) do
+    {a, b} = if guild_a <= guild_b, do: {guild_a, guild_b}, else: {guild_b, guild_a}
+
+    case :ets.lookup(@table, {:relation, a, b}) do
+      [{_, "war"}] -> true
+      _ -> false
+    end
+  end
+
+  def at_war?(_, _), do: false
+
+  @doc "Check if two players are in guilds at war."
+  def players_at_war?(char_a, char_b) do
+    case {guild_id_for(char_a), guild_id_for(char_b)} do
+      {nil, _} -> false
+      {_, nil} -> false
+      {ga, gb} when ga == gb -> false
+      {ga, gb} -> at_war?(ga, gb)
+    end
+  end
+
+  @doc "Get relation between two guilds. Pure ETS read."
+  def get_relation(guild_a, guild_b) do
+    {a, b} = if guild_a <= guild_b, do: {guild_a, guild_b}, else: {guild_b, guild_a}
+
+    case :ets.lookup(@table, {:relation, a, b}) do
+      [{_, type}] -> type
+      [] -> "peace"
+    end
+  end
+
+  @doc "Declare war on another guild (leader only)."
+  def declare_war(char_id, target_guild_name) do
+    GenServer.call(__MODULE__, {:declare_war, char_id, target_guild_name})
+  end
+
+  @doc "Propose peace to a guild at war (leader only)."
+  def propose_peace(char_id, target_guild_name) do
+    GenServer.call(__MODULE__, {:propose_peace, char_id, target_guild_name})
+  end
+
+  @doc "Propose alliance with another guild (leader only)."
+  def propose_alliance(char_id, target_guild_name) do
+    GenServer.call(__MODULE__, {:propose_alliance, char_id, target_guild_name})
+  end
+
   # ---- GenServer ----
 
   @impl true
@@ -174,6 +221,7 @@ defmodule Arena.GuildServer do
 
     # Load persisted guilds from DB into ETS
     next_id = load_guilds_from_db()
+    load_relations_from_db()
 
     {:ok, %{next_guild_id: next_id}}
   end
@@ -440,6 +488,85 @@ defmodule Arena.GuildServer do
   end
 
   @impl true
+  def handle_call({:declare_war, char_id, target_name}, _from, state) do
+    case lookup_guild_as_leader(char_id) do
+      {:ok, my_guild_id, my_guild} ->
+        case find_guild_by_name(target_name) do
+          {:ok, target_guild_id, _target_guild} when target_guild_id == my_guild_id ->
+            notify(char_id, "No puedes declarar guerra a tu propio clan.")
+            {:reply, {:error, :same_guild}, state}
+
+          {:ok, target_guild_id, target_guild} ->
+            set_relation_ets(my_guild_id, target_guild_id, "war")
+            Task.start(fn -> Guilds.set_relation(my_guild_id, target_guild_id, "war") end)
+            broadcast_guild(my_guild.members, "Se ha declarado la guerra contra '#{target_guild.name}'!")
+            broadcast_guild(target_guild.members, "El clan '#{my_guild.name}' les ha declarado la guerra!")
+            {:reply, :ok, state}
+
+          :not_found ->
+            notify(char_id, "No se encontro el clan '#{target_name}'.")
+            {:reply, {:error, :not_found}, state}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:propose_peace, char_id, target_name}, _from, state) do
+    case lookup_guild_as_leader(char_id) do
+      {:ok, my_guild_id, my_guild} ->
+        case find_guild_by_name(target_name) do
+          {:ok, target_guild_id, target_guild} ->
+            if at_war?(my_guild_id, target_guild_id) do
+              delete_relation_ets(my_guild_id, target_guild_id)
+              Task.start(fn -> Guilds.delete_relation(my_guild_id, target_guild_id) end)
+              broadcast_guild(my_guild.members, "Se ha establecido la paz con '#{target_guild.name}'.")
+              broadcast_guild(target_guild.members, "El clan '#{my_guild.name}' ha propuesto la paz.")
+              {:reply, :ok, state}
+            else
+              notify(char_id, "No estan en guerra con '#{target_name}'.")
+              {:reply, {:error, :not_at_war}, state}
+            end
+
+          :not_found ->
+            notify(char_id, "No se encontro el clan '#{target_name}'.")
+            {:reply, {:error, :not_found}, state}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:propose_alliance, char_id, target_name}, _from, state) do
+    case lookup_guild_as_leader(char_id) do
+      {:ok, my_guild_id, my_guild} ->
+        case find_guild_by_name(target_name) do
+          {:ok, target_guild_id, _target_guild} when target_guild_id == my_guild_id ->
+            notify(char_id, "No puedes aliarte con tu propio clan.")
+            {:reply, {:error, :same_guild}, state}
+
+          {:ok, target_guild_id, target_guild} ->
+            set_relation_ets(my_guild_id, target_guild_id, "alliance")
+            Task.start(fn -> Guilds.set_relation(my_guild_id, target_guild_id, "alliance") end)
+            broadcast_guild(my_guild.members, "Se ha formado una alianza con '#{target_guild.name}'.")
+            broadcast_guild(target_guild.members, "El clan '#{my_guild.name}' les ha propuesto una alianza.")
+            {:reply, :ok, state}
+
+          :not_found ->
+            notify(char_id, "No se encontro el clan '#{target_name}'.")
+            {:reply, {:error, :not_found}, state}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  @impl true
   def handle_info(:cleanup_invites, state) do
     now = System.monotonic_time(:millisecond)
 
@@ -500,6 +627,39 @@ defmodule Arena.GuildServer do
       :max -> {level, exp}
       req when exp >= req -> level_up_loop(level + 1, exp - req, max_level)
       _req -> {level, exp}
+    end
+  end
+
+  defp set_relation_ets(guild_a, guild_b, type) do
+    {a, b} = if guild_a <= guild_b, do: {guild_a, guild_b}, else: {guild_b, guild_a}
+    :ets.insert(@table, {{:relation, a, b}, type})
+  end
+
+  defp delete_relation_ets(guild_a, guild_b) do
+    {a, b} = if guild_a <= guild_b, do: {guild_a, guild_b}, else: {guild_b, guild_a}
+    :ets.delete(@table, {:relation, a, b})
+  end
+
+  defp find_guild_by_name(name) do
+    normalized = String.downcase(String.trim(name))
+
+    # Scan ETS for guild with matching name (guild count is small)
+    result =
+      :ets.foldl(
+        fn
+          {{:guild, _id}, guild}, nil ->
+            if String.downcase(guild.name) == normalized, do: guild, else: nil
+
+          _, acc ->
+            acc
+        end,
+        nil,
+        @table
+      )
+
+    case result do
+      nil -> :not_found
+      guild -> {:ok, guild.id, guild}
     end
   end
 
@@ -593,5 +753,18 @@ defmodule Arena.GuildServer do
     e ->
       Logger.warning("GuildServer: DB not available, starting with empty state: #{inspect(e)}")
       1
+  end
+
+  defp load_relations_from_db do
+    relations = Guilds.list_relations()
+
+    for rel <- relations do
+      {a, b} = if rel.guild_a_id <= rel.guild_b_id, do: {rel.guild_a_id, rel.guild_b_id}, else: {rel.guild_b_id, rel.guild_a_id}
+      :ets.insert(@table, {{:relation, a, b}, rel.relation_type})
+    end
+
+    Logger.info("GuildServer loaded #{length(relations)} guild relation(s) from DB")
+  rescue
+    _ -> :ok
   end
 end

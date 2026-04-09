@@ -133,4 +133,68 @@ defmodule GameBackend.Guilds do
       guild_id -> Repo.get(Guild, guild_id) |> Repo.preload(:members)
     end
   end
+
+  # ---- Guild Relations ----
+
+  @doc "Load all guild relations."
+  def list_relations do
+    Repo.all(GameBackend.GuildRelation)
+  end
+
+  @doc "Set relation between two guilds. Always stores with min(a,b) as guild_a_id."
+  def set_relation(guild_a_id, guild_b_id, relation_type) do
+    {a, b} = if guild_a_id <= guild_b_id, do: {guild_a_id, guild_b_id}, else: {guild_b_id, guild_a_id}
+
+    case Repo.one(
+           from r in GameBackend.GuildRelation,
+             where: r.guild_a_id == ^a and r.guild_b_id == ^b
+         ) do
+      nil ->
+        %GameBackend.GuildRelation{}
+        |> GameBackend.GuildRelation.changeset(%{
+          guild_a_id: a,
+          guild_b_id: b,
+          relation_type: relation_type
+        })
+        |> Repo.insert()
+
+      relation ->
+        relation
+        |> GameBackend.GuildRelation.changeset(%{relation_type: relation_type})
+        |> Repo.update()
+    end
+  end
+
+  @doc "Delete a relation between two guilds."
+  def delete_relation(guild_a_id, guild_b_id) do
+    {a, b} = if guild_a_id <= guild_b_id, do: {guild_a_id, guild_b_id}, else: {guild_b_id, guild_a_id}
+
+    from(r in GameBackend.GuildRelation,
+      where: r.guild_a_id == ^a and r.guild_b_id == ^b
+    )
+    |> Repo.delete_all()
+  end
+end
+
+defmodule GameBackend.GuildRelation do
+  @moduledoc "Ecto schema for guild_relations table (war/peace/alliance)."
+
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  @primary_key {:id, :id, autogenerate: true}
+  schema "guild_relations" do
+    field :guild_a_id, :integer
+    field :guild_b_id, :integer
+    field :relation_type, :string, default: "peace"
+    timestamps()
+  end
+
+  def changeset(relation, attrs) do
+    relation
+    |> cast(attrs, [:guild_a_id, :guild_b_id, :relation_type])
+    |> validate_required([:guild_a_id, :guild_b_id, :relation_type])
+    |> validate_inclusion(:relation_type, ["war", "peace", "alliance"])
+    |> unique_constraint([:guild_a_id, :guild_b_id])
+  end
 end

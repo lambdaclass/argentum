@@ -340,6 +340,18 @@ defmodule AoTcpGateway.SessionLogic do
                 {state, []}
             end
 
+          {:guild_war, target_name} ->
+            Arena.GuildServer.declare_war(state.character_id, target_name)
+            {state, []}
+
+          {:guild_peace, target_name} ->
+            Arena.GuildServer.propose_peace(state.character_id, target_name)
+            {state, []}
+
+          {:guild_alliance, target_name} ->
+            Arena.GuildServer.propose_alliance(state.character_id, target_name)
+            {state, []}
+
           :not_guild_command ->
             case parse_faction_command(message) do
               {:enlist, faction} ->
@@ -849,6 +861,18 @@ defmodule AoTcpGateway.SessionLogic do
 
       upper == "/CLANINFO" ->
         :guild_info
+
+      String.starts_with?(upper, "/DECLARARGUERRA ") ->
+        name = String.trim(String.slice(message, 16..-1//1))
+        {:guild_war, name}
+
+      String.starts_with?(upper, "/PROPONERPAZ ") ->
+        name = String.trim(String.slice(message, 13..-1//1))
+        {:guild_peace, name}
+
+      String.starts_with?(upper, "/ALIANZA ") ->
+        name = String.trim(String.slice(message, 9..-1//1))
+        {:guild_alliance, name}
 
       true ->
         :not_guild_command

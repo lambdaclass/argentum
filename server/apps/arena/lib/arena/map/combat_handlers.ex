@@ -372,7 +372,9 @@ defmodule Arena.Map.CombatHandlers do
 
                 # VB6: weapon skill gain on hit
                 entity = maybe_gain_skill(entity, skill_name)
-                entity = if not defender.criminal, do: %{entity | criminal: true}, else: entity
+                # Guild war: no criminal flag when attacking enemy guild members
+                guild_war = Arena.GuildServer.players_at_war?(char_id, defender_id)
+                entity = if not defender.criminal and not guild_war, do: %{entity | criminal: true}, else: entity
 
                 defender = if new_hp <= 0 do
                   Helpers.send_to_session(state.sessions, defender_id, {:send_raw,
@@ -776,7 +778,9 @@ defmodule Arena.Map.CombatHandlers do
             Helpers.send_to_session(state.sessions, char_id, {:send_raw,
               Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
 
-            entity = if not defender.criminal, do: %{entity | criminal: true}, else: entity
+            # Guild war: no criminal flag when attacking enemy guild members
+            guild_war = Arena.GuildServer.players_at_war?(char_id, target_id)
+            entity = if not defender.criminal and not guild_war, do: %{entity | criminal: true}, else: entity
 
             defender = if new_hp <= 0 do
               Helpers.send_to_session(state.sessions, target_id, {:send_raw,
