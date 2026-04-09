@@ -705,7 +705,7 @@ defmodule AoTcpGateway.SessionLogic do
   def handle_command(state, {:guild_request_details, %{guild: guild_name}}) when state.character_id != nil do
     # Send guild details UI packet
     case Arena.GuildServer.find_guild_by_name(guild_name) do
-      {:ok, guild} ->
+      {:ok, _guild_id, guild} ->
         leader_name = resolve_char_name(guild.leader)
         founder_name = resolve_char_name(guild.founder_id)
         date_str = if guild.created_at, do: Calendar.strftime(guild.created_at, "%Y-%m-%d"), else: ""

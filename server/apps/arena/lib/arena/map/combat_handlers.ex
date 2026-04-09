@@ -1222,7 +1222,7 @@ defmodule Arena.Map.CombatHandlers do
       Encoder.encode({:update_exp, %{current_xp: entity.xp, next_xp: GameData.exp_for_level(entity.level + 1) || 0}})})
   end
 
-  @doc "VB6 group gold: split NPC gold among killer + nearby party members."
+  # VB6 group gold: split NPC gold among killer + nearby party members.
   defp award_gold_with_party(state, char_id, entity, give_gld) do
     if give_gld <= 0 do
       {entity, state}
