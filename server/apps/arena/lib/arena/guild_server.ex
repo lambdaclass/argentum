@@ -12,6 +12,7 @@ defmodule Arena.GuildServer do
   alias AoSession.OnlineDirectory
   alias GameBackend.Guilds
   alias Arena.GuildConstants
+  alias Arena.GuildAlignment
 
   @table :ao_guilds
   @max_members 50
@@ -23,9 +24,9 @@ defmodule Arena.GuildServer do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  @doc "Create a new guild. The creator becomes the leader."
-  def create_guild(char_id, name) do
-    GenServer.call(__MODULE__, {:create, char_id, name})
+  @doc "Create a new guild. The creator becomes the leader. Alignment is set from founder."
+  def create_guild(char_id, name, alignment \\ 0) do
+    GenServer.call(__MODULE__, {:create, char_id, name, alignment})
   end
 
   @doc "Invite a player to the guild."
@@ -178,7 +179,7 @@ defmodule Arena.GuildServer do
   end
 
   @impl true
-  def handle_call({:create, char_id, name}, _from, state) do
+  def handle_call({:create, char_id, name, alignment}, _from, state) do
     name = String.trim(name)
 
     cond do
@@ -195,7 +196,7 @@ defmodule Arena.GuildServer do
         {:reply, {:error, :already_in_guild}, state}
 
       true ->
-        case Guilds.create_guild(char_id, name) do
+        case Guilds.create_guild(char_id, name, alignment) do
           {:ok, db_guild} ->
             guild_id = db_guild.id
 
@@ -209,7 +210,7 @@ defmodule Arena.GuildServer do
               description: "",
               news: "",
               url: "",
-              alignment: 0
+              alignment: alignment
             }
 
             :ets.insert(@table, {{:guild, guild_id}, guild})
@@ -293,28 +294,35 @@ defmodule Arena.GuildServer do
           true ->
             case :ets.lookup(@table, {:guild, guild_id}) do
               [{_, guild}] ->
-                if length(guild.members) >= @max_members do
-                  notify(char_id, "El clan esta lleno.")
-                  {:reply, {:error, :full}, state}
-                else
-                  case Guilds.add_member(guild_id, char_id) do
-                    {:ok, _member} ->
-                      new_members = guild.members ++ [char_id]
-                      :ets.insert(@table, {{:guild, guild_id}, %{guild | members: new_members}})
-                      :ets.insert(@table, {{:member, char_id}, guild_id})
+                cond do
+                  length(guild.members) >= @max_members ->
+                    notify(char_id, "El clan esta lleno.")
+                    {:reply, {:error, :full}, state}
 
-                      broadcast_guild(
-                        new_members,
-                        "Un jugador se ha unido al clan. Miembros: #{length(new_members)}"
-                      )
+                  guild.alignment != GuildAlignment.neutral() and
+                      not alignment_compatible?(char_id, guild.alignment) ->
+                    notify(char_id, "Tu alineacion no es compatible con este clan (#{GuildAlignment.name(guild.alignment)}).")
+                    {:reply, {:error, :alignment_mismatch}, state}
 
-                      {:reply, :ok, state}
+                  true ->
+                    case Guilds.add_member(guild_id, char_id) do
+                      {:ok, _member} ->
+                        new_members = guild.members ++ [char_id]
+                        :ets.insert(@table, {{:guild, guild_id}, %{guild | members: new_members}})
+                        :ets.insert(@table, {{:member, char_id}, guild_id})
 
-                    {:error, _reason} ->
-                      Logger.error("Failed to persist guild join for char #{char_id}")
-                      notify(char_id, "Error al unirse al clan. Intenta de nuevo.")
-                      {:reply, {:error, :db_error}, state}
-                  end
+                        broadcast_guild(
+                          new_members,
+                          "Un jugador se ha unido al clan. Miembros: #{length(new_members)}"
+                        )
+
+                        {:reply, :ok, state}
+
+                      {:error, _reason} ->
+                        Logger.error("Failed to persist guild join for char #{char_id}")
+                        notify(char_id, "Error al unirse al clan. Intenta de nuevo.")
+                        {:reply, {:error, :db_error}, state}
+                    end
                 end
 
               [] ->
@@ -492,6 +500,23 @@ defmodule Arena.GuildServer do
       :max -> {level, exp}
       req when exp >= req -> level_up_loop(level + 1, exp - req, max_level)
       _req -> {level, exp}
+    end
+  end
+
+  defp alignment_compatible?(char_id, guild_alignment) do
+    case OnlineDirectory.lookup_by_id(char_id) do
+      {:ok, %{map_id: map_id}} ->
+        case Arena.Map.MapServer.snapshot_entity(map_id, char_id) do
+          {:ok, entity} ->
+            player_align = GuildAlignment.player_alignment(entity)
+            GuildAlignment.compatible?(guild_alignment, player_align)
+
+          _ ->
+            true
+        end
+
+      _ ->
+        true
     end
   end
 

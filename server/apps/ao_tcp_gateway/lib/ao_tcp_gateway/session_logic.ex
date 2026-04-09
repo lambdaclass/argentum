@@ -262,7 +262,13 @@ defmodule AoTcpGateway.SessionLogic do
       :not_party_command ->
         case parse_guild_command(message) do
           {:guild_create, name} ->
-            Arena.GuildServer.create_guild(state.character_id, name)
+            alignment =
+              case Arena.Map.MapServer.snapshot_entity(state.map_id, state.character_id) do
+                {:ok, entity} -> Arena.GuildAlignment.from_character(entity)
+                _ -> 0
+              end
+
+            Arena.GuildServer.create_guild(state.character_id, name, alignment)
             {state, []}
 
           {:guild_invite, target_name} ->
@@ -326,7 +332,8 @@ defmodule AoTcpGateway.SessionLogic do
             case Arena.GuildServer.guild_info(state.character_id) do
               {:ok, guild, required} ->
                 req_str = if required == :max, do: "MAX", else: "#{required}"
-                info = "Clan: #{guild.name} | Nivel: #{guild.level} | EXP: #{guild.current_exp}/#{req_str} | Miembros: #{length(guild.members)}"
+                align_name = Arena.GuildAlignment.name(guild.alignment)
+                info = "Clan: #{guild.name} | Nivel: #{guild.level} | EXP: #{guild.current_exp}/#{req_str} | Alineacion: #{align_name} | Miembros: #{length(guild.members)}"
                 msg = AoProtocol.Server.Encoder.encode({:console_msg, %{message: info, font_index: 0}})
                 {state, [{:send_raw, msg}]}
               :not_in_guild ->

@@ -76,9 +76,9 @@ defmodule GameBackend.Guilds do
   end
 
   @doc "Create a guild and insert the creator as leader member."
-  def create_guild(char_id, name) do
+  def create_guild(char_id, name, alignment \\ 0) do
     Repo.transaction(fn ->
-      case %Guild{} |> Guild.changeset(%{name: name, leader_id: char_id}) |> Repo.insert() do
+      case %Guild{} |> Guild.changeset(%{name: name, leader_id: char_id, alignment: alignment}) |> Repo.insert() do
         {:ok, guild} ->
           {:ok, member} =
             %GuildMember{}
