@@ -56,11 +56,11 @@ reference and historical phase plan.
 - Client: weather rendering (rain particles), faction HUD display, party panel, clan panel
 
 **Remaining backend gaps (gameplay tail):**
-1. **Weather map flags not wired** — `csm_parser.ex:85` parses rain/snow, but `map_server.ex:197` stores both as false. Weather-on-map-enter is effectively disabled.
+1. ~~Weather map flags not wired~~ — **Verified: already working.** Parser reads rain/snow from .csm, MapServer stores in meta, session sends `rain_toggle`/`snow_toggle` packets on map enter.
 2. **Alchemy/tailoring/crafting data is sparse** — Framework exists; recipes need expansion from canonical tables / .dat-verified item IDs.
 3. **Automated parity gate missing** — Packet trace replay, AO smoke bot, VB6 formula golden tests, property/fuzz, lifecycle tests, load/soak. Biggest "are we really done?" gap.
 4. **Recent migrations need real DB verification** — Run clean-db + existing-dev-db migration path; verify character/inventory/bank/guild/faction loads after migration.
-5. **Minor protocol tail** — `online` and `use_spell_macro` are decoded but have no real gameplay handlers. `use_spell_macro` can stay legacy/no-op if browser resolves macros client-side.
+5. ~~Minor protocol tail~~ — **Verified: already handled.** `online` returns player count via `OnlineDirectory.online_count/0`. `use_spell_macro` is intentional no-op (server comment explains: client-side macro resolved via `cast_spell`).
 6. **Ops tail** — Dashboards, alerts, deploy pipeline, backup-restore, runbooks. Not gameplay, but backend production work (Phase 15 + 17).
 7. **Perf tail** — NPC aggro still scans all players; pet targeting scans all NPCs; no outbound backpressure; no load/soak gate. NPC broadcast AoI is fixed (Phase 17).
 
