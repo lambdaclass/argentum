@@ -706,14 +706,13 @@ defmodule AoTcpGateway.SessionLogic do
     # Send guild details UI packet
     case Arena.GuildServer.find_guild_by_name(guild_name) do
       {:ok, guild} ->
-        leader_name = case AoSession.OnlineDirectory.lookup_by_id(guild.leader) do
-          {:ok, info} -> info.name
-          _ -> "Unknown"
-        end
+        leader_name = resolve_char_name(guild.leader)
+        founder_name = resolve_char_name(guild.founder_id)
+        date_str = if guild.created_at, do: Calendar.strftime(guild.created_at, "%Y-%m-%d"), else: ""
         msg = AoProtocol.Server.Encoder.encode({:guild_details, %{
           name: guild.name,
-          founder: leader_name,
-          date: "",
+          founder: founder_name,
+          date: date_str,
           leader: leader_name,
           member_count: length(guild.members),
           alignment: Arena.GuildAlignment.name(guild.alignment),
@@ -731,10 +730,7 @@ defmodule AoTcpGateway.SessionLogic do
     case Arena.GuildServer.guild_info(state.character_id) do
       {:ok, guild, required} ->
         member_names = for mid <- guild.members do
-          case AoSession.OnlineDirectory.lookup_by_id(mid) do
-            {:ok, info} -> info.name
-            _ -> "ID:#{mid}"
-          end
+          resolve_char_name(mid)
         end
         requests = case Arena.GuildServer.list_requests(state.character_id) do
           {:ok, reqs} -> reqs
@@ -1084,4 +1080,18 @@ defmodule AoTcpGateway.SessionLogic do
     raw = AoProtocol.Server.Encoder.encode({:console_msg, %{message: message, font_index: 0}})
     send(self(), {:send_raw, raw})
   end
+
+  defp resolve_char_name(char_id) when is_integer(char_id) do
+    case AoSession.OnlineDirectory.lookup_by_id(char_id) do
+      {:ok, info} -> info.name
+      _ ->
+        # Offline: look up from DB
+        case GameBackend.Repo.get(GameBackend.Characters, char_id) do
+          %{name: name} -> name
+          _ -> "ID:#{char_id}"
+        end
+    end
+  end
+
+  defp resolve_char_name(_), do: "Unknown"
 end
