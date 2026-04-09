@@ -56,8 +56,6 @@ reference and historical phase plan.
 - Client: weather rendering (rain particles), faction HUD display, party panel, clan panel
 
 **Remaining gaps across all phases:**
-- Item instance metadata: real per-item `elemental_tags` are not modeled end-to-end yet
-- Faction-exclusive item flags: Real/Caos item metadata is not parsed yet, so faction gear stripping on `/RENUNCIAR` is currently a no-op placeholder
 - Weather: snow rendering on client (server packet/state exists; rain rendering done)
 - Alchemy/tailoring recipe lists: framework exists, recipes sparse
 - Phase 15: monitoring dashboards, deployment pipeline, metric collection
