@@ -8,6 +8,7 @@ defmodule GameBackend.Guild do
   schema "guilds" do
     field :name, :string
     field :leader_id, :integer
+    field :founder_id, :integer
     field :description, :string, default: ""
     field :level, :integer, default: 1
     field :current_exp, :integer, default: 0
@@ -18,7 +19,7 @@ defmodule GameBackend.Guild do
     timestamps()
   end
 
-  @cast_fields [:name, :leader_id, :description, :level, :current_exp, :news, :url, :alignment]
+  @cast_fields [:name, :leader_id, :founder_id, :description, :level, :current_exp, :news, :url, :alignment]
 
   def changeset(guild, attrs) do
     guild
@@ -78,7 +79,7 @@ defmodule GameBackend.Guilds do
   @doc "Create a guild and insert the creator as leader member."
   def create_guild(char_id, name, alignment \\ 0) do
     Repo.transaction(fn ->
-      case %Guild{} |> Guild.changeset(%{name: name, leader_id: char_id, alignment: alignment}) |> Repo.insert() do
+      case %Guild{} |> Guild.changeset(%{name: name, leader_id: char_id, founder_id: char_id, alignment: alignment}) |> Repo.insert() do
         {:ok, guild} ->
           {:ok, member} =
             %GuildMember{}

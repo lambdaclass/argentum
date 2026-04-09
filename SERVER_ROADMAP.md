@@ -56,13 +56,18 @@ reference and historical phase plan.
 - Client: weather rendering (rain particles), faction HUD display, party panel, clan panel
 
 **Remaining backend gaps (gameplay tail):**
-1. ~~Weather map flags not wired~~ — **Verified: already working.** Parser reads rain/snow from .csm, MapServer stores in meta, session sends `rain_toggle`/`snow_toggle` packets on map enter.
-2. ~~Alchemy/tailoring/crafting data is sparse~~ — **Done.** Expanded from 11 to 90+ recipes: 49 blacksmithing (26 weapons + 22 armors + smelting), 28 carpentry (arrows, bows, instruments, staves, shields, boats), 9 alchemy (6 advanced pócimas), 26 tailoring (19 garments + 5 helmets + misc). All product IDs verified against .dat files.
-3. **Automated parity gate missing** — Packet trace replay, AO smoke bot, VB6 formula golden tests, property/fuzz, lifecycle tests, load/soak. Biggest "are we really done?" gap.
-4. **Recent migrations need real DB verification** — Run clean-db + existing-dev-db migration path; verify character/inventory/bank/guild/faction loads after migration.
-5. ~~Minor protocol tail~~ — **Verified: already handled.** `online` returns player count via `OnlineDirectory.online_count/0`. `use_spell_macro` is intentional no-op (server comment explains: client-side macro resolved via `cast_spell`).
-6. **Ops tail** — Dashboards, alerts, deploy pipeline, backup-restore, runbooks. Not gameplay, but backend production work (Phase 15 + 17).
-7. **Perf tail** — NPC aggro still scans all players; pet targeting scans all NPCs; no outbound backpressure; no load/soak gate. NPC broadcast AoI is fixed (Phase 17).
+1. **Active combat/death patch needs review + tests** — NPC per-hit XP, NPC `exp_count`, deep death cleanup, poison/starvation/GM kill, NPC-kills-player, pet handling, and reward conservation must compile, pass tests, and have regression coverage before merging.
+2. **NPC XP parity** — VB6 awards proportional XP on every damaging hit, caps by NPC `ExpCount`, and pays leftover `ExpCount` on kill. Killing pets must not award player XP.
+3. **Player death parity** — one death helper for every path; clear transient combat/status state, stop rest/meditate/trade/bank/shop, despawn/retarget pets as VB6 does, send ghost `character_change`, persist counters, and implement death recovery prompt.
+4. **Death inventory/equipment rules** — VB6 death can unequip/drop items depending on map/rules. Ghost visuals alone are not enough.
+5. **Death recovery / home travel** — implement `/HOGAR` / home-city recovery, or explicitly replace it with a documented modern flow.
+6. **NPC gold reward semantics** — inspected VB6 kill path drops `GiveGLD` as gold objects on the NPC tile. Current/direct patches that give gold directly or split party gold are a deliberate divergence unless backed by a verified AO20 trace.
+7. **Old guild UI protocol** — slash-command guilds work. The VB6 binary guild/clan UI packet family (details, member requests, lists, war/peace/alliance proposals, votes, etc.) is not decoded/routed.
+8. **Elemental/rune content support** — per-instance tags are persisted/protocol-visible. Current raw data scan found no active `IsElementalTagsOnly`, nonzero static `ElementalTags`, or elemental matrix values; defer unless content enables it. If enabled, parse static item/NPC tags, apply runes, enforce elemental-only spells, and apply `ElementalMatrixForNpcs`.
+9. **Automated parity gate missing** — Packet trace replay, AO smoke bot, VB6 formula golden tests, property/fuzz, lifecycle tests, load/soak. Biggest "are we really done?" gap.
+10. **Recent migrations need real DB verification** — Run clean-db + existing-dev-db migration path; verify character/inventory/bank/guild/faction loads after migration.
+11. **Ops tail** — Dashboards, alerts, deploy pipeline, backup-restore, runbooks. Not gameplay, but backend production work (Phase 15 + 17).
+12. **Perf tail** — NPC aggro still scans all players; pet targeting scans all NPCs; no outbound backpressure; no load/soak gate. NPC broadcast AoI is fixed (Phase 17).
 
 **Remaining non-backend gaps:**
 - Weather: snow rendering on client (server packet/state exists; rain rendering done)
@@ -79,7 +84,7 @@ For the full product order, use `ROADMAP.md`. Backend sequencing is:
 
 1. Stabilize the current branch: track all migrations, run migrations, run compile/tests from a clean checkout.
 2. Build the automated parity gate: VB6 packet replay, formula golden fixtures, property/fuzz tests, lifecycle tests, AO smoke bot, browser E2E, load/soak.
-3. Close backend compatibility tail: real per-instance `elemental_tags`, faction-exclusive item metadata, recipe data expansion, migration/runtime verification.
+3. Close backend compatibility tail in this order: finish/review combat-death patch, NPC per-hit XP + `exp_count`, player death side effects + `/HOGAR`, NPC gold drop/reward parity, old guild UI packet decision, elemental/rune content only if data enables it, migration/runtime verification.
 4. Close operations tail: metrics, dashboards, alerts, release/deploy pipeline, backup/restore and shutdown runbooks.
 5. Build post-compat account API only after the compatibility gate is green: username/password or Google account login, character list/create/select, character token issue, unchanged AO socket login.
 
@@ -130,7 +135,7 @@ patching or behavior-specific workarounds.
   - server→client: `change_spell_slot`, `character_change`, `character_remove`, `npc_hit_user`, `user_hitted_user`, `user_hitted_by_user`, `create_fx`, `play_wave`, `change_npc_inventory_slot`
   - client→server: `talk`, `whisper`, `attack`, `drop`, `cast_spell`, `left_click`, `use_item`, `equip_item` (packet_counter consumption added)
 - ~~Keep extension packets out of VB6 path~~ — **Done.** `session_token` (ID 200) is WS-only, injected by WsHandler, never sent on TCP.
-- Remaining: a few client→server packets are decoded but have no game logic handler yet (online, use_spell_macro). All major gameplay packets now have handlers: yell, whisper, rest, meditate, heal, resucitate, request_skills, request_atributes, request_mini_stats, bank ops, work/train, guild commands, GM commands, double_click, party_safe_toggle, faction commands.
+- Remaining: old guild/clan UI packet families are outside the current slash-command guild path. `online` returns player count; `use_spell_macro` is intentionally server-side no-op because the client resolves macros into `cast_spell`.
 
 ### Behavior parity backlog
 

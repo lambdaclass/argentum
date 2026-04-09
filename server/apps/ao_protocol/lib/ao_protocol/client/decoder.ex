@@ -310,6 +310,182 @@ defmodule AoProtocol.Client.Decoder do
   # VB6: eUserCommerceReject=92 (no payload)
   defp decode_packet(92, rest), do: {:ok, {:user_commerce_reject, %{}}, rest}
 
+  # --- Guild UI packets ---
+
+  # eCreateNewGuild=3 — desc(S8) + name(S8) + alignment(I8)
+  defp decode_packet(3, rest) do
+    with {:ok, desc, rest} <- Reader.read_string8(rest),
+         {:ok, name, rest} <- Reader.read_string8(rest),
+         {:ok, alignment, rest} <- Reader.read_int8(rest) do
+      {:ok, {:guild_create, %{description: desc, name: name, alignment: alignment}}, rest}
+    else
+      _ -> :incomplete
+    end
+  end
+
+  # eGuildAcceptPeace=17 (no payload)
+  defp decode_packet(17, rest), do: {:ok, {:guild_accept_peace, %{}}, rest}
+
+  # eGuildRejectAlliance=18 (no payload)
+  defp decode_packet(18, rest), do: {:ok, {:guild_reject_alliance, %{}}, rest}
+
+  # eGuildRejectPeace=19 (no payload)
+  defp decode_packet(19, rest), do: {:ok, {:guild_reject_peace, %{}}, rest}
+
+  # eGuildAcceptAlliance=20 (no payload)
+  defp decode_packet(20, rest), do: {:ok, {:guild_accept_alliance, %{}}, rest}
+
+  # eGuildOfferPeace=21 — guild(S8) + proposal(S8)
+  defp decode_packet(21, rest) do
+    with {:ok, guild, rest} <- Reader.read_string8(rest),
+         {:ok, proposal, rest} <- Reader.read_string8(rest) do
+      {:ok, {:guild_offer_peace, %{guild: guild, proposal: proposal}}, rest}
+    else
+      _ -> :incomplete
+    end
+  end
+
+  # eGuildOfferAlliance=22 — guild(S8) + proposal(S8)
+  defp decode_packet(22, rest) do
+    with {:ok, guild, rest} <- Reader.read_string8(rest),
+         {:ok, proposal, rest} <- Reader.read_string8(rest) do
+      {:ok, {:guild_offer_alliance, %{guild: guild, proposal: proposal}}, rest}
+    else
+      _ -> :incomplete
+    end
+  end
+
+  # eGuildAllianceDetails=23 — guild(S8)
+  defp decode_packet(23, rest) do
+    with {:ok, guild, rest} <- Reader.read_string8(rest) do
+      {:ok, {:guild_alliance_details, %{guild: guild}}, rest}
+    else
+      _ -> :incomplete
+    end
+  end
+
+  # eGuildPeaceDetails=24 — guild(S8)
+  defp decode_packet(24, rest) do
+    with {:ok, guild, rest} <- Reader.read_string8(rest) do
+      {:ok, {:guild_peace_details, %{guild: guild}}, rest}
+    else
+      _ -> :incomplete
+    end
+  end
+
+  # eGuildRequestJoinerInfo=25 — username(S8)
+  defp decode_packet(25, rest) do
+    with {:ok, username, rest} <- Reader.read_string8(rest) do
+      {:ok, {:guild_request_joiner_info, %{username: username}}, rest}
+    else
+      _ -> :incomplete
+    end
+  end
+
+  # eGuildDeclareWar=28 — guild(S8)
+  defp decode_packet(28, rest) do
+    with {:ok, guild, rest} <- Reader.read_string8(rest) do
+      {:ok, {:guild_declare_war, %{guild: guild}}, rest}
+    else
+      _ -> :incomplete
+    end
+  end
+
+  # eGuildAcceptNewMember=30 — username(S8)
+  defp decode_packet(30, rest) do
+    with {:ok, username, rest} <- Reader.read_string8(rest) do
+      {:ok, {:guild_accept_new_member, %{username: username}}, rest}
+    else
+      _ -> :incomplete
+    end
+  end
+
+  # eGuildRejectNewMember=31 — username(S8) + reason(S8)
+  defp decode_packet(31, rest) do
+    with {:ok, username, rest} <- Reader.read_string8(rest),
+         {:ok, reason, rest} <- Reader.read_string8(rest) do
+      {:ok, {:guild_reject_new_member, %{username: username, reason: reason}}, rest}
+    else
+      _ -> :incomplete
+    end
+  end
+
+  # eGuildKickMember=32 — username(S8)
+  defp decode_packet(32, rest) do
+    with {:ok, username, rest} <- Reader.read_string8(rest) do
+      {:ok, {:guild_kick_member, %{username: username}}, rest}
+    else
+      _ -> :incomplete
+    end
+  end
+
+  # eGuildUpdateNews=33 — news(S8)
+  defp decode_packet(33, rest) do
+    with {:ok, news, rest} <- Reader.read_string8(rest) do
+      {:ok, {:guild_update_news, %{news: news}}, rest}
+    else
+      _ -> :incomplete
+    end
+  end
+
+  # eGuildMemberInfo=34 — username(S8)
+  defp decode_packet(34, rest) do
+    with {:ok, username, rest} <- Reader.read_string8(rest) do
+      {:ok, {:guild_member_info, %{username: username}}, rest}
+    else
+      _ -> :incomplete
+    end
+  end
+
+  # eGuildOpenElections=35 (no payload)
+  defp decode_packet(35, rest), do: {:ok, {:guild_open_elections, %{}}, rest}
+
+  # eGuildRequestMembership=36 — guild(S8) + application(S8)
+  defp decode_packet(36, rest) do
+    with {:ok, guild, rest} <- Reader.read_string8(rest),
+         {:ok, application, rest} <- Reader.read_string8(rest) do
+      {:ok, {:guild_request_membership, %{guild: guild, application: application}}, rest}
+    else
+      _ -> :incomplete
+    end
+  end
+
+  # eGuildRequestDetails=37 — guild(S8)
+  defp decode_packet(37, rest) do
+    with {:ok, guild, rest} <- Reader.read_string8(rest) do
+      {:ok, {:guild_request_details, %{guild: guild}}, rest}
+    else
+      _ -> :incomplete
+    end
+  end
+
+  # eGuildLeave=40 (no payload)
+  defp decode_packet(40, rest), do: {:ok, {:guild_leave, %{}}, rest}
+
+  # eGuildMessage=59 — chat(S8)
+  defp decode_packet(59, rest) do
+    with {:ok, chat, rest} <- Reader.read_string8(rest) do
+      {:ok, {:guild_message, %{message: chat}}, rest}
+    else
+      _ -> :incomplete
+    end
+  end
+
+  # eGuildOnline=60 (no payload)
+  defp decode_packet(60, rest), do: {:ok, {:guild_online, %{}}, rest}
+
+  # eGuildVote=65 — vote(S8)
+  defp decode_packet(65, rest) do
+    with {:ok, vote, rest} <- Reader.read_string8(rest) do
+      {:ok, {:guild_vote, %{vote: vote}}, rest}
+    else
+      _ -> :incomplete
+    end
+  end
+
+  # eRequestGuildLeaderInfo=84 (no payload)
+  defp decode_packet(84, rest), do: {:ok, {:request_guild_leader_info, %{}}, rest}
+
   # Unknown packet
   defp decode_packet(id, _rest), do: {:error, {:unknown_packet, id}}
 

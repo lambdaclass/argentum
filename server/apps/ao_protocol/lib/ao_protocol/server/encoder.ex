@@ -199,6 +199,69 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.guild_chat(), payload)
   end
 
+  # eguildList (ID 56) — guild_names separated by SEPARATOR
+  def encode({:guild_list, params}) do
+    payload = Writer.write_string8(params[:guild_names] || "")
+    Writer.build_packet(PacketIds.Server.guild_list(), payload)
+  end
+
+  # eguildNews (ID 89) — news(S8) + guildList(S8) + memberList(S8) + level(I8) + exp(I16) + expNeeded(I16)
+  def encode({:guild_news, params}) do
+    payload =
+      Writer.write_string8(params[:news] || "") <>
+        Writer.write_string8(params[:guild_list] || "") <>
+        Writer.write_string8(params[:member_list] || "") <>
+        Writer.write_int8(params[:level] || 1) <>
+        Writer.write_int16(params[:current_exp] || 0) <>
+        Writer.write_int16(params[:needed_exp] || 0)
+    Writer.build_packet(PacketIds.Server.guild_news(), payload)
+  end
+
+  # eGuildLeaderInfo (ID 94) — guildList(S8) + memberList(S8) + news(S8) + requests(S8) + level(I8) + exp(I16) + expNeeded(I16)
+  def encode({:guild_leader_info, params}) do
+    payload =
+      Writer.write_string8(params[:guild_list] || "") <>
+        Writer.write_string8(params[:member_list] || "") <>
+        Writer.write_string8(params[:news] || "") <>
+        Writer.write_string8(params[:requests] || "") <>
+        Writer.write_int8(params[:level] || 1) <>
+        Writer.write_int16(params[:current_exp] || 0) <>
+        Writer.write_int16(params[:needed_exp] || 0)
+    Writer.build_packet(PacketIds.Server.guild_leader_info(), payload)
+  end
+
+  # eGuildDetails (ID 95) — name(S8) + founder(S8) + date(S8) + leader(S8) + members(I16) + alignment(S8) + desc(S8) + level(I8)
+  def encode({:guild_details, params}) do
+    payload =
+      Writer.write_string8(params[:name] || "") <>
+        Writer.write_string8(params[:founder] || "") <>
+        Writer.write_string8(params[:date] || "") <>
+        Writer.write_string8(params[:leader] || "") <>
+        Writer.write_int16(params[:member_count] || 0) <>
+        Writer.write_string8(params[:alignment] || "") <>
+        Writer.write_string8(params[:description] || "") <>
+        Writer.write_int8(params[:level] || 1)
+    Writer.build_packet(PacketIds.Server.guild_details(), payload)
+  end
+
+  # eShowGuildFundationForm (ID 96) — no payload
+  def encode({:show_guild_fundation_form, _params}) do
+    Writer.build_packet(PacketIds.Server.show_guild_fundation_form(), <<>>)
+  end
+
+  # eGuildConfig (ID 201) — 5 config bytes + membersByLevel array
+  def encode({:guild_config, params}) do
+    members_by_level = params[:members_by_level] || [10, 20, 30, 40, 50, 60, 70]
+    payload =
+      Writer.write_int8(params[:level_call_support] || 3) <>
+        Writer.write_int8(params[:level_see_invisible] || 5) <>
+        Writer.write_int8(params[:level_safe] || 2) <>
+        Writer.write_int8(params[:level_show_hp_bar] || 4) <>
+        Writer.write_int8(params[:max_guild_level] || 7) <>
+        Enum.reduce(members_by_level, <<>>, fn count, acc -> acc <> Writer.write_int8(count) end)
+    Writer.build_packet(PacketIds.Server.guild_config(), payload)
+  end
+
   # eChatOverHead (ID 35) — chat(String8) + charindex(Int16) + Color(Int32) +
   #   EsSpell(Bool) + x(Int8) + y(Int8) + RequiredMinDisplayTime(Int16) + MaxDisplayTime(Int16)
   def encode({:chat_over_head, params}) do

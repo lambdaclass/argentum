@@ -111,6 +111,12 @@ defmodule AoProtocol.PacketIds do
     def console_msg, do: 37
     def console_faction_message, do: 38
     def guild_chat, do: 39
+    def guild_list, do: 56
+    def guild_news, do: 89
+    def guild_leader_info, do: 94
+    def guild_details, do: 95
+    def show_guild_fundation_form, do: 96
+    def guild_config, do: 201
 
     # Characters
     def character_create, do: 42

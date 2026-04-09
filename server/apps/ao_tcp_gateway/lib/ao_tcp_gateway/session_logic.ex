@@ -630,6 +630,144 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
+  # --- Guild binary UI packets ---
+
+  def handle_command(state, {:guild_create, %{name: name, alignment: alignment}})
+      when state.character_id != nil do
+    Arena.GuildServer.create_guild(state.character_id, name, alignment)
+    {state, []}
+  end
+
+  def handle_command(state, {:guild_leave, _}) when state.character_id != nil do
+    Arena.GuildServer.leave(state.character_id)
+    {state, []}
+  end
+
+  def handle_command(state, {:guild_message, %{message: msg}}) when state.character_id != nil do
+    Arena.GuildServer.guild_chat(state.character_id, msg)
+    {state, []}
+  end
+
+  def handle_command(state, {:guild_online, _}) when state.character_id != nil do
+    case Arena.GuildServer.guild_online(state.character_id) do
+      {:ok, names} ->
+        msg = AoProtocol.Server.Encoder.encode({:console_msg, %{message: "Miembros online: #{Enum.join(names, ", ")}", font_index: 0}})
+        {state, [{:send_raw, msg}]}
+      :not_in_guild ->
+        {state, []}
+    end
+  end
+
+  def handle_command(state, {:guild_declare_war, %{guild: guild_name}}) when state.character_id != nil do
+    Arena.GuildServer.declare_war(state.character_id, guild_name)
+    {state, []}
+  end
+
+  def handle_command(state, {:guild_offer_peace, %{guild: guild_name}}) when state.character_id != nil do
+    Arena.GuildServer.propose_peace(state.character_id, guild_name)
+    {state, []}
+  end
+
+  def handle_command(state, {:guild_offer_alliance, %{guild: guild_name}}) when state.character_id != nil do
+    Arena.GuildServer.propose_alliance(state.character_id, guild_name)
+    {state, []}
+  end
+
+  def handle_command(state, {:guild_kick_member, %{username: target_name}}) when state.character_id != nil do
+    case AoSession.OnlineDirectory.lookup_by_name(target_name) do
+      {:ok, target_id, _info} -> Arena.GuildServer.kick(state.character_id, target_id)
+      :not_found -> send_console(state, "Jugador no encontrado.")
+    end
+    {state, []}
+  end
+
+  def handle_command(state, {:guild_update_news, %{news: news}}) when state.character_id != nil do
+    Arena.GuildServer.set_guild_news(state.character_id, news)
+    {state, []}
+  end
+
+  def handle_command(state, {:guild_request_membership, %{guild: guild_name, application: desc}})
+      when state.character_id != nil do
+    Arena.GuildServer.request_membership(state.character_id, guild_name, desc)
+    {state, []}
+  end
+
+  def handle_command(state, {:guild_accept_new_member, %{username: target_name}}) when state.character_id != nil do
+    Arena.GuildServer.accept_request(state.character_id, target_name)
+    {state, []}
+  end
+
+  def handle_command(state, {:guild_reject_new_member, %{username: target_name}}) when state.character_id != nil do
+    Arena.GuildServer.reject_request(state.character_id, target_name)
+    {state, []}
+  end
+
+  def handle_command(state, {:guild_request_details, %{guild: guild_name}}) when state.character_id != nil do
+    # Send guild details UI packet
+    case Arena.GuildServer.find_guild_by_name(guild_name) do
+      {:ok, guild} ->
+        leader_name = case AoSession.OnlineDirectory.lookup_by_id(guild.leader) do
+          {:ok, info} -> info.name
+          _ -> "Unknown"
+        end
+        msg = AoProtocol.Server.Encoder.encode({:guild_details, %{
+          name: guild.name,
+          founder: leader_name,
+          date: "",
+          leader: leader_name,
+          member_count: length(guild.members),
+          alignment: Arena.GuildAlignment.name(guild.alignment),
+          description: guild.description || "",
+          level: guild.level
+        }})
+        {state, [{:send_raw, msg}]}
+      :not_found ->
+        send_console(state, "Clan no encontrado.")
+        {state, []}
+    end
+  end
+
+  def handle_command(state, {:request_guild_leader_info, _}) when state.character_id != nil do
+    case Arena.GuildServer.guild_info(state.character_id) do
+      {:ok, guild, required} ->
+        member_names = for mid <- guild.members do
+          case AoSession.OnlineDirectory.lookup_by_id(mid) do
+            {:ok, info} -> info.name
+            _ -> "ID:#{mid}"
+          end
+        end
+        requests = case Arena.GuildServer.list_requests(state.character_id) do
+          {:ok, reqs} -> reqs
+          _ -> []
+        end
+        required_int = if required == :max, do: 0, else: required
+        msg = AoProtocol.Server.Encoder.encode({:guild_leader_info, %{
+          guild_list: "",
+          member_list: Enum.join(member_names, "-"),
+          news: guild.news || "",
+          requests: Enum.join(requests, "-"),
+          level: guild.level,
+          current_exp: guild.current_exp,
+          needed_exp: required_int
+        }})
+        {state, [{:send_raw, msg}]}
+      :not_in_guild ->
+        {state, []}
+    end
+  end
+
+  # Catch-all for unimplemented guild binary packets
+  def handle_command(state, {:guild_accept_peace, _}) when state.character_id != nil, do: {state, []}
+  def handle_command(state, {:guild_reject_alliance, _}) when state.character_id != nil, do: {state, []}
+  def handle_command(state, {:guild_reject_peace, _}) when state.character_id != nil, do: {state, []}
+  def handle_command(state, {:guild_accept_alliance, _}) when state.character_id != nil, do: {state, []}
+  def handle_command(state, {:guild_alliance_details, _}) when state.character_id != nil, do: {state, []}
+  def handle_command(state, {:guild_peace_details, _}) when state.character_id != nil, do: {state, []}
+  def handle_command(state, {:guild_request_joiner_info, _}) when state.character_id != nil, do: {state, []}
+  def handle_command(state, {:guild_member_info, _}) when state.character_id != nil, do: {state, []}
+  def handle_command(state, {:guild_open_elections, _}) when state.character_id != nil, do: {state, []}
+  def handle_command(state, {:guild_vote, _}) when state.character_id != nil, do: {state, []}
+
   def handle_command(state, {command_type, _}) do
     Logger.debug("Unhandled command: #{command_type}")
     {state, []}

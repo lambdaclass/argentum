@@ -225,34 +225,34 @@ defmodule Arena.Map.CombatHandlers do
               remove_raw = Encoder.encode({:character_remove, %{char_index: npc.char_index}})
               Visibility.broadcast_visible_all(state, npc.x, npc.y, fn pid -> send(pid, {:send_raw, remove_raw}) end)
 
-              # Award XP (with party split) — no XP for killing pets
+              # Per-hit XP on the killing blow (no XP for killing pets)
+              {entity, state} = if npc.owner_id == nil do
+                award_hit_xp(state, char_id, entity, final_damage, npc_def, instance_id)
+              else
+                {entity, state}
+              end
+
+              # Kill rewards (counter, guild XP, gold, loot) — no rewards for killing pets
               state = if npc.owner_id == nil do
                 entity = %{entity | npcs_killed: entity.npcs_killed + 1}
-                give_exp = if npc_def, do: npc_def.give_exp, else: 0
-                npc_level = if npc_def, do: npc_def.npc_level, else: 1
-                xp_gained = Combat.xp_gain(final_damage, give_exp, npc.max_hp, entity.level, npc_level)
-                {entity_xp, state} = award_xp_with_party(state, char_id, entity, xp_gained)
 
                 # Award guild XP on NPC kill
-                if xp_gained > 0 do
+                give_exp = if npc_def, do: npc_def.give_exp, else: 0
+                if give_exp > 0 do
                   case Arena.GuildServer.guild_id_for(char_id) do
                     nil -> :ok
-                    gid -> Arena.GuildServer.add_guild_exp(gid, max(div(xp_gained, 10), 1))
+                    gid -> Arena.GuildServer.add_guild_exp(gid, max(div(give_exp, 10), 1))
                   end
                 end
 
-                # Award gold
+                # Award gold (with party split)
                 give_gld = if npc_def, do: npc_def.give_gld, else: 0
-                entity_xp = if give_gld > 0, do: %{entity_xp | gold: entity_xp.gold + give_gld}, else: entity_xp
-                if give_gld > 0 do
-                  Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                    Encoder.encode({:update_gold, %{gold: entity_xp.gold}})})
-                end
+                {entity, state} = award_gold_with_party(state, char_id, entity, give_gld)
 
                 # Drop loot
                 state = drop_npc_loot(state, npc, npc_def)
 
-                players = Map.put(state.players, char_id, entity_xp)
+                players = Map.put(state.players, char_id, entity)
                 %{state | players: players}
               else
                 players = Map.put(state.players, char_id, entity)
@@ -265,6 +265,13 @@ defmodule Arena.Map.CombatHandlers do
               # NPC acquires target on being hit
               npc = %{npc | target_id: char_id}
               state = put_in(state.npcs_live[instance_id], npc)
+
+              # VB6: per-hit proportional XP (no XP for hitting pets)
+              {entity, state} = if npc.owner_id == nil do
+                award_hit_xp(state, char_id, entity, final_damage, npc_def, instance_id)
+              else
+                {entity, state}
+              end
 
               players = Map.put(state.players, char_id, entity)
               %{state | players: players}
@@ -376,12 +383,12 @@ defmodule Arena.Map.CombatHandlers do
                 guild_war = Arena.GuildServer.players_at_war?(char_id, defender_id)
                 entity = if not defender.criminal and not guild_war, do: %{entity | criminal: true}, else: entity
 
-                defender = if new_hp <= 0 do
+                {defender, state} = if new_hp <= 0 do
                   Helpers.send_to_session(state.sessions, defender_id, {:send_raw,
                     Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})})
-                  %{defender | dead: true, deaths: defender.deaths + 1}
+                  handle_player_death(state, defender_id, defender)
                 else
-                  defender
+                  {defender, state}
                 end
 
                 # Faction score + kill counters + guild XP on PvP kill
@@ -695,26 +702,35 @@ defmodule Arena.Map.CombatHandlers do
               remove_raw = Encoder.encode({:character_remove, %{char_index: npc.char_index}})
               Visibility.broadcast_visible_all(state, npc.x, npc.y, fn pid -> send(pid, {:send_raw, remove_raw}) end)
 
+              # Per-hit XP on the killing blow (no XP for killing pets)
+              {entity, state} = if npc.owner_id == nil do
+                award_hit_xp(state, char_id, entity, final_damage, npc_def, instance_id)
+              else
+                {entity, state}
+              end
+
+              # Kill rewards (counter, guild XP, loot) — no rewards for killing pets
               state = if npc.owner_id == nil do
                 entity = %{entity | npcs_killed: entity.npcs_killed + 1}
-                give_exp = if npc_def, do: npc_def.give_exp, else: 0
-                npc_level = if npc_def, do: npc_def.npc_level, else: 1
-                xp_gained = Combat.xp_gain(final_damage, give_exp, npc.max_hp, entity.level, npc_level)
-                {entity_xp, state} = award_xp_with_party(state, char_id, entity, xp_gained)
 
                 # Award guild XP on NPC spell kill
-                if xp_gained > 0 do
+                give_exp = if npc_def, do: npc_def.give_exp, else: 0
+                if give_exp > 0 do
                   case Arena.GuildServer.guild_id_for(char_id) do
                     nil -> :ok
-                    gid -> Arena.GuildServer.add_guild_exp(gid, max(div(xp_gained, 10), 1))
+                    gid -> Arena.GuildServer.add_guild_exp(gid, max(div(give_exp, 10), 1))
                   end
                 end
 
+                # Award gold (with party split)
+                give_gld = if npc_def, do: npc_def.give_gld, else: 0
+                {entity, state} = award_gold_with_party(state, char_id, entity, give_gld)
+
                 Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                  Encoder.encode({:update_mana, %{min_mana: entity_xp.mana}})})
+                  Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
 
                 state = drop_npc_loot(state, npc, npc_def)
-                players = Map.put(state.players, char_id, entity_xp)
+                players = Map.put(state.players, char_id, entity)
                 %{state | players: players}
               else
                 Helpers.send_to_session(state.sessions, char_id, {:send_raw,
@@ -727,6 +743,14 @@ defmodule Arena.Map.CombatHandlers do
             else
               npc = %{npc | target_id: char_id}
               state = put_in(state.npcs_live[instance_id], npc)
+
+              # VB6: per-hit proportional XP (no XP for hitting pets)
+              {entity, state} = if npc.owner_id == nil do
+                award_hit_xp(state, char_id, entity, final_damage, npc_def, instance_id)
+              else
+                {entity, state}
+              end
+
               Helpers.send_to_session(state.sessions, char_id, {:send_raw,
                 Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
               players = Map.put(state.players, char_id, entity)
@@ -782,12 +806,12 @@ defmodule Arena.Map.CombatHandlers do
             guild_war = Arena.GuildServer.players_at_war?(char_id, target_id)
             entity = if not defender.criminal and not guild_war, do: %{entity | criminal: true}, else: entity
 
-            defender = if new_hp <= 0 do
+            {defender, state} = if new_hp <= 0 do
               Helpers.send_to_session(state.sessions, target_id, {:send_raw,
                 Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})})
-              %{defender | dead: true, deaths: defender.deaths + 1}
+              handle_player_death(state, target_id, defender)
             else
-              defender
+              {defender, state}
             end
 
             # Faction score + kill counters + guild XP on PvP spell kill
@@ -1133,12 +1157,12 @@ defmodule Arena.Map.CombatHandlers do
 
     # Check poison death
     was_alive = not entity.dead
-    entity = if entity.hp <= 0 and was_alive do
+    {entity, state} = if entity.hp <= 0 and was_alive do
       Helpers.send_to_session(state.sessions, char_id, {:send_raw,
         Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})})
-      %{entity | dead: true, deaths: entity.deaths + 1}
+      handle_player_death(state, char_id, entity)
     else
-      entity
+      {entity, state}
     end
 
     players = Map.put(state.players, char_id, entity)
@@ -1196,6 +1220,44 @@ defmodule Arena.Map.CombatHandlers do
   defp send_xp_update(state, char_id, entity) do
     Helpers.send_to_session(state.sessions, char_id, {:send_raw,
       Encoder.encode({:update_exp, %{current_xp: entity.xp, next_xp: GameData.exp_for_level(entity.level + 1) || 0}})})
+  end
+
+  @doc "VB6 group gold: split NPC gold among killer + nearby party members."
+  defp award_gold_with_party(state, char_id, entity, give_gld) do
+    if give_gld <= 0 do
+      {entity, state}
+    else
+      nearby = Arena.PartyServer.nearby_members(char_id, state.players)
+
+      if nearby == [] do
+        # Solo — full gold
+        entity = %{entity | gold: entity.gold + give_gld}
+        Helpers.send_to_session(state.sessions, char_id, {:send_raw,
+          Encoder.encode({:update_gold, %{gold: entity.gold}})})
+        {entity, state}
+      else
+        # Split among killer + nearby party members
+        share_count = length(nearby) + 1
+        share = max(div(give_gld, share_count), 1)
+
+        entity = %{entity | gold: entity.gold + share}
+        Helpers.send_to_session(state.sessions, char_id, {:send_raw,
+          Encoder.encode({:update_gold, %{gold: entity.gold}})})
+
+        state = Enum.reduce(nearby, state, fn mid, state ->
+          case Map.get(state.players, mid) do
+            nil -> state
+            member ->
+              member = %{member | gold: member.gold + share}
+              Helpers.send_to_session(state.sessions, mid, {:send_raw,
+                Encoder.encode({:update_gold, %{gold: member.gold}})})
+              %{state | players: Map.put(state.players, mid, member)}
+          end
+        end)
+
+        {entity, state}
+      end
+    end
   end
 
   def check_level_up(entity, sessions, char_id) do
@@ -1260,6 +1322,84 @@ defmodule Arena.Map.CombatHandlers do
       check_level_up(entity, sessions, char_id)
     else
       entity
+    end
+  end
+
+  @doc """
+  VB6 deep death: clear all transient combat/status state.
+  Called from every path that sets dead: true.
+  Despawns pets owned by the dying player.
+  """
+  def handle_player_death(state, char_id, player) do
+    player = %{player |
+      dead: true,
+      deaths: player.deaths + 1,
+      stamina: 0,
+      hunger: 0,
+      thirst: 0,
+      paralyzed: false,
+      invisible: false,
+      poisoned: false,
+      meditating: false,
+      resting: false,
+      immobilized: false,
+      buffs: [],
+      commerce_npc_id: nil,
+      bank_npc_id: nil,
+      trade_partner_id: nil,
+      trade_request_target: nil,
+      trade_offer_gold: 0,
+      trade_offer_items: [],
+      trade_accepted: false
+    }
+
+    # Despawn all pets owned by this player
+    pet_ids =
+      state.npcs_live
+      |> Enum.filter(fn {_id, npc} -> npc.owner_id == char_id end)
+      |> Enum.map(fn {id, _npc} -> id end)
+
+    state = Enum.reduce(pet_ids, state, fn instance_id, st ->
+      case Map.get(st.npcs_live, instance_id) do
+        nil -> st
+        npc -> Arena.NpcAi.despawn_pet(st, instance_id, npc)
+      end
+    end)
+
+    {player, state}
+  end
+
+  @doc """
+  VB6 per-hit XP: award proportional XP on each damaging hit, not just on kill.
+  xp = damage * give_exp / max_hp (with level penalty).
+  Capped by NPC's remaining exp_count pool to prevent over-awarding.
+  """
+  def award_hit_xp(state, char_id, entity, final_damage, npc_def, instance_id) do
+    if npc_def == nil or final_damage <= 0 do
+      {entity, state}
+    else
+      give_exp = npc_def.give_exp || 0
+      npc_level = npc_def.npc_level || 1
+      npc_max_hp = max(npc_def.max_hp, 1)
+      xp_gained = Combat.xp_gain(final_damage, give_exp, npc_max_hp, entity.level, npc_level)
+
+      # VB6 ExpCount pool: cap XP at remaining pool, deduct from NPC
+      npc_live = Map.get(state.npcs_live, instance_id)
+      {xp_gained, state} = if npc_live != nil and xp_gained > 0 do
+        available = npc_live.exp_count
+        capped = min(xp_gained, available)
+        npc_live = %{npc_live | exp_count: available - capped}
+        state = put_in(state.npcs_live[instance_id], npc_live)
+        {capped, state}
+      else
+        {xp_gained, state}
+      end
+
+      if xp_gained > 0 do
+        award_xp_with_party(state, char_id, entity, xp_gained)
+      else
+        {entity, state}
+      end
     end
   end
 
@@ -1452,7 +1592,11 @@ defmodule Arena.Map.CombatHandlers do
         hp_changed = entity.hp != original_entity.hp
 
         # Kill on starvation
-        entity = if entity.hp <= 0 and not entity.dead, do: %{entity | hp: 0, dead: true, deaths: entity.deaths + 1}, else: entity
+        {entity, state} = if entity.hp <= 0 and not entity.dead do
+          handle_player_death(state, char_id, %{entity | hp: 0})
+        else
+          {entity, state}
+        end
 
         # Regen (blocked by starvation/dehydration)
         entity =

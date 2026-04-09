@@ -6,9 +6,10 @@ of truth for sequencing.
 
 ## Current Status
 
-- **Backend gameplay:** close to VB6 parity. The remaining work is a short tail
-  of item metadata, faction item metadata, operations, migration/runtime
-  validation, and parity automation.
+- **Backend gameplay:** close, but not finishable until the explicit VB6 parity
+  tail below is closed or deliberately reclassified. The highest-risk tail is
+  combat/death rewards, death recovery, NPC gold semantics, old guild UI
+  packets, runtime/migration validation, and parity automation.
 - **Web client:** playable development client. The remaining work is the modern
   account/character lobby, weather/social polish, authoritative party/clan UI
   state, trade metadata display, E2E coverage, and UX polish.
@@ -23,6 +24,9 @@ of truth for sequencing.
 ### 0. Stabilize the current branch
 
 - Commit or intentionally discard any leftover generated migrations/files.
+- Finish/review the active combat patch before doing unrelated work: NPC
+  per-hit XP, NPC `exp_count`, centralized player death cleanup, NPC/player
+  death call sites, GM kill, poison, starvation, and NPC-player kill paths.
 - Run the new migrations on a dev database.
 - Run the current server and client checks once from a clean checkout.
 - Update the top-level current-status sections after every large merge.
@@ -86,13 +90,37 @@ Create these suites and keep them green:
 
 ### 2. Close the backend compatibility tail
 
-- Model per-instance inventory metadata needed for real `elemental_tags`.
-- Send real `elemental_tags` in trade packet 100 instead of defaulting unknown
-  metadata.
-- Parse faction-exclusive item flags and strip Real/Caos-only gear when a
-  player leaves a faction.
-- Expand recipe data from `.dat` / canonical tables instead of growing sparse
-  hardcoded lists forever.
+- **NPC XP parity:** VB6 awards proportional XP on every damaging hit, caps it
+  with an NPC-side remaining `ExpCount`, and pays any leftover on kill. Keep
+  party XP split working and do not award XP for hitting/killing pets.
+- **Player death parity:** all death paths must enter one helper. Match the VB6
+  side effects that affect gameplay: HP/stamina/target/combat-status cleanup,
+  poison/paralysis/invisibility/buff cleanup, meditation/rest cleanup, open
+  commerce/bank/trade cleanup, pet handling, ghost character change, persistence
+  of counters, and death prompt/recovery flow.
+- **Death inventory/equipment rules:** implement or explicitly defer the VB6
+  drop/unequip rules for non-safe maps. The ghost packet hiding equipment is not
+  the same thing as unequipping/dropping items.
+- **Death recovery / home travel:** implement the `/HOGAR` / home-city recovery
+  path and/or document the replacement flow. Spell/NPC resurrection alone is not
+  enough for the classic "dead player returns home" loop.
+- **NPC gold parity:** audit and choose the target behavior. In the inspected
+  VB6 path, NPC `GiveGLD` is dropped on the NPC tile as gold items; one old
+  group-gold helper exists, but was not found as the main kill path. Current
+  Elixir/direct patches that add gold to a killer or split it to a party are a
+  behavior choice and need a parity test.
+- **Old guild UI protocol:** guild/clan gameplay exists via slash commands and
+  backend state. If the unmodified VB6 guild window must work, add the old
+  binary guild/clan request/list/news/war/alliance/election packet family, or
+  explicitly mark that UI as not targeted.
+- **Elemental/rune content:** per-instance `elemental_tags` are persisted,
+  banked, traded, and sent. Current raw data appears dormant for elemental-only
+  spells / NPC tags / damage matrix; keep this as future content support unless
+  new data enables it. If enabled, parse static item/NPC tags, enforce
+  elemental-only spell targeting, support elemental rune application, and apply
+  `ElementalMatrixForNpcs`.
+- **Home/rune/mount audit:** home city is stored and boats/navigation exist.
+  Audit classic runes/home travel and mounts before declaring world-item parity.
 - Run and verify all recent migrations in a real dev database.
 - Keep auditing edge cases against VB6 only by adding a failing parity test
   first.

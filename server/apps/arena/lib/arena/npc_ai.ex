@@ -57,7 +57,8 @@ defmodule Arena.NpcAi do
         hp: max(hp, 1), alive: true, target_id: nil,
         x: x, y: y, respawn_at: nil,
         next_attack_at: -1_000_000_000_000,
-        next_move_at: -1_000_000_000_000
+        next_move_at: -1_000_000_000_000,
+        exp_count: if(npc_def, do: npc_def.give_exp || 0, else: 0)
       }
 
       occupancy = Helpers.set_occupancy(state.occupancy, x, y, {:npc, instance_id})
@@ -487,14 +488,14 @@ defmodule Arena.NpcAi do
                   send(pid, {:send_raw, Encoder.encode({:npc_hit_user, %{damage: damage}})})
                   send(pid, {:send_raw, Encoder.encode({:update_hp, %{min_hp: new_hp}})})
                 end
-                player = if new_hp <= 0 do
+                {player, state} = if new_hp <= 0 do
                   if pid do
                     send(pid, {:send_raw, Encoder.encode({:npc_kill_user, %{}})})
                     send(pid, {:send_raw, Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})})
                   end
-                  %{player | dead: true, deaths: player.deaths + 1}
+                  Arena.Map.CombatHandlers.handle_player_death(state, target_id, player)
                 else
-                  player
+                  {player, state}
                 end
                 players = Map.put(state.players, target_id, player)
                 state = %{state | players: players}
@@ -556,6 +557,7 @@ defmodule Arena.NpcAi do
                 send(pid, {:send_raw, Encoder.encode({:update_hp, %{min_hp: new_hp}})})
               end
 
+              target_char_id = npc.target_id
               {player, state} = if new_hp <= 0 do
                 if pid do
                   send(pid, {:send_raw, Encoder.encode({:npc_kill_user, %{}})})
@@ -563,12 +565,12 @@ defmodule Arena.NpcAi do
                 end
                 npc = %{npc | target_id: nil}
                 state = put_in(state.npcs_live[instance_id], npc)
-                {%{player | dead: true, deaths: player.deaths + 1}, state}
+                Arena.Map.CombatHandlers.handle_player_death(state, target_char_id, player)
               else
                 {player, state}
               end
 
-              players = Map.put(state.players, npc.target_id, player)
+              players = Map.put(state.players, target_char_id, player)
               state = %{state | players: players}
               if player.dead, do: Helpers.broadcast_character_change(state, player)
               state

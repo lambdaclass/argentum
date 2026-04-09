@@ -22,7 +22,9 @@ defmodule Arena.Entity.NpcEntity do
     next_spell_at: -1_000_000_000_000,
     respawn_at: nil,
     # Pet ownership: nil for wild NPCs, char_id for tamed pets
-    owner_id: nil
+    owner_id: nil,
+    # VB6 ExpCount pool: total XP available to award, decremented per hit
+    exp_count: 0
   ]
 
   @doc "Create an NpcEntity from a definition, placing it at the given coordinates."
@@ -44,7 +46,8 @@ defmodule Arena.Entity.NpcEntity do
       hp: hp,
       max_hp: max(hp, 1),
       spawn_x: x,
-      spawn_y: y
+      spawn_y: y,
+      exp_count: npc_def.give_exp || 0
     }
   end
 end

@@ -128,6 +128,18 @@ defmodule Arena.GuildServer do
     GenServer.call(__MODULE__, {:set_description, char_id, description})
   end
 
+  @doc "Find a guild by name. Pure ETS scan."
+  def find_guild_by_name(name) do
+    upper = String.upcase(name)
+    result = :ets.foldl(fn
+      {{:guild, _id}, guild}, nil ->
+        if String.upcase(guild.name) == upper, do: guild, else: nil
+      _, acc -> acc
+    end, nil, @table)
+
+    if result, do: {:ok, result}, else: :not_found
+  end
+
   @doc "Get guild info for display. Pure ETS read."
   def guild_info(char_id) do
     case get_guild(char_id) do
@@ -272,6 +284,8 @@ defmodule Arena.GuildServer do
               id: guild_id,
               name: name,
               leader: char_id,
+              founder_id: char_id,
+              created_at: db_guild.inserted_at,
               members: [char_id],
               level: 1,
               current_exp: 0,
@@ -893,6 +907,8 @@ defmodule Arena.GuildServer do
           id: db_guild.id,
           name: db_guild.name,
           leader: db_guild.leader_id,
+          founder_id: db_guild.founder_id || db_guild.leader_id,
+          created_at: db_guild.inserted_at,
           members: member_ids,
           level: db_guild.level || 1,
           current_exp: db_guild.current_exp || 0,
