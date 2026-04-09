@@ -8,8 +8,8 @@ of truth for sequencing.
 
 - **Backend gameplay:** close, but not finishable until the explicit VB6 parity
   tail below is closed or deliberately reclassified. The highest-risk tail is
-  combat/death rewards, death recovery, NPC gold semantics, old guild UI
-  packets, runtime/migration validation, and parity automation.
+  death recovery, old guild UI packet hardening, runtime/migration validation,
+  parity automation, and the ops/performance tail.
 - **Web client:** playable development client. The remaining work is the modern
   account/character lobby, weather/social polish, authoritative party/clan UI
   state, trade metadata display, E2E coverage, and UX polish.
@@ -24,9 +24,7 @@ of truth for sequencing.
 ### 0. Stabilize the current branch
 
 - Commit or intentionally discard any leftover generated migrations/files.
-- Finish/review the active combat patch before doing unrelated work: NPC
-  per-hit XP, NPC `exp_count`, centralized player death cleanup, NPC/player
-  death call sites, GM kill, poison, starvation, and NPC-player kill paths.
+- Finish/review any active local combat patch before doing unrelated work.
 - Run the new migrations on a dev database.
 - Run the current server and client checks once from a clean checkout.
 - Update the top-level current-status sections after every large merge.
@@ -90,29 +88,31 @@ Create these suites and keep them green:
 
 ### 2. Close the backend compatibility tail
 
-- **NPC XP parity:** VB6 awards proportional XP on every damaging hit, caps it
-  with an NPC-side remaining `ExpCount`, and pays any leftover on kill. Keep
-  party XP split working and do not award XP for hitting/killing pets.
-- **Player death parity:** all death paths must enter one helper. Match the VB6
-  side effects that affect gameplay: HP/stamina/target/combat-status cleanup,
-  poison/paralysis/invisibility/buff cleanup, meditation/rest cleanup, open
-  commerce/bank/trade cleanup, pet handling, ghost character change, persistence
-  of counters, and death prompt/recovery flow.
-- **Death inventory/equipment rules:** implement or explicitly defer the VB6
-  drop/unequip rules for non-safe maps. The ghost packet hiding equipment is not
-  the same thing as unequipping/dropping items.
+Done in the recent backend parity pass; keep covered by tests:
+
+- **NPC XP parity:** proportional per-hit XP, NPC-side `exp_count`, party XP
+  split, and pet XP guard are implemented.
+- **Player death entry points:** PvP, NPC, poison, starvation, and GM kill paths
+  enter one death helper.
+- **Player death cleanup:** death clears transient combat/status state, closes
+  trade/bank/commerce state, despawns owned pets, increments death counters, and
+  broadcasts ghost visuals.
+- **Death inventory/equipment rules:** active death cleanup unequips equipped
+  items and drops droppable inventory on unsafe maps.
+- **NPC gold parity:** active combat code drops NPC `GiveGLD` as a gold ground
+  object at the NPC death tile.
+- **Guild backend depth:** guild persistence, tags, levels/XP, metadata,
+  alignment, requests/aspirants, wars, peace, alliances, successor promotion,
+  and old guild UI response encoders are implemented.
+
+Still open before calling backend compatibility done:
+
 - **Death recovery / home travel:** implement the `/HOGAR` / home-city recovery
   path and/or document the replacement flow. Spell/NPC resurrection alone is not
   enough for the classic "dead player returns home" loop.
-- **NPC gold parity:** audit and choose the target behavior. In the inspected
-  VB6 path, NPC `GiveGLD` is dropped on the NPC tile as gold items; one old
-  group-gold helper exists, but was not found as the main kill path. Current
-  Elixir/direct patches that add gold to a killer or split it to a party are a
-  behavior choice and need a parity test.
-- **Old guild UI protocol:** guild/clan gameplay exists via slash commands and
-  backend state. If the unmodified VB6 guild window must work, add the old
-  binary guild/clan request/list/news/war/alliance/election packet family, or
-  explicitly mark that UI as not targeted.
+- **Old guild UI client packet hardening:** gameplay and many UI responses
+  exist. Finish decoder/routing parity for the old guild window and add packet
+  replay tests so a wrong payload length cannot desync the TCP stream.
 - **Elemental/rune content:** per-instance `elemental_tags` are persisted,
   banked, traded, and sent. Current raw data appears dormant for elemental-only
   spells / NPC tags / damage matrix; keep this as future content support unless

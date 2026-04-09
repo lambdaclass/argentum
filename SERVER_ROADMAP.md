@@ -55,19 +55,22 @@ reference and historical phase plan.
 - Benchmark harness, benchmark maps, metrics, CI/release workflows, web test client
 - Client: weather rendering (rain particles), faction HUD display, party panel, clan panel
 
+**Recently closed backend parity items:**
+1. **NPC XP parity** — proportional per-hit XP, NPC-side `exp_count`, party XP split, and pet XP guard are implemented.
+2. **Player death entry points** — PvP, NPC, poison, starvation, and GM kill paths enter one death helper.
+3. **Player death cleanup** — death clears transient combat/status state, closes trade/bank/commerce state, despawns owned pets, increments death counters, and broadcasts ghost visuals.
+4. **Death inventory/equipment rules** — active death cleanup unequips equipped items and drops droppable inventory on unsafe maps.
+5. **NPC gold reward semantics** — active combat code drops NPC `GiveGLD` as a gold ground object at the NPC death tile.
+6. **Guild backend depth** — persistence, tags, levels/XP, metadata, alignment, requests/aspirants, wars, peace, alliances, successor promotion, and old UI response encoders are implemented.
+
 **Remaining backend gaps (gameplay tail):**
-1. **Active combat/death patch needs review + tests** — NPC per-hit XP, NPC `exp_count`, deep death cleanup, poison/starvation/GM kill, NPC-kills-player, pet handling, and reward conservation must compile, pass tests, and have regression coverage before merging.
-2. **NPC XP parity** — VB6 awards proportional XP on every damaging hit, caps by NPC `ExpCount`, and pays leftover `ExpCount` on kill. Killing pets must not award player XP.
-3. **Player death parity** — one death helper for every path; clear transient combat/status state, stop rest/meditate/trade/bank/shop, despawn/retarget pets as VB6 does, send ghost `character_change`, persist counters, and implement death recovery prompt.
-4. **Death inventory/equipment rules** — VB6 death can unequip/drop items depending on map/rules. Ghost visuals alone are not enough.
-5. **Death recovery / home travel** — implement `/HOGAR` / home-city recovery, or explicitly replace it with a documented modern flow.
-6. **NPC gold reward semantics** — inspected VB6 kill path drops `GiveGLD` as gold objects on the NPC tile. Current/direct patches that give gold directly or split party gold are a deliberate divergence unless backed by a verified AO20 trace.
-7. **Old guild UI protocol** — slash-command guilds work. The VB6 binary guild/clan UI packet family (details, member requests, lists, war/peace/alliance proposals, votes, etc.) is not decoded/routed.
-8. **Elemental/rune content support** — per-instance tags are persisted/protocol-visible. Current raw data scan found no active `IsElementalTagsOnly`, nonzero static `ElementalTags`, or elemental matrix values; defer unless content enables it. If enabled, parse static item/NPC tags, apply runes, enforce elemental-only spells, and apply `ElementalMatrixForNpcs`.
-9. **Automated parity gate missing** — Packet trace replay, AO smoke bot, VB6 formula golden tests, property/fuzz, lifecycle tests, load/soak. Biggest "are we really done?" gap.
-10. **Recent migrations need real DB verification** — Run clean-db + existing-dev-db migration path; verify character/inventory/bank/guild/faction loads after migration.
-11. **Ops tail** — Dashboards, alerts, deploy pipeline, backup-restore, runbooks. Not gameplay, but backend production work (Phase 15 + 17).
-12. **Perf tail** — NPC aggro still scans all players; pet targeting scans all NPCs; no outbound backpressure; no load/soak gate. NPC broadcast AoI is fixed (Phase 17).
+1. **Death recovery / home travel** — implement `/HOGAR` / home-city recovery, or explicitly replace it with a documented modern flow.
+2. **Old guild UI client packet hardening** — gameplay and many UI responses exist. Finish decoder/routing parity for the old guild window, including payload-consuming no-op packets, and add packet replay tests.
+3. **Elemental/rune content support** — per-instance tags are persisted/protocol-visible. Current raw data scan found no active `IsElementalTagsOnly`, nonzero static `ElementalTags`, or elemental matrix values; defer unless content enables it. If enabled, parse static item/NPC tags, apply runes, enforce elemental-only spells, and apply `ElementalMatrixForNpcs`.
+4. **Automated parity gate missing** — Packet trace replay, AO smoke bot, VB6 formula golden tests, property/fuzz, lifecycle tests, load/soak. Biggest "are we really done?" gap.
+5. **Recent migrations need real DB verification** — Run clean-db + existing-dev-db migration path; verify character/inventory/bank/guild/faction loads after migration.
+6. **Ops tail** — Dashboards, alerts, deploy pipeline, backup-restore, runbooks. Not gameplay, but backend production work (Phase 15 + 17).
+7. **Perf tail** — NPC aggro still scans all players; pet targeting scans all NPCs; no outbound backpressure; no load/soak gate. NPC broadcast AoI is fixed (Phase 17).
 
 **Remaining non-backend gaps:**
 - Weather: snow rendering on client (server packet/state exists; rain rendering done)
@@ -84,7 +87,7 @@ For the full product order, use `ROADMAP.md`. Backend sequencing is:
 
 1. Stabilize the current branch: track all migrations, run migrations, run compile/tests from a clean checkout.
 2. Build the automated parity gate: VB6 packet replay, formula golden fixtures, property/fuzz tests, lifecycle tests, AO smoke bot, browser E2E, load/soak.
-3. Close backend compatibility tail in this order: finish/review combat-death patch, NPC per-hit XP + `exp_count`, player death side effects + `/HOGAR`, NPC gold drop/reward parity, old guild UI packet decision, elemental/rune content only if data enables it, migration/runtime verification.
+3. Close backend compatibility tail in this order: `/HOGAR` death recovery, old guild UI packet hardening + replay tests, elemental/rune content only if data enables it, migration/runtime verification.
 4. Close operations tail: metrics, dashboards, alerts, release/deploy pipeline, backup/restore and shutdown runbooks.
 5. Build post-compat account API only after the compatibility gate is green: username/password or Google account login, character list/create/select, character token issue, unchanged AO socket login.
 
@@ -135,7 +138,11 @@ patching or behavior-specific workarounds.
   - server→client: `change_spell_slot`, `character_change`, `character_remove`, `npc_hit_user`, `user_hitted_user`, `user_hitted_by_user`, `create_fx`, `play_wave`, `change_npc_inventory_slot`
   - client→server: `talk`, `whisper`, `attack`, `drop`, `cast_spell`, `left_click`, `use_item`, `equip_item` (packet_counter consumption added)
 - ~~Keep extension packets out of VB6 path~~ — **Done.** `session_token` (ID 200) is WS-only, injected by WsHandler, never sent on TCP.
-- Remaining: old guild/clan UI packet families are outside the current slash-command guild path. `online` returns player count; `use_spell_macro` is intentionally server-side no-op because the client resolves macros into `cast_spell`.
+- Remaining: old guild/clan UI response encoders and core routes exist. Harden
+  the remaining client→server UI packet decoders/routes and add VB6 packet
+  replay tests. `online` returns player count; `use_spell_macro` is
+  intentionally server-side no-op because the client resolves macros into
+  `cast_spell`.
 
 ### Behavior parity backlog
 
@@ -151,14 +158,19 @@ patching or behavior-specific workarounds.
   - ~~FX packets using wrong field name (fx_id vs fx)~~ — **Done.** Fixed in social.ex meditate/resurrect.
   - ~~duplicated packet builder in SessionLogic~~ — **Done.** Removed; all sites use Helpers.character_create_packet.
   - ~~hunger/thirst drain missing~~ — **Done.** Drain by 1 per regen tick, starvation damage at 0, regen blocked.
-- Remaining open items:
-  - interval clamps that may still differ from raw VB6 data-driven timing
-  - ongoing invisibility / AI / spell-selection edge-case review
   - ~~trainer NPC gating for skill training~~ — **Done.** Proximity check for npc_type 3 (entrenador) + gold cost (`max(current * 10, 10)`) + update_gold packet.
   - ~~trade packet 100 full VB6 shape~~ — **Done.** Encoder includes name/GRH/tags fields.
   - ~~`party_safe_toggle` handler~~ — **Done.** PartyServer.safe_toggle/1 toggles `:safe` flag on party, combat_handlers checks `party_safe?/2`.
   - ~~hunger/thirst VB6 semantics~~ — **Done.** Interval counters (@hunger_thirst_drain_interval=10), stamina pressure before HP damage, starvation kills at 0 HP.
   - ~~faction system~~ — **Done.** `faction` field on PlayerEntity (:none/:royal_army/:chaos_legion), enlist/leave via `/ENLISTAR`/`/RENUNCIAR`, faction-gated map restrictions, same-faction PvP block, faction chat via `/FACCION`, faction_status in mini_stats.
+  - ~~NPC per-hit XP + exp_count~~ — **Done.** XP is awarded on damaging hits and capped by the live NPC pool.
+  - ~~deep player death helper~~ — **Done.** PvP, NPC, poison, starvation, and GM kill enter the same cleanup path.
+  - ~~NPC gold drop~~ — **Done.** NPC `GiveGLD` drops as a gold ground object.
+- Remaining open items:
+  - `/HOGAR` / home-city death recovery
+  - old guild UI decoder/route hardening and replay tests
+  - interval clamps that may still differ from raw VB6 data-driven timing
+  - ongoing invisibility / AI / spell-selection edge-case review
 
 ### Compatibility test gate
 
@@ -726,9 +738,9 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 - 22 unit tests covering all combat formulas
 
 **Remaining gaps:**
-- Ranged attacks (bows/arrows)
-- Player-vs-player and player-vs-NPC integration tests
 - Golden-value / VB6 compatibility verification
+- More player-vs-player and player-vs-NPC integration tests for the death,
+  inventory-drop, NPC gold-drop, XP-pool, pet, and party paths
 
 **Goal:** Players can fight NPCs and other players with melee, ranged, and unarmed attacks.
 
@@ -782,9 +794,7 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 - Left-click target tracking in session state for spell targeting
 
 **Remaining gaps:**
-- Buff/debuff duration timers (paralysis/poison wear off)
-- Summon spells (invoca)
-- Resurrection spells
+- Summon-spell / pet edge-case verification against VB6
 - Spell verification against VB6 behavior
 
 **Goal:** Players can cast offensive, healing, and buff/debuff spells.
@@ -827,9 +837,9 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 - Loot drops on NPC death (probabilistic from loot table)
 
 **Remaining gaps:**
-- Shopkeeper interaction (comercia + shop_items parsed but unused)
 - Quest NPC interaction
-- NPC spell casting (lanza_spells + spells parsed but unused)
+- NPC aggro/targeting performance hardening
+- NPC spell-casting and hostile-AI parity verification against VB6 traces
 
 **Goal:** NPCs walk around, attack players, sell items, give quests.
 
@@ -1017,7 +1027,8 @@ This already exists and works. Do not expand Rust scope unless profiling shows a
 - ~~Safe zones~~ — **Done.**
 - ~~Criminal system~~ — **Done.**
 - ~~Rest/meditate~~ — **Done.**
-- ~~Hunger/thirst drain~~ — **Done** (but semantics differ from VB6 — see behavior parity backlog).
+- ~~Hunger/thirst drain~~ — **Done.** VB6-style interval counters + stamina
+  pressure before HP damage.
 - ~~Pets/taming~~ — **Done.** Taming skill, pet AI follow/attack/despawn, owner_id/pet_ids fields
 - ~~GM commands~~ — **Done.** 13 commands: teleport, spawn item, invisible, goto, info, kill, kick, ban, mute, unmute, jail, spawn NPC, locate
 - ~~Weather server-side~~ — **Done.** rain_toggle on enter/transfer. Client renders rain particles

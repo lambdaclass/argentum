@@ -245,9 +245,9 @@ defmodule Arena.Map.CombatHandlers do
                   end
                 end
 
-                # Award gold (with party split)
+                # VB6: NPCTirarOro — drop gold on the floor at NPC position
                 give_gld = if npc_def, do: npc_def.give_gld, else: 0
-                {entity, state} = award_gold_with_party(state, char_id, entity, give_gld)
+                state = drop_npc_gold(state, npc, give_gld)
 
                 # Drop loot
                 state = drop_npc_loot(state, npc, npc_def)
@@ -722,9 +722,9 @@ defmodule Arena.Map.CombatHandlers do
                   end
                 end
 
-                # Award gold (with party split)
+                # VB6: NPCTirarOro — drop gold on the floor at NPC position
                 give_gld = if npc_def, do: npc_def.give_gld, else: 0
-                {entity, state} = award_gold_with_party(state, char_id, entity, give_gld)
+                state = drop_npc_gold(state, npc, give_gld)
 
                 Helpers.send_to_session(state.sessions, char_id, {:send_raw,
                   Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
@@ -1222,41 +1222,19 @@ defmodule Arena.Map.CombatHandlers do
       Encoder.encode({:update_exp, %{current_xp: entity.xp, next_xp: GameData.exp_for_level(entity.level + 1) || 0}})})
   end
 
-  # VB6 group gold: split NPC gold among killer + nearby party members.
-  defp award_gold_with_party(state, char_id, entity, give_gld) do
-    if give_gld <= 0 do
-      {entity, state}
+  # VB6: NPCTirarOro — drop gold on the floor at the NPC's death position.
+  # Gold item ID 12 (iORO), capped at @max_stack per ground tile.
+  @gold_item_id 12
+  defp drop_npc_gold(state, _npc, give_gld) when give_gld <= 0, do: state
+  defp drop_npc_gold(state, npc, give_gld) do
+    pos = {npc.x, npc.y}
+    unless Map.has_key?(state.ground_items, pos) do
+      ground_items = Map.put(state.ground_items, pos, %{item_id: @gold_item_id, amount: give_gld, elemental_tags: 0})
+      state = %{state | ground_items: ground_items}
+      Helpers.broadcast_object_create(state, npc.x, npc.y, @gold_item_id, give_gld)
+      state
     else
-      nearby = Arena.PartyServer.nearby_members(char_id, state.players)
-
-      if nearby == [] do
-        # Solo — full gold
-        entity = %{entity | gold: entity.gold + give_gld}
-        Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-          Encoder.encode({:update_gold, %{gold: entity.gold}})})
-        {entity, state}
-      else
-        # Split among killer + nearby party members
-        share_count = length(nearby) + 1
-        share = max(div(give_gld, share_count), 1)
-
-        entity = %{entity | gold: entity.gold + share}
-        Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-          Encoder.encode({:update_gold, %{gold: entity.gold}})})
-
-        state = Enum.reduce(nearby, state, fn mid, state ->
-          case Map.get(state.players, mid) do
-            nil -> state
-            member ->
-              member = %{member | gold: member.gold + share}
-              Helpers.send_to_session(state.sessions, mid, {:send_raw,
-                Encoder.encode({:update_gold, %{gold: member.gold}})})
-              %{state | players: Map.put(state.players, mid, member)}
-          end
-        end)
-
-        {entity, state}
-      end
+      state
     end
   end
 
@@ -1353,6 +1331,16 @@ defmodule Arena.Map.CombatHandlers do
       trade_accepted: false
     }
 
+    # VB6: unequip all equipped items on death
+    {player, unequipped_slots} = unequip_all_on_death(player)
+
+    # VB6: TirarTodosLosItems — drop inventory on ground in unsafe zones
+    {player, state} = if not Map.get(state.meta || %{}, :safe_zone, false) do
+      drop_inventory_on_death(state, player)
+    else
+      {player, state}
+    end
+
     # Despawn all pets owned by this player
     pet_ids =
       state.npcs_live
@@ -1366,7 +1354,71 @@ defmodule Arena.Map.CombatHandlers do
       end
     end)
 
+    # Send unequip slot updates to client
+    for slot <- unequipped_slots do
+      Helpers.send_inventory_slot(state.sessions, char_id, player.inventory, slot)
+    end
+
+    # VB6: /HOGAR message in unsafe zones
+    if not Map.get(state.meta || %{}, :safe_zone, false) do
+      Helpers.send_to_session(state.sessions, char_id, {:send_raw,
+        Encoder.encode({:console_msg, %{message: "Escribe /HOGAR si deseas regresar rápido a tu hogar.", font_index: 5}})})
+    end
+
     {player, state}
+  end
+
+  # Unequip all equipped items. Returns {updated_player, list_of_changed_slot_indices}.
+  defp unequip_all_on_death(player) do
+    {new_inventory, changed_slots} =
+      player.inventory
+      |> Enum.with_index()
+      |> Enum.reduce({player.inventory, []}, fn {item, idx}, {inv, slots} ->
+        if item != nil and item.equipped do
+          new_item = %{item | equipped: false}
+          {List.replace_at(inv, idx, new_item), [idx | slots]}
+        else
+          {inv, slots}
+        end
+      end)
+
+    equipment = %{weapon: nil, armor: nil, shield: nil, helmet: nil, ring: nil}
+    player = %{player | inventory: new_inventory, equipment: equipment}
+    {player, changed_slots}
+  end
+
+  # Drop all non-newbie items on the ground at player position.
+  # VB6: TirarTodosLosItems — drops each item from inventory to the floor.
+  defp drop_inventory_on_death(state, player) do
+    {new_inventory, state} =
+      player.inventory
+      |> Enum.with_index()
+      |> Enum.reduce({player.inventory, state}, fn {item, idx}, {inv, st} ->
+        if item != nil do
+          item_def = GameData.get_item(item.item_id)
+          # VB6: don't drop newbie items or quest items
+          newbie = item_def != nil and Map.get(item_def, :newbie, false)
+          if newbie do
+            {inv, st}
+          else
+            pos = {player.x, player.y}
+            # Only drop if tile doesn't already have a ground item
+            st = unless Map.has_key?(st.ground_items, pos) do
+              ground_items = Map.put(st.ground_items, pos, %{item_id: item.item_id, amount: item.amount, elemental_tags: Map.get(item, :elemental_tags, 0)})
+              st = %{st | ground_items: ground_items}
+              Helpers.broadcast_object_create(st, player.x, player.y, item.item_id, item.amount, Map.get(item, :elemental_tags, 0))
+              st
+            else
+              st
+            end
+            {List.replace_at(inv, idx, nil), st}
+          end
+        else
+          {inv, st}
+        end
+      end)
+
+    {%{player | inventory: new_inventory}, state}
   end
 
   @doc """
