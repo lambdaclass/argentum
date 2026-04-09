@@ -26,7 +26,7 @@ defmodule Arena.Map.Trade do
           item_tags = Map.get(inv_item, :elemental_tags, 0)
 
           # Add or update the offered item in trade_offer_items
-          existing = Enum.find_index(entity.trade_offer_items, fn {id, _, _} -> id == obj_index end)
+          existing = Enum.find_index(entity.trade_offer_items, fn {id, _, t} -> id == obj_index and t == item_tags end)
 
           trade_items =
             if existing do
@@ -275,7 +275,8 @@ defmodule Arena.Map.Trade do
     Enum.reduce(giver.trade_offer_items, {giver, receiver}, fn {obj_index, amount, tags}, {g, r} ->
       # Find the slot in giver's inventory that holds this item
       slot_idx = Enum.find_index(g.inventory, fn
-        %{item_id: ^obj_index, equipped: false} -> true
+        %{item_id: ^obj_index, equipped: false} = item ->
+          Map.get(item, :elemental_tags, 0) == tags
         _ -> false
       end)
 

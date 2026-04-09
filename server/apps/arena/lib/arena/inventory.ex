@@ -21,7 +21,7 @@ defmodule Arena.Inventory do
         {:gold, amount}
 
       item_def != nil and item_def.stackable ->
-        add_stackable(inventory, item_id, amount)
+        add_stackable(inventory, item_id, amount, elemental_tags)
 
       true ->
         add_to_empty_slot(inventory, item_id, amount, elemental_tags)
@@ -144,10 +144,10 @@ defmodule Arena.Inventory do
   defp gender_allowed?(%{gender_restriction: :any}, _), do: true
   defp gender_allowed?(%{gender_restriction: required}, char_gender), do: required == char_gender
 
-  defp add_stackable(inventory, item_id, amount) do
-    case find_stack_slot(inventory, item_id) do
+  defp add_stackable(inventory, item_id, amount, elemental_tags \\ 0) do
+    case find_stack_slot(inventory, item_id, elemental_tags) do
       nil ->
-        add_to_empty_slot(inventory, item_id, amount)
+        add_to_empty_slot(inventory, item_id, amount, elemental_tags)
 
       idx ->
         item = Enum.at(inventory, idx)
@@ -168,9 +168,10 @@ defmodule Arena.Inventory do
     end
   end
 
-  defp find_stack_slot(inventory, item_id) do
+  defp find_stack_slot(inventory, item_id, elemental_tags \\ 0) do
     Enum.find_index(inventory, fn
-      %{item_id: ^item_id, equipped: false} -> true
+      %{item_id: ^item_id, equipped: false} = item ->
+        Map.get(item, :elemental_tags, 0) == elemental_tags
       _ -> false
     end)
   end

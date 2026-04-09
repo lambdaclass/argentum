@@ -106,8 +106,8 @@ defmodule Arena.Map.Bank do
                 state = %{state | players: players}
 
                 # Upsert into bank DB
-                bank_slot = if slot_destino > 0, do: slot_destino, else: find_bank_slot(entity.char_id, inv_item.item_id)
                 inv_tags = Map.get(inv_item, :elemental_tags, 0)
+                bank_slot = if slot_destino > 0, do: slot_destino, else: find_bank_slot(entity.char_id, inv_item.item_id, inv_tags)
                 upsert_bank_item(entity.char_id, bank_slot, inv_item.item_id, amount, inv_tags)
 
                 # Send updated inventory slot
@@ -274,10 +274,10 @@ defmodule Arena.Map.Bank do
     GameBackend.Characters.save_snapshot(char_id, %{bank_gold: amount})
   end
 
-  def find_bank_slot(char_id, item_id) do
+  def find_bank_slot(char_id, item_id, elemental_tags \\ 0) do
     bank_items = GameBackend.BankItems.get_bank(char_id)
-    # Try to stack on existing slot with same item
-    case Enum.find(bank_items, fn bi -> bi.item_id == item_id end) do
+    # Try to stack on existing slot with same item AND same elemental_tags
+    case Enum.find(bank_items, fn bi -> bi.item_id == item_id and (bi.elemental_tags || 0) == elemental_tags end) do
       nil ->
         # Find first empty slot (1-based)
         used = MapSet.new(bank_items, & &1.slot)
