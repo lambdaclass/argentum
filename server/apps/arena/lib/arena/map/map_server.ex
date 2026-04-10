@@ -123,6 +123,11 @@ defmodule Arena.Map.MapServer do
   def pet_leave(map_id, char_id), do: GenServer.cast(via(map_id), {:pet_leave, char_id})
   def pet_leave_all(map_id, char_id), do: GenServer.cast(via(map_id), {:pet_leave_all, char_id})
   def move_spell(map_id, char_id, upwards, slot), do: GenServer.cast(via(map_id), {:move_spell, char_id, upwards, slot})
+  def modify_skills(map_id, char_id, points), do: GenServer.cast(via(map_id), {:modify_skills, char_id, points})
+  def change_description(map_id, char_id, desc), do: GenServer.cast(via(map_id), {:change_description, char_id, desc})
+  def spell_info(map_id, char_id, slot), do: GenServer.cast(via(map_id), {:spell_info, char_id, slot})
+  def move_item(map_id, char_id, from_slot, to_slot), do: GenServer.cast(via(map_id), {:move_item, char_id, from_slot, to_slot})
+  def modify_gold(map_id, char_id, amount), do: GenServer.cast(via(map_id), {:modify_gold, char_id, amount})
 
   @doc "Check if a map process is loaded and ready to accept commands."
   def ready?(map_id) do
@@ -425,6 +430,16 @@ defmodule Arena.Map.MapServer do
   def handle_cast({:pet_leave_all, char_id}, state), do: Social.handle_pet_leave_all(state, char_id)
   @impl true
   def handle_cast({:move_spell, char_id, upwards, slot}, state), do: Social.handle_move_spell(state, char_id, upwards, slot)
+  @impl true
+  def handle_cast({:modify_skills, char_id, points}, state), do: Social.handle_modify_skills(state, char_id, points)
+  @impl true
+  def handle_cast({:change_description, char_id, desc}, state), do: Social.handle_change_description(state, char_id, desc)
+  @impl true
+  def handle_cast({:spell_info, char_id, slot}, state), do: Social.handle_spell_info(state, char_id, slot)
+  @impl true
+  def handle_cast({:move_item, char_id, from_slot, to_slot}, state), do: Social.handle_move_item(state, char_id, from_slot, to_slot)
+  @impl true
+  def handle_cast({:modify_gold, char_id, amount}, state), do: Social.handle_modify_gold(state, char_id, amount)
 
   # ---- Timers ----
 

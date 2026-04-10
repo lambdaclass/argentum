@@ -142,6 +142,9 @@ defmodule Arena.Entity.PlayerEntity do
     # Pets: list of NPC instance IDs owned by this player (not persisted across sessions)
     pet_ids: [],
 
+    # Player description (VB6: /DESC)
+    description: "",
+
     # Chat moderation: mute expiry (monotonic ms, 0 = not muted)
     muted_until: 0,
     # Chat rate limit: last chat timestamp (monotonic ms, 0 = never)

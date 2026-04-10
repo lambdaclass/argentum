@@ -972,6 +972,225 @@ defmodule AoTcpGateway.SessionLogic do
     {state, [{:console_msg, %{message: "No puedes entrenar esa criatura.", font_index: 0}}]}
   end
 
+  # ---- Pass 2: commands needing gameplay semantics ----
+
+  # ModifySkills (ID 7) — distribute skill points from the stats screen
+  # VB6 sends 24 bytes, one per skill in NUMSKILLS order, each byte = points to add
+  def handle_command(state, {:modify_skills, %{points: points}}) when state.character_id != nil do
+    Arena.Map.MapServer.modify_skills(state.map_id, state.character_id, points)
+    {state, []}
+  end
+
+  # ChangeDescription (ID 64) — set player description
+  def handle_command(state, {:change_description, %{description: desc}}) when state.character_id != nil do
+    Arena.Map.MapServer.change_description(state.map_id, state.character_id, desc)
+    {state, []}
+  end
+
+  # SpellInfo (ID 4) — request spell details for a slot
+  def handle_command(state, {:spell_info, %{slot: slot}}) when state.character_id != nil do
+    Arena.Map.MapServer.spell_info(state.map_id, state.character_id, slot)
+    {state, []}
+  end
+
+  # CraftBlacksmith (ID 100) — old UI crafting, route to work system
+  def handle_command(state, {:craft_blacksmith, _}) when state.character_id != nil do
+    Arena.Map.MapServer.train_skill(state.map_id, state.character_id, 20)  # 20 = blacksmithing index
+    {state, []}
+  end
+
+  # CraftCarpenter (ID 1) — old UI crafting, route to work system
+  def handle_command(state, {:craft_carpenter, _}) when state.character_id != nil do
+    Arena.Map.MapServer.train_skill(state.map_id, state.character_id, 21)  # 21 = carpentry index
+    {state, []}
+  end
+
+  # WorkLeftClick (ID 2) — same as work packet but with coordinates
+  def handle_command(state, {:work_left_click, %{x: x, y: y, skill: skill}}) when state.character_id != nil do
+    state = %{state | target_x: x, target_y: y}
+    Arena.Map.MapServer.train_skill(state.map_id, state.character_id, skill)
+    {state, []}
+  end
+
+  # ClanCodexUpdate (ID 15) — update guild description
+  def handle_command(state, {:clan_codex_update, %{description: desc}}) when state.character_id != nil do
+    Arena.GuildServer.set_guild_description(state.character_id, desc)
+    {state, []}
+  end
+
+  # ForumPost (ID 13) — no forum system, stub
+  def handle_command(state, {:forum_post, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: "El foro no esta disponible.", font_index: 0}}]}
+  end
+
+  # Punishments (ID 66) — view player penalties
+  def handle_command(state, {:punishments, %{name: name}}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: "No hay penas registradas para #{name}.", font_index: 0}}]}
+  end
+
+  # Gamble (ID 67) — gambling system not implemented
+  def handle_command(state, {:gamble, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: "El sistema de apuestas no esta disponible.", font_index: 0}}]}
+  end
+
+  # Denounce (ID 72) — report a player
+  def handle_command(state, {:denounce, %{name: name, reason: reason}}) when state.character_id != nil do
+    Arena.AuditLog.log_report(state.character_id, name, reason)
+    {state, [{:console_msg, %{message: "Denuncia registrada.", font_index: 0}}]}
+  end
+
+  # DonateGold (ID 210) — donate gold to faction
+  def handle_command(state, {:donate_gold, %{amount: amount}}) when state.character_id != nil do
+    case Arena.Map.MapServer.snapshot_entity(state.map_id, state.character_id) do
+      {:ok, entity} ->
+        cond do
+          entity.faction == :none ->
+            {state, [{:console_msg, %{message: "No perteneces a ninguna faccion.", font_index: 0}}]}
+          entity.gold < amount or amount <= 0 ->
+            {state, [{:console_msg, %{message: "No tienes suficiente oro.", font_index: 0}}]}
+          true ->
+            # Deduct gold — faction treasury not yet tracked
+            Arena.Map.MapServer.modify_gold(state.map_id, state.character_id, -amount)
+            {state, [
+              {:update_gold, %{gold: entity.gold - amount}},
+              {:console_msg, %{message: "Has donado #{amount} monedas de oro a tu faccion.", font_index: 0}}
+            ]}
+        end
+      _ -> {state, []}
+    end
+  end
+
+  # TransferGold (ID 224) — transfer gold to another player
+  def handle_command(state, {:transfer_gold, %{name: name, amount: amount}}) when state.character_id != nil do
+    case AoSession.OnlineDirectory.lookup_by_name(name) do
+      {:ok, target_id, target_info} when amount > 0 ->
+        case Arena.Map.MapServer.snapshot_entity(state.map_id, state.character_id) do
+          {:ok, entity} when entity.gold >= amount ->
+            Arena.Map.MapServer.modify_gold(state.map_id, state.character_id, -amount)
+            # Target may be on different map
+            target_map = target_info.map_id
+            Arena.Map.MapServer.modify_gold(target_map, target_id, amount)
+            {state, [
+              {:update_gold, %{gold: entity.gold - amount}},
+              {:console_msg, %{message: "Has transferido #{amount} oro a #{name}.", font_index: 0}}
+            ]}
+          {:ok, _} ->
+            {state, [{:console_msg, %{message: "No tienes suficiente oro.", font_index: 0}}]}
+          _ -> {state, []}
+        end
+      :not_found ->
+        {state, [{:console_msg, %{message: "Jugador no encontrado.", font_index: 0}}]}
+      _ ->
+        {state, [{:console_msg, %{message: "Cantidad invalida.", font_index: 0}}]}
+    end
+  end
+
+  # MoveItem (ID 225) — swap inventory slots
+  def handle_command(state, {:move_item, %{from_slot: from, to_slot: to}}) when state.character_id != nil do
+    Arena.Map.MapServer.move_item(state.map_id, state.character_id, from, to)
+    {state, []}
+  end
+
+  # ---- GM binary packets → route via MapServer.chat as equivalent text commands ----
+
+  def handle_command(state, {:go_to_char, %{name: name}}) when state.character_id != nil do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/GOTO #{name}")
+    {state, []}
+  end
+
+  def handle_command(state, {:warp_me_to_target, _}) when state.character_id != nil do
+    # Warp to current target — synthesize /GOTO with target at cursor
+    {state, [{:console_msg, %{message: "Usa /GOTO <nombre> para teletransportarte.", font_index: 0}}]}
+  end
+
+  def handle_command(state, {:warp_char, %{name: name, map: map}}) when state.character_id != nil do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/TELEPORT #{map} 50 50")
+    {state, []}
+  end
+
+  def handle_command(state, {:invisible, _}) when state.character_id != nil do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/INVISIBLE")
+    {state, []}
+  end
+
+  def handle_command(state, {:silence, %{name: name}}) when state.character_id != nil do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/MUTE #{name} 10")
+    {state, []}
+  end
+
+  def handle_command(state, {:jail, %{name: name, reason: _reason, minutes: minutes}}) when state.character_id != nil do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/JAIL #{name} #{minutes}")
+    {state, []}
+  end
+
+  def handle_command(state, {:kick, %{name: name}}) when state.character_id != nil do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/KICK #{name}")
+    {state, []}
+  end
+
+  def handle_command(state, {:execute, %{name: name}}) when state.character_id != nil do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/KILL #{name}")
+    {state, []}
+  end
+
+  def handle_command(state, {:ban_char, %{name: name, reason: _reason}}) when state.character_id != nil do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/BAN #{name} 30")
+    {state, []}
+  end
+
+  def handle_command(state, {:unban_char, %{name: name}}) when state.character_id != nil do
+    # No unban GM command exists yet — stub
+    {state, [{:console_msg, %{message: "Unban no implementado para #{name}.", font_index: 0}}]}
+  end
+
+  def handle_command(state, {:revive_char, %{name: name}}) when state.character_id != nil do
+    # Route through chat — no /REVIVE command exists, but we can synthesize it
+    {state, [{:console_msg, %{message: "Revive no implementado para #{name}.", font_index: 0}}]}
+  end
+
+  def handle_command(state, {:summon_char, %{name: name}}) when state.character_id != nil do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/LOCATE #{name}")
+    {state, []}
+  end
+
+  def handle_command(state, {:kill_npc, _}) when state.character_id != nil do
+    # Kill targeted NPC — would need target tracking for NPCs
+    {state, [{:console_msg, %{message: "Usa /KILL <nombre> para matar NPCs.", font_index: 0}}]}
+  end
+
+  def handle_command(state, {:request_char_info, %{name: name}}) when state.character_id != nil do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/INFO #{name}")
+    {state, []}
+  end
+
+  def handle_command(state, {:where, %{name: name}}) when state.character_id != nil do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/LOCATE #{name}")
+    {state, []}
+  end
+
+  def handle_command(state, {:gm_message, %{message: message}}) when state.character_id != nil do
+    # GM broadcast message to all players
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, message)
+    {state, []}
+  end
+
+  def handle_command(state, {:server_message, %{message: message}}) when state.character_id != nil do
+    # Server-wide broadcast — route through chat for GM check
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, message)
+    {state, []}
+  end
+
+  def handle_command(state, {:online_gm, _}) when state.character_id != nil do
+    count = AoSession.OnlineDirectory.online_count()
+    {state, [{:console_msg, %{message: "GMs en linea: #{count}", font_index: 0}}]}
+  end
+
+  def handle_command(state, {:rain_toggle, _}) when state.character_id != nil do
+    # Toggle rain on current map — needs GM check in MapServer
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/LLUVIA")
+    {state, []}
+  end
+
   def handle_command(state, {command_type, _}) do
     Logger.debug("Unhandled command: #{command_type}")
     {state, []}

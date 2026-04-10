@@ -1577,4 +1577,159 @@ defmodule Arena.Map.Social do
     packet = Encoder.encode({:change_spell_slot, %{slot: idx + 1, spell_id: spell_id}})
     Helpers.send_to_session(sessions, char_id, {:send_raw, packet})
   end
+
+  # ==================================================================
+  # Modify skills (VB6: distribute skill points from stats screen)
+  # ==================================================================
+
+  @skill_order [
+    :magic, :stealing, :combat_tactics, :combat_weapons, :meditation,
+    :short_weapons, :hiding, :survival, :trading, :combat_defense,
+    :leadership, :ranged_weapons, :wrestling, :navigation, :riding,
+    :resistance, :woodcutting, :fishing, :mining, :blacksmithing,
+    :carpentry, :alchemy, :tailoring, :taming
+  ]
+
+  def handle_modify_skills(state, char_id, points_list) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        if entity.dead do
+          msg(state, char_id, "Estas muerto!")
+          {:noreply, state}
+        else
+          # Sum requested points — must not exceed available skill_points
+          total_requested = Enum.sum(points_list)
+
+          if total_requested <= 0 or total_requested > entity.skill_points do
+            msg(state, char_id, "No tienes suficientes puntos de habilidad.")
+            {:noreply, state}
+          else
+            # Apply points to skills, capping each at 100
+            {new_skills, points_used} =
+              @skill_order
+              |> Enum.zip(points_list)
+              |> Enum.reduce({entity.skills, 0}, fn {skill_atom, pts}, {skills, used} ->
+                if pts > 0 do
+                  current = Map.get(skills, skill_atom, 0)
+                  add = min(pts, 100 - current)
+                  if add > 0 do
+                    {Map.put(skills, skill_atom, current + add), used + add}
+                  else
+                    {skills, used}
+                  end
+                else
+                  {skills, used}
+                end
+              end)
+
+            entity = %{entity | skills: new_skills, skill_points: entity.skill_points - points_used}
+            players = Map.put(state.players, char_id, entity)
+            state = %{state | players: players}
+
+            # Send updated skills back
+            Helpers.send_to_session(state.sessions, char_id,
+              {:send_raw, Encoder.encode({:send_skills, %{skills: entity.skills}})})
+
+            {:noreply, state}
+          end
+        end
+      :error -> {:noreply, state}
+    end
+  end
+
+  # ==================================================================
+  # Change description
+  # ==================================================================
+
+  @max_description_length 200
+
+  def handle_change_description(state, char_id, desc) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        desc = String.slice(desc, 0, @max_description_length)
+        entity = %{entity | description: desc}
+        players = Map.put(state.players, char_id, entity)
+        state = %{state | players: players}
+        msg(state, char_id, "Descripcion cambiada.")
+        {:noreply, state}
+      :error -> {:noreply, state}
+    end
+  end
+
+  # ==================================================================
+  # Spell info (VB6: show spell details for a slot)
+  # ==================================================================
+
+  def handle_spell_info(state, char_id, slot) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        idx = slot - 1
+        spell_id = Enum.at(entity.spells || [], idx)
+
+        if spell_id && spell_id > 0 do
+          case GameData.get_spell(spell_id) do
+            nil ->
+              msg(state, char_id, "Hechizo no encontrado.")
+            spell_def ->
+              info = "#{spell_def.name} - Mana: #{spell_def.mana_required}"
+              info = if spell_def.min_hp && spell_def.min_hp > 0,
+                do: info <> " - Daño: #{spell_def.min_hp}-#{spell_def.max_hp}",
+                else: info
+              msg(state, char_id, info)
+          end
+        else
+          msg(state, char_id, "No hay hechizo en ese slot.")
+        end
+        {:noreply, state}
+      :error -> {:noreply, state}
+    end
+  end
+
+  # ==================================================================
+  # Move item (swap inventory slots)
+  # ==================================================================
+
+  def handle_move_item(state, char_id, from_slot, to_slot) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        inv = entity.inventory || []
+        from_idx = from_slot - 1
+        to_idx = to_slot - 1
+
+        if from_idx >= 0 and from_idx < length(inv) and to_idx >= 0 and to_idx < length(inv) do
+          a = Enum.at(inv, from_idx)
+          b = Enum.at(inv, to_idx)
+          inv = inv |> List.replace_at(from_idx, b) |> List.replace_at(to_idx, a)
+          entity = %{entity | inventory: inv}
+          players = Map.put(state.players, char_id, entity)
+          state = %{state | players: players}
+
+          # Send updated slots
+          Helpers.send_inventory_slot(state.sessions, char_id, inv, from_idx)
+          Helpers.send_inventory_slot(state.sessions, char_id, inv, to_idx)
+          {:noreply, state}
+        else
+          {:noreply, state}
+        end
+      :error -> {:noreply, state}
+    end
+  end
+
+  # ==================================================================
+  # Modify gold (add or subtract)
+  # ==================================================================
+
+  def handle_modify_gold(state, char_id, amount) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        new_gold = max(entity.gold + amount, 0)
+        entity = %{entity | gold: new_gold}
+        players = Map.put(state.players, char_id, entity)
+        state = %{state | players: players}
+        Helpers.send_to_session(state.sessions, char_id,
+          {:send_raw, Encoder.encode({:update_gold, %{gold: new_gold}})})
+        {:noreply, state}
+      :error -> {:noreply, state}
+    end
+  end
 end
