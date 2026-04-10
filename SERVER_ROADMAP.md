@@ -73,16 +73,16 @@ reference and historical phase plan.
    travel/bar/effect, jail/newbie/carcel/penalty/reto restrictions, already-home
    handling, cancel existing travel, home arrival still dead. Do not
    resurrect/full-heal in this flow.
-2. **Raw `ehome` packet** — decode and route the old client home command packet;
-   text chat `/HOGAR` is not enough for old-client parity.
-3. **Home-city mapping** — VB6 city enum, character creation, `Ciudades.Dat`,
-   fallback spawns, and home travel lookup must use one documented mapping.
+2. **Raw `ehome` route** — packet ID 264 is decoded. Route `{:home, %{}}` to
+   the home-travel handler; text chat `/HOGAR` is not enough for old-client parity.
+3. ~~**Home-city mapping** — VB6 city enum, character creation, `Ciudades.Dat`,
+   fallback spawns, and home travel lookup must use one documented mapping.~~ **Done.**
 4. **Guild UI proposal behavior** — finish old-client peace/alliance/list/detail
    behavior and add packet replay tests for the old clan windows.
 5. **Elemental/rune content support** — per-instance tags are persisted/protocol-visible. Current raw data scan found no active elemental values; defer unless content enables it.
 6. **Automated parity gate expansion** — Initial parity test suite exists. Still needed: packet trace replay, AO smoke bot, property/fuzz, lifecycle tests, load/soak.
 7. **Recent migrations need real DB verification** — Run clean-db + existing-dev-db migration path; verify character/inventory/bank/guild/faction loads after migration.
-8. **Pending test files** — Commit or intentionally remove `server/apps/ao_protocol/test/ao_protocol/guild_protocol_test.exs` and `server/apps/arena/test/combat_lifecycle_test.exs`.
+8. ~~**Pending test files** — Commit or intentionally remove `server/apps/ao_protocol/test/ao_protocol/guild_protocol_test.exs` and `server/apps/arena/test/combat_lifecycle_test.exs`.~~ **Done.**
 9. **Local test toolchain** — Fix the Elixir/Hex/OTP mismatch so `mix compile` and `mix test` run reliably from a clean checkout.
 10. **Ops tail** — Dashboards, alerts, deploy pipeline, backup-restore, runbooks. Not gameplay, but backend production work (Phase 15 + 17).
 11. **Perf tail** — NPC aggro still scans all players; pet targeting scans all NPCs; no outbound backpressure; no load/soak gate. NPC broadcast AoI is fixed (Phase 17).
@@ -102,8 +102,8 @@ For the full product order, use `ROADMAP.md`. Backend sequencing is:
 
 1. Stabilize the current branch: track pending test files, track all migrations, run migrations, fix the local Hex/OTP toolchain if needed, and run compile/tests from a clean checkout.
 2. Build the automated parity gate: VB6 packet replay, formula golden fixtures, property/fuzz tests, lifecycle tests, AO smoke bot, browser E2E, load/soak.
-3. Close the core backend parity tail in this order: `/HOGAR` death recovery,
-   raw `ehome`, city mapping, old guild UI route behavior + replay tests,
+3. Close the core backend parity tail in this order: `/HOGAR` delayed travel
+   and restrictions, raw `ehome` SessionLogic route, old guild UI route behavior + replay tests,
    elemental/rune content only if data enables it, migration/runtime verification.
 4. Close the old-client packet/UI tail: pet UI packets, crafting UI packets,
    trainer/spell UI packets, info/service packets, faction/council packets,
@@ -196,10 +196,9 @@ patching or behavior-specific workarounds.
   - ~~deep player death helper~~ — **Done.** PvP, NPC, poison, starvation, and GM kill enter the same cleanup path.
   - ~~NPC gold drop~~ — **Done.** NPC `GiveGLD` drops as a gold ground object.
 - Remaining open items:
-  - `/HOGAR` / home-city death recovery: dead-only paid delayed travel, no
-    resurrection, full VB6 restrictions, raw `ehome` packet route
-  - home-city mapping: one VB6-compatible enum across creation, persistence,
-    `Ciudades.Dat`, fallback spawns, and home travel
+  - `/HOGAR` / home-city death recovery: add delayed travel/bar/effect, full
+    VB6 restrictions, and raw `ehome` SessionLogic route. No-resurrection,
+    gold cost, already-home, penalty check, and city mapping are implemented.
   - old guild UI route/election behavior and replay tests
   - interval clamps that may still differ from raw VB6 data-driven timing
   - ongoing invisibility / AI / spell-selection edge-case review
@@ -227,19 +226,24 @@ These items are larger than the core web gameplay path. Keep them visible until
 the product owner either implements them or explicitly declares them out of scope.
 
 **Old-client packet / UI families still to cover:**
-- `ehome` raw packet for `/HOGAR`.
-- Pet commands: stand, follow, leave, follow-all, leave-all.
+- `ehome` raw packet for `/HOGAR` is decoded; route it in SessionLogic.
+- Pet commands: stand, follow, leave, follow-all, leave-all. Decoders exist;
+  route them to the pet system.
 - Crafting commands/windows: old carpenter / blacksmith / alchemy / tailor
   forms, work-left-click, open crafting, add/remove ingredients and catalysts,
-  move craft item, craft item, close crafting.
+  move craft item, craft item, close crafting. Some legacy craft decoders exist;
+  complete the packet surface and route it.
 - Training/spell commands/windows: train list, train target list, train action,
-  spell info, move spell.
+  spell info, move spell. Some decoders exist; route them and add responses.
 - Info/service windows: account balance, help, stats/info, reward, MOTD,
-  uptime, punishments, map entrance price, online faction/GM/map lists.
+  uptime, punishments, map entrance price, online faction/GM/map lists. Some
+  decoders exist; route them and add response packets.
 - Faction/council packet commands: faction message, council message,
-  leave-faction, online royal/chaos, royal/chaos GM broadcast paths.
+  leave-faction, online royal/chaos, royal/chaos GM broadcast paths. Some
+  decoders exist; route them.
 - GM/admin binary commands selected for the target shard. Slash GM commands are
-  useful, but are not old-client packet parity.
+  useful, but are not old-client packet parity. A core decoder subset exists;
+  route it or document the replacement.
 
 **Old backend systems still to implement if kept in scope:**
 - Quests and quest NPC protocol.

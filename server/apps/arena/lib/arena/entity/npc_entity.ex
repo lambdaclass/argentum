@@ -23,6 +23,8 @@ defmodule Arena.Entity.NpcEntity do
     respawn_at: nil,
     # Pet ownership: nil for wild NPCs, char_id for tamed pets
     owner_id: nil,
+    # Pet behavior mode: :follow (default) or :stand (idle)
+    pet_mode: :follow,
     # VB6 ExpCount pool: total XP available to award, decremented per hit
     exp_count: 0
   ]

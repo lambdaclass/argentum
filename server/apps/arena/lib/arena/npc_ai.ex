@@ -134,8 +134,8 @@ defmodule Arena.NpcAi do
         despawn_pet(state, instance_id, npc)
 
       owner ->
-        if owner.dead do
-          # Owner is dead — idle in place
+        if owner.dead or npc.pet_mode == :stand do
+          # Owner is dead or pet is in stand mode — idle in place
           state
         else
           dist_x = abs(npc.x - owner.x)

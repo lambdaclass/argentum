@@ -64,10 +64,11 @@ not just the playable web core.
 1. **`/HOGAR` final parity:** no revive/full-heal; paid delayed home travel;
    travel bar/effect; jail restricted area, NEWBIE zone, CARCEL trigger,
    penalty/jail timer, reto, traveling cancel, already-home, no-gold handling.
-2. **Raw `ehome` packet:** decode and route old-client packet ID 264 for home
-   travel.
-3. **Home-city mapping:** commit/verify one VB6 enum everywhere: 1 Ulla, 2 Nix,
-   3 Banderbill, 4 Lindos, 5 Arghal, 6 Arkhein, 7 Forgat, 8 Eldoria, 9 Penthar.
+2. **Raw `ehome` route:** packet ID 264 is decoded. Route `{:home, %{}}` to the
+   `/HOGAR` handler.
+3. ~~**Home-city mapping:** one VB6 enum everywhere: 1 Ulla, 2 Nix,
+   3 Banderbill, 4 Lindos, 5 Arghal, 6 Arkhein, 7 Forgat, 8 Eldoria, 9 Penthar.~~
+   **Done.**
 4. **Elemental/rune combat effect:** tags are stored/sent; add active damage
    modifier only if target data actually enables elemental content.
 5. **Guild proposal UI fidelity:** finish old peace/alliance/list/detail mailbox
@@ -76,17 +77,19 @@ not just the playable web core.
 #### B. Old VB6 client packet coverage
 
 6. **Pet command packets:** `/QUIETO`, `/ACOMPANAR`, `/LIBERAR`, follow-all,
-   leave-all.
+   leave-all. Decoders exist; route to pet handlers.
 7. **Crafting UI packets:** open/add/remove/move/craft item; blacksmith,
-   carpenter, alchemy, tailor windows.
+   carpenter, alchemy, tailor windows. Some old craft decoders exist; complete
+   the remaining decoders and route them to crafting.
 8. **Training/spell UI packets:** train list, trainer creature list, spell info,
-   move spell.
+   move spell. Some decoders exist; route them and add response packets.
 9. **Info UI packets:** `/AYUDA`, `/MOTD`, `/UPTIME`, `/BALANCE`, `/EST`,
-   `/INFO`, `/RECOMPENSA`.
+   `/INFO`, `/RECOMPENSA`. Some decoders exist; route them and add responses.
 10. **Faction/council binary command packets:** keep slash behavior, but expose
-    the old packet surface too.
+    the old packet surface too. Some decoders exist; route them.
 11. **Full GM/admin binary packet family:** practical slash GM commands exist;
-    either route the old packet family or formally define the replacement.
+    some decoders exist. Route the old packet family or formally define the
+    replacement.
 
 #### C. Big old systems not fully rebuilt
 
@@ -105,8 +108,8 @@ not just the playable web core.
 
 #### D. Verification / release blockers
 
-23. **Track pending tests:** commit or intentionally remove
-    `guild_protocol_test.exs` and `combat_lifecycle_test.exs`.
+23. ~~**Track pending tests:** commit or intentionally remove
+    `guild_protocol_test.exs` and `combat_lifecycle_test.exs`.~~ **Done.**
 24. **Real Postgres migration run:** clean database and copy of a dev database.
 25. **Automated parity gate:** VB6 formula golden tests, packet replay, smoke
     bot, decoder fuzz, combat/death integration, migration tests.
@@ -193,9 +196,10 @@ Still open before calling backend compatibility done:
   penalty/jail timer, reto, already-at-home, existing-travel cancel, gold cost,
   travel bar/effect, home arrival while still dead.
 - **Raw `/HOGAR` packet:** decode and route old client `ehome` in addition to
-  any web-client text command.
-- **Home-city mapping:** keep city enum, creation storage, `Ciudades.Dat`
-  loading, fallback spawns, and `/HOGAR` lookup on one documented mapping.
+  any web-client text command. Decoder exists; SessionLogic route is still open.
+- ~~**Home-city mapping:** keep city enum, creation storage, `Ciudades.Dat`
+  loading, fallback spawns, and `/HOGAR` lookup on one documented mapping.~~
+  **Done.**
 - **Guild proposal UI behavior:** keep old guild UI packets decoded, but finish
   the remaining peace/alliance proposal-list/detail behavior and cover it with
   packet replay tests.
@@ -215,19 +219,21 @@ This is required if "everything equal" means the unmodified old client can use
 the whole old UI surface, not just the modern web UI and slash-command subset.
 
 - **Pet UI packets:** `/QUIETO`, `/ACOMPANAR`, `/LIBERAR`, follow-all,
-  leave-all. Route them to the existing pet ownership/AI system.
+  leave-all. Decoders exist; route them to the existing pet ownership/AI system.
 - **Crafting UI packets:** old open/add/remove/move/craft item packets,
   blacksmith/carpenter/alchemy/tailor forms, and close-crafting flow. Route
-  them to the existing crafting backend.
+  them to the existing crafting backend. Some legacy craft decoders exist.
 - **Trainer/spell UI packets:** train list, trainer creature list, spell info,
-  move spell, and related response packets.
+  move spell, and related response packets. Some decoders exist.
 - **Info/service packets:** help, MOTD, uptime, account balance, stats/info,
-  reward, punishments, map entrance price, online faction lists.
+  reward, punishments, map entrance price, online faction lists. Some decoders
+  exist.
 - **Faction/council packets:** binary faction/council messages and leave-faction
   command packets. Keep the slash/web commands, but do not require them for the
-  old client.
+  old client. Some decoders exist.
 - **GM/admin binary packets:** decide exact compatibility target, then decode
   and route the old GM packet family or explicitly document the replacement.
+  A core GM decoder subset exists.
 
 ### 4. Rebuild any VB6 side systems kept in the target
 

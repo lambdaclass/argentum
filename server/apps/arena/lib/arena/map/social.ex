@@ -1437,4 +1437,144 @@ defmodule Arena.Map.Social do
       end
     end
   end
+
+  # ==================================================================
+  # Pet commands (VB6: /QUIETO, /ACOMPAÑAR, /LIBERAR)
+  # ==================================================================
+
+  def handle_pet_stand(state, char_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        if entity.dead do
+          msg(state, char_id, "Estas muerto!")
+          {:noreply, state}
+        else
+          state = set_pet_mode(state, char_id, :stand)
+          msg(state, char_id, "Tus mascotas se quedan quietas.")
+          {:noreply, state}
+        end
+      :error -> {:noreply, state}
+    end
+  end
+
+  def handle_pet_follow(state, char_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        if entity.dead do
+          msg(state, char_id, "Estas muerto!")
+          {:noreply, state}
+        else
+          state = set_pet_mode(state, char_id, :follow)
+          msg(state, char_id, "Tus mascotas te siguen.")
+          {:noreply, state}
+        end
+      :error -> {:noreply, state}
+    end
+  end
+
+  def handle_pet_leave(state, char_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        if entity.dead do
+          msg(state, char_id, "Estas muerto!")
+          {:noreply, state}
+        else
+          case entity.pet_ids do
+            [first_pet | rest_pets] ->
+              case Map.get(state.npcs_live, first_pet) do
+                nil ->
+                  entity = %{entity | pet_ids: rest_pets}
+                  state = %{state | players: Map.put(state.players, char_id, entity)}
+                  {:noreply, state}
+                npc ->
+                  state = Arena.NpcAi.despawn_pet(state, first_pet, npc)
+                  entity = %{entity | pet_ids: rest_pets}
+                  state = %{state | players: Map.put(state.players, char_id, entity)}
+                  msg(state, char_id, "Has liberado una mascota.")
+                  {:noreply, state}
+              end
+            _ ->
+              msg(state, char_id, "No tienes mascotas.")
+              {:noreply, state}
+          end
+        end
+      :error -> {:noreply, state}
+    end
+  end
+
+  def handle_pet_leave_all(state, char_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        if entity.dead do
+          msg(state, char_id, "Estas muerto!")
+          {:noreply, state}
+        else
+          state = Enum.reduce(entity.pet_ids || [], state, fn instance_id, st ->
+            case Map.get(st.npcs_live, instance_id) do
+              nil -> st
+              npc -> Arena.NpcAi.despawn_pet(st, instance_id, npc)
+            end
+          end)
+
+          entity = %{entity | pet_ids: []}
+          state = %{state | players: Map.put(state.players, char_id, entity)}
+          msg(state, char_id, "Has liberado todas tus mascotas.")
+          {:noreply, state}
+        end
+      :error -> {:noreply, state}
+    end
+  end
+
+  # Set pet behavior mode — :stand stops movement/attack, :follow resumes normal AI
+  defp set_pet_mode(state, char_id, mode) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        npcs_live =
+          Enum.reduce(entity.pet_ids || [], state.npcs_live, fn instance_id, npcs ->
+            case Map.get(npcs, instance_id) do
+              nil -> npcs
+              npc -> Map.put(npcs, instance_id, %{npc | pet_mode: mode})
+            end
+          end)
+        %{state | npcs_live: npcs_live}
+      :error -> state
+    end
+  end
+
+  # ==================================================================
+  # Move spell (VB6: reorder spell slots)
+  # ==================================================================
+
+  def handle_move_spell(state, char_id, upwards, slot) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        spells = entity.spells || []
+        # Convert 1-based slot to 0-based index
+        idx = slot - 1
+        swap_idx = if upwards, do: idx - 1, else: idx + 1
+
+        if idx >= 0 and idx < length(spells) and swap_idx >= 0 and swap_idx < length(spells) do
+          a = Enum.at(spells, idx)
+          b = Enum.at(spells, swap_idx)
+          spells = spells |> List.replace_at(idx, b) |> List.replace_at(swap_idx, a)
+          entity = %{entity | spells: spells}
+          players = Map.put(state.players, char_id, entity)
+          state = %{state | players: players}
+
+          # Send updated spell slots to client
+          send_spell_slot(state.sessions, char_id, spells, idx)
+          send_spell_slot(state.sessions, char_id, spells, swap_idx)
+          {:noreply, state}
+        else
+          {:noreply, state}
+        end
+      :error -> {:noreply, state}
+    end
+  end
+
+  defp send_spell_slot(sessions, char_id, spells, idx) do
+    spell_id = Enum.at(spells, idx) || 0
+    packet = Encoder.encode({:change_spell_slot, %{slot: idx + 1, spell_id: spell_id}})
+    Helpers.send_to_session(sessions, char_id, {:send_raw, packet})
+  end
 end

@@ -839,6 +839,139 @@ defmodule AoTcpGateway.SessionLogic do
     {state, [{:console_msg, %{message: "Elecciones de clan desactivadas por el momento.", font_index: 0}}]}
   end
 
+  # ---- Pass 1: route low-risk existing behavior ----
+
+  # Home binary packet (ID 264) → same as /HOGAR text command
+  def handle_command(state, {:home, _}) when state.character_id != nil do
+    handle_hogar(state)
+  end
+
+  # Leave faction binary packet
+  def handle_command(state, {:leave_faction, _}) when state.character_id != nil do
+    Arena.Map.MapServer.leave_faction(state.map_id, state.character_id)
+    {state, []}
+  end
+
+  # Faction message binary packet
+  def handle_command(state, {:faction_message, %{message: message}}) when state.character_id != nil do
+    Arena.Map.MapServer.faction_chat(state.map_id, state.character_id, message)
+    {state, []}
+  end
+
+  # Group/party chat
+  def handle_command(state, {:grupo_msg, %{message: message}}) when state.character_id != nil do
+    case Arena.PartyServer.get_party(state.character_id) do
+      {:ok, party} ->
+        sender_name =
+          case AoSession.OnlineDirectory.lookup_by_id(state.character_id) do
+            {:ok, info} -> info.name
+            :not_found -> "?"
+          end
+
+        for member_id <- party.members, member_id != state.character_id do
+          case AoSession.OnlineDirectory.lookup_by_id(member_id) do
+            {:ok, member_info} ->
+              msg = "[Grupo] #{sender_name}: #{message}"
+              send(member_info.session_pid, {:send_raw,
+                AoProtocol.Server.Encoder.encode({:console_msg, %{message: msg, font_index: 3}})})
+            :not_found -> :ok
+          end
+        end
+        {state, [{:console_msg, %{message: "[Grupo] #{sender_name}: #{message}", font_index: 3}}]}
+
+      :not_in_party ->
+        {state, [{:console_msg, %{message: "No estas en un grupo.", font_index: 0}}]}
+    end
+  end
+
+  # Request stats (same as request_mini_stats)
+  def handle_command(state, {:request_stats, _}) when state.character_id != nil do
+    Arena.Map.MapServer.request_mini_stats(state.map_id, state.character_id)
+    {state, []}
+  end
+
+  # Help — VB6 sends static help text
+  def handle_command(state, {:help, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: "Escribe /ONLINE para ver jugadores conectados. Usa /HOGAR para ir a tu ciudad.", font_index: 0}}]}
+  end
+
+  # Request MOTD — no server-wide MOTD system yet, return placeholder
+  def handle_command(state, {:request_motd, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: "Bienvenido a Argentum Online!", font_index: 0}}]}
+  end
+
+  # Uptime — compute from VM start
+  def handle_command(state, {:uptime, _}) when state.character_id != nil do
+    {uptime_ms, _} = :erlang.statistics(:wall_clock)
+    hours = div(uptime_ms, 3_600_000)
+    minutes = div(rem(uptime_ms, 3_600_000), 60_000)
+    {state, [{:console_msg, %{message: "Uptime: #{hours}h #{minutes}m", font_index: 0}}]}
+  end
+
+  # Information — target NPC info (same as double_click on target)
+  def handle_command(state, {:information, _}) when state.character_id != nil do
+    Arena.Map.MapServer.double_click(state.map_id, state.character_id, state.target_x, state.target_y)
+    {state, []}
+  end
+
+  # Reward — stub, NPC reward info not implemented
+  def handle_command(state, {:reward, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: "No hay recompensas disponibles.", font_index: 0}}]}
+  end
+
+  # Train list — stub, client expects console response
+  def handle_command(state, {:train_list, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: "No hay criaturas disponibles para entrenar.", font_index: 0}}]}
+  end
+
+  # Request account state/balance
+  def handle_command(state, {:request_account_state, _}) when state.character_id != nil do
+    case Arena.Map.MapServer.snapshot_entity(state.map_id, state.character_id) do
+      {:ok, entity} ->
+        {state, [{:console_msg, %{message: "Oro: #{entity.gold}", font_index: 0}}]}
+      _ ->
+        {state, []}
+    end
+  end
+
+  # Move spell — reorder spell slots in-memory
+  def handle_command(state, {:move_spell, %{upwards: upwards, slot: slot}}) when state.character_id != nil do
+    Arena.Map.MapServer.move_spell(state.map_id, state.character_id, upwards, slot)
+    {state, []}
+  end
+
+  # Pet commands — route to MapServer
+  def handle_command(state, {:pet_stand, _}) when state.character_id != nil do
+    Arena.Map.MapServer.pet_stand(state.map_id, state.character_id)
+    {state, []}
+  end
+
+  def handle_command(state, {:pet_follow, _}) when state.character_id != nil do
+    Arena.Map.MapServer.pet_follow(state.map_id, state.character_id)
+    {state, []}
+  end
+
+  def handle_command(state, {:pet_leave, _}) when state.character_id != nil do
+    Arena.Map.MapServer.pet_leave(state.map_id, state.character_id)
+    {state, []}
+  end
+
+  def handle_command(state, {:pet_leave_all, _}) when state.character_id != nil do
+    Arena.Map.MapServer.pet_leave_all(state.map_id, state.character_id)
+    {state, []}
+  end
+
+  # Council message — same as faction chat (royal/chaos council)
+  def handle_command(state, {:council_message, %{message: message}}) when state.character_id != nil do
+    Arena.Map.MapServer.faction_chat(state.map_id, state.character_id, message)
+    {state, []}
+  end
+
+  # Train — interact with trainer NPC pet (stub for now)
+  def handle_command(state, {:train, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: "No puedes entrenar esa criatura.", font_index: 0}}]}
+  end
+
   def handle_command(state, {command_type, _}) do
     Logger.debug("Unhandled command: #{command_type}")
     {state, []}
