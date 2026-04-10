@@ -1103,7 +1103,7 @@ defmodule AoTcpGateway.SessionLogic do
     {state, [{:console_msg, %{message: "Usa /GOTO <nombre> para teletransportarte.", font_index: 0}}]}
   end
 
-  def handle_command(state, {:warp_char, %{name: name, map: map}}) when state.character_id != nil do
+  def handle_command(state, {:warp_char, %{name: _name, map: map}}) when state.character_id != nil do
     Arena.Map.MapServer.chat(state.map_id, state.character_id, "/TELEPORT #{map} 50 50")
     {state, []}
   end

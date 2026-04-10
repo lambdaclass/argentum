@@ -61,14 +61,12 @@ not just the playable web core.
 
 #### A. Core VB6 parity still to close
 
-1. **`/HOGAR` final parity:** no revive/full-heal; paid delayed home travel;
-   travel bar/effect; jail restricted area, NEWBIE zone, CARCEL trigger,
-   penalty/jail timer, reto, traveling cancel, already-home, no-gold handling.
-2. **Raw `ehome` route:** packet ID 264 is decoded. Route `{:home, %{}}` to the
-   `/HOGAR` handler.
-3. ~~**Home-city mapping:** one VB6 enum everywhere: 1 Ulla, 2 Nix,
-   3 Banderbill, 4 Lindos, 5 Arghal, 6 Arkhein, 7 Forgat, 8 Eldoria, 9 Penthar.~~
-   **Done.**
+1. **`/HOGAR` final parity:** no-revive, gold cost, penalty/home checks are
+   done. Still missing: VB6-style delayed travel bar/effect, jail restricted
+   area, NEWBIE zone, CARCEL trigger, reto/traveling cancel behavior.
+2. ~~**Raw `ehome` route:** packet ID 264 decoded and routed to `/HOGAR`
+   handler.~~ **Done.**
+3. ~~**Home-city mapping:** VB6 enum fixed across all files.~~ **Done.**
 4. **Elemental/rune combat effect:** tags are stored/sent; add active damage
    modifier only if target data actually enables elemental content.
 5. **Guild proposal UI fidelity:** finish old peace/alliance/list/detail mailbox
@@ -76,20 +74,23 @@ not just the playable web core.
 
 #### B. Old VB6 client packet coverage
 
-6. **Pet command packets:** `/QUIETO`, `/ACOMPANAR`, `/LIBERAR`, follow-all,
-   leave-all. Decoders exist; route to pet handlers.
-7. **Crafting UI packets:** open/add/remove/move/craft item; blacksmith,
-   carpenter, alchemy, tailor windows. Some old craft decoders exist; complete
-   the remaining decoders and route them to crafting.
-8. **Training/spell UI packets:** train list, trainer creature list, spell info,
-   move spell. Some decoders exist; route them and add response packets.
-9. **Info UI packets:** `/AYUDA`, `/MOTD`, `/UPTIME`, `/BALANCE`, `/EST`,
-   `/INFO`, `/RECOMPENSA`. Some decoders exist; route them and add responses.
-10. **Faction/council binary command packets:** keep slash behavior, but expose
-    the old packet surface too. Some decoders exist; route them.
-11. **Full GM/admin binary packet family:** practical slash GM commands exist;
-    some decoders exist. Route the old packet family or formally define the
-    replacement.
+6. ~~**Pet command packets:** decoded and routed. `pet_stand`/`pet_follow`
+   set `pet_mode` on NpcEntity; `pet_leave`/`pet_leave_all` despawn pets.~~
+   **Done.**
+7. **Crafting UI packets:** `craft_blacksmith`/`craft_carpenter` decoded and
+   routed to existing work system. Old open/add/remove/move/craft UI packets
+   still not decoded (AO20 crafting uses the `:work` packet instead).
+8. ~~**Training/spell UI packets:** `train_list`, `train`, `spell_info`,
+   `move_spell` decoded and routed.~~ **Done.**
+9. ~~**Info UI packets:** `help`, `request_motd`, `uptime`,
+   `request_account_state`, `request_stats`, `information`, `reward` decoded
+   and routed.~~ **Done.**
+10. ~~**Faction/council binary command packets:** `faction_message`,
+    `council_message`, `leave_faction` decoded and routed.~~ **Done.**
+11. **GM/admin binary packet family:** core GM packets (goto, invisible, jail,
+    kick, execute, ban, silence, where, info, rain_toggle) decoded and routed
+    via MapServer.chat text dispatch. `gm_message` routes locally, not as a
+    real server broadcast. `role_master_request` still unhandled.
 
 #### C. Big old systems not fully rebuilt
 
