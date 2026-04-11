@@ -88,10 +88,7 @@ defmodule Arena.GuildServer do
               end
 
             raw =
-              AoProtocol.Server.Encoder.encode(
-                {:guild_chat,
-                 %{status: 0, message: "#{sender_name}: #{message}"}}
-              )
+              AoProtocol.Server.Encoder.encode({:guild_chat, %{status: 0, message: "#{sender_name}: #{message}"}})
 
             for mid <- guild.members do
               case OnlineDirectory.lookup_by_id(mid) do
@@ -332,8 +329,7 @@ defmodule Arena.GuildServer do
 
                 :ets.insert(
                   @table,
-                  {{:invite, target_id},
-                   %{from: leader_id, guild_id: guild_id, expires_at: now + @invite_ttl_ms}}
+                  {{:invite, target_id}, %{from: leader_id, guild_id: guild_id, expires_at: now + @invite_ttl_ms}}
                 )
 
                 notify(
@@ -376,7 +372,11 @@ defmodule Arena.GuildServer do
 
                   guild.alignment != GuildAlignment.neutral() and
                       not alignment_compatible?(char_id, guild.alignment) ->
-                    notify(char_id, "Tu alineacion no es compatible con este clan (#{GuildAlignment.name(guild.alignment)}).")
+                    notify(
+                      char_id,
+                      "Tu alineacion no es compatible con este clan (#{GuildAlignment.name(guild.alignment)})."
+                    )
+
                     {:reply, {:error, :alignment_mismatch}, state}
 
                   true ->
@@ -409,76 +409,6 @@ defmodule Arena.GuildServer do
       [] ->
         notify(char_id, "No tienes invitaciones de clan pendientes.")
         {:reply, {:error, :no_invite}, state}
-    end
-  end
-
-  @impl true
-  def handle_cast({:leave, char_id}, state) do
-    do_leave(char_id)
-    {:noreply, state}
-  end
-
-  @impl true
-  def handle_cast({:kick, leader_id, target_id}, state) do
-    case :ets.lookup(@table, {:member, leader_id}) do
-      [{_, guild_id}] ->
-        case :ets.lookup(@table, {:guild, guild_id}) do
-          [{_, %{leader: ^leader_id} = guild}] ->
-            if target_id in guild.members and target_id != leader_id do
-              Guilds.remove_member(guild_id, target_id)
-              new_members = List.delete(guild.members, target_id)
-              :ets.insert(@table, {{:guild, guild_id}, %{guild | members: new_members}})
-              :ets.delete(@table, {:member, target_id})
-              notify(target_id, "Has sido expulsado del clan.")
-              broadcast_guild(new_members, "Un jugador fue expulsado del clan.")
-            end
-
-          _ ->
-            :ok
-        end
-
-      [] ->
-        :ok
-    end
-
-    {:noreply, state}
-  end
-
-  @impl true
-  def handle_cast({:add_exp, guild_id, amount}, state) do
-    case :ets.lookup(@table, {:guild, guild_id}) do
-      [{_, guild}] ->
-        max_level = GuildConstants.max_level()
-
-        if guild.level >= max_level do
-          {:noreply, state}
-        else
-          old_level = guild.level
-          new_exp = guild.current_exp + amount
-
-          {new_level, final_exp} =
-            level_up_loop(old_level, new_exp, max_level)
-
-          guild = %{guild | level: new_level, current_exp: final_exp}
-          :ets.insert(@table, {{:guild, guild_id}, guild})
-
-          if new_level > old_level do
-            broadcast_guild(
-              guild.members,
-              "El clan ha subido al nivel #{new_level}!"
-            )
-          end
-
-          # Async DB persist
-          Task.start(fn ->
-            Guilds.update_guild(guild_id, %{level: new_level, current_exp: final_exp})
-          end)
-
-          {:noreply, state}
-        end
-
-      [] ->
-        {:noreply, state}
     end
   end
 
@@ -643,12 +573,13 @@ defmodule Arena.GuildServer do
       {:ok, guild_id, _guild} ->
         requests = Guilds.list_requests(guild_id)
 
-        request_names = for req <- requests do
-          case OnlineDirectory.lookup_by_id(req.char_id) do
-            {:ok, info} -> info.name
-            :not_found -> "ID:#{req.char_id}"
+        request_names =
+          for req <- requests do
+            case OnlineDirectory.lookup_by_id(req.char_id) do
+              {:ok, info} -> info.name
+              :not_found -> "ID:#{req.char_id}"
+            end
           end
-        end
 
         if requests == [] do
           notify(char_id, "No hay solicitudes pendientes.")
@@ -731,6 +662,76 @@ defmodule Arena.GuildServer do
   end
 
   @impl true
+  def handle_cast({:leave, char_id}, state) do
+    do_leave(char_id)
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_cast({:kick, leader_id, target_id}, state) do
+    case :ets.lookup(@table, {:member, leader_id}) do
+      [{_, guild_id}] ->
+        case :ets.lookup(@table, {:guild, guild_id}) do
+          [{_, %{leader: ^leader_id} = guild}] ->
+            if target_id in guild.members and target_id != leader_id do
+              Guilds.remove_member(guild_id, target_id)
+              new_members = List.delete(guild.members, target_id)
+              :ets.insert(@table, {{:guild, guild_id}, %{guild | members: new_members}})
+              :ets.delete(@table, {:member, target_id})
+              notify(target_id, "Has sido expulsado del clan.")
+              broadcast_guild(new_members, "Un jugador fue expulsado del clan.")
+            end
+
+          _ ->
+            :ok
+        end
+
+      [] ->
+        :ok
+    end
+
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_cast({:add_exp, guild_id, amount}, state) do
+    case :ets.lookup(@table, {:guild, guild_id}) do
+      [{_, guild}] ->
+        max_level = GuildConstants.max_level()
+
+        if guild.level >= max_level do
+          {:noreply, state}
+        else
+          old_level = guild.level
+          new_exp = guild.current_exp + amount
+
+          {new_level, final_exp} =
+            level_up_loop(old_level, new_exp, max_level)
+
+          guild = %{guild | level: new_level, current_exp: final_exp}
+          :ets.insert(@table, {{:guild, guild_id}, guild})
+
+          if new_level > old_level do
+            broadcast_guild(
+              guild.members,
+              "El clan ha subido al nivel #{new_level}!"
+            )
+          end
+
+          # Async DB persist
+          Task.start(fn ->
+            Guilds.update_guild(guild_id, %{level: new_level, current_exp: final_exp})
+          end)
+
+          {:noreply, state}
+        end
+
+      [] ->
+        {:noreply, state}
+    end
+  end
+
+  @impl true
   def handle_info(:cleanup_invites, state) do
     now = System.monotonic_time(:millisecond)
 
@@ -798,7 +799,7 @@ defmodule Arena.GuildServer do
     end
   end
 
-  defp level_up_loop(level, exp, max_level) when level >= max_level, do: {max_level, 0}
+  defp level_up_loop(level, _exp, max_level) when level >= max_level, do: {max_level, 0}
 
   defp level_up_loop(level, exp, max_level) do
     required = GuildConstants.required_exp(level)
@@ -871,11 +872,15 @@ defmodule Arena.GuildServer do
     case :ets.lookup(@table, {:member, char_id}) do
       [{_, guild_id}] ->
         case :ets.lookup(@table, {:guild, guild_id}) do
-          [{_, %{leader: ^char_id} = guild}] -> {:ok, guild_id, guild}
+          [{_, %{leader: ^char_id} = guild}] ->
+            {:ok, guild_id, guild}
+
           [{_, _guild}] ->
             notify(char_id, "Solo el lider del clan puede hacer eso.")
             {:error, :not_leader}
-          [] -> {:error, :no_guild}
+
+          [] ->
+            {:error, :no_guild}
         end
 
       [] ->
@@ -888,9 +893,7 @@ defmodule Arena.GuildServer do
     case OnlineDirectory.lookup_by_id(char_id) do
       {:ok, %{session_pid: pid}} ->
         raw =
-          AoProtocol.Server.Encoder.encode(
-            {:console_msg, %{message: message, font_index: 0}}
-          )
+          AoProtocol.Server.Encoder.encode({:console_msg, %{message: message, font_index: 0}})
 
         send(pid, {:send_raw, raw})
 
@@ -948,7 +951,11 @@ defmodule Arena.GuildServer do
     relations = Guilds.list_relations()
 
     for rel <- relations do
-      {a, b} = if rel.guild_a_id <= rel.guild_b_id, do: {rel.guild_a_id, rel.guild_b_id}, else: {rel.guild_b_id, rel.guild_a_id}
+      {a, b} =
+        if rel.guild_a_id <= rel.guild_b_id,
+          do: {rel.guild_a_id, rel.guild_b_id},
+          else: {rel.guild_b_id, rel.guild_a_id}
+
       :ets.insert(@table, {{:relation, a, b}, rel.relation_type})
     end
 

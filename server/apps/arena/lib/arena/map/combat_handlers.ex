@@ -28,7 +28,9 @@ defmodule Arena.Map.CombatHandlers do
 
   @poison_tick_interval 2000
 
+  # VB6 faction PvP maps — used when elemental/faction combat is wired
   @faction_pvp_maps [58, 59, 60, 195, 196]
+  _ = @faction_pvp_maps
 
   @skill_gain_chance 35
   @max_skill 100
@@ -43,9 +45,15 @@ defmodule Arena.Map.CombatHandlers do
         now = System.monotonic_time(:millisecond)
 
         cond do
-          now < entity.next_attack_at -> {:reply, {:error, :cooldown}, state}
-          entity.dead -> {:reply, {:error, :dead}, state}
-          entity.paralyzed -> {:reply, {:error, :paralyzed}, state}
+          now < entity.next_attack_at ->
+            {:reply, {:error, :cooldown}, state}
+
+          entity.dead ->
+            {:reply, {:error, :dead}, state}
+
+          entity.paralyzed ->
+            {:reply, {:error, :paralyzed}, state}
+
           true ->
             entity = Helpers.break_invisibility(entity, state, char_id)
             weapon_id = entity.equipment[:weapon]
@@ -62,6 +70,7 @@ defmodule Arena.Map.CombatHandlers do
               entity = %{entity | next_attack_at: now + @attack_cooldown_ms}
 
               swing_raw = Encoder.encode({:char_swing, %{char_index: entity.char_index}})
+
               Visibility.broadcast_visible(state, entity.x, entity.y, char_id, fn pid ->
                 send(pid, {:send_raw, swing_raw})
               end)
@@ -71,7 +80,8 @@ defmodule Arena.Map.CombatHandlers do
             end
         end
 
-      :error -> {:reply, {:error, :not_on_map}, state}
+      :error ->
+        {:reply, {:error, :not_on_map}, state}
     end
   end
 
@@ -81,21 +91,31 @@ defmodule Arena.Map.CombatHandlers do
         {:reply, {:error, :out_of_range}, state}
 
       max(abs(entity.x - target_x), abs(entity.y - target_y)) > @ranged_max_distance ->
-        Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-          Encoder.encode({:console_msg, %{message: "Demasiado lejos.", font_index: 0}})})
+        Helpers.send_to_session(
+          state.sessions,
+          char_id,
+          {:send_raw, Encoder.encode({:console_msg, %{message: "Demasiado lejos.", font_index: 0}})}
+        )
+
         {:reply, {:error, :out_of_range}, state}
 
       entity.equipment[:municion] == nil ->
-        Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-          Encoder.encode({:console_msg, %{message: "No tienes municiones equipadas.", font_index: 0}})})
+        Helpers.send_to_session(
+          state.sessions,
+          char_id,
+          {:send_raw, Encoder.encode({:console_msg, %{message: "No tienes municiones equipadas.", font_index: 0}})}
+        )
+
         {:reply, {:error, :no_ammo}, state}
 
       true ->
         ammo_id = entity.equipment[:municion]
-        ammo_slot_idx = Enum.find_index(entity.inventory, fn
-          %{item_id: ^ammo_id, equipped: true} -> true
-          _ -> false
-        end)
+
+        ammo_slot_idx =
+          Enum.find_index(entity.inventory, fn
+            %{item_id: ^ammo_id, equipped: true} -> true
+            _ -> false
+          end)
 
         if ammo_slot_idx == nil do
           entity = %{entity | equipment: Map.put(entity.equipment, :municion, nil)}
@@ -107,6 +127,7 @@ defmodule Arena.Map.CombatHandlers do
           entity = %{entity | next_attack_at: now + @attack_cooldown_ms}
 
           swing_raw = Encoder.encode({:char_swing, %{char_index: entity.char_index}})
+
           Visibility.broadcast_visible(state, entity.x, entity.y, char_id, fn pid ->
             send(pid, {:send_raw, swing_raw})
           end)
@@ -127,25 +148,38 @@ defmodule Arena.Map.CombatHandlers do
     slot = Enum.at(entity.inventory, slot_idx)
     new_amount = slot.amount - 1
 
-    {inventory, equipment} = if new_amount <= 0 do
-      {List.replace_at(entity.inventory, slot_idx, nil),
-       Map.put(entity.equipment, :municion, nil)}
-    else
-      {List.replace_at(entity.inventory, slot_idx, %{slot | amount: new_amount}),
-       entity.equipment}
-    end
+    {inventory, equipment} =
+      if new_amount <= 0 do
+        {List.replace_at(entity.inventory, slot_idx, nil), Map.put(entity.equipment, :municion, nil)}
+      else
+        {List.replace_at(entity.inventory, slot_idx, %{slot | amount: new_amount}), entity.equipment}
+      end
 
     entity = %{entity | inventory: inventory, equipment: equipment}
 
     # Send inventory update to client
     if new_amount <= 0 do
-      Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-        Encoder.encode({:change_inventory_slot, %{slot: slot_idx + 1, obj_index: 0, amount: 0, equipped: false, valor: 0.0}})})
+      Helpers.send_to_session(
+        state.sessions,
+        char_id,
+        {:send_raw,
+         Encoder.encode(
+           {:change_inventory_slot, %{slot: slot_idx + 1, obj_index: 0, amount: 0, equipped: false, valor: 0.0}}
+         )}
+      )
     else
       item_def = GameData.get_item(ammo_id)
       valor = if item_def, do: item_def.valor / 1, else: 0.0
-      Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-        Encoder.encode({:change_inventory_slot, %{slot: slot_idx + 1, obj_index: ammo_id, amount: new_amount, equipped: true, valor: valor}})})
+
+      Helpers.send_to_session(
+        state.sessions,
+        char_id,
+        {:send_raw,
+         Encoder.encode(
+           {:change_inventory_slot,
+            %{slot: slot_idx + 1, obj_index: ammo_id, amount: new_amount, equipped: true, valor: valor}}
+         )}
+      )
     end
 
     entity
@@ -155,10 +189,12 @@ defmodule Arena.Map.CombatHandlers do
   def find_inventory_slot(entity, item_id, stackable) do
     if stackable do
       # Try to find existing stack first
-      idx = Enum.find_index(entity.inventory, fn
-        %{item_id: ^item_id} -> true
-        _ -> false
-      end)
+      idx =
+        Enum.find_index(entity.inventory, fn
+          %{item_id: ^item_id} -> true
+          _ -> false
+        end)
+
       idx || Enum.find_index(entity.inventory, &is_nil/1)
     else
       Enum.find_index(entity.inventory, &is_nil/1)
@@ -188,13 +224,26 @@ defmodule Arena.Map.CombatHandlers do
           skill_name = Keyword.get(opts, :skill, :combat_weapons)
           weapon_skill = Map.get(entity.skills, skill_name, 50)
           npc_evasion = if npc_def, do: npc_def.poder_evasion, else: 0
-          hit_roll = Combat.hit_chance(weapon_skill, entity.agi, entity.level, class_id,
-                                       npc_evasion, 0, (if npc_def, do: npc_def.npc_level, else: 1), class_id)
+
+          hit_roll =
+            Combat.hit_chance(
+              weapon_skill,
+              entity.agi,
+              entity.level,
+              class_id,
+              npc_evasion,
+              0,
+              if(npc_def, do: npc_def.npc_level, else: 1),
+              class_id
+            )
 
           if :rand.uniform(100) <= hit_roll do
             # VB6: base user damage added to weapon damage
             {user_min, user_max} = Combat.base_user_damage(entity.level, class_id)
-            raw_damage = Combat.melee_damage(min_weapon, max_weapon, entity.str + entity.str_buff, class_id, user_min, user_max)
+
+            raw_damage =
+              Combat.melee_damage(min_weapon, max_weapon, entity.str + entity.str_buff, class_id, user_min, user_max)
+
             npc_defense = if npc_def, do: npc_def.def, else: 0
             final_damage = max(raw_damage - npc_defense, 0)
 
@@ -205,18 +254,29 @@ defmodule Arena.Map.CombatHandlers do
             entity = maybe_gain_skill(entity, skill_name)
 
             # Send damage feedback to attacker
-            Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-              Encoder.encode({:user_hitted_user, %{char_index: npc.char_index, damage: final_damage}})})
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw, Encoder.encode({:user_hitted_user, %{char_index: npc.char_index, damage: final_damage}})}
+            )
 
             if new_hp <= 0 do
               # NPC died
-              state = if npc.owner_id != nil do
-                # Pet died — remove from npcs_live and owner's pet_ids
-                handle_pet_death(state, instance_id, npc)
-              else
-                npc = %{npc | alive: false, respawn_at: System.monotonic_time(:millisecond) + ((if npc_def, do: npc_def.intervalo_respawn, else: 60) * 1000)}
-                put_in(state.npcs_live[instance_id], npc)
-              end
+              state =
+                if npc.owner_id != nil do
+                  # Pet died — remove from npcs_live and owner's pet_ids
+                  handle_pet_death(state, instance_id, npc)
+                else
+                  npc = %{
+                    npc
+                    | alive: false,
+                      respawn_at:
+                        System.monotonic_time(:millisecond) +
+                          if(npc_def, do: npc_def.intervalo_respawn, else: 60) * 1000
+                  }
+
+                  put_in(state.npcs_live[instance_id], npc)
+                end
 
               occupancy = Helpers.clear_occupancy(state.occupancy, npc.x, npc.y)
               state = %{state | occupancy: occupancy}
@@ -226,38 +286,41 @@ defmodule Arena.Map.CombatHandlers do
               Visibility.broadcast_visible_all(state, npc.x, npc.y, fn pid -> send(pid, {:send_raw, remove_raw}) end)
 
               # Per-hit XP on the killing blow (no XP for killing pets)
-              {entity, state} = if npc.owner_id == nil do
-                award_hit_xp(state, char_id, entity, final_damage, npc_def, instance_id)
-              else
-                {entity, state}
-              end
-
-              # Kill rewards (counter, guild XP, gold, loot) — no rewards for killing pets
-              state = if npc.owner_id == nil do
-                entity = %{entity | npcs_killed: entity.npcs_killed + 1}
-
-                # Award guild XP on NPC kill
-                give_exp = if npc_def, do: npc_def.give_exp, else: 0
-                if give_exp > 0 do
-                  case Arena.GuildServer.guild_id_for(char_id) do
-                    nil -> :ok
-                    gid -> Arena.GuildServer.add_guild_exp(gid, max(div(give_exp, 10), 1))
-                  end
+              {entity, state} =
+                if npc.owner_id == nil do
+                  award_hit_xp(state, char_id, entity, final_damage, npc_def, instance_id)
+                else
+                  {entity, state}
                 end
 
-                # VB6: NPCTirarOro — drop gold on the floor at NPC position
-                give_gld = if npc_def, do: npc_def.give_gld, else: 0
-                state = drop_npc_gold(state, npc, give_gld)
+              # Kill rewards (counter, guild XP, gold, loot) — no rewards for killing pets
+              state =
+                if npc.owner_id == nil do
+                  entity = %{entity | npcs_killed: entity.npcs_killed + 1}
 
-                # Drop loot
-                state = drop_npc_loot(state, npc, npc_def)
+                  # Award guild XP on NPC kill
+                  give_exp = if npc_def, do: npc_def.give_exp, else: 0
 
-                players = Map.put(state.players, char_id, entity)
-                %{state | players: players}
-              else
-                players = Map.put(state.players, char_id, entity)
-                %{state | players: players}
-              end
+                  if give_exp > 0 do
+                    case Arena.GuildServer.guild_id_for(char_id) do
+                      nil -> :ok
+                      gid -> Arena.GuildServer.add_guild_exp(gid, max(div(give_exp, 10), 1))
+                    end
+                  end
+
+                  # VB6: NPCTirarOro — drop gold on the floor at NPC position
+                  give_gld = if npc_def, do: npc_def.give_gld, else: 0
+                  state = drop_npc_gold(state, npc, give_gld)
+
+                  # Drop loot
+                  state = drop_npc_loot(state, npc, npc_def)
+
+                  players = Map.put(state.players, char_id, entity)
+                  %{state | players: players}
+                else
+                  players = Map.put(state.players, char_id, entity)
+                  %{state | players: players}
+                end
 
               state
             else
@@ -267,11 +330,12 @@ defmodule Arena.Map.CombatHandlers do
               state = put_in(state.npcs_live[instance_id], npc)
 
               # VB6: per-hit proportional XP (no XP for hitting pets)
-              {entity, state} = if npc.owner_id == nil do
-                award_hit_xp(state, char_id, entity, final_damage, npc_def, instance_id)
-              else
-                {entity, state}
-              end
+              {entity, state} =
+                if npc.owner_id == nil do
+                  award_hit_xp(state, char_id, entity, final_damage, npc_def, instance_id)
+                else
+                  {entity, state}
+                end
 
               players = Map.put(state.players, char_id, entity)
               %{state | players: players}
@@ -294,26 +358,44 @@ defmodule Arena.Map.CombatHandlers do
       defender ->
         cond do
           entity.safe_mode ->
-            Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-              Encoder.encode({:console_msg, %{message: "Tienes el seguro activado.", font_index: 0}})})
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "Tienes el seguro activado.", font_index: 0}})}
+            )
+
             players = Map.put(state.players, char_id, entity)
             %{state | players: players}
 
           same_faction?(entity, defender) ->
-            Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-              Encoder.encode({:console_msg, %{message: "No puedes atacar a un miembro de tu faccion.", font_index: 0}})})
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw,
+               Encoder.encode({:console_msg, %{message: "No puedes atacar a un miembro de tu faccion.", font_index: 0}})}
+            )
+
             players = Map.put(state.players, char_id, entity)
             %{state | players: players}
 
           party_safe_block?(char_id, defender) ->
-            Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-              Encoder.encode({:console_msg, %{message: "No puedes atacar a un miembro de tu grupo.", font_index: 0}})})
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw,
+               Encoder.encode({:console_msg, %{message: "No puedes atacar a un miembro de tu grupo.", font_index: 0}})}
+            )
+
             players = Map.put(state.players, char_id, entity)
             %{state | players: players}
 
           state.meta.safe_zone and not faction_pvp_exception?(state.map_id, entity, defender) ->
-            Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-              Encoder.encode({:console_msg, %{message: "Zona segura.", font_index: 0}})})
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "Zona segura.", font_index: 0}})}
+            )
+
             players = Map.put(state.players, char_id, entity)
             %{state | players: players}
 
@@ -332,8 +414,17 @@ defmodule Arena.Map.CombatHandlers do
             weapon_skill = Map.get(entity.skills, skill_name, 50)
             def_tactics = Map.get(defender.skills, :combat_tactics, 50)
 
-            hit_roll = Combat.hit_chance(weapon_skill, entity.agi + entity.agi_buff, entity.level, class_id,
-                                         def_tactics, defender.agi + defender.agi_buff, defender.level, def_class_id)
+            hit_roll =
+              Combat.hit_chance(
+                weapon_skill,
+                entity.agi + entity.agi_buff,
+                entity.level,
+                class_id,
+                def_tactics,
+                defender.agi + defender.agi_buff,
+                defender.level,
+                def_class_id
+              )
 
             # VB6: meditating reduces evasion by 25%
             hit_roll = Combat.adjust_hit_for_meditate(hit_roll, defender.meditating)
@@ -343,39 +434,72 @@ defmodule Arena.Map.CombatHandlers do
               def_skill = Map.get(defender.skills, :combat_defense, 50)
 
               # VB6: shield block uses attacker's weapon skill, not tactics
-              if shield_pct > 0 and Combat.shield_block?(shield_pct, def_skill, Map.get(entity.skills, :combat_weapons, 50)) do
+              if shield_pct > 0 and
+                   Combat.shield_block?(shield_pct, def_skill, Map.get(entity.skills, :combat_weapons, 50)) do
                 # VB6: defense skill gain on block
                 defender = maybe_gain_skill(defender, :combat_defense)
 
-                Helpers.send_to_session(state.sessions, defender_id, {:send_raw,
-                  Encoder.encode({:blocked_with_shield_user, %{}})})
+                Helpers.send_to_session(
+                  state.sessions,
+                  defender_id,
+                  {:send_raw, Encoder.encode({:blocked_with_shield_user, %{}})}
+                )
+
                 block_raw = Encoder.encode({:blocked_with_shield_other, %{char_index: defender.char_index}})
+
                 Visibility.broadcast_visible(state, defender.x, defender.y, defender_id, fn pid ->
                   send(pid, {:send_raw, block_raw})
                 end)
 
-                players = state.players
+                players =
+                  state.players
                   |> Map.put(char_id, entity)
                   |> Map.put(defender_id, defender)
+
                 %{state | players: players}
               else
                 # VB6: base user damage added to weapon damage
                 {user_min, user_max} = Combat.base_user_damage(entity.level, class_id)
-                raw_damage = Combat.melee_damage(min_weapon, max_weapon, entity.str + entity.str_buff, class_id, user_min, user_max)
+
+                raw_damage =
+                  Combat.melee_damage(
+                    min_weapon,
+                    max_weapon,
+                    entity.str + entity.str_buff,
+                    class_id,
+                    user_min,
+                    user_max
+                  )
+
                 # VB6: critical hit check
-                raw_damage = if Combat.critical_hit?(weapon_skill), do: Combat.apply_critical(raw_damage), else: raw_damage
+                raw_damage =
+                  if Combat.critical_hit?(weapon_skill), do: Combat.apply_critical(raw_damage), else: raw_damage
+
                 {min_def, max_def} = CombatStats.effective_defense(defender.equipment)
                 {final_damage, _location} = Combat.apply_defense(raw_damage, {min_def, max_def})
 
                 new_hp = max(defender.hp - final_damage, 0)
                 defender = %{defender | hp: new_hp}
 
-                Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                  Encoder.encode({:user_hitted_user, %{char_index: defender.char_index, damage: final_damage}})})
-                Helpers.send_to_session(state.sessions, defender_id, {:send_raw,
-                  Encoder.encode({:user_hitted_by_user, %{char_index: entity.char_index, damage: final_damage}})})
-                Helpers.send_to_session(state.sessions, defender_id, {:send_raw,
-                  Encoder.encode({:update_hp, %{min_hp: new_hp}})})
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw,
+                   Encoder.encode({:user_hitted_user, %{char_index: defender.char_index, damage: final_damage}})}
+                )
+
+                Helpers.send_to_session(
+                  state.sessions,
+                  defender_id,
+                  {:send_raw,
+                   Encoder.encode({:user_hitted_by_user, %{char_index: entity.char_index, damage: final_damage}})}
+                )
+
+                Helpers.send_to_session(
+                  state.sessions,
+                  defender_id,
+                  {:send_raw, Encoder.encode({:update_hp, %{min_hp: new_hp}})}
+                )
 
                 # VB6: weapon skill gain on hit
                 entity = maybe_gain_skill(entity, skill_name)
@@ -383,33 +507,41 @@ defmodule Arena.Map.CombatHandlers do
                 guild_war = Arena.GuildServer.players_at_war?(char_id, defender_id)
                 entity = if not defender.criminal and not guild_war, do: %{entity | criminal: true}, else: entity
 
-                {defender, state} = if new_hp <= 0 do
-                  Helpers.send_to_session(state.sessions, defender_id, {:send_raw,
-                    Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})})
-                  handle_player_death(state, defender_id, defender)
-                else
-                  {defender, state}
-                end
+                {defender, state} =
+                  if new_hp <= 0 do
+                    Helpers.send_to_session(
+                      state.sessions,
+                      defender_id,
+                      {:send_raw, Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})}
+                    )
 
-                # Faction score + kill counters + guild XP on PvP kill
-                entity = if defender.dead do
-                  score = Arena.Map.Social.faction_score_for_kill(entity, defender)
-                  entity = if score > 0, do: %{entity | faction_score: entity.faction_score + score}, else: entity
-                  entity = update_pvp_kill_counters(entity, defender)
-
-                  case Arena.GuildServer.guild_id_for(char_id) do
-                    nil -> :ok
-                    gid -> Arena.GuildServer.add_guild_exp(gid, 50)
+                    handle_player_death(state, defender_id, defender)
+                  else
+                    {defender, state}
                   end
 
-                  entity
-                else
-                  entity
-                end
+                # Faction score + kill counters + guild XP on PvP kill
+                entity =
+                  if defender.dead do
+                    score = Arena.Map.Social.faction_score_for_kill(entity, defender)
+                    entity = if score > 0, do: %{entity | faction_score: entity.faction_score + score}, else: entity
+                    entity = update_pvp_kill_counters(entity, defender)
 
-                players = state.players
+                    case Arena.GuildServer.guild_id_for(char_id) do
+                      nil -> :ok
+                      gid -> Arena.GuildServer.add_guild_exp(gid, 50)
+                    end
+
+                    entity
+                  else
+                    entity
+                  end
+
+                players =
+                  state.players
                   |> Map.put(char_id, entity)
                   |> Map.put(defender_id, defender)
+
                 state = %{state | players: players}
 
                 if defender.dead do
@@ -443,9 +575,15 @@ defmodule Arena.Map.CombatHandlers do
         slot_cd = Map.get(entity.spell_cooldowns, spell_slot, -1_000_000_000_000)
 
         cond do
-          now < slot_cd -> {:reply, {:error, :cooldown}, state}
-          entity.dead -> {:reply, {:error, :dead}, state}
-          entity.paralyzed -> {:reply, {:error, :paralyzed}, state}
+          now < slot_cd ->
+            {:reply, {:error, :cooldown}, state}
+
+          entity.dead ->
+            {:reply, {:error, :dead}, state}
+
+          entity.paralyzed ->
+            {:reply, {:error, :paralyzed}, state}
+
           true ->
             spell_idx = spell_slot - 1
 
@@ -458,10 +596,15 @@ defmodule Arena.Map.CombatHandlers do
                 spell_def = GameData.get_spell(spell_id)
 
                 # Bounds + range check
-                target_oob = target_x != nil and target_y != nil and
-                  (target_x < 1 or target_x > Helpers.map_width() or target_y < 1 or target_y > Helpers.map_height())
-                spell_in_range = not target_oob and (target_x == nil or target_y == nil or
-                  (abs(entity.x - target_x) <= Helpers.aoi_range_x() and abs(entity.y - target_y) <= Helpers.aoi_range_y()))
+                target_oob =
+                  target_x != nil and target_y != nil and
+                    (target_x < 1 or target_x > Helpers.map_width() or target_y < 1 or target_y > Helpers.map_height())
+
+                spell_in_range =
+                  not target_oob and
+                    (target_x == nil or target_y == nil or
+                       (abs(entity.x - target_x) <= Helpers.aoi_range_x() and
+                          abs(entity.y - target_y) <= Helpers.aoi_range_y()))
 
                 magic_skill = Map.get(entity.skills, :magic, 0)
                 req = if spell_def, do: spell_def.requirement_mask, else: 0
@@ -484,14 +627,26 @@ defmodule Arena.Map.CombatHandlers do
 
                   # VB6: MaxLevelCasteable -- spell has a max caster level
                   spell_def.max_level_casteable > 0 and entity.level > spell_def.max_level_casteable ->
-                    Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                      Encoder.encode({:console_msg, %{message: "Tu nivel es muy alto para lanzar este hechizo.", font_index: 0}})})
+                    Helpers.send_to_session(
+                      state.sessions,
+                      char_id,
+                      {:send_raw,
+                       Encoder.encode(
+                         {:console_msg, %{message: "Tu nivel es muy alto para lanzar este hechizo.", font_index: 0}}
+                       )}
+                    )
+
                     {:reply, {:error, :level_too_high}, state}
 
                   # VB6: NeedStaff -- requires a magic staff equipped
                   spell_def.need_staff and not has_staff_equipped?(entity) ->
-                    Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                      Encoder.encode({:console_msg, %{message: "Necesitas un baculo equipado.", font_index: 0}})})
+                    Helpers.send_to_session(
+                      state.sessions,
+                      char_id,
+                      {:send_raw,
+                       Encoder.encode({:console_msg, %{message: "Necesitas un baculo equipado.", font_index: 0}})}
+                    )
+
                     {:reply, {:error, :need_staff}, state}
 
                   # VB6: RequirementMask -- equipment requirements
@@ -516,37 +671,39 @@ defmodule Arena.Map.CombatHandlers do
 
                   # VB6: eRequireTargetOnLand -- target must be on land
                   band(req, @req_on_land) != 0 and target_x != nil and
-                    tile_is_water?(state, target_x, target_y) ->
+                      tile_is_water?(state, target_x, target_y) ->
                     spell_req_fail(state, char_id, "El objetivo debe estar en tierra.")
 
                   # VB6: eRequireTargetOnWater -- target must be on water
                   band(req, @req_on_water) != 0 and target_x != nil and
-                    not tile_is_water?(state, target_x, target_y) ->
+                      not tile_is_water?(state, target_x, target_y) ->
                     spell_req_fail(state, char_id, "El objetivo debe estar en agua.")
 
                   # VB6: WorkOnDead -- reject if target is dead and spell cannot work on dead
                   not spell_def.work_on_dead and target_x != nil and target_y != nil and
-                    target_is_dead?(state, target_x, target_y) ->
+                      target_is_dead?(state, target_x, target_y) ->
                     spell_req_fail(state, char_id, "No puedes lanzar ese hechizo sobre un muerto.")
 
                   # VB6: StaffAfecta -- requires a weapon of specific obj_type
                   spell_def.staff_afecta > 0 and
-                    not has_required_weapon_type?(entity, spell_def.staff_afecta) ->
+                      not has_required_weapon_type?(entity, spell_def.staff_afecta) ->
                     spell_req_fail(state, char_id, "Necesitas el arma adecuada para lanzar ese hechizo.")
 
                   # VB6: RequireWeaponType -- requires weapon of specific e_WeaponType enum
                   spell_def.require_weapon_type > 0 and
-                    not has_required_weapon_enum?(entity, spell_def.require_weapon_type) ->
+                      not has_required_weapon_enum?(entity, spell_def.require_weapon_type) ->
                     spell_req_fail(state, char_id, "Necesitas el tipo de arma correcto para lanzar ese hechizo.")
 
                   true ->
                     entity = Helpers.break_invisibility(entity, state, char_id)
                     # VB6: per-spell cooldown in seconds
                     cooldown_ms = spell_def.cooldown * 1000
-                    entity = %{entity |
-                      mana: entity.mana - spell_def.mana_required,
-                      stamina: max(entity.stamina - spell_def.sta_required, 0),
-                      spell_cooldowns: Map.put(entity.spell_cooldowns, spell_slot, now + cooldown_ms)
+
+                    entity = %{
+                      entity
+                      | mana: entity.mana - spell_def.mana_required,
+                        stamina: max(entity.stamina - spell_def.sta_required, 0),
+                        spell_cooldowns: Map.put(entity.spell_cooldowns, spell_slot, now + cooldown_ms)
                     }
 
                     state = apply_spell(state, char_id, entity, spell_def, target_x, target_y)
@@ -555,7 +712,8 @@ defmodule Arena.Map.CombatHandlers do
             end
         end
 
-      :error -> {:reply, {:error, :not_on_map}, state}
+      :error ->
+        {:reply, {:error, :not_on_map}, state}
     end
   end
 
@@ -574,15 +732,33 @@ defmodule Arena.Map.CombatHandlers do
   def broadcast_spell_fx(state, entity, spell_def, target_x, target_y) do
     if spell_def.fx_grh > 0 do
       target_occ = if target_x && target_y, do: Helpers.get_occupancy(state.occupancy, target_x, target_y), else: nil
-      fx_char_index = case target_occ do
-        {:player, pid} -> case Map.get(state.players, pid) do nil -> 0; p -> p.char_index end
-        {:npc, iid} -> case Map.get(state.npcs_live, iid) do nil -> 0; n -> n.char_index end
-        _ -> entity.char_index
-      end
+
+      fx_char_index =
+        case target_occ do
+          {:player, pid} ->
+            case Map.get(state.players, pid) do
+              nil -> 0
+              p -> p.char_index
+            end
+
+          {:npc, iid} ->
+            case Map.get(state.npcs_live, iid) do
+              nil -> 0
+              n -> n.char_index
+            end
+
+          _ ->
+            entity.char_index
+        end
 
       fx_x = if target_x, do: target_x, else: entity.x
       fx_y = if target_y, do: target_y, else: entity.y
-      fx_raw = Encoder.encode({:create_fx, %{char_index: fx_char_index, fx: spell_def.fx_grh, loops: spell_def.loops, x: fx_x, y: fx_y}})
+
+      fx_raw =
+        Encoder.encode(
+          {:create_fx, %{char_index: fx_char_index, fx: spell_def.fx_grh, loops: spell_def.loops, x: fx_x, y: fx_y}}
+        )
+
       Visibility.broadcast_visible_all(state, entity.x, entity.y, fn pid -> send(pid, {:send_raw, fx_raw}) end)
     end
 
@@ -595,6 +771,7 @@ defmodule Arena.Map.CombatHandlers do
   # VB6: iterate square area centered on target, apply spell to matching occupants
   def apply_spell_aoe(state, char_id, entity, spell_def, center_x, center_y) do
     r = spell_def.area_radio
+
     targets =
       for ty <- (center_y - r)..(center_y + r),
           tx <- (center_x - r)..(center_x + r),
@@ -603,15 +780,16 @@ defmodule Arena.Map.CombatHandlers do
       end
 
     # Filter by area_afecta: 1=users, 2=NPCs, 3=both
-    targets = Enum.filter(targets, fn {_tx, _ty, occ} ->
-      case {spell_def.area_afecta, occ} do
-        {1, {:player, _}} -> true
-        {2, {:npc, _}} -> true
-        {3, {:player, _}} -> true
-        {3, {:npc, _}} -> true
-        _ -> false
-      end
-    end)
+    targets =
+      Enum.filter(targets, fn {_tx, _ty, occ} ->
+        case {spell_def.area_afecta, occ} do
+          {1, {:player, _}} -> true
+          {2, {:npc, _}} -> true
+          {3, {:player, _}} -> true
+          {3, {:npc, _}} -> true
+          _ -> false
+        end
+      end)
 
     # Apply spell to each target, threading state. Re-fetch entity from state each iteration
     # since damage spells can update entity (XP, criminal flag).
@@ -635,9 +813,11 @@ defmodule Arena.Map.CombatHandlers do
 
       # Heal spell (sube_hp == 1 or sanacion)
       spell_def.sube_hp == 1 or spell_def.sanacion ->
-        heal = if spell_def.max_hp > spell_def.min_hp,
-          do: Enum.random(spell_def.min_hp..spell_def.max_hp),
-          else: spell_def.min_hp
+        heal =
+          if spell_def.max_hp > spell_def.min_hp,
+            do: Enum.random(spell_def.min_hp..spell_def.max_hp),
+            else: spell_def.min_hp
+
         apply_spell_heal(state, char_id, entity, heal, spell_def, target_x, target_y)
 
       # Status effects
@@ -685,16 +865,27 @@ defmodule Arena.Map.CombatHandlers do
             new_hp = max(npc.hp - final_damage, 0)
             npc = %{npc | hp: new_hp}
 
-            Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-              Encoder.encode({:user_hitted_user, %{char_index: npc.char_index, damage: final_damage}})})
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw, Encoder.encode({:user_hitted_user, %{char_index: npc.char_index, damage: final_damage}})}
+            )
 
             if new_hp <= 0 do
-              state = if npc.owner_id != nil do
-                handle_pet_death(state, instance_id, npc)
-              else
-                npc = %{npc | alive: false, respawn_at: System.monotonic_time(:millisecond) + ((if npc_def, do: npc_def.intervalo_respawn, else: 60) * 1000)}
-                put_in(state.npcs_live[instance_id], npc)
-              end
+              state =
+                if npc.owner_id != nil do
+                  handle_pet_death(state, instance_id, npc)
+                else
+                  npc = %{
+                    npc
+                    | alive: false,
+                      respawn_at:
+                        System.monotonic_time(:millisecond) +
+                          if(npc_def, do: npc_def.intervalo_respawn, else: 60) * 1000
+                  }
+
+                  put_in(state.npcs_live[instance_id], npc)
+                end
 
               occupancy = Helpers.clear_occupancy(state.occupancy, npc.x, npc.y)
               state = %{state | occupancy: occupancy}
@@ -703,41 +894,51 @@ defmodule Arena.Map.CombatHandlers do
               Visibility.broadcast_visible_all(state, npc.x, npc.y, fn pid -> send(pid, {:send_raw, remove_raw}) end)
 
               # Per-hit XP on the killing blow (no XP for killing pets)
-              {entity, state} = if npc.owner_id == nil do
-                award_hit_xp(state, char_id, entity, final_damage, npc_def, instance_id)
-              else
-                {entity, state}
-              end
-
-              # Kill rewards (counter, guild XP, loot) — no rewards for killing pets
-              state = if npc.owner_id == nil do
-                entity = %{entity | npcs_killed: entity.npcs_killed + 1}
-
-                # Award guild XP on NPC spell kill
-                give_exp = if npc_def, do: npc_def.give_exp, else: 0
-                if give_exp > 0 do
-                  case Arena.GuildServer.guild_id_for(char_id) do
-                    nil -> :ok
-                    gid -> Arena.GuildServer.add_guild_exp(gid, max(div(give_exp, 10), 1))
-                  end
+              {entity, state} =
+                if npc.owner_id == nil do
+                  award_hit_xp(state, char_id, entity, final_damage, npc_def, instance_id)
+                else
+                  {entity, state}
                 end
 
-                # VB6: NPCTirarOro — drop gold on the floor at NPC position
-                give_gld = if npc_def, do: npc_def.give_gld, else: 0
-                state = drop_npc_gold(state, npc, give_gld)
+              # Kill rewards (counter, guild XP, loot) — no rewards for killing pets
+              state =
+                if npc.owner_id == nil do
+                  entity = %{entity | npcs_killed: entity.npcs_killed + 1}
 
-                Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                  Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+                  # Award guild XP on NPC spell kill
+                  give_exp = if npc_def, do: npc_def.give_exp, else: 0
 
-                state = drop_npc_loot(state, npc, npc_def)
-                players = Map.put(state.players, char_id, entity)
-                %{state | players: players}
-              else
-                Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                  Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
-                players = Map.put(state.players, char_id, entity)
-                %{state | players: players}
-              end
+                  if give_exp > 0 do
+                    case Arena.GuildServer.guild_id_for(char_id) do
+                      nil -> :ok
+                      gid -> Arena.GuildServer.add_guild_exp(gid, max(div(give_exp, 10), 1))
+                    end
+                  end
+
+                  # VB6: NPCTirarOro — drop gold on the floor at NPC position
+                  give_gld = if npc_def, do: npc_def.give_gld, else: 0
+                  state = drop_npc_gold(state, npc, give_gld)
+
+                  Helpers.send_to_session(
+                    state.sessions,
+                    char_id,
+                    {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+                  )
+
+                  state = drop_npc_loot(state, npc, npc_def)
+                  players = Map.put(state.players, char_id, entity)
+                  %{state | players: players}
+                else
+                  Helpers.send_to_session(
+                    state.sessions,
+                    char_id,
+                    {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+                  )
+
+                  players = Map.put(state.players, char_id, entity)
+                  %{state | players: players}
+                end
 
               state
             else
@@ -745,14 +946,19 @@ defmodule Arena.Map.CombatHandlers do
               state = put_in(state.npcs_live[instance_id], npc)
 
               # VB6: per-hit proportional XP (no XP for hitting pets)
-              {entity, state} = if npc.owner_id == nil do
-                award_hit_xp(state, char_id, entity, final_damage, npc_def, instance_id)
-              else
-                {entity, state}
-              end
+              {entity, state} =
+                if npc.owner_id == nil do
+                  award_hit_xp(state, char_id, entity, final_damage, npc_def, instance_id)
+                else
+                  {entity, state}
+                end
 
-              Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+              Helpers.send_to_session(
+                state.sessions,
+                char_id,
+                {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+              )
+
               players = Map.put(state.players, char_id, entity)
               %{state | players: players}
             end
@@ -771,79 +977,128 @@ defmodule Arena.Map.CombatHandlers do
           defender ->
             cond do
               same_faction?(entity, defender) ->
-                Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                  Encoder.encode({:console_msg, %{message: "No puedes atacar a un miembro de tu faccion.", font_index: 0}})})
-                Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                  Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw,
+                   Encoder.encode(
+                     {:console_msg, %{message: "No puedes atacar a un miembro de tu faccion.", font_index: 0}}
+                   )}
+                )
+
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+                )
+
                 players = Map.put(state.players, char_id, entity)
                 %{state | players: players}
 
               party_safe_block?(char_id, defender) ->
-                Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                  Encoder.encode({:console_msg, %{message: "No puedes atacar a un miembro de tu grupo.", font_index: 0}})})
-                Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                  Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw,
+                   Encoder.encode(
+                     {:console_msg, %{message: "No puedes atacar a un miembro de tu grupo.", font_index: 0}}
+                   )}
+                )
+
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+                )
+
                 players = Map.put(state.players, char_id, entity)
                 %{state | players: players}
 
               true ->
-            # VB6: apply magic resistance in PvP (resistance skill as percentage)
-            resist_pct = Map.get(defender.skills, :resistance, 0)
-            final_damage = Combat.apply_magic_resistance(damage, resist_pct)
-            new_hp = max(defender.hp - final_damage, 0)
-            defender = %{defender | hp: new_hp}
+                # VB6: apply magic resistance in PvP (resistance skill as percentage)
+                resist_pct = Map.get(defender.skills, :resistance, 0)
+                final_damage = Combat.apply_magic_resistance(damage, resist_pct)
+                new_hp = max(defender.hp - final_damage, 0)
+                defender = %{defender | hp: new_hp}
 
-            Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-              Encoder.encode({:user_hitted_user, %{char_index: defender.char_index, damage: final_damage}})})
-            Helpers.send_to_session(state.sessions, target_id, {:send_raw,
-              Encoder.encode({:user_hitted_by_user, %{char_index: entity.char_index, damage: final_damage}})})
-            Helpers.send_to_session(state.sessions, target_id, {:send_raw,
-              Encoder.encode({:update_hp, %{min_hp: new_hp}})})
-            Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-              Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw,
+                   Encoder.encode({:user_hitted_user, %{char_index: defender.char_index, damage: final_damage}})}
+                )
 
-            # Guild war: no criminal flag when attacking enemy guild members
-            guild_war = Arena.GuildServer.players_at_war?(char_id, target_id)
-            entity = if not defender.criminal and not guild_war, do: %{entity | criminal: true}, else: entity
+                Helpers.send_to_session(
+                  state.sessions,
+                  target_id,
+                  {:send_raw,
+                   Encoder.encode({:user_hitted_by_user, %{char_index: entity.char_index, damage: final_damage}})}
+                )
 
-            {defender, state} = if new_hp <= 0 do
-              Helpers.send_to_session(state.sessions, target_id, {:send_raw,
-                Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})})
-              handle_player_death(state, target_id, defender)
-            else
-              {defender, state}
-            end
+                Helpers.send_to_session(
+                  state.sessions,
+                  target_id,
+                  {:send_raw, Encoder.encode({:update_hp, %{min_hp: new_hp}})}
+                )
 
-            # Faction score + kill counters + guild XP on PvP spell kill
-            entity = if defender.dead do
-              score = Arena.Map.Social.faction_score_for_kill(entity, defender)
-              entity = if score > 0, do: %{entity | faction_score: entity.faction_score + score}, else: entity
-              entity = update_pvp_kill_counters(entity, defender)
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+                )
 
-              case Arena.GuildServer.guild_id_for(char_id) do
-                nil -> :ok
-                gid -> Arena.GuildServer.add_guild_exp(gid, 50)
-              end
+                # Guild war: no criminal flag when attacking enemy guild members
+                guild_war = Arena.GuildServer.players_at_war?(char_id, target_id)
+                entity = if not defender.criminal and not guild_war, do: %{entity | criminal: true}, else: entity
 
-              entity
-            else
-              entity
-            end
+                {defender, state} =
+                  if new_hp <= 0 do
+                    Helpers.send_to_session(
+                      state.sessions,
+                      target_id,
+                      {:send_raw, Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})}
+                    )
 
-            players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, defender)
-            state = %{state | players: players}
+                    handle_player_death(state, target_id, defender)
+                  else
+                    {defender, state}
+                  end
 
-            if defender.dead do
-              Helpers.broadcast_character_change(state, defender)
-            end
+                # Faction score + kill counters + guild XP on PvP spell kill
+                entity =
+                  if defender.dead do
+                    score = Arena.Map.Social.faction_score_for_kill(entity, defender)
+                    entity = if score > 0, do: %{entity | faction_score: entity.faction_score + score}, else: entity
+                    entity = update_pvp_kill_counters(entity, defender)
 
-            state
+                    case Arena.GuildServer.guild_id_for(char_id) do
+                      nil -> :ok
+                      gid -> Arena.GuildServer.add_guild_exp(gid, 50)
+                    end
+
+                    entity
+                  else
+                    entity
+                  end
+
+                players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, defender)
+                state = %{state | players: players}
+
+                if defender.dead do
+                  Helpers.broadcast_character_change(state, defender)
+                end
+
+                state
             end
         end
 
       _ ->
-        Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-          Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+        Helpers.send_to_session(
+          state.sessions,
+          char_id,
+          {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+        )
+
         players = Map.put(state.players, char_id, entity)
         %{state | players: players}
     end
@@ -862,20 +1117,35 @@ defmodule Arena.Map.CombatHandlers do
           target_entity ->
             # VB6: cannot heal dead targets
             if target_entity.dead do
-              Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                Encoder.encode({:console_msg, %{message: "Esta muerto.", font_index: 5}})})
-              Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+              Helpers.send_to_session(
+                state.sessions,
+                char_id,
+                {:send_raw, Encoder.encode({:console_msg, %{message: "Esta muerto.", font_index: 5}})}
+              )
+
+              Helpers.send_to_session(
+                state.sessions,
+                char_id,
+                {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+              )
+
               players = Map.put(state.players, char_id, entity)
               %{state | players: players}
             else
               new_hp = min(target_entity.hp + heal, target_entity.max_hp)
               target_entity = %{target_entity | hp: new_hp}
 
-              Helpers.send_to_session(state.sessions, target_id, {:send_raw,
-                Encoder.encode({:update_hp, %{min_hp: new_hp}})})
-              Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+              Helpers.send_to_session(
+                state.sessions,
+                target_id,
+                {:send_raw, Encoder.encode({:update_hp, %{min_hp: new_hp}})}
+              )
+
+              Helpers.send_to_session(
+                state.sessions,
+                char_id,
+                {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+              )
 
               players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, target_entity)
               %{state | players: players}
@@ -887,10 +1157,13 @@ defmodule Arena.Map.CombatHandlers do
         new_hp = min(entity.hp + heal, entity.max_hp)
         entity = %{entity | hp: new_hp}
 
-        Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-          Encoder.encode({:update_hp, %{min_hp: new_hp}})})
-        Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-          Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+        Helpers.send_to_session(state.sessions, char_id, {:send_raw, Encoder.encode({:update_hp, %{min_hp: new_hp}})})
+
+        Helpers.send_to_session(
+          state.sessions,
+          char_id,
+          {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+        )
 
         players = Map.put(state.players, char_id, entity)
         %{state | players: players}
@@ -901,10 +1174,11 @@ defmodule Arena.Map.CombatHandlers do
     target = if target_x && target_y, do: Helpers.get_occupancy(state.occupancy, target_x, target_y), else: nil
     now = System.monotonic_time(:millisecond)
 
-    target_id = case target do
-      {:player, tid} -> tid
-      _ -> char_id
-    end
+    target_id =
+      case target do
+        {:player, tid} -> tid
+        _ -> char_id
+      end
 
     case Map.get(state.players, target_id) do
       nil ->
@@ -914,37 +1188,42 @@ defmodule Arena.Map.CombatHandlers do
       target_entity ->
         duration_ms = max((spell_def.duration || 0) * 1000, 3000)
 
-        target_entity = cond do
-          spell_def.paraliza ->
-            buff = %{type: :paralyzed, expires_at: now + div(duration_ms, 2)}
-            buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :paralyzed))]
-            %{target_entity | paralyzed: true, buffs: buffs}
+        target_entity =
+          cond do
+            spell_def.paraliza ->
+              buff = %{type: :paralyzed, expires_at: now + div(duration_ms, 2)}
+              buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :paralyzed))]
+              %{target_entity | paralyzed: true, buffs: buffs}
 
-          spell_def.envenena ->
-            buff = %{type: :poisoned, expires_at: now + duration_ms, next_tick: now + 2000}
-            buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :poisoned))]
-            %{target_entity | poisoned: true, buffs: buffs}
+            spell_def.envenena ->
+              buff = %{type: :poisoned, expires_at: now + duration_ms, next_tick: now + 2000}
+              buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :poisoned))]
+              %{target_entity | poisoned: true, buffs: buffs}
 
-          spell_def.cura_veneno ->
-            buffs = Enum.reject(target_entity.buffs, &(&1.type == :poisoned))
-            %{target_entity | poisoned: false, buffs: buffs}
+            spell_def.cura_veneno ->
+              buffs = Enum.reject(target_entity.buffs, &(&1.type == :poisoned))
+              %{target_entity | poisoned: false, buffs: buffs}
 
-          spell_def.invisibilidad ->
-            buff = %{type: :invisible, expires_at: now + duration_ms}
-            buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :invisible))]
-            %{target_entity | invisible: true, buffs: buffs}
+            spell_def.invisibilidad ->
+              buff = %{type: :invisible, expires_at: now + duration_ms}
+              buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :invisible))]
+              %{target_entity | invisible: true, buffs: buffs}
 
-          spell_def.inmoviliza ->
-            # VB6: immobilize duration is halved
-            buff = %{type: :immobilized, expires_at: now + div(duration_ms, 2)}
-            buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :immobilized))]
-            %{target_entity | immobilized: true, buffs: buffs}
+            spell_def.inmoviliza ->
+              # VB6: immobilize duration is halved
+              buff = %{type: :immobilized, expires_at: now + div(duration_ms, 2)}
+              buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :immobilized))]
+              %{target_entity | immobilized: true, buffs: buffs}
 
-          true -> target_entity
-        end
+            true ->
+              target_entity
+          end
 
-        Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-          Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+        Helpers.send_to_session(
+          state.sessions,
+          char_id,
+          {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+        )
 
         players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, target_entity)
         %{state | players: players}
@@ -954,10 +1233,11 @@ defmodule Arena.Map.CombatHandlers do
   def apply_spell_resurrect(state, char_id, entity, spell_def, target_x, target_y) do
     target = if target_x && target_y, do: Helpers.get_occupancy(state.occupancy, target_x, target_y), else: nil
 
-    target_id = case target do
-      {:player, tid} -> tid
-      _ -> nil
-    end
+    target_id =
+      case target do
+        {:player, tid} -> tid
+        _ -> nil
+      end
 
     target_player = if target_id, do: Map.get(state.players, target_id)
 
@@ -966,24 +1246,47 @@ defmodule Arena.Map.CombatHandlers do
       revive_pct = max(spell_def.min_hp, 10)
       revive_hp = max(div(target_player.max_hp * revive_pct, 100), 1)
 
-      revived = %{target_player |
-        dead: false, hp: revive_hp, mana: 0, hunger: 0, thirst: 0,
-        buffs: [], paralyzed: false, poisoned: false, invisible: false
+      revived = %{
+        target_player
+        | dead: false,
+          hp: revive_hp,
+          mana: 0,
+          hunger: 0,
+          thirst: 0,
+          buffs: [],
+          paralyzed: false,
+          poisoned: false,
+          invisible: false
       }
 
       # Notify revived player
-      Helpers.send_to_session(state.sessions, target_id, {:send_raw,
-        Encoder.encode({:update_hp, %{min_hp: revive_hp}})})
-      Helpers.send_to_session(state.sessions, target_id, {:send_raw,
-        Encoder.encode({:update_mana, %{min_mana: 0}})})
-      Helpers.send_to_session(state.sessions, target_id, {:send_raw,
-        Encoder.encode({:update_hunger_and_thirst, %{max_hunger: 100, min_hunger: 0, max_thirst: 100, min_thirst: 0}})})
-      Helpers.send_to_session(state.sessions, target_id, {:send_raw,
-        Encoder.encode({:console_msg, %{message: "Has sido resucitado!", font_index: 0}})})
+      Helpers.send_to_session(
+        state.sessions,
+        target_id,
+        {:send_raw, Encoder.encode({:update_hp, %{min_hp: revive_hp}})}
+      )
+
+      Helpers.send_to_session(state.sessions, target_id, {:send_raw, Encoder.encode({:update_mana, %{min_mana: 0}})})
+
+      Helpers.send_to_session(
+        state.sessions,
+        target_id,
+        {:send_raw,
+         Encoder.encode({:update_hunger_and_thirst, %{max_hunger: 100, min_hunger: 0, max_thirst: 100, min_thirst: 0}})}
+      )
+
+      Helpers.send_to_session(
+        state.sessions,
+        target_id,
+        {:send_raw, Encoder.encode({:console_msg, %{message: "Has sido resucitado!", font_index: 0}})}
+      )
 
       # Update caster mana
-      Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-        Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+      Helpers.send_to_session(
+        state.sessions,
+        char_id,
+        {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+      )
 
       players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, revived)
       state = %{state | players: players}
@@ -991,10 +1294,18 @@ defmodule Arena.Map.CombatHandlers do
       state
     else
       # No dead player at target -- just update caster mana
-      Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-        Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
-      Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-        Encoder.encode({:console_msg, %{message: "No hay un jugador muerto ahi.", font_index: 5}})})
+      Helpers.send_to_session(
+        state.sessions,
+        char_id,
+        {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+      )
+
+      Helpers.send_to_session(
+        state.sessions,
+        char_id,
+        {:send_raw, Encoder.encode({:console_msg, %{message: "No hay un jugador muerto ahi.", font_index: 5}})}
+      )
+
       players = Map.put(state.players, char_id, entity)
       %{state | players: players}
     end
@@ -1004,10 +1315,11 @@ defmodule Arena.Map.CombatHandlers do
     target = if target_x && target_y, do: Helpers.get_occupancy(state.occupancy, target_x, target_y), else: nil
     now = System.monotonic_time(:millisecond)
 
-    target_id = case target do
-      {:player, tid} -> tid
-      _ -> char_id
-    end
+    target_id =
+      case target do
+        {:player, tid} -> tid
+        _ -> char_id
+      end
 
     case Map.get(state.players, target_id) do
       nil ->
@@ -1015,10 +1327,11 @@ defmodule Arena.Map.CombatHandlers do
         %{state | players: players}
 
       target_entity ->
-        {sube, min_val, max_val} = case attr do
-          :str -> {spell_def.sube_fu, spell_def.min_fu, spell_def.max_fu}
-          :agi -> {spell_def.sube_ag, spell_def.min_ag, spell_def.max_ag}
-        end
+        {sube, min_val, max_val} =
+          case attr do
+            :str -> {spell_def.sube_fu, spell_def.min_fu, spell_def.max_fu}
+            :agi -> {spell_def.sube_ag, spell_def.min_ag, spell_def.max_ag}
+          end
 
         amount = if max_val > min_val, do: Enum.random(min_val..max_val), else: min_val
         duration_ms = max((spell_def.duration || 0) * 1000, 3000)
@@ -1027,17 +1340,21 @@ defmodule Arena.Map.CombatHandlers do
         # sube == 1 -> increase, sube == 2 -> decrease
         actual = if sube == 1, do: amount, else: -amount
 
-        target_entity = case attr do
-          :str -> %{target_entity | str_buff: target_entity.str_buff + actual}
-          :agi -> %{target_entity | agi_buff: target_entity.agi_buff + actual}
-        end
+        target_entity =
+          case attr do
+            :str -> %{target_entity | str_buff: target_entity.str_buff + actual}
+            :agi -> %{target_entity | agi_buff: target_entity.agi_buff + actual}
+          end
 
         buff = %{type: buff_type, expires_at: now + duration_ms, value: actual}
         buffs = [buff | target_entity.buffs]
         target_entity = %{target_entity | buffs: buffs}
 
-        Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-          Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+        Helpers.send_to_session(
+          state.sessions,
+          char_id,
+          {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+        )
 
         players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, target_entity)
         %{state | players: players}
@@ -1047,10 +1364,11 @@ defmodule Arena.Map.CombatHandlers do
   def apply_spell_mana(state, char_id, entity, spell_def, target_x, target_y) do
     target = if target_x && target_y, do: Helpers.get_occupancy(state.occupancy, target_x, target_y), else: nil
 
-    target_id = case target do
-      {:player, tid} -> tid
-      _ -> char_id
-    end
+    target_id =
+      case target do
+        {:player, tid} -> tid
+        _ -> char_id
+      end
 
     case Map.get(state.players, target_id) do
       nil ->
@@ -1058,22 +1376,31 @@ defmodule Arena.Map.CombatHandlers do
         %{state | players: players}
 
       target_entity ->
-        amount = if spell_def.max_mana > spell_def.min_mana,
-          do: Enum.random(spell_def.min_mana..spell_def.max_mana),
-          else: spell_def.min_mana
+        amount =
+          if spell_def.max_mana > spell_def.min_mana,
+            do: Enum.random(spell_def.min_mana..spell_def.max_mana),
+            else: spell_def.min_mana
 
-        target_entity = if spell_def.sube_mana == 1 do
-          # Restore mana
-          %{target_entity | mana: min(target_entity.mana + amount, target_entity.max_mana)}
-        else
-          # Drain mana
-          %{target_entity | mana: max(target_entity.mana - amount, 0)}
-        end
+        target_entity =
+          if spell_def.sube_mana == 1 do
+            # Restore mana
+            %{target_entity | mana: min(target_entity.mana + amount, target_entity.max_mana)}
+          else
+            # Drain mana
+            %{target_entity | mana: max(target_entity.mana - amount, 0)}
+          end
 
-        Helpers.send_to_session(state.sessions, target_id, {:send_raw,
-          Encoder.encode({:update_mana, %{min_mana: target_entity.mana}})})
-        Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-          Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+        Helpers.send_to_session(
+          state.sessions,
+          target_id,
+          {:send_raw, Encoder.encode({:update_mana, %{min_mana: target_entity.mana}})}
+        )
+
+        Helpers.send_to_session(
+          state.sessions,
+          char_id,
+          {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+        )
 
         players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, target_entity)
         %{state | players: players}
@@ -1083,10 +1410,11 @@ defmodule Arena.Map.CombatHandlers do
   def apply_spell_stamina(state, char_id, entity, spell_def, target_x, target_y) do
     target = if target_x && target_y, do: Helpers.get_occupancy(state.occupancy, target_x, target_y), else: nil
 
-    target_id = case target do
-      {:player, tid} -> tid
-      _ -> char_id
-    end
+    target_id =
+      case target do
+        {:player, tid} -> tid
+        _ -> char_id
+      end
 
     case Map.get(state.players, target_id) do
       nil ->
@@ -1094,20 +1422,29 @@ defmodule Arena.Map.CombatHandlers do
         %{state | players: players}
 
       target_entity ->
-        amount = if spell_def.max_sta > spell_def.min_sta,
-          do: Enum.random(spell_def.min_sta..spell_def.max_sta),
-          else: spell_def.min_sta
+        amount =
+          if spell_def.max_sta > spell_def.min_sta,
+            do: Enum.random(spell_def.min_sta..spell_def.max_sta),
+            else: spell_def.min_sta
 
-        target_entity = if spell_def.sube_sta == 1 do
-          %{target_entity | stamina: min(target_entity.stamina + amount, target_entity.max_stamina)}
-        else
-          %{target_entity | stamina: max(target_entity.stamina - amount, 0)}
-        end
+        target_entity =
+          if spell_def.sube_sta == 1 do
+            %{target_entity | stamina: min(target_entity.stamina + amount, target_entity.max_stamina)}
+          else
+            %{target_entity | stamina: max(target_entity.stamina - amount, 0)}
+          end
 
-        Helpers.send_to_session(state.sessions, target_id, {:send_raw,
-          Encoder.encode({:update_stamina, %{min_sta: target_entity.stamina}})})
-        Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-          Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+        Helpers.send_to_session(
+          state.sessions,
+          target_id,
+          {:send_raw, Encoder.encode({:update_stamina, %{min_sta: target_entity.stamina}})}
+        )
+
+        Helpers.send_to_session(
+          state.sessions,
+          char_id,
+          {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+        )
 
         players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, target_entity)
         %{state | players: players}
@@ -1122,48 +1459,59 @@ defmodule Arena.Map.CombatHandlers do
     {expired, active} = Enum.split_with(entity.buffs, fn b -> now >= b.expires_at end)
 
     # Clear flags for expired buffs
-    entity = Enum.reduce(expired, entity, fn buff, ent ->
-      case buff.type do
-        :paralyzed -> %{ent | paralyzed: false}
-        :poisoned -> %{ent | poisoned: false}
-        :invisible -> %{ent | invisible: false}
-        :immobilized -> %{ent | immobilized: false}
-        :str_buff -> %{ent | str_buff: max(ent.str_buff - (buff[:value] || 0), 0)}
-        :agi_buff -> %{ent | agi_buff: max(ent.agi_buff - (buff[:value] || 0), 0)}
-        _ -> ent
-      end
-    end)
+    entity =
+      Enum.reduce(expired, entity, fn buff, ent ->
+        case buff.type do
+          :paralyzed -> %{ent | paralyzed: false}
+          :poisoned -> %{ent | poisoned: false}
+          :invisible -> %{ent | invisible: false}
+          :immobilized -> %{ent | immobilized: false}
+          :str_buff -> %{ent | str_buff: max(ent.str_buff - (buff[:value] || 0), 0)}
+          :agi_buff -> %{ent | agi_buff: max(ent.agi_buff - (buff[:value] || 0), 0)}
+          _ -> ent
+        end
+      end)
 
     # Process poison ticks on active poison buffs
-    {entity, active} = Enum.map_reduce(active, entity, fn buff, ent ->
-      if buff.type == :poisoned and now >= (buff[:next_tick] || 0) do
-        damage = max(Enum.random(3..5) * div(ent.max_hp, 100), 1)
-        new_hp = max(ent.hp - damage, 0)
-        ent = %{ent | hp: new_hp}
+    {entity, active} =
+      Enum.map_reduce(active, entity, fn buff, ent ->
+        if buff.type == :poisoned and now >= (buff[:next_tick] || 0) do
+          damage = max(Enum.random(3..5) * div(ent.max_hp, 100), 1)
+          new_hp = max(ent.hp - damage, 0)
+          ent = %{ent | hp: new_hp}
 
-        Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-          Encoder.encode({:update_hp, %{min_hp: new_hp}})})
-        Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-          Encoder.encode({:console_msg, %{message: "Veneno te hace #{damage} de daño.", font_index: 5}})})
+          Helpers.send_to_session(state.sessions, char_id, {:send_raw, Encoder.encode({:update_hp, %{min_hp: new_hp}})})
 
-        buff = %{buff | next_tick: now + @poison_tick_interval}
-        {buff, ent}
-      else
-        {buff, ent}
-      end
-    end)
+          Helpers.send_to_session(
+            state.sessions,
+            char_id,
+            {:send_raw, Encoder.encode({:console_msg, %{message: "Veneno te hace #{damage} de daño.", font_index: 5}})}
+          )
+
+          buff = %{buff | next_tick: now + @poison_tick_interval}
+          {buff, ent}
+        else
+          {buff, ent}
+        end
+      end)
 
     entity = %{entity | buffs: active}
 
     # Check poison death
     was_alive = not entity.dead
-    {entity, state} = if entity.hp <= 0 and was_alive do
-      Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-        Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})})
-      handle_player_death(state, char_id, entity)
-    else
-      {entity, state}
-    end
+
+    {entity, state} =
+      if entity.hp <= 0 and was_alive do
+        Helpers.send_to_session(
+          state.sessions,
+          char_id,
+          {:send_raw, Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})}
+        )
+
+        handle_player_death(state, char_id, entity)
+      else
+        {entity, state}
+      end
 
     players = Map.put(state.players, char_id, entity)
     state = %{state | players: players}
@@ -1177,6 +1525,7 @@ defmodule Arena.Map.CombatHandlers do
 
   def maybe_gain_skill(entity, skill_name) do
     current = Map.get(entity.skills, skill_name, 0)
+
     if current < @max_skill and :rand.uniform(100) <= @skill_gain_chance do
       %{entity | skills: Map.put(entity.skills, skill_name, current + 1)}
     else
@@ -1202,32 +1551,41 @@ defmodule Arena.Map.CombatHandlers do
       entity = check_level_up(entity, state.sessions, char_id)
       send_xp_update(state, char_id, entity)
 
-      state = Enum.reduce(nearby, state, fn mid, state ->
-        case Map.get(state.players, mid) do
-          nil -> state
-          member ->
-            member = %{member | xp: member.xp + share}
-            member = check_level_up(member, state.sessions, mid)
-            send_xp_update(state, mid, member)
-            %{state | players: Map.put(state.players, mid, member)}
-        end
-      end)
+      state =
+        Enum.reduce(nearby, state, fn mid, state ->
+          case Map.get(state.players, mid) do
+            nil ->
+              state
+
+            member ->
+              member = %{member | xp: member.xp + share}
+              member = check_level_up(member, state.sessions, mid)
+              send_xp_update(state, mid, member)
+              %{state | players: Map.put(state.players, mid, member)}
+          end
+        end)
 
       {entity, state}
     end
   end
 
   defp send_xp_update(state, char_id, entity) do
-    Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-      Encoder.encode({:update_exp, %{current_xp: entity.xp, next_xp: GameData.exp_for_level(entity.level + 1) || 0}})})
+    Helpers.send_to_session(
+      state.sessions,
+      char_id,
+      {:send_raw,
+       Encoder.encode({:update_exp, %{current_xp: entity.xp, next_xp: GameData.exp_for_level(entity.level + 1) || 0}})}
+    )
   end
 
   # VB6: NPCTirarOro — drop gold on the floor at the NPC's death position.
   # Gold item ID 12 (iORO), capped at @max_stack per ground tile.
   @gold_item_id 12
   defp drop_npc_gold(state, _npc, give_gld) when give_gld <= 0, do: state
+
   defp drop_npc_gold(state, npc, give_gld) do
     pos = {npc.x, npc.y}
+
     unless Map.has_key?(state.ground_items, pos) do
       ground_items = Map.put(state.ground_items, pos, %{item_id: @gold_item_id, amount: give_gld, elemental_tags: 0})
       state = %{state | ground_items: ground_items}
@@ -1266,35 +1624,54 @@ defmodule Arena.Map.CombatHandlers do
       # Base damage for new level
       {new_min_hit, new_max_hit} = Combat.base_user_damage(new_level, class_id)
 
-      entity = %{entity |
-        level: new_level,
-        xp: entity.xp - next_xp,
-        max_hp: new_max_hp, hp: new_max_hp,
-        max_mana: new_max_mana, mana: new_max_mana,
-        max_stamina: new_max_stamina, stamina: new_max_stamina,
-        min_hit: new_min_hit, max_hit: new_max_hit,
-        skill_points: entity.skill_points + skill_pts
+      entity = %{
+        entity
+        | level: new_level,
+          xp: entity.xp - next_xp,
+          max_hp: new_max_hp,
+          hp: new_max_hp,
+          max_mana: new_max_mana,
+          mana: new_max_mana,
+          max_stamina: new_max_stamina,
+          stamina: new_max_stamina,
+          min_hit: new_min_hit,
+          max_hit: new_max_hit,
+          skill_points: entity.skill_points + skill_pts
       }
 
       # Level-up packet
-      Helpers.send_to_session(sessions, char_id, {:send_raw,
-        Encoder.encode({:level_up, %{level: new_level}})})
+      Helpers.send_to_session(sessions, char_id, {:send_raw, Encoder.encode({:level_up, %{level: new_level}})})
 
       # Full stat refresh
-      Helpers.send_to_session(sessions, char_id, {:send_raw,
-        Encoder.encode({:update_user_stats, %{
-          max_hp: entity.max_hp, min_hp: entity.hp, shield: 0,
-          max_mana: entity.max_mana, min_mana: entity.mana,
-          max_sta: entity.max_stamina, min_sta: entity.stamina,
-          gold: entity.gold, gold_cap: 1_000_000,
-          level: entity.level,
-          exp_next_level: GameData.exp_for_level(entity.level + 1) || 0,
-          exp: entity.xp,
-          class: Helpers.class_atom_to_id(entity.class)
-        }})})
+      Helpers.send_to_session(
+        sessions,
+        char_id,
+        {:send_raw,
+         Encoder.encode(
+           {:update_user_stats,
+            %{
+              max_hp: entity.max_hp,
+              min_hp: entity.hp,
+              shield: 0,
+              max_mana: entity.max_mana,
+              min_mana: entity.mana,
+              max_sta: entity.max_stamina,
+              min_sta: entity.stamina,
+              gold: entity.gold,
+              gold_cap: 1_000_000,
+              level: entity.level,
+              exp_next_level: GameData.exp_for_level(entity.level + 1) || 0,
+              exp: entity.xp,
+              class: Helpers.class_atom_to_id(entity.class)
+            }}
+         )}
+      )
 
-      Helpers.send_to_session(sessions, char_id, {:send_raw,
-        Encoder.encode({:console_msg, %{message: "Has alcanzado el nivel #{new_level}!", font_index: 0}})})
+      Helpers.send_to_session(
+        sessions,
+        char_id,
+        {:send_raw, Encoder.encode({:console_msg, %{message: "Has alcanzado el nivel #{new_level}!", font_index: 0}})}
+      )
 
       # Recursive check for multiple level ups
       check_level_up(entity, sessions, char_id)
@@ -1309,37 +1686,39 @@ defmodule Arena.Map.CombatHandlers do
   Despawns pets owned by the dying player.
   """
   def handle_player_death(state, char_id, player) do
-    player = %{player |
-      dead: true,
-      deaths: player.deaths + 1,
-      stamina: 0,
-      hunger: 0,
-      thirst: 0,
-      paralyzed: false,
-      invisible: false,
-      poisoned: false,
-      meditating: false,
-      resting: false,
-      immobilized: false,
-      buffs: [],
-      commerce_npc_id: nil,
-      bank_npc_id: nil,
-      trade_partner_id: nil,
-      trade_request_target: nil,
-      trade_offer_gold: 0,
-      trade_offer_items: [],
-      trade_accepted: false
+    player = %{
+      player
+      | dead: true,
+        deaths: player.deaths + 1,
+        stamina: 0,
+        hunger: 0,
+        thirst: 0,
+        paralyzed: false,
+        invisible: false,
+        poisoned: false,
+        meditating: false,
+        resting: false,
+        immobilized: false,
+        buffs: [],
+        commerce_npc_id: nil,
+        bank_npc_id: nil,
+        trade_partner_id: nil,
+        trade_request_target: nil,
+        trade_offer_gold: 0,
+        trade_offer_items: [],
+        trade_accepted: false
     }
 
     # VB6: unequip all equipped items on death
     {player, unequipped_slots} = unequip_all_on_death(player)
 
     # VB6: TirarTodosLosItems — drop inventory on ground in unsafe zones
-    {player, state} = if not Map.get(state.meta || %{}, :safe_zone, false) do
-      drop_inventory_on_death(state, player)
-    else
-      {player, state}
-    end
+    {player, state} =
+      if not Map.get(state.meta || %{}, :safe_zone, false) do
+        drop_inventory_on_death(state, player)
+      else
+        {player, state}
+      end
 
     # Despawn all pets owned by this player
     pet_ids =
@@ -1347,12 +1726,13 @@ defmodule Arena.Map.CombatHandlers do
       |> Enum.filter(fn {_id, npc} -> npc.owner_id == char_id end)
       |> Enum.map(fn {id, _npc} -> id end)
 
-    state = Enum.reduce(pet_ids, state, fn instance_id, st ->
-      case Map.get(st.npcs_live, instance_id) do
-        nil -> st
-        npc -> Arena.NpcAi.despawn_pet(st, instance_id, npc)
-      end
-    end)
+    state =
+      Enum.reduce(pet_ids, state, fn instance_id, st ->
+        case Map.get(st.npcs_live, instance_id) do
+          nil -> st
+          npc -> Arena.NpcAi.despawn_pet(st, instance_id, npc)
+        end
+      end)
 
     # Send unequip slot updates to client
     for slot <- unequipped_slots do
@@ -1361,8 +1741,14 @@ defmodule Arena.Map.CombatHandlers do
 
     # VB6: /HOGAR message in unsafe zones
     if not Map.get(state.meta || %{}, :safe_zone, false) do
-      Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-        Encoder.encode({:console_msg, %{message: "Escribe /HOGAR si deseas regresar rápido a tu hogar.", font_index: 5}})})
+      Helpers.send_to_session(
+        state.sessions,
+        char_id,
+        {:send_raw,
+         Encoder.encode(
+           {:console_msg, %{message: "Escribe /HOGAR si deseas regresar rápido a tu hogar.", font_index: 5}}
+         )}
+      )
     end
 
     {player, state}
@@ -1398,19 +1784,37 @@ defmodule Arena.Map.CombatHandlers do
           item_def = GameData.get_item(item.item_id)
           # VB6: don't drop newbie items or quest items
           newbie = item_def != nil and Map.get(item_def, :newbie, false)
+
           if newbie do
             {inv, st}
           else
             pos = {player.x, player.y}
             # Only drop if tile doesn't already have a ground item
-            st = unless Map.has_key?(st.ground_items, pos) do
-              ground_items = Map.put(st.ground_items, pos, %{item_id: item.item_id, amount: item.amount, elemental_tags: Map.get(item, :elemental_tags, 0)})
-              st = %{st | ground_items: ground_items}
-              Helpers.broadcast_object_create(st, player.x, player.y, item.item_id, item.amount, Map.get(item, :elemental_tags, 0))
-              st
-            else
-              st
-            end
+            st =
+              unless Map.has_key?(st.ground_items, pos) do
+                ground_items =
+                  Map.put(st.ground_items, pos, %{
+                    item_id: item.item_id,
+                    amount: item.amount,
+                    elemental_tags: Map.get(item, :elemental_tags, 0)
+                  })
+
+                st = %{st | ground_items: ground_items}
+
+                Helpers.broadcast_object_create(
+                  st,
+                  player.x,
+                  player.y,
+                  item.item_id,
+                  item.amount,
+                  Map.get(item, :elemental_tags, 0)
+                )
+
+                st
+              else
+                st
+              end
+
             {List.replace_at(inv, idx, nil), st}
           end
         else
@@ -1437,15 +1841,17 @@ defmodule Arena.Map.CombatHandlers do
 
       # VB6 ExpCount pool: cap XP at remaining pool, deduct from NPC
       npc_live = Map.get(state.npcs_live, instance_id)
-      {xp_gained, state} = if npc_live != nil and xp_gained > 0 do
-        available = npc_live.exp_count
-        capped = min(xp_gained, available)
-        npc_live = %{npc_live | exp_count: available - capped}
-        state = put_in(state.npcs_live[instance_id], npc_live)
-        {capped, state}
-      else
-        {xp_gained, state}
-      end
+
+      {xp_gained, state} =
+        if npc_live != nil and xp_gained > 0 do
+          available = npc_live.exp_count
+          capped = min(xp_gained, available)
+          npc_live = %{npc_live | exp_count: available - capped}
+          state = put_in(state.npcs_live[instance_id], npc_live)
+          {capped, state}
+        else
+          {xp_gained, state}
+        end
 
       if xp_gained > 0 do
         award_xp_with_party(state, char_id, entity, xp_gained)
@@ -1456,11 +1862,13 @@ defmodule Arena.Map.CombatHandlers do
   end
 
   def drop_npc_loot(state, _npc, nil), do: state
+
   def drop_npc_loot(state, npc, npc_def) do
     Enum.reduce(npc_def.loot_table, state, fn %{item_id: item_id, amount: amount}, state ->
       # Simple probability: 1 in 5 chance per loot entry
       if :rand.uniform(5) == 1 do
         pos = {npc.x, npc.y}
+
         unless Map.has_key?(state.ground_items, pos) do
           ground_items = Map.put(state.ground_items, pos, %{item_id: item_id, amount: amount, elemental_tags: 0})
           state = %{state | ground_items: ground_items}
@@ -1477,6 +1885,7 @@ defmodule Arena.Map.CombatHandlers do
 
   def has_staff_equipped?(entity) do
     weapon_id = entity.equipment[:weapon]
+
     if weapon_id do
       item_def = GameData.get_item(weapon_id)
       item_def != nil and item_def.staff_power > 0
@@ -1493,13 +1902,16 @@ defmodule Arena.Map.CombatHandlers do
           nil -> false
           target_entity -> target_entity.dead
         end
-      _ -> false
+
+      _ ->
+        false
     end
   end
 
   # VB6: StaffAfecta -- check if the caster's weapon obj_type matches required type
   defp has_required_weapon_type?(entity, required_obj_type) do
     weapon_id = entity.equipment[:weapon]
+
     if weapon_id do
       item_def = GameData.get_item(weapon_id)
       item_def != nil and item_def.obj_type == required_obj_type
@@ -1527,6 +1939,7 @@ defmodule Arena.Map.CombatHandlers do
   # VB6: RequireWeaponType -- check weapon_type enum (sword=1, dagger=2, etc.)
   defp has_required_weapon_enum?(entity, required_weapon_type) do
     weapon_id = entity.equipment[:weapon]
+
     if weapon_id do
       item_def = GameData.get_item(weapon_id)
       item_def != nil and item_def.weapon_type == required_weapon_type
@@ -1537,8 +1950,12 @@ defmodule Arena.Map.CombatHandlers do
 
   # VB6: requirement mask failure -- send message and return error reply
   def spell_req_fail(state, char_id, message) do
-    Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-      Encoder.encode({:console_msg, %{message: message, font_index: 0}})})
+    Helpers.send_to_session(
+      state.sessions,
+      char_id,
+      {:send_raw, Encoder.encode({:console_msg, %{message: message, font_index: 0}})}
+    )
+
     {:reply, {:error, :requirement_not_met}, state}
   end
 
@@ -1603,11 +2020,12 @@ defmodule Arena.Map.CombatHandlers do
         original_entity = state.players[char_id]
 
         # VB6: decrement jail penalty every minute
-        entity = if decrement_penalty? and entity.penalty > 0 do
-          %{entity | penalty: entity.penalty - 1}
-        else
-          entity
-        end
+        entity =
+          if decrement_penalty? and entity.penalty > 0 do
+            %{entity | penalty: entity.penalty - 1}
+          else
+            entity
+          end
 
         # Drain hunger/thirst only every Nth tick (~30s)
         {entity, vitals_changed} =
@@ -1635,8 +2053,10 @@ defmodule Arena.Map.CombatHandlers do
           cond do
             entity.stamina == 0 and starving and dehydrated ->
               %{entity | hp: max(entity.hp - @hunger_thirst_damage * 2, 0)}
+
             entity.stamina == 0 and (starving or dehydrated) ->
               %{entity | hp: max(entity.hp - @hunger_thirst_damage, 0)}
+
             true ->
               entity
           end
@@ -1644,11 +2064,12 @@ defmodule Arena.Map.CombatHandlers do
         hp_changed = entity.hp != original_entity.hp
 
         # Kill on starvation
-        {entity, state} = if entity.hp <= 0 and not entity.dead do
-          handle_player_death(state, char_id, %{entity | hp: 0})
-        else
-          {entity, state}
-        end
+        {entity, state} =
+          if entity.hp <= 0 and not entity.dead do
+            handle_player_death(state, char_id, %{entity | hp: 0})
+          else
+            {entity, state}
+          end
 
         # Regen (blocked by starvation/dehydration)
         entity =
@@ -1661,9 +2082,14 @@ defmodule Arena.Map.CombatHandlers do
               regen = max(div(entity.con, 6), 1)
               new_hp = min(entity.hp + regen, entity.max_hp)
               entity = %{entity | hp: new_hp}
+
               if new_hp >= entity.max_hp do
-                Helpers.send_to_session(state.sessions, char_id,
-                  {:send_raw, Encoder.encode({:console_msg, %{message: "Has terminado de descansar.", font_index: 0}})})
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw, Encoder.encode({:console_msg, %{message: "Has terminado de descansar.", font_index: 0}})}
+                )
+
                 %{entity | resting: false}
               else
                 entity
@@ -1675,9 +2101,14 @@ defmodule Arena.Map.CombatHandlers do
               regen = max(div(entity.int * max(med_skill, 1), 35), 1)
               new_mana = min(entity.mana + regen, entity.max_mana)
               entity = %{entity | mana: new_mana}
+
               if new_mana >= entity.max_mana do
-                Helpers.send_to_session(state.sessions, char_id,
-                  {:send_raw, Encoder.encode({:console_msg, %{message: "Has terminado de meditar.", font_index: 0}})})
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw, Encoder.encode({:console_msg, %{message: "Has terminado de meditar.", font_index: 0}})}
+                )
+
                 %{entity | meditating: false}
               else
                 entity
@@ -1716,31 +2147,53 @@ defmodule Arena.Map.CombatHandlers do
 
         # Send updates
         if vitals_changed do
-          Helpers.send_to_session(state.sessions, char_id,
-            {:send_raw, Encoder.encode({:update_hunger_and_thirst, %{
-              max_hunger: 100, min_hunger: entity.hunger,
-              max_thirst: 100, min_thirst: entity.thirst
-            }})})
+          Helpers.send_to_session(
+            state.sessions,
+            char_id,
+            {:send_raw,
+             Encoder.encode(
+               {:update_hunger_and_thirst,
+                %{
+                  max_hunger: 100,
+                  min_hunger: entity.hunger,
+                  max_thirst: 100,
+                  min_thirst: entity.thirst
+                }}
+             )}
+          )
         end
 
         if hp_changed or entity.hp != original_entity.hp do
-          Helpers.send_to_session(state.sessions, char_id,
-            {:send_raw, Encoder.encode({:update_hp, %{min_hp: entity.hp, shield: 0}})})
+          Helpers.send_to_session(
+            state.sessions,
+            char_id,
+            {:send_raw, Encoder.encode({:update_hp, %{min_hp: entity.hp, shield: 0}})}
+          )
         end
 
         if entity.mana != original_entity.mana do
-          Helpers.send_to_session(state.sessions, char_id,
-            {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
+          Helpers.send_to_session(
+            state.sessions,
+            char_id,
+            {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+          )
         end
 
         if stamina_changed or entity.stamina != original_entity.stamina do
-          Helpers.send_to_session(state.sessions, char_id,
-            {:send_raw, Encoder.encode({:update_stamina, %{min_sta: entity.stamina}})})
+          Helpers.send_to_session(
+            state.sessions,
+            char_id,
+            {:send_raw, Encoder.encode({:update_stamina, %{min_sta: entity.stamina}})}
+          )
         end
 
         if entity.dead and not original_entity.dead do
-          Helpers.send_to_session(state.sessions, char_id,
-            {:send_raw, Encoder.encode({:console_msg, %{message: "Has muerto de inanición.", font_index: 0}})})
+          Helpers.send_to_session(
+            state.sessions,
+            char_id,
+            {:send_raw, Encoder.encode({:console_msg, %{message: "Has muerto de inanición.", font_index: 0}})}
+          )
+
           state = %{state | players: Map.put(state.players, char_id, entity)}
           Helpers.broadcast_character_change(state, entity)
           state

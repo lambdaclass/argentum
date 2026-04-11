@@ -78,6 +78,7 @@ defmodule Arena.CombatLifecycleTest do
   defp enter_player(char_id, name, overrides \\ %{}) do
     entity = make_entity(char_id, name, overrides)
     {:ok, _idx, _players, _weather} = MapServer.enter(@test_map_id, entity, session_pid: self())
+
     on_exit(fn ->
       try do
         MapServer.leave(@test_map_id, char_id)
@@ -87,6 +88,7 @@ defmodule Arena.CombatLifecycleTest do
         :exit, _ -> :ok
       end
     end)
+
     entity
   end
 
@@ -142,15 +144,17 @@ defmodule Arena.CombatLifecycleTest do
   end
 
   describe "melee attack" do
-    test "attack sends packets to attacker" do
+    test "attack sends packets to nearby observer" do
       _attacker = enter_player(30010, "Attacker", %{x: 50, y: 50, heading: :south})
+      _observer = enter_player(30011, "Observer", %{x: 51, y: 50})
       flush_mailbox()
 
-      # Attack facing tile — no target there, but swing animation should still fire
+      # Attack facing tile — no target there, but swing animation is broadcast to
+      # other players on the map (the attacker itself is excluded from the broadcast).
       MapServer.attack(@test_map_id, 30010)
       msgs = collect_messages(300)
 
-      # Should receive at least some packets (swing animation)
+      # The observer (whose session_pid is also self()) should receive the swing packet
       assert length(msgs) > 0
     end
   end
@@ -160,17 +164,20 @@ defmodule Arena.CombatLifecycleTest do
       # GM player
       _gm = enter_player(30100, "GMPlayer", %{gm: true, x: 48, y: 48})
       # Target player with status effects
-      _target = enter_player(30101, "VictimPlayer", %{
-        x: 50, y: 50,
-        poisoned: true,
-        invisible: true,
-        paralyzed: true,
-        meditating: true,
-        resting: true,
-        buffs: [%{type: :str, remaining_ms: 5000, value: 10}],
-        commerce_npc_id: 42,
-        trade_partner_id: 99
-      })
+      _target =
+        enter_player(30101, "VictimPlayer", %{
+          x: 50,
+          y: 50,
+          poisoned: true,
+          invisible: true,
+          paralyzed: true,
+          meditating: true,
+          resting: true,
+          buffs: [%{type: :str, remaining_ms: 5000, value: 10}],
+          commerce_npc_id: 42,
+          trade_partner_id: 99
+        })
+
       flush_mailbox()
 
       # Verify pre-death state
@@ -209,15 +216,20 @@ defmodule Arena.CombatLifecycleTest do
 
     test "death unequips all items" do
       _gm = enter_player(30104, "GM3", %{gm: true, x: 48, y: 48})
-      _target = enter_player(30105, "Unequipper", %{
-        x: 50, y: 50,
-        inventory: [
-          %{item_id: 100, amount: 1, equipped: true},
-          %{item_id: 200, amount: 1, equipped: true},
-          %{item_id: 300, amount: 5, equipped: false}
-        ] ++ List.duplicate(nil, 21),
-        equipment: %{weapon: 100, armor: 200, shield: nil, helmet: nil, ring: nil}
-      })
+
+      _target =
+        enter_player(30105, "Unequipper", %{
+          x: 50,
+          y: 50,
+          inventory:
+            [
+              %{item_id: 100, amount: 1, equipped: true},
+              %{item_id: 200, amount: 1, equipped: true},
+              %{item_id: 300, amount: 5, equipped: false}
+            ] ++ List.duplicate(nil, 21),
+          equipment: %{weapon: 100, armor: 200, shield: nil, helmet: nil, ring: nil}
+        })
+
       flush_mailbox()
 
       gm_kill_player(30104, "Unequipper")

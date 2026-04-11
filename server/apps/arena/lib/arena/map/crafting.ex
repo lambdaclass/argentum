@@ -12,13 +12,20 @@ defmodule Arena.Map.Crafting do
   alias AoProtocol.Server.Encoder
 
   # Tool item IDs (obj_type 18 in obj.dat)
-  @pickaxe_ids [187, 363, 46]         # Piquete de Minero, Dorado, Blodium
-  @fishing_rod_ids [881, 2121, 2132, 2133]  # Caña de Pescar variants
-  @woodcutting_axe_ids [127, 361]      # Hacha de Leñador, Élfica
-  @hammer_ids [389]                     # Martillo de Herrero
-  @saw_ids [198]                        # Serrucho
-  @sewing_ids [886, 885, 369]           # Costurero, Tijeras, Tijeras doradas
-  @alchemy_ids [887]                    # Olla de Alquimia
+  # Piquete de Minero, Dorado, Blodium
+  @pickaxe_ids [187, 363, 46]
+  # Caña de Pescar variants
+  @fishing_rod_ids [881, 2121, 2132, 2133]
+  # Hacha de Leñador, Élfica
+  @woodcutting_axe_ids [127, 361]
+  # Martillo de Herrero
+  @hammer_ids [389]
+  # Serrucho
+  @saw_ids [198]
+  # Costurero, Tijeras, Tijeras doradas
+  @sewing_ids [886, 885, 369]
+  # Olla de Alquimia
+  @alchemy_ids [887]
 
   # NPC types for production workstations
   @npc_type_forge 5
@@ -69,15 +76,30 @@ defmodule Arena.Map.Crafting do
     weapon_id = entity.equipment[:weapon]
 
     case skill_atom do
-      :mining -> gather(state, char_id, entity, :mining, weapon_id, @pickaxe_ids)
-      :fishing -> fish(state, char_id, entity, weapon_id)
-      :woodcutting -> gather(state, char_id, entity, :woodcutting, weapon_id, @woodcutting_axe_ids)
-      :blacksmithing -> produce(state, char_id, entity, :blacksmithing, weapon_id, @hammer_ids, [@npc_type_forge])
-      :carpentry -> produce(state, char_id, entity, :carpentry, weapon_id, @saw_ids, [@npc_type_workbench])
-      :alchemy -> produce(state, char_id, entity, :alchemy, weapon_id, @alchemy_ids, [@npc_type_alchemy])
-      :tailoring -> produce(state, char_id, entity, :tailoring, weapon_id, @sewing_ids, [@npc_type_loom])
+      :mining ->
+        gather(state, char_id, entity, :mining, weapon_id, @pickaxe_ids)
+
+      :fishing ->
+        fish(state, char_id, entity, weapon_id)
+
+      :woodcutting ->
+        gather(state, char_id, entity, :woodcutting, weapon_id, @woodcutting_axe_ids)
+
+      :blacksmithing ->
+        produce(state, char_id, entity, :blacksmithing, weapon_id, @hammer_ids, [@npc_type_forge])
+
+      :carpentry ->
+        produce(state, char_id, entity, :carpentry, weapon_id, @saw_ids, [@npc_type_workbench])
+
+      :alchemy ->
+        produce(state, char_id, entity, :alchemy, weapon_id, @alchemy_ids, [@npc_type_alchemy])
+
+      :tailoring ->
+        produce(state, char_id, entity, :tailoring, weapon_id, @sewing_ids, [@npc_type_loom])
+
       :taming ->
         attempt_taming(state, char_id, entity)
+
       _ ->
         send_msg(state, char_id, "No puedes trabajar en eso.")
         {:noreply, state}
@@ -264,17 +286,13 @@ defmodule Arena.Map.Crafting do
                   for slot <- consumed_slots do
                     Helpers.send_inventory_slot(state.sessions, char_id, final_inventory, slot)
                   end
+
                   Helpers.send_inventory_slot(state.sessions, char_id, final_inventory, result_slot)
                   send_skills(state, char_id, entity)
 
                   item_def = GameData.get_item(recipe.result_id)
                   name = if item_def, do: item_def.name, else: "un objeto"
                   send_msg(state, char_id, "Has creado #{name}.")
-                  {:noreply, state}
-
-                {:ok, final_inventory, _slot} ->
-                  entity = %{entity | inventory: final_inventory}
-                  state = update_player(state, char_id, entity)
                   {:noreply, state}
 
                 {:error, :inventory_full} ->
@@ -317,7 +335,7 @@ defmodule Arena.Map.Crafting do
 
   defp facing_water?(state, entity) do
     {fx, fy} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
-    Arena.TileGrid.get_tile(state.map_id, fx, fy) == 2
+    TileGrid.get_tile(state.map_id, fx, fy) == 2
   end
 
   # ---- Helpers ----
@@ -338,8 +356,11 @@ defmodule Arena.Map.Crafting do
     entity = %{entity | stamina: new_stamina}
     state = update_player(state, char_id, entity)
 
-    Helpers.send_to_session(state.sessions, char_id,
-      {:send_raw, Encoder.encode({:update_stamina, %{min_sta: new_stamina}})})
+    Helpers.send_to_session(
+      state.sessions,
+      char_id,
+      {:send_raw, Encoder.encode({:update_stamina, %{min_sta: new_stamina}})}
+    )
 
     {entity, state}
   end
@@ -357,10 +378,12 @@ defmodule Arena.Map.Crafting do
 
       {slot, item} ->
         take = min(amount, item.amount)
+
         case Inventory.remove_from_slot(inventory, slot, take) do
           {:ok, new_inventory, _} ->
             remaining = amount - take
             new_consumed = [slot | consumed_slots]
+
             if remaining > 0 do
               consume_ingredients(new_inventory, [{item_id, remaining} | rest], new_consumed)
             else
@@ -387,12 +410,18 @@ defmodule Arena.Map.Crafting do
   end
 
   defp send_msg(state, char_id, message) do
-    Helpers.send_to_session(state.sessions, char_id,
-      {:send_raw, Encoder.encode({:console_msg, %{message: message, font_index: 0}})})
+    Helpers.send_to_session(
+      state.sessions,
+      char_id,
+      {:send_raw, Encoder.encode({:console_msg, %{message: message, font_index: 0}})}
+    )
   end
 
   defp send_skills(state, char_id, entity) do
-    Helpers.send_to_session(state.sessions, char_id,
-      {:send_raw, Encoder.encode({:send_skills, %{skills: entity.skills}})})
+    Helpers.send_to_session(
+      state.sessions,
+      char_id,
+      {:send_raw, Encoder.encode({:send_skills, %{skills: entity.skills}})}
+    )
   end
 end

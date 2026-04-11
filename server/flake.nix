@@ -23,12 +23,15 @@
             pkgs.gnumake
             pkgs.nodejs_22
             pkgs.protobuf
+            pkgs.cacert
           ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
             pkgs.inotify-tools
           ];
 
           shellHook = ''
             export PATH="$HOME/.mix/escripts:$PATH"
+            export SSL_CERT_FILE="${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+            export HEX_CACERTS_PATH="$SSL_CERT_FILE"
             export PGDATA="$PWD/.pgdata"
             export PGHOST="$PWD/.pgdata"
             export PGPORT="5432"

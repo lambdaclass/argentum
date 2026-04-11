@@ -19,6 +19,7 @@ defmodule Arena.HungerThirstTest do
       {:ok, _pid} -> :ok
       {:error, {:already_started, _pid}} -> :ok
     end
+
     :ok
   end
 
@@ -28,7 +29,7 @@ defmodule Arena.HungerThirstTest do
     %{
       players: players,
       sessions: %{},
-      npcs: %{},
+      npcs_live: %{},
       meta: %{safe_zone: false},
       visibility_mode: :global,
       hunger_thirst_tick_counter: Keyword.get(opts, :counter, 9)
@@ -93,10 +94,14 @@ defmodule Arena.HungerThirstTest do
 
     test "regen is blocked when hunger is 0" do
       entity = %PlayerEntity{
-        char_id: 1, hp: 50, max_hp: 100,
-        hunger: 0, thirst: 50,
+        char_id: 1,
+        hp: 50,
+        max_hp: 100,
+        hunger: 0,
+        thirst: 50,
         resting: true
       }
+
       state = make_state(%{1 => entity})
 
       new_state = CombatHandlers.process_regen_tick(state)
@@ -108,10 +113,14 @@ defmodule Arena.HungerThirstTest do
 
     test "regen is blocked when thirst is 0" do
       entity = %PlayerEntity{
-        char_id: 1, mana: 50, max_mana: 100,
-        hunger: 50, thirst: 0,
+        char_id: 1,
+        mana: 50,
+        max_mana: 100,
+        hunger: 50,
+        thirst: 0,
         meditating: true
       }
+
       state = make_state(%{1 => entity})
 
       new_state = CombatHandlers.process_regen_tick(state)

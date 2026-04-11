@@ -147,7 +147,7 @@ defmodule Arena.Entity.PlayerEntity do
 
     # Chat moderation: mute expiry (monotonic ms, 0 = not muted)
     muted_until: 0,
-    # Chat rate limit: last chat timestamp (monotonic ms, 0 = never)
-    last_chat_at: 0
+    # Chat rate limit: last chat timestamp (monotonic ms, far-past = never)
+    last_chat_at: -1_000_000_000_000
   ]
 end

@@ -373,8 +373,26 @@ defmodule AoTcpGateway.WsIntegrationTest do
   # character_move (44): Int16 + Int8 + Int8 (4 bytes)
   defp skip_packet_payload(44, <<_::binary-size(4), rest::binary>>), do: {:ok, rest}
 
-  # character_remove (43): Int16 (2 bytes)
-  defp skip_packet_payload(43, <<_::binary-size(2), rest::binary>>), do: {:ok, rest}
+  # character_remove (43): Int16 + Bool + Bool (4 bytes)
+  defp skip_packet_payload(43, <<_::binary-size(4), rest::binary>>), do: {:ok, rest}
+
+  # character_change (49): Int16 + Int8(flags) + Int16*7 + Int8 + Int16*4 = 22 bytes
+  defp skip_packet_payload(49, <<_::binary-size(22), rest::binary>>), do: {:ok, rest}
+
+  # rain_toggle (59): Bool (1 byte)
+  defp skip_packet_payload(59, <<_::8, rest::binary>>), do: {:ok, rest}
+
+  # update_user_stats (61): 2+2+4+2+2+2+2+4+4+1+4+4+1 = 34 bytes
+  defp skip_packet_payload(61, <<_::binary-size(34), rest::binary>>), do: {:ok, rest}
+
+  # snow_toggle (76): Bool (1 byte)
+  defp skip_packet_payload(76, <<_::8, rest::binary>>), do: {:ok, rest}
+
+  # mini_stats (79): 4+4+1+4+1+4+4+1+4+1 = 28 bytes
+  defp skip_packet_payload(79, <<_::binary-size(28), rest::binary>>), do: {:ok, rest}
+
+  # send_atributes (81): 5 × Int8 = 5 bytes
+  defp skip_packet_payload(81, <<_::binary-size(5), rest::binary>>), do: {:ok, rest}
 
   # Fallback: unknown packet
   defp skip_packet_payload(_id, _data), do: :unknown

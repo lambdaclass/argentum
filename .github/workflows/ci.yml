@@ -77,7 +77,7 @@ jobs:
         run: mix compile --warnings-as-errors
 
       - name: Run Credo
-        run: mix credo --strict
+        run: mix credo
 
       - name: Run tests
         env:

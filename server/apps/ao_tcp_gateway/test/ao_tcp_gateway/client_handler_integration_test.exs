@@ -419,6 +419,29 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
     end
   end
 
+  # character_change (49): Int16 + Int8(flags) + Int16*7 + Int8 + Int16*4 = 22 bytes
+  defp decode_server_packet(49, <<_::binary-size(22), rest::binary>>), do: {:ok, %{}, rest}
+
+  # rain_toggle (59): Bool (1 byte)
+  defp decode_server_packet(59, <<_::8, rest::binary>>), do: {:ok, %{}, rest}
+
+  # update_user_stats (61): 2+2+4+2+2+2+2+4+4+1+4+4+1 = 34 bytes
+  defp decode_server_packet(61, <<_::binary-size(34), rest::binary>>), do: {:ok, %{}, rest}
+
+  # snow_toggle (76): Bool (1 byte)
+  defp decode_server_packet(76, <<_::8, rest::binary>>), do: {:ok, %{}, rest}
+
+  # mini_stats (79): 4+4+1+4+1+4+4+1+4+1 = 28 bytes
+  defp decode_server_packet(79, <<_::binary-size(28), rest::binary>>), do: {:ok, %{}, rest}
+
+  # send_atributes (81): 5 × Int8 = 5 bytes
+  defp decode_server_packet(81, <<_::binary-size(5), rest::binary>>), do: {:ok, %{}, rest}
+
+  # update_hp (27): Int16 + Int32 = 6 bytes (already decoded above via Reader, add skip fallback)
+  # update_mana (26): Int16 = 2 bytes (already decoded via Reader)
+  # update_sta (25): Int16 = 2 bytes (already decoded via Reader)
+  # update_gold (28): Int32 + Int32 = 8 bytes (already decoded via Reader)
+
   defp decode_server_packet(_id, _rest), do: :incomplete
 
   # ============================================================
@@ -440,7 +463,7 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
 
       # All non-welcome packets are valid middle types
       middle = Enum.reject(after_core, &(&1 == 37))
-      assert Enum.all?(middle, &(&1 in [42, 63, 66, 80, 29, 87]))
+      assert Enum.all?(middle, &(&1 in [42, 49, 59, 61, 63, 66, 76, 79, 80, 81, 29, 87]))
     end
 
     test "logged packet has new_user=false", %{port: port} do

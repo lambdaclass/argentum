@@ -24,14 +24,14 @@ defmodule Arena.InventoryTest do
       # Item 37 is "Espada corta" (ObjType 2, weapon) — non-stackable
       {:ok, inv, slot} = Inventory.add_item(@empty_inventory, 37, 1)
       assert slot == 0
-      assert Enum.at(inv, 0) == %{item_id: 37, amount: 1, equipped: false}
+      assert Enum.at(inv, 0) == %{item_id: 37, amount: 1, equipped: false, elemental_tags: 0}
     end
 
     test "adds to first empty slot when earlier slots occupied" do
       inv = List.replace_at(@empty_inventory, 0, %{item_id: 37, amount: 1, equipped: false})
       {:ok, inv2, slot} = Inventory.add_item(inv, 38, 1)
       assert slot == 1
-      assert Enum.at(inv2, 1) == %{item_id: 38, amount: 1, equipped: false}
+      assert Enum.at(inv2, 1) == %{item_id: 38, amount: 1, equipped: false, elemental_tags: 0}
     end
 
     test "stacks stackable items on existing slot" do
@@ -211,7 +211,9 @@ defmodule Arena.InventoryTest do
         {{:item, id}, %{equip_slot: ^slot, forbidden_classes: nil, allowed_races: nil, min_elv: min_elv}}, nil
         when id != exclude and min_elv <= 1 ->
           id
-        _, acc -> acc
+
+        _, acc ->
+          acc
       end,
       nil,
       :arena_game_data
@@ -235,7 +237,9 @@ defmodule Arena.InventoryTest do
         {{:item, id}, %{equip_slot: slot, min_elv: min_elv}}, nil
         when slot != nil and min_elv > 1 ->
           id
-        _, acc -> acc
+
+        _, acc ->
+          acc
       end,
       nil,
       :arena_game_data
@@ -248,7 +252,9 @@ defmodule Arena.InventoryTest do
         {{:item, id}, %{equip_slot: slot, forbidden_classes: classes}}, nil
         when slot != nil and classes != nil ->
           id
-        _, acc -> acc
+
+        _, acc ->
+          acc
       end,
       nil,
       :arena_game_data
