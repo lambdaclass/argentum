@@ -43,3 +43,4 @@ apps/arena/native/tile_grid/target/
 result
 
 .vscode/settings.json
+server/.cache/
