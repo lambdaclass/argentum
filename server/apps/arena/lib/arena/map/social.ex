@@ -125,6 +125,37 @@ defmodule Arena.Map.Social do
   end
 
   # ==================================================================
+  # GM Rain Toggle (binary packet, not chat)
+  # ==================================================================
+
+  def handle_gm_rain_toggle(state, char_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} when entity.gm ->
+        new_rain = not state.meta.rain
+        meta = %{state.meta | rain: new_rain}
+        state = %{state | meta: meta}
+
+        rain_raw = Encoder.encode({:rain_toggle, %{raining: new_rain}})
+
+        for {_cid, pid} <- state.sessions do
+          send(pid, {:send_raw, rain_raw})
+        end
+
+        label = if new_rain, do: "ON", else: "OFF"
+        gm_console(state, char_id, "Rain toggled #{label} on this map.")
+
+        {:noreply, state}
+
+      {:ok, _entity} ->
+        gm_console(state, char_id, "You are not a GM.")
+        {:noreply, state}
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  # ==================================================================
   # GM Commands
   # ==================================================================
 

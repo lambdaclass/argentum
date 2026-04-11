@@ -3,7 +3,6 @@ defmodule AoTcpGateway.WsIntegrationTest do
 
   @moduletag :integration
 
-  @ws_port 7667
   @ws_host ~c"127.0.0.1"
   @ws_path "/ao"
 
@@ -104,14 +103,19 @@ defmodule AoTcpGateway.WsIntegrationTest do
   # WebSocket helpers
   # -------------------------------------------------------------------
 
+  defp ws_port do
+    :ranch.get_port(:ao_ws_listener)
+  end
+
   defp ws_connect do
-    {:ok, socket} = :gen_tcp.connect(@ws_host, @ws_port, [:binary, active: false, packet: :raw])
+    port = ws_port()
+    {:ok, socket} = :gen_tcp.connect(@ws_host, port, [:binary, active: false, packet: :raw])
 
     key = Base.encode64(:crypto.strong_rand_bytes(16))
 
     request =
       "GET #{@ws_path} HTTP/1.1\r\n" <>
-        "Host: #{@ws_host}:#{@ws_port}\r\n" <>
+        "Host: #{@ws_host}:#{port}\r\n" <>
         "Upgrade: websocket\r\n" <>
         "Connection: Upgrade\r\n" <>
         "Sec-WebSocket-Key: #{key}\r\n" <>

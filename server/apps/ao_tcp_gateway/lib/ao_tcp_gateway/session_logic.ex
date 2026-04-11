@@ -134,7 +134,8 @@ defmodule AoTcpGateway.SessionLogic do
           character_id: entity.char_id,
           char_index: char_index,
           map_id: map_id,
-          entity: entity
+          entity: entity,
+          is_gm: entity.gm == true
       }
 
       weather_packets =
@@ -225,8 +226,9 @@ defmodule AoTcpGateway.SessionLogic do
   # ---- Game commands ----
 
   def handle_command(state, {:walk, %{direction: direction}}) when state.character_id != nil do
+    {state, cancel_packets} = maybe_cancel_hogar(state)
     Arena.Map.MapServer.move_character(state.map_id, state.character_id, direction)
-    {state, []}
+    {state, cancel_packets}
   end
 
   def handle_command(state, {:walk, _}), do: {state, []}
@@ -434,8 +436,9 @@ defmodule AoTcpGateway.SessionLogic do
   end
 
   def handle_command(state, {:attack, _}) when state.character_id != nil do
+    {state, cancel_packets} = maybe_cancel_hogar(state)
     Arena.Map.MapServer.attack(state.map_id, state.character_id, state.target_x, state.target_y)
-    {state, []}
+    {state, cancel_packets}
   end
 
   def handle_command(state, {:request_position_update, _})
@@ -449,8 +452,9 @@ defmodule AoTcpGateway.SessionLogic do
   def handle_command(state, {:request_position_update, _}), do: {state, []}
 
   def handle_command(state, {:cast_spell, %{spell_slot: slot}}) when state.character_id != nil do
+    {state, cancel_packets} = maybe_cancel_hogar(state)
     Arena.Map.MapServer.cast_spell(state.map_id, state.character_id, slot, state.target_x, state.target_y)
-    {state, []}
+    {state, cancel_packets}
   end
 
   def handle_command(state, {:left_click, %{x: x, y: y}}) when state.character_id != nil do
@@ -463,61 +467,89 @@ defmodule AoTcpGateway.SessionLogic do
   end
 
   def handle_command(state, {:commerce_start, _}) when state.character_id != nil do
-    Arena.Map.MapServer.open_commerce(state.map_id, state.character_id, state.target_x, state.target_y)
-    {state, []}
+    case Arena.Map.MapServer.open_commerce(state.map_id, state.character_id, state.target_x, state.target_y) do
+      :ok -> {%{state | in_commerce: true}, []}
+      _ -> {state, []}
+    end
   end
 
   def handle_command(state, {:commerce_buy, %{slot: slot, amount: amount}})
-      when state.character_id != nil do
+      when state.character_id != nil and state.in_commerce == true do
     Arena.Map.MapServer.commerce_buy(state.map_id, state.character_id, slot, amount)
     {state, []}
   end
 
+  def handle_command(state, {:commerce_buy, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: "No estas en un comercio.", font_index: 0}}]}
+  end
+
   def handle_command(state, {:commerce_sell, %{slot: slot, amount: amount}})
-      when state.character_id != nil do
+      when state.character_id != nil and state.in_commerce == true do
     Arena.Map.MapServer.commerce_sell(state.map_id, state.character_id, slot, amount)
     {state, []}
   end
 
+  def handle_command(state, {:commerce_sell, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: "No estas en un comercio.", font_index: 0}}]}
+  end
+
   def handle_command(state, {:commerce_end, _}) when state.character_id != nil do
     Arena.Map.MapServer.commerce_end(state.map_id, state.character_id)
-    {state, []}
+    {%{state | in_commerce: false}, []}
   end
 
   # ---- Banking ----
 
   def handle_command(state, {:bank_start, _}) when state.character_id != nil do
-    Arena.Map.MapServer.open_bank(state.map_id, state.character_id, state.target_x, state.target_y)
-    {state, []}
+    case Arena.Map.MapServer.open_bank(state.map_id, state.character_id, state.target_x, state.target_y) do
+      :ok -> {%{state | in_bank: true}, []}
+      _ -> {state, []}
+    end
   end
 
   def handle_command(state, {:bank_deposit, %{slot: slot, amount: amount, slot_destino: slot_destino}})
-      when state.character_id != nil do
+      when state.character_id != nil and state.in_bank == true do
     Arena.Map.MapServer.bank_deposit(state.map_id, state.character_id, slot, amount, slot_destino)
     {state, []}
   end
 
+  def handle_command(state, {:bank_deposit, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: "No estas en un banco.", font_index: 0}}]}
+  end
+
   def handle_command(state, {:bank_extract_item, %{slot: slot, amount: amount, slot_destino: slot_destino}})
-      when state.character_id != nil do
+      when state.character_id != nil and state.in_bank == true do
     Arena.Map.MapServer.bank_extract_item(state.map_id, state.character_id, slot, amount, slot_destino)
     {state, []}
   end
 
+  def handle_command(state, {:bank_extract_item, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: "No estas en un banco.", font_index: 0}}]}
+  end
+
   def handle_command(state, {:bank_deposit_gold, %{amount: amount}})
-      when state.character_id != nil do
+      when state.character_id != nil and state.in_bank == true do
     Arena.Map.MapServer.bank_deposit_gold(state.map_id, state.character_id, amount)
     {state, []}
   end
 
+  def handle_command(state, {:bank_deposit_gold, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: "No estas en un banco.", font_index: 0}}]}
+  end
+
   def handle_command(state, {:bank_extract_gold, %{amount: amount}})
-      when state.character_id != nil do
+      when state.character_id != nil and state.in_bank == true do
     Arena.Map.MapServer.bank_extract_gold(state.map_id, state.character_id, amount)
     {state, []}
   end
 
+  def handle_command(state, {:bank_extract_gold, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: "No estas en un banco.", font_index: 0}}]}
+  end
+
   def handle_command(state, {:bank_end, _}) when state.character_id != nil do
     Arena.Map.MapServer.bank_end(state.map_id, state.character_id)
-    {state, []}
+    {%{state | in_bank: false}, []}
   end
 
   def handle_command(state, {:yell, %{message: message}}) when state.character_id != nil do
@@ -599,13 +631,21 @@ defmodule AoTcpGateway.SessionLogic do
 
   def handle_command(state, {:user_commerce_offer, %{obj_index: obj_index, amount: amount}})
       when state.character_id != nil do
-    Arena.Map.MapServer.user_trade_offer(state.map_id, state.character_id, obj_index, amount)
-    {state, []}
+    case Arena.Map.MapServer.user_trade_offer(state.map_id, state.character_id, obj_index, amount) do
+      {:error, :not_trading} ->
+        {state, [{:console_msg, %{message: "No estas en un comercio con otro jugador.", font_index: 0}}]}
+      _ ->
+        {state, []}
+    end
   end
 
   def handle_command(state, {:user_commerce_ok, _}) when state.character_id != nil do
-    Arena.Map.MapServer.user_trade_accept(state.map_id, state.character_id)
-    {state, []}
+    case Arena.Map.MapServer.user_trade_accept(state.map_id, state.character_id) do
+      {:error, :not_trading} ->
+        {state, [{:console_msg, %{message: "No estas en un comercio con otro jugador.", font_index: 0}}]}
+      _ ->
+        {state, []}
+    end
   end
 
   def handle_command(state, {:user_commerce_reject, _}) when state.character_id != nil do
@@ -1092,103 +1132,133 @@ defmodule AoTcpGateway.SessionLogic do
   end
 
   # ---- GM binary packets → route via MapServer.chat as equivalent text commands ----
+  # All GM commands require is_gm == true at the session level (defense-in-depth;
+  # the MapServer also checks entity.gm before executing).
 
-  def handle_command(state, {:go_to_char, %{name: name}}) when state.character_id != nil do
+  @gm_not_authorized_msg {:console_msg, %{message: "No tienes privilegios de GM.", font_index: 0}}
+
+  def handle_command(state, {:go_to_char, %{name: name}})
+      when state.character_id != nil and state.is_gm == true do
     Arena.Map.MapServer.chat(state.map_id, state.character_id, "/GOTO #{name}")
     {state, []}
   end
 
-  def handle_command(state, {:warp_me_to_target, _}) when state.character_id != nil do
-    # Warp to current target — synthesize /GOTO with target at cursor
+  def handle_command(state, {:warp_me_to_target, _})
+      when state.character_id != nil and state.is_gm == true do
     {state, [{:console_msg, %{message: "Usa /GOTO <nombre> para teletransportarte.", font_index: 0}}]}
   end
 
-  def handle_command(state, {:warp_char, %{name: _name, map: map}}) when state.character_id != nil do
+  def handle_command(state, {:warp_char, %{name: _name, map: map}})
+      when state.character_id != nil and state.is_gm == true do
     Arena.Map.MapServer.chat(state.map_id, state.character_id, "/TELEPORT #{map} 50 50")
     {state, []}
   end
 
-  def handle_command(state, {:invisible, _}) when state.character_id != nil do
+  def handle_command(state, {:invisible, _})
+      when state.character_id != nil and state.is_gm == true do
     Arena.Map.MapServer.chat(state.map_id, state.character_id, "/INVISIBLE")
     {state, []}
   end
 
-  def handle_command(state, {:silence, %{name: name}}) when state.character_id != nil do
+  def handle_command(state, {:silence, %{name: name}})
+      when state.character_id != nil and state.is_gm == true do
     Arena.Map.MapServer.chat(state.map_id, state.character_id, "/MUTE #{name} 10")
     {state, []}
   end
 
-  def handle_command(state, {:jail, %{name: name, reason: _reason, minutes: minutes}}) when state.character_id != nil do
+  def handle_command(state, {:jail, %{name: name, reason: _reason, minutes: minutes}})
+      when state.character_id != nil and state.is_gm == true do
     Arena.Map.MapServer.chat(state.map_id, state.character_id, "/JAIL #{name} #{minutes}")
     {state, []}
   end
 
-  def handle_command(state, {:kick, %{name: name}}) when state.character_id != nil do
+  def handle_command(state, {:kick, %{name: name}})
+      when state.character_id != nil and state.is_gm == true do
     Arena.Map.MapServer.chat(state.map_id, state.character_id, "/KICK #{name}")
     {state, []}
   end
 
-  def handle_command(state, {:execute, %{name: name}}) when state.character_id != nil do
+  def handle_command(state, {:execute, %{name: name}})
+      when state.character_id != nil and state.is_gm == true do
     Arena.Map.MapServer.chat(state.map_id, state.character_id, "/KILL #{name}")
     {state, []}
   end
 
-  def handle_command(state, {:ban_char, %{name: name, reason: _reason}}) when state.character_id != nil do
+  def handle_command(state, {:ban_char, %{name: name, reason: _reason}})
+      when state.character_id != nil and state.is_gm == true do
     Arena.Map.MapServer.chat(state.map_id, state.character_id, "/BAN #{name} 30")
     {state, []}
   end
 
-  def handle_command(state, {:unban_char, %{name: name}}) when state.character_id != nil do
-    # No unban GM command exists yet — stub
+  def handle_command(state, {:unban_char, %{name: name}})
+      when state.character_id != nil and state.is_gm == true do
     {state, [{:console_msg, %{message: "Unban no implementado para #{name}.", font_index: 0}}]}
   end
 
-  def handle_command(state, {:revive_char, %{name: name}}) when state.character_id != nil do
-    # Route through chat — no /REVIVE command exists, but we can synthesize it
+  def handle_command(state, {:revive_char, %{name: name}})
+      when state.character_id != nil and state.is_gm == true do
     {state, [{:console_msg, %{message: "Revive no implementado para #{name}.", font_index: 0}}]}
   end
 
-  def handle_command(state, {:summon_char, %{name: name}}) when state.character_id != nil do
+  def handle_command(state, {:summon_char, %{name: name}})
+      when state.character_id != nil and state.is_gm == true do
     Arena.Map.MapServer.chat(state.map_id, state.character_id, "/LOCATE #{name}")
     {state, []}
   end
 
-  def handle_command(state, {:kill_npc, _}) when state.character_id != nil do
-    # Kill targeted NPC — would need target tracking for NPCs
+  def handle_command(state, {:kill_npc, _})
+      when state.character_id != nil and state.is_gm == true do
     {state, [{:console_msg, %{message: "Usa /KILL <nombre> para matar NPCs.", font_index: 0}}]}
   end
 
-  def handle_command(state, {:request_char_info, %{name: name}}) when state.character_id != nil do
+  def handle_command(state, {:request_char_info, %{name: name}})
+      when state.character_id != nil and state.is_gm == true do
     Arena.Map.MapServer.chat(state.map_id, state.character_id, "/INFO #{name}")
     {state, []}
   end
 
-  def handle_command(state, {:where, %{name: name}}) when state.character_id != nil do
+  def handle_command(state, {:where, %{name: name}})
+      when state.character_id != nil and state.is_gm == true do
     Arena.Map.MapServer.chat(state.map_id, state.character_id, "/LOCATE #{name}")
     {state, []}
   end
 
-  def handle_command(state, {:gm_message, %{message: message}}) when state.character_id != nil do
-    # GM broadcast message to all players
+  def handle_command(state, {:gm_message, %{message: message}})
+      when state.character_id != nil and state.is_gm == true do
+    raw = AoProtocol.Server.Encoder.encode({:console_msg, %{message: message, font_index: 0}})
+    AoSession.OnlineDirectory.broadcast_all({:send_raw, raw})
+    {state, []}
+  end
+
+  def handle_command(state, {:server_message, %{message: message}})
+      when state.character_id != nil and state.is_gm == true do
     Arena.Map.MapServer.chat(state.map_id, state.character_id, message)
     {state, []}
   end
 
-  def handle_command(state, {:server_message, %{message: message}}) when state.character_id != nil do
-    # Server-wide broadcast — route through chat for GM check
-    Arena.Map.MapServer.chat(state.map_id, state.character_id, message)
-    {state, []}
-  end
-
-  def handle_command(state, {:online_gm, _}) when state.character_id != nil do
+  def handle_command(state, {:online_gm, _})
+      when state.character_id != nil and state.is_gm == true do
     count = AoSession.OnlineDirectory.online_count()
     {state, [{:console_msg, %{message: "GMs en linea: #{count}", font_index: 0}}]}
   end
 
-  def handle_command(state, {:rain_toggle, _}) when state.character_id != nil do
-    # Toggle rain on current map — needs GM check in MapServer
-    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/LLUVIA")
+  def handle_command(state, {:rain_toggle, _})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.gm_rain_toggle(state.map_id, state.character_id)
     {state, []}
+  end
+
+  # Catch-all for GM commands attempted without privileges
+  @gm_command_types [
+    :go_to_char, :warp_me_to_target, :warp_char, :invisible, :silence,
+    :jail, :kick, :execute, :ban_char, :unban_char, :revive_char,
+    :summon_char, :kill_npc, :request_char_info, :where, :gm_message,
+    :server_message, :online_gm, :rain_toggle
+  ]
+
+  def handle_command(state, {cmd_type, _})
+      when state.character_id != nil and cmd_type in @gm_command_types do
+    {state, [@gm_not_authorized_msg]}
   end
 
   def handle_command(state, {command_type, _}) do
@@ -1196,7 +1266,7 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
-  # ---- /HOGAR — dead player home recovery (VB6 parity) ----
+  # ---- /HOGAR — VB6 home travel (dead=instant, alive=delayed ~10s) ----
 
   # VB6 e_Ciudad enum order (reverse of character_creation @home_city_atom)
   @home_city_ids %{
@@ -1204,49 +1274,134 @@ defmodule AoTcpGateway.SessionLogic do
     arghal: 5, arkhein: 6, forgat: 7, eldoria: 8, penthar: 9
   }
 
+  @jail_map_id 66
+  @hogar_travel_delay_ms 10_000
+
   defp handle_hogar(state) do
     case Arena.Map.MapServer.snapshot_entity(state.map_id, state.character_id) do
       {:ok, entity} ->
-        cond do
-          # VB6: must be dead
-          not entity.dead ->
-            {state, [{:console_msg, %{message: "Debes estar muerto para utilizar este comando.", font_index: 0}}]}
-
-          # VB6: cannot use in prison (penalty counter > 0)
-          (entity.penalty || 0) > 0 ->
-            {state, [{:console_msg, %{message: "No puedes usar este comando en prisión.", font_index: 0}}]}
-
-          # VB6: check if already on home map
-          true ->
-            city_id = Map.get(@home_city_ids, entity.home_city, 1)
-            spawn = Arena.Data.GameData.city_spawn(city_id)
-
-            if state.map_id == spawn.map do
-              {state, [{:console_msg, %{message: "Ya te encuentras en tu hogar.", font_index: 0}}]}
-            else
-              # VB6 gold cost: level^2 if L>24, else (L*15) + floor(L^1.5)
-              cost = hogar_gold_cost(entity.level)
-
-              if entity.gold < cost do
-                {state, [{:console_msg, %{message: "Para utilizar este comando necesitas #{cost} monedas de oro.", font_index: 0}}]}
-              else
-                # Deduct gold but do NOT resurrect — VB6 teleports the corpse.
-                # Player must visit a Revividor NPC to actually revive.
-                new_gold = entity.gold - cost
-                corpse = %{entity | gold: new_gold}
-
-                {state, packets} = transfer(state, spawn.map, spawn.x, spawn.y, corpse)
-                packets = packets ++ [
-                  {:update_gold, %{gold: new_gold}},
-                  {:console_msg, %{message: "Has regresado a tu ciudad de origen.", font_index: 0}}
-                ]
-                {state, packets}
-              end
-            end
+        if entity.dead do
+          handle_hogar_dead(state, entity)
+        else
+          handle_hogar_check(state, entity)
         end
 
       _ ->
         {state, []}
+    end
+  end
+
+  # Dead player: instant teleport with gold cost (original VB6 behavior)
+  defp handle_hogar_dead(state, entity) do
+    cond do
+      (entity.penalty || 0) > 0 ->
+        {state, [{:console_msg, %{message: "No puedes usar este comando en prisión.", font_index: 0}}]}
+
+      true ->
+        city_id = Map.get(@home_city_ids, entity.home_city, 1)
+        spawn = Arena.Data.GameData.city_spawn(city_id)
+
+        if state.map_id == spawn.map do
+          {state, [{:console_msg, %{message: "Ya te encuentras en tu hogar.", font_index: 0}}]}
+        else
+          cost = hogar_gold_cost(entity.level)
+
+          if entity.gold < cost do
+            {state, [{:console_msg, %{message: "Para utilizar este comando necesitas #{cost} monedas de oro.", font_index: 0}}]}
+          else
+            new_gold = entity.gold - cost
+            corpse = %{entity | gold: new_gold}
+
+            {state, packets} = transfer(state, spawn.map, spawn.x, spawn.y, corpse)
+            packets = packets ++ [
+              {:update_gold, %{gold: new_gold}},
+              {:console_msg, %{message: "Has regresado a tu ciudad de origen.", font_index: 0}}
+            ]
+            {state, packets}
+          end
+        end
+    end
+  end
+
+  # Alive player: delayed travel with cancellation.
+  # Public so it can be tested directly without MapServer.
+  @doc false
+  def handle_hogar_check(state, entity) do
+    hogar_ref = Map.get(state, :hogar_timer_ref)
+
+    cond do
+      # Cannot use in prison (penalty counter > 0)
+      (entity.penalty || 0) > 0 ->
+        {state, [{:console_msg, %{message: "No puedes usar este comando en prisión.", font_index: 0}}]}
+
+      # Cannot use on jail map
+      state.map_id == @jail_map_id ->
+        {state, [{:console_msg, %{message: "No puedes usar este comando en prisión.", font_index: 0}}]}
+
+      # Already traveling
+      hogar_ref != nil ->
+        {state, [{:console_msg, %{message: "Ya estás viajando a tu hogar.", font_index: 0}}]}
+
+      # Already on home map
+      true ->
+        city_id = Map.get(@home_city_ids, entity.home_city, 1)
+        spawn = Arena.Data.GameData.city_spawn(city_id)
+
+        if state.map_id == spawn.map do
+          {state, [{:console_msg, %{message: "Ya te encuentras en tu hogar.", font_index: 0}}]}
+        else
+          # Start delayed travel
+          ref = Process.send_after(self(), :hogar_arrive, @hogar_travel_delay_ms)
+          state = Map.put(state, :hogar_timer_ref, ref)
+
+          {state, [
+            {:console_msg, %{message: "Comienza tu viaje a tu hogar. Recuerda que si te mueves, el viaje se cancelará.", font_index: 0}}
+          ]}
+        end
+    end
+  end
+
+  @doc """
+  Cancel an in-progress /HOGAR travel. Returns `{state, packets}`.
+  Called when the player walks, attacks, casts, gets hit, or dies.
+  """
+  def cancel_hogar(state) do
+    case Map.get(state, :hogar_timer_ref) do
+      nil ->
+        {state, []}
+
+      ref ->
+        Process.cancel_timer(ref)
+        state = Map.put(state, :hogar_timer_ref, nil)
+        {state, [{:console_msg, %{message: "Viaje a tu hogar cancelado.", font_index: 0}}]}
+    end
+  end
+
+  @doc """
+  Convenience: cancel hogar and return just `{state, cancel_packets}`.
+  Used by walk/attack/spell handlers that need to prepend cancel packets.
+  """
+  def maybe_cancel_hogar(state) do
+    cancel_hogar(state)
+  end
+
+  @doc """
+  Handle the :hogar_arrive timer message. Teleports the player to their
+  home city if the timer wasn't cancelled (hogar_timer_ref still set).
+  Returns either `{:transfer, map, x, y, entity}` tuple (for handler to process)
+  or `{state, []}` if cancelled.
+  """
+  def handle_hogar_arrive(state, entity) do
+    case Map.get(state, :hogar_timer_ref) do
+      nil ->
+        # Timer was cancelled
+        {state, []}
+
+      _ref ->
+        city_id = Map.get(@home_city_ids, entity.home_city, 1)
+        spawn = Arena.Data.GameData.city_spawn(city_id)
+
+        {:transfer, spawn.map, spawn.x, spawn.y, entity}
     end
   end
 

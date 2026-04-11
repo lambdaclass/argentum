@@ -81,6 +81,9 @@ defmodule Arena.Map.MapServer do
 
   def change_heading(map_id, char_id, heading), do: GenServer.cast(via(map_id), {:change_heading, char_id, heading})
   def chat(map_id, char_id, message), do: GenServer.cast(via(map_id), {:chat, char_id, message})
+
+  @doc "GM action: toggle rain on this map."
+  def gm_rain_toggle(map_id, char_id), do: GenServer.cast(via(map_id), {:gm_rain_toggle, char_id})
   def pick_up(map_id, char_id), do: GenServer.call(via(map_id), {:pick_up, char_id})
   def drop_item(map_id, char_id, slot, amount), do: GenServer.call(via(map_id), {:drop_item, char_id, slot, amount})
   def equip_item(map_id, char_id, slot), do: GenServer.call(via(map_id), {:equip_item, char_id, slot})
@@ -406,6 +409,8 @@ defmodule Arena.Map.MapServer do
       zone: state.meta.zone,
       terrain: state.meta.terrain,
       safe_zone: state.meta.safe_zone,
+      rain: state.meta.rain,
+      snow: state.meta.snow,
       npc_count: length(state.meta.npcs),
       object_count: length(state.meta.objects),
       exit_count: length(state.meta.tile_exits)
@@ -457,6 +462,8 @@ defmodule Arena.Map.MapServer do
 
   @impl true
   def handle_cast({:chat, char_id, message}, state), do: Social.handle_chat(state, char_id, message)
+  @impl true
+  def handle_cast({:gm_rain_toggle, char_id}, state), do: Social.handle_gm_rain_toggle(state, char_id)
   @impl true
   def handle_cast({:yell, char_id, message}, state), do: Social.handle_yell(state, char_id, message)
   @impl true

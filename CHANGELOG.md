@@ -4,6 +4,19 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- Parity-gate TCP harness hardened: deterministic packet waits, shared TCP
+  packet decoder/helpers, SQL sandbox owner lifecycle for Ranch/TCP tests,
+  and default soak exclusion.
+- CI parity lanes added: fast lane for compile/format/credo/unit and slow lane
+  for heavier integration/parity coverage.
+- StreamData property tests added for combat formulas, character creation, and
+  protocol round-trip invariants.
+- TCP smoke coverage expanded with bank, commerce, safe toggle, meditate,
+  reconnect, whisper, online, yell, and rest flows.
+- Fixture replay harness and `mix capture.packets` workflow added, with a
+  synthetic seed fixture corpus pending replacement by real VB6 captures.
+- Manual VB6 smoke checklist added in
+  [server/VB6_SMOKE_CHECKLIST.md](/Users/unbalancedparen/projects/argentum/server/VB6_SMOKE_CHECKLIST.md).
 - Supported backend environment verified: the `server/` Nix/dev shell compiles
   and tests cleanly.
 - Recent migrations verified on clean Postgres and on an upgrade path.

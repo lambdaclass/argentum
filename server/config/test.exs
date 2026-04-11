@@ -23,6 +23,14 @@ config :arena, ArenaWeb.Endpoint,
   secret_key_base: "QK4nHna6CWP5+KH2khYXzdIAM2GmQ1B7xwDP6fdjhQro1659xfFvC+69Joj/dKyw",
   server: false
 
+######################################
+# App configuration: ao_tcp_gateway #
+######################################
+
+config :ao_tcp_gateway,
+  port: 0,
+  ws_port: 0
+
 ###################################
 # App configuration: game_backend #
 ###################################

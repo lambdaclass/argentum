@@ -78,6 +78,22 @@ defmodule AoSession.OnlineDirectory do
     :ets.select_count(@table, [{{{{:by_id, :_}}, :_}, [], [true]}])
   end
 
+  @doc "Send a message to every connected session pid."
+  def broadcast_all(message) do
+    :ets.foldl(
+      fn
+        {{:by_id, _char_id}, %{session_pid: pid}}, acc ->
+          send(pid, message)
+          acc + 1
+
+        _other, acc ->
+          acc
+      end,
+      0,
+      @table
+    )
+  end
+
   # ---- GenServer ----
 
   @impl true

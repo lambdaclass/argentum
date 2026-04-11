@@ -36,6 +36,10 @@ defmodule AoTcpGateway.ClientHandler do
       entity: nil,
       target_x: nil,
       target_y: nil,
+      in_commerce: false,
+      in_bank: false,
+      is_gm: false,
+      hogar_timer_ref: nil,
       flood_guard: FloodGuard.new()
     })
   end
@@ -73,6 +77,27 @@ defmodule AoTcpGateway.ClientHandler do
           SessionLogic.autosave(entity)
         end
         loop(state)
+
+      :hogar_arrive ->
+        case Arena.Map.MapServer.snapshot_entity(state.map_id, state.character_id) do
+          {:ok, entity} ->
+            case SessionLogic.handle_hogar_arrive(state, entity) do
+              {:transfer, dest_map, dest_x, dest_y, ent} ->
+                {state, packets} = SessionLogic.transfer(state, dest_map, dest_x, dest_y, ent)
+                state = Map.put(state, :hogar_timer_ref, nil)
+                packets = packets ++ [{:console_msg, %{message: "Has llegado a tu hogar.", font_index: 0}}]
+                send_packets(state, packets)
+                loop(state)
+
+              {state, packets} ->
+                send_packets(state, packets)
+                loop(state)
+            end
+
+          _ ->
+            state = Map.put(state, :hogar_timer_ref, nil)
+            loop(state)
+        end
     end
   end
 
