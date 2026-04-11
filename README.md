@@ -185,35 +185,86 @@ When a map node dies, the player's socket stays alive on the gateway. The gatewa
 
 ## Setup
 
-Requires [Nix](https://nixos.org/download) + [devenv](https://devenv.sh/getting-started/).
+Two supported paths: **Nix** (recommended) or **Docker**. Both run from `server/`.
 
-devenv provides PostgreSQL 16, Elixir 1.16, Erlang/OTP 26, Rust, and Node.js — no manual installation needed.
+### Option A: Nix (recommended)
+
+Requires [Nix](https://nixos.org/download). The flake provides Elixir 1.16, Erlang/OTP 26, Rust, PostgreSQL 16, and Node.js — no manual installation.
 
 ```bash
-# Enter dev shell
-devenv shell
-
-# First time: install deps, create DB, and run
 cd server
+
+# Enter the dev shell
+nix develop
+
+# First time: install deps, create DB, run migrations, and start
 make start
 
 # Subsequent runs (DB already exists)
 make run
 ```
 
-Other useful targets (run from `server/`):
+| Command | Description |
+|---------|-------------|
+| `make start` | Start Postgres + setup + run |
+| `make test` | Run all tests |
+| `make check` | Format + credo |
+| `make console` | IEx shell with the app loaded |
+| `make docs` | Generate ExDoc documentation |
+| `make pg.start` / `make pg.stop` | Manage the local Postgres |
+| `make client.dev` | Run Vite web client on :5173 |
+| `make client.build` | Build web client (served at /client/) |
+| `make clean` | Remove build artifacts |
+| `make purge` | Full reset (build + deps + pgdata) |
+
+### Option B: Docker
+
+Requires [Docker](https://docs.docker.com/get-docker/) and Docker Compose.
 
 ```bash
-make test          # run all tests
-make check         # format + credo
-make console       # iex -S mix
-make client.dev    # run the Vite web client on :5173
-make client.build  # build web client (served at /client/)
-make clean         # remove build artifacts
-make purge         # full reset (devenv + _build + deps)
+cd server
+
+# Start Postgres and run migrations
+make docker.up
+make docker.migrate
+
+# Run tests inside Docker
+make docker.test
+
+# Stop everything
+make docker.down
 ```
 
-> **Without nix:** Install Elixir, Erlang, Rust, and PostgreSQL manually (see `.tool-versions` for versions). Alternatively, `docker-compose up -d postgres` provides just the database.
+To run the Elixir server on the host with Docker Postgres:
+
+```bash
+make docker.up          # Postgres on localhost:5432
+nix develop             # or use system Elixir 1.16+
+mix deps.get && mix phx.server
+```
+
+| Command | Description |
+|---------|-------------|
+| `make docker.up` | Start Postgres container |
+| `make docker.down` | Stop all containers |
+| `make docker.migrate` | Run DB migrations in Docker |
+| `make docker.test` | Run full test suite in Docker |
+| `make docker.build` | Build production Docker image |
+
+### Production Docker Image
+
+```bash
+cd server
+docker build -t argentum:latest .
+docker run -e DATABASE_URL=ecto://user:pass@host/argentum \
+           -e SECRET_KEY_BASE=$(mix phx.gen.secret) \
+           -p 3000:3000 -p 7666:7666 -p 7667:7667 \
+           argentum:latest
+```
+
+### Monitoring
+
+The docker-compose includes Prometheus (http://localhost:9090) and Grafana (http://localhost:9100).
 
 ### Connect
 

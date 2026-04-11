@@ -1,4 +1,4 @@
-.PHONY: deps db setup run start test console format credo check docs clean purge pg.start pg.stop client.dev client.build client.typecheck client.preview client.clean
+.PHONY: deps db setup run start test console format credo check docs clean purge pg.start pg.stop client.dev client.build client.typecheck client.preview client.clean docker.up docker.down docker.migrate docker.test docker.build
 
 NIX := nix develop --command
 
@@ -95,3 +95,20 @@ client.clean:
 
 purge: pg.stop
 	rm -rf _build/ deps/ .pgdata/ ../client/node_modules ../client/dist
+
+# ---- Docker ----
+
+docker.up:
+	docker compose up -d postgres
+
+docker.down:
+	docker compose down
+
+docker.migrate: docker.up
+	docker compose run --rm migrate
+
+docker.test: docker.up
+	docker compose run --rm test
+
+docker.build:
+	docker build -t argentum:latest .
