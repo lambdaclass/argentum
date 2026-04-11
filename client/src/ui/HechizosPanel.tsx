@@ -36,6 +36,16 @@ export function HechizosPanel({
     selectedSlot == null ? null : getSpellMetadata(selectedSlot.spellId);
   const requirementLabels = getSpellRequirementLabels(selectedMetadata);
   const canCast = connected && selectedSlotIndex != null && selectedSlot != null;
+  const spellSummary = selectedMetadata
+    ? [
+        `Mana ${selectedMetadata.manaRequired}`,
+        `Stamina ${selectedMetadata.staminaRequired}`,
+        `Skill ${selectedMetadata.minSkill}`,
+        `Cooldown ${selectedMetadata.cooldown ?? 2}s`,
+        `Tipo ${getSpellTypeLabel(selectedMetadata.type)}`,
+        `Objetivo ${getSpellTargetLabel(selectedMetadata.target)}`
+      ]
+    : [];
   const targetTile = state.world.targetTile;
   const targetTerrain =
     targetTile && state.world.map
@@ -52,7 +62,10 @@ export function HechizosPanel({
   }, [selectedSlot]);
 
   return (
-    <section className={`panel spellbook-panel ${compact ? "spellbook-panel-compact" : ""}`}>
+    <section
+      className={`panel spellbook-panel ${compact ? "spellbook-panel-compact" : ""}`}
+      data-testid="spellbook-panel"
+    >
       <div className="panel-header">
         <h2>Hechizos</h2>
         <span className="panel-tag">{learnedCount} slots</span>
@@ -78,6 +91,32 @@ export function HechizosPanel({
         </small>
       </div>
 
+      {selectedMetadata ? (
+        <div className="spellbook-summary-strip" data-testid="spellbook-summary">
+          {spellSummary.map((label) => (
+            <span className="spellbook-summary-chip" key={label}>
+              {label}
+            </span>
+          ))}
+          {(selectedMetadata.areaRadio ?? 0) > 0 ? (
+            <span className="spellbook-summary-chip spellbook-summary-chip-area">
+              Area {selectedMetadata.areaRadio} ·{" "}
+              {getSpellAreaTargetLabel(selectedMetadata.areaAfecta ?? 0)}
+            </span>
+          ) : (
+            <span className="spellbook-summary-chip spellbook-summary-chip-area">Sin area</span>
+          )}
+          {selectedMetadata.needStaff ? (
+            <span className="spellbook-summary-chip spellbook-summary-chip-warning">Requiere baston</span>
+          ) : null}
+          {selectedMetadata.workOnDead ? (
+            <span className="spellbook-summary-chip spellbook-summary-chip-warning">
+              Funciona en muertos
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className={`spellbook-list ${compact ? "spellbook-list-compact" : ""}`}>
         {slots.map((spell, index) => {
           const metadata = spell == null ? null : getSpellMetadata(spell.spellId);
@@ -100,7 +139,11 @@ export function HechizosPanel({
               <strong>{spell?.name ?? "(vacio)"}</strong>
               {spell ? (
                 <small className="spellbook-row-cost">
-                  {metadata ? `M ${metadata.manaRequired} · ${metadata.cooldown ?? 2}s` : `#${spell.spellId}`}
+                  {metadata
+                    ? `M ${metadata.manaRequired} · ${metadata.cooldown ?? 2}s · ${
+                        getSpellTargetLabel(metadata.target)
+                      }`
+                    : `#${spell.spellId}`}
                 </small>
               ) : null}
             </button>
@@ -168,7 +211,7 @@ export function HechizosPanel({
         </small>
       </div>
 
-      <div className="selected-slot-card spellbook-detail-card">
+      <div className="selected-slot-card spellbook-detail-card" data-testid="spellbook-detail">
         {selectedSlot ? (
           <>
             <p className="session-card-title">Hechizo seleccionado</p>
@@ -200,9 +243,7 @@ export function HechizosPanel({
                 <span>Area</span>
                 <strong>
                   {selectedMetadata && (selectedMetadata.areaRadio ?? 0) > 0
-                    ? `R${selectedMetadata.areaRadio} · ${getSpellAreaTargetLabel(
-                        selectedMetadata.areaAfecta ?? 0
-                      )}`
+                    ? `R${selectedMetadata.areaRadio} · ${getSpellAreaTargetLabel(selectedMetadata.areaAfecta ?? 0)}`
                     : "Directo"}
                 </strong>
               </div>
@@ -235,6 +276,12 @@ export function HechizosPanel({
               <span>Tipo</span>
               <strong>
                 {selectedMetadata ? getSpellTypeLabel(selectedMetadata.type) : "Desconocido"}
+              </strong>
+            </div>
+            <div className="selected-slot-item">
+              <span>Objetivo</span>
+              <strong>
+                {selectedMetadata ? getSpellTargetLabel(selectedMetadata.target) : "Desconocido"}
               </strong>
             </div>
             <div className="selected-slot-item">

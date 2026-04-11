@@ -58,5 +58,12 @@ export function WorldCanvas({
     rendererRef.current?.render(world, assetCatalog, showTileDebug);
   }, [assetCatalog, showTileDebug, world]);
 
-  return <div className="world-canvas" ref={rootRef} />;
+  return (
+    <div
+      className="world-canvas"
+      data-raining={raining ? "1" : "0"}
+      data-testid="world-canvas"
+      ref={rootRef}
+    />
+  );
 }

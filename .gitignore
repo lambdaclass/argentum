@@ -8,3 +8,7 @@
 .DS_Store
 Thumbs.db
 /.cache/
+test-results/
+client/playwright-report/
+client/test-results/
+client/blob-report/

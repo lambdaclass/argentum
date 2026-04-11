@@ -2004,6 +2004,23 @@ h3 {
   font-size: 11px;
 }
 
+.trade-selection-meta {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.trade-selection-meta-chip {
+  padding: 5px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 216, 132, 0.16);
+  background: rgba(255, 216, 132, 0.08);
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 600;
+}
+
 .merchant-icon {
   background-repeat: no-repeat;
   image-rendering: pixelated;
@@ -2409,6 +2426,22 @@ h3 {
   display: block;
 }
 
+.world-status-chip small {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-soft);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.world-status-chip-weather {
+  grid-column: 1 / -1;
+  border-color: rgba(115, 194, 109, 0.18);
+  background:
+    radial-gradient(circle at right top, rgba(115, 194, 109, 0.14), transparent 38%),
+    var(--bg-soft);
+}
+
 .minimap-modal {
   position: fixed;
   inset: 0;
@@ -2476,11 +2509,41 @@ h3 {
   text-align: right;
 }
 
+.spellbook-summary-strip {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.spellbook-summary-chip {
+  padding: 5px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 216, 132, 0.16);
+  background: rgba(255, 216, 132, 0.08);
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.spellbook-summary-chip-area {
+  border-color: rgba(96, 192, 241, 0.2);
+  background: rgba(96, 192, 241, 0.08);
+  color: #c7ecff;
+}
+
+.spellbook-summary-chip-warning {
+  border-color: rgba(214, 148, 79, 0.22);
+  background: rgba(214, 148, 79, 0.12);
+  color: #ffd7b1;
+}
+
 .spellbook-row {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
+  scroll-margin-block: 96px;
   padding: 10px 12px;
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.03);

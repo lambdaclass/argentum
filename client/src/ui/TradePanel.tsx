@@ -39,6 +39,10 @@ function ItemIcon({
   );
 }
 
+function formatHex(value: number) {
+  return `0x${value.toString(16).toUpperCase()}`;
+}
+
 function TradeOfferList({
   assetCatalog,
   title,
@@ -68,7 +72,10 @@ function TradeOfferList({
                 <ItemIcon assetCatalog={assetCatalog} itemId={item.itemId} />
                 <div className="trade-row-copy">
                   <strong>{getObjectName(assetCatalog, item.itemId)}</strong>
-                  <small>x{item.amount}</small>
+                  <small>
+                    ID #{item.itemId} · x{item.amount} · GRH {item.grhIndex}
+                  </small>
+                  <small>Tags elementales {formatHex(item.elementalTags)}</small>
                 </div>
               </>
             ) : (
@@ -107,7 +114,7 @@ export function TradePanel({
     selectedOfferAmount > 0;
 
   return (
-    <section className="panel trade-panel">
+    <section className="panel trade-panel" data-testid="trade-panel">
       <div className="merchant-panel-header">
         <div>
           <p className="eyebrow">Trueque</p>
@@ -129,7 +136,7 @@ export function TradePanel({
             <strong>{state.trade.partnerAccepted ? "Acepto" : "Esperando respuesta"}</strong>
           </div>
         </div>
-        <small>Cada cambio en una oferta reinicia ambas aceptaciones.</small>
+        <small>Cada cambio en una oferta reinicia ambas aceptaciones y vuelve a mostrar el detalle de item, ID, valor y tags.</small>
       </div>
 
       <div className="trade-offer-grid">
@@ -193,6 +200,18 @@ export function TradePanel({
               ? "Los items equipados no pueden ofrecerse."
               : "La oferta actual usa el item seleccionado y se acumula si lo repites."}
           </small>
+          {selectedInventorySlot ? (
+            <div className="trade-selection-meta" data-testid="trade-selection-meta">
+              <span className="trade-selection-meta-chip">ID #{selectedInventorySlot.itemId}</span>
+              <span className="trade-selection-meta-chip">Valor {selectedInventorySlot.value}</span>
+              <span className="trade-selection-meta-chip">
+                Uso {formatHex(selectedInventorySlot.canUse)}
+              </span>
+              <span className="trade-selection-meta-chip">
+                Estado {selectedInventorySlot.equipped ? "Equipado" : "Libre"}
+              </span>
+            </div>
+          ) : null}
         </div>
         <div className="merchant-action-row">
           <input

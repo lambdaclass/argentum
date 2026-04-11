@@ -42,6 +42,22 @@ function VitalBar({
   );
 }
 
+function describeWeather(raining: boolean, snowing: boolean) {
+  if (raining && snowing) {
+    return "Lluvia y nieve activas";
+  }
+
+  if (raining) {
+    return "Lluvia global activa";
+  }
+
+  if (snowing) {
+    return "Nevando en todo el mundo";
+  }
+
+  return "Cielo despejado";
+}
+
 export function WorldStatusPanel({ state }: WorldStatusPanelProps) {
   const [expanded, setExpanded] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -54,6 +70,7 @@ export function WorldStatusPanel({ state }: WorldStatusPanelProps) {
   const otherCount = Object.keys(state.world.others).length;
   const npcCount = state.world.map?.npcs.length ?? 0;
   const exitCount = state.world.map?.exits.length ?? 0;
+  const weatherLabel = describeWeather(state.weather.raining, state.weather.snowing);
 
   useEffect(() => {
     if (canvasRef.current) {
@@ -66,7 +83,7 @@ export function WorldStatusPanel({ state }: WorldStatusPanelProps) {
   }, [expanded, state]);
 
   return (
-    <section className="panel world-status-card">
+    <section className="panel world-status-card" data-testid="world-status-panel">
       <div className="panel-header">
         <div>
           <p className="eyebrow">World</p>
@@ -118,6 +135,11 @@ export function WorldStatusPanel({ state }: WorldStatusPanelProps) {
           </div>
 
           <div className="world-status-chip-grid world-status-chip-grid-dense">
+            <div className="world-status-chip world-status-chip-weather">
+              <span>Weather</span>
+              <strong>{weatherLabel}</strong>
+              <small>Global state, not just one tile.</small>
+            </div>
             <div className="world-status-chip">
               <span>Position</span>
               <strong>{position}</strong>
@@ -172,6 +194,11 @@ export function WorldStatusPanel({ state }: WorldStatusPanelProps) {
             <div className="minimap-modal-body">
               <canvas className="world-minimap world-minimap-expanded" ref={expandedCanvasRef} />
               <div className="world-status-chip-grid world-status-chip-grid-dense">
+                <div className="world-status-chip world-status-chip-weather">
+                  <span>Weather</span>
+                  <strong>{weatherLabel}</strong>
+                  <small>Global state, not just one tile.</small>
+                </div>
                 <div className="world-status-chip">
                   <span>Self</span>
                   <strong>Red marker</strong>

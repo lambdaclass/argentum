@@ -9,9 +9,12 @@
     "prebuild": "npm run maps:build",
     "prepreview": "npm run maps:build",
     "dev": "vite",
+    "dev:ui": "vite --host 127.0.0.1 --port 4173 --strictPort",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed"
   },
   "dependencies": {
     "pixi.js": "^7.4.3",
@@ -19,9 +22,11 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",
+    "playwright": "^1.59.1",
     "typescript": "^5.6.3",
     "vite": "^5.4.10"
   }
