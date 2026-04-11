@@ -14,14 +14,15 @@ defmodule ArenaWeb.Endpoint do
   socket "/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]]
 
   # Serve at "/" the static files from "priv/static" directory.
-  #
-  # You should set gzip to true if you are running phx.digest
-  # when deploying your static files in production.
   plug Plug.Static,
     at: "/",
     from: :arena,
     gzip: false,
     only: ArenaWeb.static_paths()
+
+  # Game resources and client assets — served before the router so the SPA
+  # catch-all doesn't intercept them. Uses a custom plug for runtime path resolution.
+  plug ArenaWeb.StaticAssets
 
   # Code reloading can be explicitly enabled under the
   # :code_reloader configuration of your endpoint.

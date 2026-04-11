@@ -10,4 +10,8 @@ defmodule ArenaWeb.Router do
 
     get "/health", HealthController, :check
   end
+
+  # SPA catch-all: serve index.html for any non-API, non-static path
+  get "/", ArenaWeb.SpaController, :index
+  get "/*path", ArenaWeb.SpaController, :index
 end

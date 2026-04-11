@@ -7,16 +7,9 @@ This is the only roadmap. `CHANGELOG.md` tracks completed work.
 - **Backend gameplay:** close for the modern web path, but not full VB6 parity.
   Do not call the backend compatible until the backend tasks below are closed
   or deliberately removed from scope.
-- **Parity gate:** partially built. `Balance.dat` parity checks, formula golden
-  fixtures, character-creation parity, and a first `MapServer` smoke layer are
-  in place.
-  - TCP harness, sandbox ownership, shared decoder, soak exclusion, scope labels: **DONE**
-  - CI fast/slow lanes: **DONE**
-  - StreamData property tests: **DONE**
-  - Extended smoke coverage: **DONE**
-  - Fixture replay harness + `mix capture.packets`: **DONE**
-  - VB6 capture corpus: **EMPTY** (needs real VB6 traffic)
-  - Manual VB6 smoke checklist: **DONE** (see `server/VB6_SMOKE_CHECKLIST.md`)
+- **Parity gate:** the harness foundation is in place. The main remaining proof
+  gap is a real VB6 traffic corpus and replay coverage built from captured
+  sessions instead of synthetic fixtures alone.
 - **Backend environment:** the supported `server/` Nix/dev shell compiles and
   tests cleanly, and recent migrations were verified on clean Postgres.
 - **Web client:** playable development client. Remaining work is weather/social
@@ -25,60 +18,36 @@ This is the only roadmap. `CHANGELOG.md` tracks completed work.
 - **Post-compat account flow:** not built. Target is username/password or Google
   account login over HTTP, character selection in the browser, then unchanged
   AO socket login with `login_existing_char(char_id, session_token)`.
-- **Code size now:** backend app source is ~16k Elixir LOC; web client source is
-  ~15k TypeScript/React/CSS LOC.
+- **Code size now:** backend runtime code is ~21k Elixir LOC, backend tests are
+  ~17k Elixir LOC, and the web client source is ~15k TypeScript/React/CSS LOC.
 
 ## Linear Task List
 
-Backend work comes first. Frontend/browser work starts only after the backend
-tasks below are closed or explicitly deferred.
+Tasks `1-44` are the backend parity path. Tasks `45-65` are backend
+modernization that should not block parity signoff unless explicitly pulled
+into scope. Tasks `66-161` are post-parity browser/product work.
 
-### Backend Agent Execution Plan
+## Scope Rules
 
-Use agents only on disjoint write sets. Merge test/data/doc work first. Merge
-shared protocol/session behavior last.
+- If a task changes **player-visible gameplay**, **old-client protocol
+  behavior**, or **persistent game rules**, match the VB6 baseline.
+- If a task only changes **implementation**, **testing**, **performance**,
+  **ops**, or **admin tooling**, improve it in the modern way.
+- Items explicitly marked **if target baseline uses them** are parity blockers
+  only when the chosen VB6 shard/data set actually depends on them.
 
-**Wave 1: safe parallel backend tracks**
-- Tasks `4-13`: parity-gate expansion work.
-  Ownership: fixtures, replay tests, golden tests, lifecycle tests, persistence
-  tests, CI/docs.
-- Tasks `20-21`: timer and semantic audits.
-  Ownership: audit tests first, then narrow fixes.
-- Task `25`: recipe/data expansion.
-  Ownership: recipe tables and recipe tests only.
+## Backend Parity Finish Line
 
-**Wave 2: isolated packet-family backend tracks**
-- Task `23`: trainer skill-group restrictions.
-- Task `26`: old crafting UI packet surface.
-- Task `27`: training/spell window semantics.
-- Task `28`: info/service window semantics.
-- Task `29`: faction/council old response behavior.
-  Ownership: keep each packet family in its own write scope and test file set.
+Call backend parity done only when:
 
-**Wave 3: shared router/session backend tracks**
-- Tasks `14-18`, `24`, `30-31`.
-  Ownership: one owner at a time for shared protocol/session files such as
-  `session_logic.ex`, decoder/router paths, and shared social/GM handlers.
-  Do not run multiple agents against the same routing surface in parallel.
+- real VB6 packet captures exist from `mix capture.packets`
+- replay suites are green against those captures
+- formula/lifecycle/persistence parity suites are green
+- the manual VB6 smoke checklist is green with an unmodified VB6 client
+- all in-scope parity-required backend tasks below are done
+- any out-of-scope legacy systems are explicitly listed as excluded
 
-**Wave 4: large backend systems**
-- Tasks `32-43`.
-  Ownership: one subsystem per agent with disjoint files where possible
-  (`quests`, `duels`, `events`, `auction`, `forum`, `marriage`, etc.).
-
-**Wave 5: backend performance and operations**
-- Tasks `45-65`.
-  Ownership: split by subsystem, not by theme:
-  `NPC AI`, `pet AI`, `session send path`, `telemetry`, `persistence`,
-  `admin/ops`.
-
-**Integration order**
-- Merge Wave 1 first.
-- Merge Wave 2 next.
-- Merge Wave 3 after the test/doc/data work is green.
-- Merge Wave 4 and Wave 5 only after the shared router/session work is stable.
-- After each merged wave: run targeted suites, then full `mix test`, then
-  update roadmap/changelog once.
+### Maintenance
 
 1. Keep the branch clean.
    Outcome: no stray generated files, half-finished migrations, or untracked
@@ -87,6 +56,9 @@ shared protocol/session behavior last.
    Outcome: parity work does not overlap with half-integrated gameplay edits.
 3. Update the top-level roadmap status after every large merge.
    Outcome: the roadmap remains accurate instead of becoming historical fiction.
+
+### Parity Proof
+
 4. Build and version a real VB6 packet-capture corpus using
    `mix capture.packets` against an unmodified VB6 client.
    Outcome: replay tests have captured byte fixtures from the real old client
@@ -121,6 +93,9 @@ shared protocol/session behavior last.
 13. Define the exact parity-gate required suites.
     Outcome: "parity gate green" means a concrete, documented set of passing
     suites instead of a vague status label.
+
+### Parity-Required Backend Behavior
+
 14. Finish `/HOGAR` exact VB6 behavior.
     Outcome: home travel matches VB6 end-to-end, including delayed bar/effect,
     jail restricted area, NEWBIE zone, CARCEL trigger, reto/traveling cancel
