@@ -437,6 +437,12 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
   # send_atributes (81): 5 × Int8 = 5 bytes
   defp decode_server_packet(81, <<_::binary-size(5), rest::binary>>), do: {:ok, %{}, rest}
 
+  # safe_mode_on (20): no payload
+  defp decode_server_packet(20, rest), do: {:ok, %{}, rest}
+
+  # safe_mode_off (21): no payload
+  defp decode_server_packet(21, rest), do: {:ok, %{}, rest}
+
   # update_hp (27): Int16 + Int32 = 6 bytes (already decoded above via Reader, add skip fallback)
   # update_mana (26): Int16 = 2 bytes (already decoded via Reader)
   # update_sta (25): Int16 = 2 bytes (already decoded via Reader)
@@ -463,7 +469,7 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
 
       # All non-welcome packets are valid middle types
       middle = Enum.reject(after_core, &(&1 == 37))
-      assert Enum.all?(middle, &(&1 in [42, 49, 59, 61, 63, 66, 76, 79, 80, 81, 29, 87]))
+      assert Enum.all?(middle, &(&1 in [20, 21, 42, 49, 59, 61, 63, 66, 76, 79, 80, 81, 29, 87]))
     end
 
     test "logged packet has new_user=false", %{port: port} do

@@ -402,6 +402,12 @@ defmodule AoTcpGateway.WsIntegrationTest do
   # send_atributes (81): 5 × Int8 = 5 bytes
   defp skip_packet_payload(81, <<_::binary-size(5), rest::binary>>), do: {:ok, rest}
 
+  # safe_mode_on (20): no payload
+  defp skip_packet_payload(20, rest), do: {:ok, rest}
+
+  # safe_mode_off (21): no payload
+  defp skip_packet_payload(21, rest), do: {:ok, rest}
+
   # Fallback: unknown packet
   defp skip_packet_payload(_id, _data), do: :unknown
 
