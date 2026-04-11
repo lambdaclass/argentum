@@ -1,6 +1,9 @@
 # Old VB6 source and clients (large, not needed in repo)
 /old/
 
+# Nix-managed local Postgres data
+.pgdata/
+
 # OS
 .DS_Store
 Thumbs.db
