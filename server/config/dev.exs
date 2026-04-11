@@ -29,7 +29,7 @@ config :arena, dev_routes: true
 config :game_backend, GameBackend.Repo,
   username: "postgres",
   password: "postgres",
-  hostname: "localhost",
+  hostname: System.get_env("DATABASE_HOST", "localhost"),
   database: "argentum_dev",
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
