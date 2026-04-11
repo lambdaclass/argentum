@@ -1,7 +1,7 @@
-# Argentum Online: VB6 → Elixir Migration Roadmap
+# Argentum Backend Appendix
 
-**Linear plan:** start with `ROADMAP.md`. This file is the detailed backend
-reference and historical phase plan.
+`ROADMAP.md` is the only roadmap. This file is the detailed backend appendix
+and reference.
 
 ## Current State
 
@@ -72,30 +72,27 @@ reference and historical phase plan.
 11. ~~**Raw `ehome` packet**~~ — ID 264 decoded and routed to `/HOGAR` handler.
 12. **Old-client packet coverage pass** — 50+ new decoders added (pets, crafting, training, spells, info, faction, GM, economy). 94% of decoded packets now have `handle_command` routes. Remaining: `role_master_request`. Placeholder routes exist for `gm_message` (local chat, not broadcast) and `rain_toggle` (text dispatch).
 13. **Gameplay wiring pass** — `modify_skills` (point distribution with cap), `change_description`, `spell_info`, `move_item` (slot swap), `move_spell`, `modify_gold`, pet control (`pet_mode` on NpcEntity), party chat (`grupo_msg`), gold transfer, faction donate all wired to real game logic.
+14. **Supported backend environment** — `server/` Nix/dev shell compiles and tests cleanly.
+15. **Migration verification** — recent migrations were verified on clean Postgres and on an upgrade path.
 
 **Remaining backend gaps (gameplay tail):**
-1. **Local test toolchain** — Fix the Elixir/Hex/OTP mismatch so `mix compile`
-   and `mix test` run reliably from a clean checkout.
-2. **Recent migrations need real DB verification** — Run clean-db +
-   existing-dev-db migration path; verify
-   character/inventory/bank/guild/faction loads after migration.
-3. **`/HOGAR` final parity** — no-revive, gold cost, penalty/home checks done.
+1. **`/HOGAR` final parity** — no-revive, gold cost, penalty/home checks done.
    Still missing: VB6-style delayed travel bar/effect, jail restricted area,
    NEWBIE zone, CARCEL trigger, reto/traveling cancel behavior.
-4. **Guild UI proposal behavior** — finish old-client peace/alliance/list/detail
+2. **Guild UI proposal behavior** — finish old-client peace/alliance/list/detail
    behavior and add packet replay tests for the old clan windows.
-5. **Tighten placeholder routes** — `gm_message` needs real server-wide
+3. **Tighten placeholder routes** — `gm_message` needs real server-wide
    broadcast; `rain_toggle` needs direct MapServer path instead of text
    dispatch; `role_master_request` needs handler.
-6. **Elemental/rune content support** — per-instance tags are
+4. **Elemental/rune content support** — per-instance tags are
    persisted/protocol-visible. Current raw data scan found no active elemental
    values; defer unless content enables it.
-7. **Automated parity gate expansion** — Initial parity test suite exists. Still
+5. **Automated parity gate expansion** — Initial parity test suite exists. Still
    needed: packet trace replay, AO smoke bot, property/fuzz, lifecycle tests,
    load/soak.
-8. **Ops tail** — Dashboards, alerts, deploy pipeline, backup-restore, runbooks.
+6. **Ops tail** — Dashboards, alerts, deploy pipeline, backup-restore, runbooks.
    Not gameplay, but backend production work (Phase 15 + 17).
-9. **Perf tail** — NPC aggro still scans all players; pet targeting scans all
+7. **Perf tail** — NPC aggro still scans all players; pet targeting scans all
    NPCs; no outbound backpressure; no load/soak gate. NPC broadcast AoI is
    fixed (Phase 17).
 
@@ -113,8 +110,8 @@ reference and historical phase plan.
 For the full product order, use `ROADMAP.md`. Backend sequencing is:
 
 1. Stabilize the current branch: keep the branch clean, fix the local Hex/OTP
-   toolchain, run compile/tests from a clean checkout, and run recent
-   migrations on real Postgres.
+   issue scope small, keep compile/tests green in the supported environment, and
+   rerun recent migrations when schema changes land.
 2. Build the automated parity gate: VB6 packet replay, formula golden fixtures,
    property/fuzz tests, lifecycle tests, AO smoke bot, browser E2E, and
    load/soak.

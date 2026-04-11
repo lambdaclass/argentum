@@ -1,7 +1,7 @@
-# Argentum Online: Web Client Roadmap
+# Argentum Client Appendix
 
-**Linear plan:** start with `ROADMAP.md`. This file tracks the web client tail
-and browser-specific product work.
+`ROADMAP.md` is the only roadmap. This file tracks client-specific reference
+notes and browser product details.
 
 ## Current State
 
