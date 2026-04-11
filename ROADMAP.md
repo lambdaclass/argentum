@@ -23,9 +23,10 @@ This is the only roadmap. `CHANGELOG.md` tracks completed work.
 
 ## Linear Task List
 
-Tasks `1-49` are the backend parity path. Tasks `50-70` are backend
-modernization that should not block parity signoff unless explicitly pulled
-into scope. Tasks `71-161` are post-parity browser/product work.
+Tasks `1-49` are the backend parity path. Tasks `50-145` are post-parity
+browser/product work. Tasks `146-167` are backend modernization and
+operations that should not block parity signoff unless explicitly pulled into
+scope.
 
 ## Scope Rules
 
@@ -46,6 +47,40 @@ Call backend parity done only when:
 - the manual VB6 smoke checklist is green with an unmodified VB6 client
 - all in-scope parity-required backend tasks below are done
 - any out-of-scope legacy systems are explicitly listed as excluded
+
+## Execution Rules
+
+Keep the roadmap linear, but execute it with these constraints:
+
+- **Tasks 1-3:** do serially. They are repo hygiene and status control.
+- **Tasks 4-13:** strongest current parallel batch. These are mostly proof and
+  test work with low write-set overlap.
+- **Tasks 14-18:** keep at the end of parity proof. They are blocked on having
+  a Windows/VB6 environment and a real capture corpus.
+- **Tasks 19-29:** mostly shared protocol/session behavior. Prefer one owner at
+  a time unless the write sets are proven disjoint.
+- **Tasks 30-34:** good parallel batch. These are isolated old packet/UI
+  families if each family has a single owner.
+- **Tasks 35-36:** do serially. GM/admin packet targeting and implementation
+  tend to touch shared routing and decoder surfaces.
+- **Tasks 37-46:** parallelize by subsystem only. One owner per legacy system:
+  quests, duels, events, auction, mounts, gambling, treasure, forum,
+  marriage, guild elections.
+- **Tasks 47-49:** do serially. These are scope decisions and final drift
+  cleanup.
+- **Tasks 50-145:** highly parallelizable once started. Split by browser
+  surface: protocol tests, reducer/state tests, UI polish, account/lobby,
+  i18n, multi-realm.
+- **Tasks 146-167:** parallelize by subsystem. These are modernization tasks
+  and should not block parity signoff unless explicitly promoted.
+
+When in doubt:
+
+- Parallelize test-only, doc-only, data-only, and clearly isolated subsystem
+  work.
+- Serialize anything that touches shared session logic, protocol decoding,
+  command routing, or cross-cutting persistence semantics.
+- Merge proof/test work before shared behavior changes.
 
 ### Maintenance
 
@@ -206,280 +241,286 @@ Call backend parity done only when:
     first.
     Outcome: no undocumented "close enough" backend differences remain.
 
-### Backend Modernization
-
-50. Replace NPC aggro full scans with spatial-grid queries.
-    Outcome: hostile NPC target acquisition scales with local visibility, not
-    full player count.
-51. Replace pet target full scans with bounded or indexed lookup.
-    Outcome: pets do not scale linearly with all NPCs on the map.
-52. Add outbound backpressure for lagging sessions.
-    Outcome: a slow client cannot grow process memory without bound.
-53. Add per-MapServer hotspot telemetry.
-    Outcome: player count, NPC count, tick duration, mailbox length, and
-    broadcast rates are visible per map.
-54. Add batch persistence / write-queue strategy for scattered DB writes.
-    Outcome: autosave, logout, bank, and guild writes can be hardened and
-    scaled without ad hoc call patterns.
-55. Pre-resolve `.dat` references at load time where hot-path lookups still
-    repeat.
-    Outcome: gameplay avoids repeated definition lookups that can be resolved
-    once at startup.
-56. Unify interest management for players, NPCs, and ground items.
-    Outcome: create/remove boundary behavior is consistent across visible world
-    entities.
-57. Add runtime admin tools for map/process inspection and control.
-    Outcome: operators can inspect mailboxes, player counts, force save, and
-    restart maps cleanly.
-58. Add admin lookup for accounts, characters, and online players.
-    Outcome: operators can inspect live and persisted entities.
-59. Add admin moderation actions: kick, ban, mute, jail.
-    Outcome: basic live moderation exists outside raw gameplay commands.
-60. Add admin world actions: item/NPC spawn, teleport, locate.
-    Outcome: operator world control exists in one supported surface.
-61. Add admin logs and health views.
-    Outcome: operators can inspect recent actions and system state quickly.
-62. Add metrics and dashboards.
-    Outcome: runtime health can be observed without log scraping.
-63. Add alerts and release artifacts.
-    Outcome: the project is releaseable and operationally monitorable.
-64. Add deployment pipeline and backup/restore runbook.
-    Outcome: releases and recovery have a documented path.
-65. Add TLS for HTTPS and WSS.
-    Outcome: production browser/session traffic is encrypted.
-66. Add asset CDN/delivery strategy for static resources.
-    Outcome: heavy client assets do not depend on the gameplay server path.
-67. Add automated backups and database connection-pool tuning.
-    Outcome: the database operational path is production-safe.
-68. Add runtime-tunable settings for intervals, rates, and formula constants.
-    Outcome: live tuning does not require a recompile for every server constant.
-69. Verify graceful host shutdown.
-    Outcome: shutdown does not lose player state or corrupt runtime processes.
-70. Add pre-public scripted load/soak runs.
-    Outcome: operational confidence exists before open testing.
-
 ### Post-Parity Browser And Product Work
 
-71. Run `npm run typecheck` from a clean checkout.
+50. Run `npm run typecheck` from a clean checkout.
     Outcome: the current browser code passes the static TypeScript gate.
-72. Run `npm run build` from a clean checkout.
+51. Run `npm run build` from a clean checkout.
     Outcome: the production browser bundle builds successfully.
-73. Keep client packet decode/encode locked to current server protocol.
+52. Keep client packet decode/encode locked to current server protocol.
     Outcome: browser packet handling does not drift from `ao_protocol`.
-74. Add browser-side packet fixture tests using the shared VB6 fixtures.
+53. Add browser-side packet fixture tests using the shared VB6 fixtures.
     Outcome: client protocol compatibility is checked against the same captured
     bytes as the server.
-75. Add browser-side decoder fuzz tests.
+54. Add browser-side decoder fuzz tests.
     Outcome: malformed packet payloads do not crash or corrupt client state.
-76. Add browser-side reducer/state tests for inventory.
+55. Add browser-side reducer/state tests for inventory.
     Outcome: inventory state stays deterministic under packet sequences.
-77. Add browser-side reducer/state tests for bank.
+56. Add browser-side reducer/state tests for bank.
     Outcome: bank state stays deterministic under packet sequences.
-78. Add browser-side reducer/state tests for trade.
+57. Add browser-side reducer/state tests for trade.
     Outcome: trade state stays deterministic under packet sequences.
-79. Add browser-side reducer/state tests for party and clan.
+58. Add browser-side reducer/state tests for party and clan.
     Outcome: social state stays deterministic under packet sequences.
-80. Add browser-side reducer/state tests for weather and death.
+59. Add browser-side reducer/state tests for weather and death.
     Outcome: weather/death state stays deterministic under packet sequences.
-81. Add browser visual fixture tests for player bodies and equipment overlays.
+60. Add browser visual fixture tests for player bodies and equipment overlays.
     Outcome: body/head/equipment composition does not drift visually.
-82. Add browser visual fixture tests for common NPC sprites.
+61. Add browser visual fixture tests for common NPC sprites.
     Outcome: skeleton/boar/wolf/ant style mapping regressions are caught early.
-83. Keep WebSocket/session bootstrap isolated from gameplay bytes.
+62. Keep WebSocket/session bootstrap isolated from gameplay bytes.
     Outcome: browser auth/lobby flow never contaminates AO gameplay packet
     semantics.
-84. Decode and dispatch `snow_toggle`.
+63. Decode and dispatch `snow_toggle`.
     Outcome: snow state reaches the browser renderer correctly.
-85. Render snow when `snow_toggle` is active.
+64. Render snow when `snow_toggle` is active.
     Outcome: weather parity is visually complete in the browser.
-86. Show trade item name in the trade panel.
+65. Show trade item name in the trade panel.
     Outcome: the player sees the real item label from packet 100.
-87. Show trade item `GRH`/sprite metadata in the trade panel.
+66. Show trade item `GRH`/sprite metadata in the trade panel.
     Outcome: trade visuals use the metadata already sent by the server.
-88. Show trade item elemental tags in the trade panel.
+67. Show trade item elemental tags in the trade panel.
     Outcome: non-zero item tags are visible instead of hidden protocol data.
-89. Show spell cooldown hints.
+68. Show spell cooldown hints.
     Outcome: spell timing constraints are visible before the server rejects the
     cast.
-90. Show spell requirement hints.
+69. Show spell requirement hints.
     Outcome: land/water/staff/dead targeting rules are visible in the browser.
-91. Show spell AoE/radius hints.
+70. Show spell AoE/radius hints.
     Outcome: spell area semantics are visible before cast.
-92. Keep NPC sprite/body mappings checked by fixture or screenshot tests.
+71. Keep NPC sprite/body mappings checked by fixture or screenshot tests.
     Outcome: visual regressions in body-to-sprite mapping are caught early.
-93. Make party panels use authoritative state instead of console-text
+72. Make party panels use authoritative state instead of console-text
     inference.
     Outcome: party UI reflects backend truth.
-94. Make clan panels use authoritative state instead of console-text inference.
+73. Make clan panels use authoritative state instead of console-text inference.
     Outcome: clan UI reflects backend truth.
-95. Show party member online state, leader/permissions, and party safe state.
+74. Show party member online state, leader/permissions, and party safe state.
     Outcome: party UI surfaces the real backend state instead of a flat member
     list.
-96. Show clan member online state, rank/role, and faction/guild alignment.
+75. Show clan member online state, rank/role, and faction/guild alignment.
     Outcome: clan UI surfaces the real backend state instead of a flat member
     list.
-97. Keep faction chat visible as a distinct chat stream.
+76. Keep faction chat visible as a distinct chat stream.
     Outcome: faction communication is not collapsed into generic log lines.
-98. Keep guild chat visible as a distinct chat stream.
+77. Keep guild chat visible as a distinct chat stream.
     Outcome: guild communication is not collapsed into generic log lines.
-99. Keep party chat visible as a distinct chat stream.
+78. Keep party chat visible as a distinct chat stream.
     Outcome: party communication is not collapsed into generic log lines.
-100. Add clear ghost/dead HUD cues.
+79. Add clear ghost/dead HUD cues.
     Outcome: dead state is visually obvious in the browser.
-101. Disable actions that the dead state will reject anyway.
+80. Disable actions that the dead state will reject anyway.
     Outcome: obvious dead-state rejections are prevented client-side.
-102. Add a loading overlay.
+81. Add a loading overlay.
     Outcome: map/session transitions are visible instead of abrupt.
-103. Add a reconnect overlay.
+82. Add a reconnect overlay.
     Outcome: connection recovery is visible and less confusing.
-104. Add a banned error state.
+83. Add a banned error state.
     Outcome: banned users get an explicit browser state instead of a generic
     failure.
-105. Add a muted error/state message.
+84. Add a muted error/state message.
     Outcome: muted users see a clear chat restriction state.
-106. Add a server-full error state.
+85. Add a server-full error state.
     Outcome: capacity failures are explicit in the browser.
-107. Add a maintenance error state.
+86. Add a maintenance error state.
      Outcome: maintenance mode is explicit in the browser.
-108. Add a token-expired error state.
+87. Add a token-expired error state.
      Outcome: auth/session expiry is explicit in the browser.
-109. Add browser music settings.
+88. Add browser music settings.
      Outcome: music can be enabled, disabled, and persisted intentionally.
-110. Add browser SFX settings.
+89. Add browser SFX settings.
      Outcome: sound effects can be enabled, disabled, and persisted
      intentionally.
-111. Add browser renderer-quality settings.
+90. Add browser renderer-quality settings.
      Outcome: users can trade fidelity for performance explicitly.
-112. Add browser keybind settings.
+91. Add browser keybind settings.
      Outcome: controls can be configured instead of hardcoded.
-113. Add a minimap if it remains part of the web UX target.
+92. Add a minimap if it remains part of the web UX target.
      Outcome: navigation support is explicit instead of ad hoc.
-114. Add map markers if they remain part of the web UX target.
+93. Add map markers if they remain part of the web UX target.
      Outcome: navigation targets are explicit instead of ad hoc.
-115. Add combat and spell sound effects.
+94. Add combat and spell sound effects.
      Outcome: combat feedback is not visually silent.
-116. Add inventory and UI sound effects.
+95. Add inventory and UI sound effects.
      Outcome: inventory and menu interactions have immediate feedback.
-117. Add door, teleport, and weather sound effects.
+96. Add door, teleport, and weather sound effects.
      Outcome: world transitions and ambience have immediate feedback.
-118. Add a responsive layout pass for desktop.
+97. Add a responsive layout pass for desktop.
      Outcome: the client remains usable on normal desktop browser sizes.
-119. Add a responsive layout pass for laptop and common browser zoom levels.
+98. Add a responsive layout pass for laptop and common browser zoom levels.
      Outcome: the client remains usable on tighter browser layouts and zoomed
      views.
-120. Add web E2E smoke coverage for browser login/lobby flows once they exist.
+99. Add web E2E smoke coverage for browser login/lobby flows once they exist.
      Outcome: the account/lobby browser path is tested end-to-end.
-121. Add web E2E smoke coverage for connect, map load, and inventory.
+100. Add web E2E smoke coverage for connect, map load, and inventory.
      Outcome: the basic gameplay browser path is tested end-to-end.
-122. Add web E2E smoke coverage for combat, spells, death, and revive.
+101. Add web E2E smoke coverage for combat, spells, death, and revive.
      Outcome: the core gameplay browser path is tested end-to-end.
-123. Add web E2E smoke coverage for bank, trade, social UI, weather, and
+102. Add web E2E smoke coverage for bank, trade, social UI, weather, and
      reconnect.
      Outcome: advanced browser gameplay flows are tested end-to-end.
-124. Add `POST /api/auth/login`.
+103. Add `POST /api/auth/login`.
      Outcome: account-level username/password login exists over HTTP.
-125. Add `POST /api/auth/google`.
+104. Add `POST /api/auth/google`.
      Outcome: account-level Google login exists over HTTP.
-126. Add `GET /api/auth/session`.
+105. Add `GET /api/auth/session`.
      Outcome: browser session restore works without touching the AO socket.
-127. Add `POST /api/auth/logout`.
+106. Add `POST /api/auth/logout`.
      Outcome: account logout is explicit and clean.
-128. Add `GET /api/characters`.
+107. Add `GET /api/characters`.
      Outcome: the browser can list account-owned characters.
-129. Add `POST /api/characters`.
+108. Add `POST /api/characters`.
      Outcome: character creation exists in the account lobby flow.
-130. Add `POST /api/characters/:id/session`.
+109. Add `POST /api/characters/:id/session`.
      Outcome: selecting a character yields the token needed for unchanged AO
      socket entry.
-131. Support password-only accounts.
+110. Support password-only accounts.
      Outcome: the account model works without Google linkage.
-132. Support Google-only accounts.
+111. Support Google-only accounts.
      Outcome: the account model works without a local password.
-133. Support linked password+Google accounts.
+112. Support linked password+Google accounts.
      Outcome: one account can support both auth methods cleanly.
-134. Build the browser username/password login flow.
+113. Build the browser username/password login flow.
      Outcome: users can sign in with credentials before the AO session starts.
-135. Build the browser session-restore flow.
+114. Build the browser session-restore flow.
      Outcome: users can resume account sessions cleanly.
-136. Build the browser Google login flow.
+115. Build the browser Google login flow.
      Outcome: Google auth is first-class in the browser, not a token paste
      path.
-137. Build the browser Google account-link flow.
+116. Build the browser Google account-link flow.
      Outcome: existing accounts can attach Google auth cleanly.
-138. Build the browser character list flow.
+117. Build the browser character list flow.
      Outcome: the browser shows owned characters before opening the AO session.
-139. Build the browser character creation flow.
+118. Build the browser character creation flow.
      Outcome: the browser can create a new character before opening the AO
      session.
-140. Build the browser character selection flow.
+119. Build the browser character selection flow.
      Outcome: the browser chooses a character before opening the AO session.
-141. Include race/class choices in the browser character create flow.
+120. Include race/class choices in the browser character create flow.
      Outcome: browser-side character creation exposes core class/race setup.
-142. Include head/home/stat choices in the browser character create flow.
+121. Include head/home/stat choices in the browser character create flow.
      Outcome: browser-side character creation exposes the remaining setup
      choices the backend expects.
-143. Stop using socket `login_new_char` as the primary browser account flow.
+122. Stop using socket `login_new_char` as the primary browser account flow.
      Outcome: account auth and gameplay auth are clearly separated.
-144. Launch the AO socket with `login_existing_char(char_id, session_token)`.
+123. Launch the AO socket with `login_existing_char(char_id, session_token)`.
      Outcome: gameplay protocol stays unchanged after the HTTP lobby.
-145. Prefer same-origin serving or proxying for the account API.
+124. Prefer same-origin serving or proxying for the account API.
      Outcome: cookies/session handling stays simple.
-146. Define supported locales and fallback behavior.
+125. Define supported locales and fallback behavior.
      Outcome: internationalization has an explicit scope instead of ad hoc text
      replacement.
-147. Extract browser gameplay UI strings into translation keys.
+126. Extract browser gameplay UI strings into translation keys.
      Outcome: the in-game browser UI can be localized without editing code in
      place.
-148. Extract account, auth, and lobby UI strings into translation keys.
+127. Extract account, auth, and lobby UI strings into translation keys.
      Outcome: login, session, and character-picking flows can be localized
      cleanly.
-149. Separate player-facing server and browser messages from hardcoded
+128. Separate player-facing server and browser messages from hardcoded
      shard-language text where localization is required.
      Outcome: localizable messages stop being trapped inside gameplay logic.
-150. Keep protocol payloads language-neutral where possible.
+129. Keep protocol payloads language-neutral where possible.
      Outcome: localization does not require protocol forks for each language.
-151. Add locale preference at the account or session level.
+130. Add locale preference at the account or session level.
      Outcome: language choice is explicit and persistent.
-152. Add browser language selection and persistence.
+131. Add browser language selection and persistence.
      Outcome: players can switch languages intentionally instead of relying on
      browser defaults only.
-153. Add locale-aware number, date, and time formatting.
+132. Add locale-aware number, date, and time formatting.
      Outcome: non-text formatting matches player locale expectations.
-154. Verify fonts and glyph coverage for the supported languages.
+133. Verify fonts and glyph coverage for the supported languages.
      Outcome: translated UI and chat do not fail on missing glyphs.
-155. Audit chat/input handling for accents, IME, and Unicode edge cases.
+134. Audit chat/input handling for accents, IME, and Unicode edge cases.
      Outcome: players from different language backgrounds can type reliably.
-156. Add browser i18n test coverage.
+135. Add browser i18n test coverage.
      Outcome: translation keys, fallback behavior, and locale switching stay
      correct under change.
-157. Decide which surfaces remain intentionally non-localized.
+136. Decide which surfaces remain intentionally non-localized.
      Outcome: player names, GM commands, shard-specific content, and other
      exceptions are explicit instead of accidental.
-158. Define the multi-realm architecture: one account system, many regional
+137. Define the multi-realm architecture: one account system, many regional
      worlds.
      Outcome: region support is built on explicit realm boundaries instead of
      cross-region live-state shortcuts.
-159. Add realm metadata and realm selection to the account/lobby backend.
+138. Add realm metadata and realm selection to the account/lobby backend.
      Outcome: the backend can list available realms before gameplay login.
-160. Add realm selection to the browser lobby.
+139. Add realm selection to the browser lobby.
      Outcome: players choose a server region before opening the AO session.
-161. Show per-realm character availability and state in the browser lobby.
+140. Show per-realm character availability and state in the browser lobby.
      Outcome: region choice and character choice are visible together.
-162. Route character session issuance through the selected realm.
+141. Route character session issuance through the selected realm.
      Outcome: `login_existing_char` tokens become realm-aware without changing
      the gameplay protocol shape.
-163. Add deployment and runbook support for multiple regional realms.
+142. Add deployment and runbook support for multiple regional realms.
      Outcome: the project can operate the same game stack in more than one
      country or region.
-164. Add realm-aware monitoring and admin surfaces.
+143. Add realm-aware monitoring and admin surfaces.
      Outcome: operators can inspect and manage each realm independently.
-165. Define the controlled character-transfer policy between realms.
+144. Define the controlled character-transfer policy between realms.
      Outcome: cross-realm movement is an explicit product rule with cooldowns,
      restrictions, and economics.
-166. Implement controlled character transfer between realms if it remains in
+145. Implement controlled character transfer between realms if it remains in
      scope.
      Outcome: players can move characters across regions through a supported
      flow instead of ad hoc manual intervention.
+
+### Backend Modernization
+
+146. Replace NPC aggro full scans with spatial-grid queries.
+     Outcome: hostile NPC target acquisition scales with local visibility, not
+     full player count.
+147. Replace pet target full scans with bounded or indexed lookup.
+     Outcome: pets do not scale linearly with all NPCs on the map.
+148. Add outbound backpressure for lagging sessions.
+     Outcome: a slow client cannot grow process memory without bound.
+149. Add per-MapServer hotspot telemetry.
+     Outcome: player count, NPC count, tick duration, mailbox length, and
+     broadcast rates are visible per map.
+150. Add batch persistence / write-queue strategy for scattered DB writes.
+     Outcome: autosave, logout, bank, and guild writes can be hardened and
+     scaled without ad hoc call patterns.
+151. Pre-resolve `.dat` references at load time where hot-path lookups still
+     repeat.
+     Outcome: gameplay avoids repeated definition lookups that can be resolved
+     once at startup.
+152. Unify interest management for players, NPCs, and ground items.
+     Outcome: create/remove boundary behavior is consistent across visible world
+     entities.
+153. Add runtime admin tools for map/process inspection and control.
+     Outcome: operators can inspect mailboxes, player counts, force save, and
+     restart maps cleanly.
+154. Add admin lookup for accounts, characters, and online players.
+     Outcome: operators can inspect live and persisted entities.
+155. Add admin moderation actions: kick, ban, mute, jail.
+     Outcome: basic live moderation exists outside raw gameplay commands.
+156. Add admin world actions: item/NPC spawn, teleport, locate.
+     Outcome: operator world control exists in one supported surface.
+157. Add admin logs and health views.
+     Outcome: operators can inspect recent actions and system state quickly.
+158. Add metrics and dashboards.
+     Outcome: runtime health can be observed without log scraping.
+159. Add alerts and release artifacts.
+     Outcome: the project is releaseable and operationally monitorable.
+160. Add deployment pipeline and backup/restore runbook.
+     Outcome: releases and recovery have a documented path.
+161. Add TLS for HTTPS and WSS.
+     Outcome: production browser/session traffic is encrypted.
+162. Add asset CDN/delivery strategy for static resources.
+     Outcome: heavy client assets do not depend on the gameplay server path.
+163. Add automated backups and database connection-pool tuning.
+     Outcome: the database operational path is production-safe.
+164. Add runtime-tunable settings for intervals, rates, and formula constants.
+     Outcome: live tuning does not require a recompile for every server constant.
+165. Verify graceful host shutdown.
+     Outcome: shutdown does not lose player state or corrupt runtime processes.
+166. Add pre-public scripted load/soak runs.
+     Outcome: operational confidence exists before open testing.
+167. Add post-parity anti-cheat hardening: movement anomaly scoring, rate
+     validation, state-machine validation, economy invariants, structured
+     anti-cheat events, and operator visibility.
+     Outcome: speed hacking, packet abuse, duping, and botting signals are
+     detected, logged, and acted on systematically without changing legal
+     gameplay behavior.
 
 ## Checks To Run
 
