@@ -26,7 +26,9 @@ This is the only roadmap. `CHANGELOG.md` tracks completed work.
 Tasks `1-49` are the backend parity path. Tasks `50-145` are post-parity
 browser/product work. Tasks `146-167` are backend modernization and
 operations that should not block parity signoff unless explicitly pulled into
-scope.
+scope. Tasks `168-169` are optional legacy features that the inspected VB6
+baseline kept disabled and should only be revisited after backend
+modernization unless a target shard explicitly re-enables them.
 
 ## Scope Rules
 
@@ -34,6 +36,10 @@ scope.
   behavior**, or **persistent game rules**, match the VB6 baseline.
 - If the VB6 baseline intentionally disables a feature, keep the disabled
   behavior unless the selected target shard explicitly re-enables it.
+- If the inspected VB6 baseline disables a feature, parity only requires
+  preserving the disabled semantics in the backend parity path. Re-enabling
+  that feature belongs after the frontend/product and backend-modernization
+  tracks unless the selected shard explicitly requires it earlier.
 - If a task only changes **implementation**, **testing**, **performance**,
   **ops**, or **admin tooling**, improve it in the modern way.
 - Items explicitly marked **if target baseline uses them** are parity blockers
@@ -67,7 +73,7 @@ Keep the roadmap linear, but execute it with these constraints:
   tend to touch shared routing and decoder surfaces.
 - **Tasks 37-46:** parallelize by subsystem only. One owner per legacy system:
   quests, duels, events, auction, mounts, gambling, treasure, forum,
-  marriage, guild elections.
+  marriage.
 - **Tasks 47-49:** do serially. These are scope decisions and final drift
   cleanup.
 - **Tasks 50-145:** highly parallelizable once started. Split by browser
@@ -75,6 +81,8 @@ Keep the roadmap linear, but execute it with these constraints:
   i18n, multi-realm.
 - **Tasks 146-167:** parallelize by subsystem. These are modernization tasks
   and should not block parity signoff unless explicitly promoted.
+- **Tasks 168-169:** do only after backend modernization unless the target
+  shard explicitly promotes them back into the parity path.
 
 When in doubt:
 
@@ -154,11 +162,12 @@ When in doubt:
     Outcome: `/HOGAR` matches the inspected VB6 baseline end-to-end: dead-only
     immediate return with gold cost, alive-use rejection, jail/NEWBIE/CARCEL
     and reto restrictions, and no invented delayed-travel flow.
-20. Finish the old guild relation/election semantics for the selected VB6
+20. Preserve the disabled guild relation semantics from the inspected VB6
     baseline.
-    Outcome: alliance/peace proposal lists, details, and election packets
-    either return the VB6 disabled responses or the real shard-specific flows,
-    instead of modern placeholder mailbox behavior.
+    Outcome: alliance/peace proposal lists, details, and related clan-relation
+    packets return the VB6 disabled responses instead of modern placeholder
+    mailbox behavior. Live alliance/peace systems, if later desired, are
+    deferred until after the frontend work.
 21. Fix `gm_message` to match VB6 GM/admin broadcast semantics.
     Outcome: `gm_message` is limited to the intended GM/admin audience, uses
     the right prefix/font semantics, and is audited like the old server rather
@@ -241,11 +250,11 @@ When in doubt:
     Outcome: the old in-game board/forum backend exists and persists correctly.
 45. Implement marriage.
     Outcome: marriage-related backend state and actions exist.
-46. Implement guild leader elections/democratic succession if the target shard
-    requires them.
-    Outcome: guild leadership parity either preserves the VB6 disabled
-    semantics or matches the selected shard instead of assuming elections are
-    always live.
+46. Preserve the disabled guild election semantics from the inspected VB6
+    baseline.
+    Outcome: guild election packets return the VB6 disabled responses instead
+    of assuming elections are live. Live election implementation, if later
+    desired, is deferred until after the frontend work.
 47. Decide whether the old AO20-era account/lobby/control packet surfaces are
     still in scope.
     Outcome: the old lobby, anti-cheat session packets, feature toggles,
@@ -537,6 +546,19 @@ When in doubt:
 167. Add post-parity anti-cheat hardening: movement anomaly scoring, rate
      validation, state-machine validation, economy invariants, structured
      anti-cheat events, and operator visibility.
+
+### Legacy Features Disabled In The Inspected VB6 Baseline
+
+168. If the selected shard explicitly re-enables clan relations, implement the
+     live guild alliance/peace proposal, detail, and mailbox flows after the
+     frontend and backend-modernization tracks are complete.
+     Outcome: the re-enabled shard gets real alliance/peace UI and backend
+     behavior without delaying parity for the inspected disabled baseline.
+169. If the selected shard explicitly re-enables guild elections, implement the
+     live election and democratic succession system after the frontend and
+     backend-modernization tracks are complete.
+     Outcome: the re-enabled shard gets real election flows without delaying
+     parity for the inspected disabled baseline.
      Outcome: speed hacking, packet abuse, duping, and botting signals are
      detected, logged, and acted on systematically without changing legal
      gameplay behavior.
