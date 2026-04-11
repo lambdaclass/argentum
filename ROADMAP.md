@@ -32,6 +32,8 @@ scope.
 
 - If a task changes **player-visible gameplay**, **old-client protocol
   behavior**, or **persistent game rules**, match the VB6 baseline.
+- If the VB6 baseline intentionally disables a feature, keep the disabled
+  behavior unless the selected target shard explicitly re-enables it.
 - If a task only changes **implementation**, **testing**, **performance**,
   **ops**, or **admin tooling**, improve it in the modern way.
 - Items explicitly marked **if target baseline uses them** are parity blockers
@@ -149,20 +151,25 @@ When in doubt:
 ### Parity-Required Backend Behavior
 
 19. Finish `/HOGAR` exact VB6 behavior.
-    Outcome: home travel matches VB6 end-to-end, including delayed bar/effect,
-    jail restricted area, NEWBIE zone, CARCEL trigger, reto/traveling cancel
-    behavior, and arrival while still dead.
-20. Finish old guild proposal UI behavior.
-    Outcome: peace/alliance proposal-list/detail mailbox flows behave like the
-    old clan UI and are covered by replay tests.
-21. Replace the `gm_message` placeholder route.
-    Outcome: `gm_message` becomes a real GM/server broadcast instead of a local
-    chat shortcut.
-22. Replace the `rain_toggle` placeholder route.
-    Outcome: rain toggling becomes a direct backend action instead of chat
-    indirection.
-23. Implement `role_master_request`.
-    Outcome: the remaining decoded-but-unhandled route has real behavior.
+    Outcome: `/HOGAR` matches the inspected VB6 baseline end-to-end: dead-only
+    immediate return with gold cost, alive-use rejection, jail/NEWBIE/CARCEL
+    and reto restrictions, and no invented delayed-travel flow.
+20. Finish the old guild relation/election semantics for the selected VB6
+    baseline.
+    Outcome: alliance/peace proposal lists, details, and election packets
+    either return the VB6 disabled responses or the real shard-specific flows,
+    instead of modern placeholder mailbox behavior.
+21. Fix `gm_message` to match VB6 GM/admin broadcast semantics.
+    Outcome: `gm_message` is limited to the intended GM/admin audience, uses
+    the right prefix/font semantics, and is audited like the old server rather
+    than behaving like a global plain-chat broadcast.
+22. Fix `rain_toggle` to match VB6 global weather semantics.
+    Outcome: GM weather toggling drives the same global rain/snow/thunder/flash
+    side effects the VB6 server produced instead of only flipping map-local
+    rain state.
+23. Implement the remaining player-to-staff request packet behavior.
+    Outcome: `role_master_request` and the old support-request surfaces such as
+    `question_gm` have real VB6-compatible routing instead of being absent.
 24. Keep elemental/rune combat effects data-driven.
     Outcome: elemental tags remain inert unless target data enables them; if it
     does, the combat matrix/effects are implemented without inventing new
@@ -178,9 +185,10 @@ When in doubt:
     snapshot API for the browser.
     Outcome: frontend party/clan UI can consume backend truth instead of chat
     log inference.
-28. Implement trainer skill-group restrictions if target data requires them.
-    Outcome: training parity matches the trainer/skill-group rules of the target
-    shard instead of "all trainers teach everything".
+28. Finish pet/trainer command parity for the selected VB6 baseline.
+    Outcome: `pet_follow_all`, trainer creature lists, trainer summon/train
+    flows, and any real trainer gating used by the target shard are implemented
+    instead of left as stubs or reduced to unrelated skill-point shortcuts.
 29. Add out-of-sequence packet validation.
     Outcome: trade/commercial/admin packet families reject invalid state
     transitions instead of relying on happy-path ordering.
@@ -192,13 +200,16 @@ When in doubt:
     existing crafting backend through open/add/remove/move/craft/close flows.
 32. Finish the remaining training/spell window response semantics.
     Outcome: the VB6 client gets the exact remaining responses it still expects
-    for train lists, spell info, spell movement, and related flows.
-33. Finish the remaining info/service window response semantics.
-    Outcome: help, MOTD, uptime, punishments, reward/info/account-balance style
-    windows have the remaining old-client responses they need.
+    for spell info, spell movement, trainer lists, trainer summon responses,
+    and the missing `UpdateRM`/`UpdateDM` style spell-stat updates.
+33. Finish the remaining info/service/NPC-request window semantics.
+    Outcome: help, MOTD, uptime, punishments, reward, account-state, banker,
+    timbero, priest, enlistador, and related old request/response windows stop
+    using placeholder text and match VB6 behavior.
 34. Finish the remaining faction/council old response behavior.
-    Outcome: the old faction/council UI and command surface do not depend on
-    slash-command-only replacements.
+    Outcome: the old faction/council UI and command surface, including
+    `online_royal_army`, `online_chaos_legion`, and council-management flows,
+    do not depend on slash-command-only replacements.
 35. Decide the old GM/admin binary packet target.
     Outcome: the exact packet compatibility target is explicit instead of
     implicit.
@@ -212,15 +223,18 @@ When in doubt:
 39. Implement events / tournaments / lobby events / capture events /
     invasions / global world-event announcements.
     Outcome: server-side event systems match the selected old-server feature
-    set.
+    set, including the old event-lobby protocol where that baseline depends on
+    it.
 40. Implement auction / subasta.
     Outcome: the old auction backend exists and is reachable through the
     compatible protocol/UI path.
 41. Implement mounts if the target data expects mounts separate from
     boats/navigation.
     Outcome: mount behavior is present where the target shard/data requires it.
-42. Implement gambling / arena-payment side systems.
-    Outcome: the remaining economy side systems from the old server exist.
+42. Implement gambling / priest-forgiveness / arena-payment side systems.
+    Outcome: gambler flows, priest donation-forgiveness semantics, priced-entry
+    travel/arena flows, and the related old economy side systems exist with VB6
+    behavior instead of modern substitutes.
 43. Implement treasure search.
     Outcome: treasure-search gameplay exists on the backend.
 44. Implement forum / in-game message board.
@@ -229,14 +243,19 @@ When in doubt:
     Outcome: marriage-related backend state and actions exist.
 46. Implement guild leader elections/democratic succession if the target shard
     requires them.
-    Outcome: guild leadership parity matches the selected shard instead of
-    stopping at successor promotion only.
-47. Decide whether the old account/lobby packet system is still in scope.
-    Outcome: either the old account/lobby backend is explicitly required, or
-    the HTTP account/character lobby is explicitly accepted as the replacement.
-48. If old account/lobby packets remain in scope, implement them.
-    Outcome: the old account/lobby backend exists as a parity feature, not a
-    future maybe.
+    Outcome: guild leadership parity either preserves the VB6 disabled
+    semantics or matches the selected shard instead of assuming elections are
+    always live.
+47. Decide whether the old AO20-era account/lobby/control packet surfaces are
+    still in scope.
+    Outcome: the old lobby, anti-cheat session packets, feature toggles,
+    hotkeys, skin/reset/delete-item flows, and premium/shop or publication
+    control surfaces are either explicitly required for parity or explicitly
+    cut from scope.
+48. If those old AO20-era packet surfaces remain in scope, implement them.
+    Outcome: the selected old account/lobby/control packet families exist as
+    parity features instead of staying as decoder-only or completely absent
+    protocol surfaces.
 49. Close any remaining backend drift only by adding a failing parity test
     first.
     Outcome: no undocumented "close enough" backend differences remain.
