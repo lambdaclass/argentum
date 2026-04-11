@@ -1,7 +1,6 @@
 # Argentum Changelog
 
-This file tracks completed work. `ROADMAP.md` and `SERVER_ROADMAP.md` track
-remaining work only.
+This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
