@@ -398,7 +398,8 @@ defmodule Arena.CharacterCreationParityTest do
 
       agi = 18 + GameData.race_mod(@humano, :agi)
       sta_roll = max(div(agi, 6), 2)
-      min_stamina = 20 * 1
+      min_roll = 1
+      min_stamina = 20 * min_roll
       max_stamina = 20 * sta_roll
 
       assert entity.stamina >= min_stamina,

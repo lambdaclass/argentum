@@ -118,7 +118,7 @@ defmodule GameBackend.GuildFactionAdversarialTest do
   end
 
   describe "guild: create with non-existent leader character ID" do
-    test "create_guild with bogus char_id still inserts (no FK on leader_id)" , %{account: account} do
+    test "create_guild with bogus char_id still inserts (no FK on leader_id)", %{account: account} do
       # leader_id is just an integer column, not a foreign key in the migration.
       # The guild is created but has no valid leader character. This tests that
       # no crash occurs; the system stores the value as-is.
@@ -338,15 +338,17 @@ defmodule GameBackend.GuildFactionAdversarialTest do
 
       results = [result_a, result_b]
 
-      successes = Enum.count(results, fn
-        {:ok, _} -> true
-        _ -> false
-      end)
+      successes =
+        Enum.count(results, fn
+          {:ok, _} -> true
+          _ -> false
+        end)
 
-      failures = Enum.count(results, fn
-        {:error, _} -> true
-        _ -> false
-      end)
+      failures =
+        Enum.count(results, fn
+          {:error, _} -> true
+          _ -> false
+        end)
 
       # Exactly one should succeed and one should fail due to unique constraint
       assert successes == 1

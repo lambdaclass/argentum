@@ -126,7 +126,11 @@ defmodule Mix.Tasks.Bench.Soak do
 
     # Analyze and print
     verdict = analyze(samples, final_status, spawned)
-    print_results(count, profile, interval, max_interval, duration, map_label, samples, bot_metrics, final_status, spawned, verdict)
+    print_results(%{
+      count: count, profile: profile, interval: interval, max_interval: max_interval,
+      duration: duration, map_label: map_label, samples: samples,
+      bot_metrics: bot_metrics, final_status: final_status, spawned: spawned, verdict: verdict
+    })
 
     unless verdict.pass do
       System.at_exit(fn _ -> :ok end)
@@ -254,7 +258,11 @@ defmodule Mix.Tasks.Bench.Soak do
   # Reporting
   # ---------------------------------------------------------------------------
 
-  defp print_results(count, profile, interval, max_interval, duration, map_label, samples, bot_metrics, final_status, spawned, verdict) do
+  defp print_results(%{
+         count: count, profile: profile, interval: interval, max_interval: max_interval,
+         duration: duration, map_label: map_label, samples: samples,
+         bot_metrics: bot_metrics, final_status: final_status, spawned: spawned, verdict: verdict
+       }) do
     avg = fn list -> if list == [], do: 0.0, else: Enum.sum(list) / length(list) end
 
     memories = Enum.map(samples, & &1.memory_mb)

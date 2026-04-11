@@ -179,7 +179,8 @@ defmodule Arena.VB6FormulaGoldenExpansionTest do
     test "str exactly 15 gives no str bonus" do
       dmg_mod = GameData.class_damage_mod(@guerrero)
       # max(0, 15 - 15) = 0
-      expected = max(round((3 * 20 + 20 * 0.2 * 0 + 5) * dmg_mod), 1)
+      str_bonus = 0
+      expected = max(round((3 * 20 + 20 * 0.2 * str_bonus + 5) * dmg_mod), 1)
       assert Combat.melee_damage(20, 20, 15, @guerrero, 5, 5) == expected
     end
 
@@ -253,7 +254,8 @@ defmodule Arena.VB6FormulaGoldenExpansionTest do
 
     test "skill 0 and tactics 0 uses denominator 1" do
       # shield_pct * 0 / 1 = 0 -> clamp 10
-      chance = round(50 * 0 / max(0 + 0, 1)) |> clamp(10, 90)
+      skill = 0
+      chance = round(50 * skill / max(skill + 0, 1)) |> clamp(10, 90)
       assert chance == 10
     end
   end
@@ -264,22 +266,27 @@ defmodule Arena.VB6FormulaGoldenExpansionTest do
   describe "commerce buy price formula" do
     test "trading skill 0, valor 100, amount 1" do
       # ceil(100 / (1 + 0/100) * 1) = ceil(100 / 1.0) = 100
-      assert ceil(100 / (1 + 0 / 100) * 1) == 100
+      skill = 0
+      amount = 1
+      assert ceil(100 / (1 + skill / 100) * amount) == 100
     end
 
     test "trading skill 50, valor 100, amount 1" do
       # ceil(100 / (1 + 50/100) * 1) = ceil(100 / 1.5) = ceil(66.67) = 67
-      assert ceil(100 / (1 + 50 / 100) * 1) == 67
+      amount = 1
+      assert ceil(100 / (1 + 50 / 100) * amount) == 67
     end
 
     test "trading skill 100, valor 100, amount 1" do
       # ceil(100 / (1 + 100/100) * 1) = ceil(100 / 2.0) = 50
-      assert ceil(100 / (1 + 100 / 100) * 1) == 50
+      amount = 1
+      assert ceil(100 / (1 + 100 / 100) * amount) == 50
     end
 
     test "trading skill 0, valor 100, amount 5" do
       # ceil(100 / 1.0 * 5) = 500
-      assert ceil(100 / (1 + 0 / 100) * 5) == 500
+      skill = 0
+      assert ceil(100 / (1 + skill / 100) * 5) == 500
     end
 
     test "trading skill 100, valor 150, amount 3" do
@@ -293,8 +300,9 @@ defmodule Arena.VB6FormulaGoldenExpansionTest do
     end
 
     test "trading skill 75, valor 200, amount 1" do
+      amount = 1
       # ceil(200 / 1.75) = ceil(114.2857) = 115
-      assert ceil(200 / (1 + 75 / 100) * 1) == 115
+      assert ceil(200 / (1 + 75 / 100) * amount) == 115
     end
   end
 
@@ -303,7 +311,8 @@ defmodule Arena.VB6FormulaGoldenExpansionTest do
 
   describe "commerce sell price formula" do
     test "valor 100, amount 1" do
-      assert div(100, 3) * 1 == 33
+      amount = 1
+      assert div(100, 3) * amount == 33
     end
 
     test "valor 100, amount 5" do
@@ -311,15 +320,18 @@ defmodule Arena.VB6FormulaGoldenExpansionTest do
     end
 
     test "valor 3, amount 1 gives 1" do
-      assert div(3, 3) * 1 == 1
+      amount = 1
+      assert div(3, 3) * amount == 1
     end
 
     test "valor 2, amount 1 truncates to 0" do
-      assert div(2, 3) * 1 == 0
+      amount = 1
+      assert div(2, 3) * amount == 0
     end
 
     test "valor 1, amount 1 truncates to 0" do
-      assert div(1, 3) * 1 == 0
+      amount = 1
+      assert div(1, 3) * amount == 0
     end
 
     test "valor 300, amount 10" do
@@ -658,7 +670,8 @@ defmodule Arena.VB6FormulaGoldenExpansionTest do
 
     test "guerrero with agi 0 still gets at least 1" do
       sta_growth = GameData.class_stamina_growth(@guerrero)
-      expected = max(trunc(sta_growth * 0 / 33), 1)
+      agi = 0
+      expected = max(trunc(sta_growth * agi / 33), 1)
       assert expected == 1
     end
 
@@ -688,6 +701,7 @@ defmodule Arena.VB6FormulaGoldenExpansionTest do
     test "all classes return a positive integer" do
       for class_id <- 1..12 do
         pts = GameData.class_skill_points(class_id)
+
         assert is_integer(pts) and pts > 0,
                "Class #{class_id} skill_points should be positive, got #{pts}"
       end

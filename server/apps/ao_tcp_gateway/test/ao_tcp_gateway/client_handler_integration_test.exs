@@ -291,7 +291,9 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
          {:ok, y, rest} <- Reader.read_int8(rest),
          {:ok, min_time, rest} <- Reader.read_int16(rest),
          {:ok, max_time, rest} <- Reader.read_int16(rest) do
-      {:ok, %{message: msg, char_index: char_index, color: color, es_spell: es_spell, x: x, y: y, min_display_time: min_time, max_display_time: max_time}, rest}
+      result = %{message: msg, char_index: char_index, color: color, es_spell: es_spell,
+                 x: x, y: y, min_display_time: min_time, max_display_time: max_time}
+      {:ok, result, rest}
     else
       _ -> :incomplete
     end

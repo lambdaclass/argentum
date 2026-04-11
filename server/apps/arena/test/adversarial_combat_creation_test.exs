@@ -45,6 +45,7 @@ defmodule Arena.AdversarialCombatCreationTest do
     test "1. zero weapon skill and zero attack mod returns value in 5..95" do
       for def_class <- @class_ids, atk_class <- @class_ids do
         result = Combat.hit_chance(0, 0, 1, atk_class, 0, 0, 1, def_class)
+
         assert result >= 5 and result <= 95,
                "hit_chance(0,0,1,#{atk_class},0,0,1,#{def_class}) = #{result}, expected 5..95"
       end
@@ -53,8 +54,10 @@ defmodule Arena.AdversarialCombatCreationTest do
     test "2. max possible values (999 skill, 999 mods) no overflow, still in range" do
       for atk_class <- @class_ids, def_class <- @class_ids do
         result = Combat.hit_chance(999, 999, 999, atk_class, 999, 999, 999, def_class)
+
         assert is_integer(result),
                "hit_chance with max values should return integer, got #{inspect(result)}"
+
         assert result >= 5 and result <= 95,
                "hit_chance with max values = #{result}, expected 5..95"
       end
@@ -64,8 +67,10 @@ defmodule Arena.AdversarialCombatCreationTest do
       # Negative skill, agi, level -- should not crash
       for atk_class <- @class_ids, def_class <- @class_ids do
         result = Combat.hit_chance(-10, -5, -1, atk_class, -10, -5, -1, def_class)
+
         assert is_integer(result),
                "hit_chance with negatives should return integer, got #{inspect(result)}"
+
         assert result >= 5 and result <= 95,
                "hit_chance with negatives = #{result}, expected 5..95"
       end
@@ -76,6 +81,7 @@ defmodule Arena.AdversarialCombatCreationTest do
     test "4. zero strength and zero weapon damage returns >= 1" do
       for class <- @class_ids do
         result = Combat.melee_damage(0, 0, 0, class, 0, 0)
+
         assert result >= 1,
                "melee_damage(0,0,0,#{class},0,0) = #{result}, expected >= 1"
       end
@@ -84,8 +90,10 @@ defmodule Arena.AdversarialCombatCreationTest do
     test "5. extremely high values no integer overflow" do
       for class <- @class_ids do
         result = Combat.melee_damage(999_999, 999_999, 999, class, 999_999, 999_999)
+
         assert is_integer(result),
                "melee_damage with extreme values should return integer"
+
         assert result >= 1,
                "melee_damage with extreme values = #{result}, expected >= 1"
       end
@@ -113,6 +121,7 @@ defmodule Arena.AdversarialCombatCreationTest do
     test "7. attacker level >> defender level yields minimal or 0 XP" do
       # Player level 50 vs NPC level 1: delta = 49, penalty zeroes out
       result = Combat.xp_gain(100, 200, 100, 50, 1)
+
       assert result == 0,
              "xp_gain with 49-level advantage = #{result}, expected 0"
     end
@@ -355,6 +364,7 @@ defmodule Arena.AdversarialCombatCreationTest do
 
       # Verify penalty still applies even with huge base
       penalized_xp = Combat.xp_gain(9999, 9999, 100, 50, 1)
+
       assert penalized_xp == 0,
              "huge level gap should still zero out XP, got #{penalized_xp}"
     end

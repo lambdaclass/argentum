@@ -130,10 +130,10 @@ defmodule Arena.IntervalTimerAuditTest do
       <<158::little-signed-16, rest::binary>> = binary
 
       # 12 x Int32 LE fields
-      <<bow::little-signed-32, walk::little-signed-32, melee::little-signed-32,
-        melee_magic::little-signed-32, magic::little-signed-32, magic_melee::little-signed-32,
-        melee_use::little-signed-32, work_extract::little-signed-32, work_build::little-signed-32,
-        use_item::little-signed-32, use_click::little-signed-32, drop::little-signed-32>> = rest
+      <<bow::little-signed-32, walk::little-signed-32, melee::little-signed-32, melee_magic::little-signed-32,
+        magic::little-signed-32, magic_melee::little-signed-32, melee_use::little-signed-32,
+        work_extract::little-signed-32, work_build::little-signed-32, use_item::little-signed-32,
+        use_click::little-signed-32, drop::little-signed-32>> = rest
 
       assert walk == 210, "VB6 walk interval must be 210ms, got #{walk}"
       assert bow == 0, "default bow interval should be 0 (unused)"
@@ -173,10 +173,9 @@ defmodule Arena.IntervalTimerAuditTest do
       binary = Encoder.encode({:intervals, params})
       <<158::little-signed-16, rest::binary>> = binary
 
-      <<bow::little-signed-32, walk::little-signed-32, melee::little-signed-32,
-        _mm::little-signed-32, magic::little-signed-32, _mgm::little-signed-32,
-        _mu::little-signed-32, _we::little-signed-32, _wb::little-signed-32,
-        use_item::little-signed-32, _uc::little-signed-32, _d::little-signed-32>> = rest
+      <<bow::little-signed-32, walk::little-signed-32, melee::little-signed-32, _mm::little-signed-32,
+        magic::little-signed-32, _mgm::little-signed-32, _mu::little-signed-32, _we::little-signed-32,
+        _wb::little-signed-32, use_item::little-signed-32, _uc::little-signed-32, _d::little-signed-32>> = rest
 
       assert bow == 100
       assert walk == 210
@@ -302,7 +301,9 @@ defmodule Arena.IntervalTimerAuditTest do
       player = new_state.players[4]
 
       expected_mana = 50 + max(div(18, 35), 1)
-      assert player.mana == expected_mana, "passive mana regen with int=18: expected #{expected_mana}, got #{player.mana}"
+
+      assert player.mana == expected_mana,
+             "passive mana regen with int=18: expected #{expected_mana}, got #{player.mana}"
     end
 
     test "meditate mana regen: int * meditation_skill / 35 per tick, min 1" do
@@ -338,11 +339,24 @@ defmodule Arena.IntervalTimerAuditTest do
       player = new_state.players[6]
 
       expected_sta = 50 + max(div(18, 6), 1)
-      assert player.stamina == expected_sta, "stamina regen with agi=18: expected #{expected_sta}, got #{player.stamina}"
+
+      assert player.stamina == expected_sta,
+             "stamina regen with agi=18: expected #{expected_sta}, got #{player.stamina}"
     end
 
     test "regen is blocked when starving (hunger=0)" do
-      entity = %PlayerEntity{char_id: 7, hp: 50, max_hp: 100, mana: 50, max_mana: 100, stamina: 50, max_stamina: 100, hunger: 0, thirst: 100}
+      entity = %PlayerEntity{
+        char_id: 7,
+        hp: 50,
+        max_hp: 100,
+        mana: 50,
+        max_mana: 100,
+        stamina: 50,
+        max_stamina: 100,
+        hunger: 0,
+        thirst: 100
+      }
+
       state = make_regen_state(%{7 => entity})
 
       new_state = CombatHandlers.process_regen_tick(state)
@@ -355,7 +369,18 @@ defmodule Arena.IntervalTimerAuditTest do
     end
 
     test "regen is blocked when dehydrated (thirst=0)" do
-      entity = %PlayerEntity{char_id: 8, hp: 50, max_hp: 100, mana: 50, max_mana: 100, stamina: 50, max_stamina: 100, hunger: 100, thirst: 0}
+      entity = %PlayerEntity{
+        char_id: 8,
+        hp: 50,
+        max_hp: 100,
+        mana: 50,
+        max_mana: 100,
+        stamina: 50,
+        max_stamina: 100,
+        hunger: 100,
+        thirst: 0
+      }
+
       state = make_regen_state(%{8 => entity})
 
       new_state = CombatHandlers.process_regen_tick(state)

@@ -127,7 +127,9 @@ defmodule Arena.GmCommandsTest do
 
           forward_loop = fn forward_loop ->
             receive do
-              :stop -> :ok
+              :stop ->
+                :ok
+
               msg ->
                 send(test_pid, {:regular_msg, msg})
                 forward_loop.(forward_loop)
