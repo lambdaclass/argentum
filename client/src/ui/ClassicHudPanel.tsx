@@ -128,8 +128,8 @@ export function ClassicHudPanel({
 
       {isDead ? (
         <div className="classic-hud-dead-banner" data-testid="hud-dead-banner">
-          <span>Fantasma</span>
-          <strong>Revive antes de usar acciones de combate o inventario.</strong>
+          <span>Fantasma activo</span>
+          <strong>Revive antes de atacar, comerciar o usar items.</strong>
         </div>
       ) : null}
 

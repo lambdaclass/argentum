@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState, type Dispatch } from "react";
 import { appReducer, createInitialState } from "./appReducer";
-import type { Direction } from "./types";
+import type { ClientAction, Direction } from "./types";
 import { SessionClient, type MovementDebugSnapshot } from "../net/SessionClient";
 import { MapMusicController } from "../audio/mapMusic";
 import { SoundEffectsController } from "../audio/soundEffects";
@@ -178,7 +178,7 @@ function describeConnectionIssue(error: string | null, hasSavedSession: boolean)
   return null;
 }
 
-function applyDemoScenario(dispatch: any, scenario: DemoScenario) {
+function applyDemoScenario(dispatch: Dispatch<ClientAction>, scenario: DemoScenario) {
   switch (scenario) {
     case "dead":
       dispatch({ type: "connection/setStatus", status: "connected" });
@@ -457,6 +457,13 @@ export function App() {
   const sound = soundRef.current;
 
   useEffect(() => {
+    if (uiDemoMode) {
+      setAssetCatalog(null);
+      setAssetStatus("ready");
+      setAssetError(null);
+      return;
+    }
+
     let cancelled = false;
     setAssetCatalog(null);
     setAssetStatus("loading");
@@ -489,6 +496,17 @@ export function App() {
   }, [state.connection.endpoint]);
 
   useEffect(() => {
+    if (uiDemoMode) {
+      setMapPackStatus("ready");
+      setMapPackError(null);
+      setMapPackProgress({
+        phase: "ready",
+        loadedBytes: 1,
+        totalBytes: 1
+      });
+      return;
+    }
+
     let cancelled = false;
     setMapPackStatus("loading");
     setMapPackError(null);
@@ -726,6 +744,10 @@ export function App() {
   }, [session]);
 
   useEffect(() => {
+    if (uiDemoMode) {
+      return;
+    }
+
     if (
       assetStatus !== "ready" ||
       mapPackStatus !== "ready" ||
@@ -900,7 +922,7 @@ export function App() {
       return {
         eyebrow: "Ghost",
         title: "Fantasma activo",
-        copy: "Dead-state actions are disabled until revive. The HUD is showing the current ghost state.",
+        copy: "Las acciones del estado muerto quedan deshabilitadas hasta revivir. El HUD muestra el estado fantasma.",
         tone: "dead" as const
       };
     }
@@ -911,7 +933,26 @@ export function App() {
         title: state.connection.credentials ? "Reconnecting" : "Connecting",
         copy: state.connection.credentials
           ? "Reusing the saved session to reconnect this account."
-          : "Opening the account login flow with the current name and password."
+          : "Opening the account login flow with the current name and password.",
+        tone: "connecting" as const
+      };
+    }
+
+    if (state.world.mapStatus === "error") {
+      return {
+        eyebrow: "Map",
+        title: "Map Load Failed",
+        copy: state.world.mapError ?? "The world data could not be loaded.",
+        tone: "error" as const
+      };
+    }
+
+    if ((state.world.mapStatus === "loading" || state.world.mapStatus === "transferring") && !state.world.map) {
+      return {
+        eyebrow: "Map",
+        title: state.world.mapStatus === "transferring" ? "Changing Map" : "Loading Map",
+        copy: "Keeping the session alive while the destination map is prepared.",
+        tone: "loading" as const
       };
     }
 
@@ -932,23 +973,8 @@ export function App() {
           state.connection.lastError ??
           (state.connection.credentials
             ? "Assets are loaded. A saved reconnect session is ready in Sesion."
-            : "Assets are loaded. Enter an account name and password in Sesion, then connect.")
-      };
-    }
-
-    if (state.world.mapStatus === "error") {
-      return {
-        eyebrow: "Map",
-        title: "Map Load Failed",
-        copy: state.world.mapError ?? "The world data could not be loaded."
-      };
-    }
-
-    if ((state.world.mapStatus === "loading" || state.world.mapStatus === "transferring") && !state.world.map) {
-      return {
-        eyebrow: "Map",
-        title: state.world.mapStatus === "transferring" ? "Changing Map" : "Loading Map",
-        copy: "Keeping the session alive while the destination map is prepared."
+            : "Assets are loaded. Enter an account name and password in Sesion, then connect."),
+        tone: "reconnect" as const
       };
     }
 
@@ -1016,7 +1042,7 @@ export function App() {
                   }}
                 />
                 {worldOverlay ? (
-                  <div className="world-overlay-state">
+                  <div className="world-overlay-state" data-kind={worldOverlay.tone} data-testid="world-overlay-state">
                     <p className="eyebrow">{worldOverlay.eyebrow}</p>
                     <h3>{worldOverlay.title}</h3>
                     <p className="panel-copy compact">{worldOverlay.copy}</p>

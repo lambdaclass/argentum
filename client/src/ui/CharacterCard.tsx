@@ -97,7 +97,7 @@ export function CharacterCard({
   const factionLabel = getFactionStatusLabel(state.world.self.factionStatus);
   const deathLabel = state.world.self.dead ? "Fantasma" : null;
   const deadCopy = state.world.self.dead
-    ? "Revive before attacking, using items, or re-entering combat flows."
+    ? "Revive antes de atacar, usar items o volver al combate."
     : null;
   const effectiveCollapsed = dense || collapsed || isShortViewport;
 
@@ -186,7 +186,7 @@ export function CharacterCard({
         </div>
         {deadCopy ? (
           <div className="character-dead-callout" data-testid="character-dead-callout">
-            <strong>Ghost state</strong>
+            <strong>Estado fantasma</strong>
             <span>{deadCopy}</span>
           </div>
         ) : null}
@@ -315,7 +315,7 @@ export function CharacterCard({
       ) : null}
       {deadCopy ? (
         <div className="character-dead-callout" data-testid="character-dead-callout">
-          <strong>Ghost state</strong>
+          <strong>Estado fantasma</strong>
           <span>{deadCopy}</span>
         </div>
       ) : null}
