@@ -175,6 +175,9 @@ defmodule AoProtocol.PacketIds do
     def party_safe_mode_on, do: 22
     def party_safe_mode_off, do: 23
 
+    # GM panel
+    def show_gm_panel_form, do: 84
+
     # Commerce (NPC)
     def commerce_init, do: 10
     def commerce_end, do: 8

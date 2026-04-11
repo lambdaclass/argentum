@@ -1251,12 +1251,18 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
+  # RoleMasterRequest — GM requests the GM panel form (VB6: "Maestro de Roles")
+  def handle_command(state, {:role_master_request, _})
+      when state.character_id != nil and state.is_gm == true do
+    {state, [{:show_gm_panel_form, %{}}]}
+  end
+
   # Catch-all for GM commands attempted without privileges
   @gm_command_types [
     :go_to_char, :warp_me_to_target, :warp_char, :invisible, :silence,
     :jail, :kick, :execute, :ban_char, :unban_char, :revive_char,
     :summon_char, :kill_npc, :request_char_info, :where, :gm_message,
-    :server_message, :online_gm, :rain_toggle
+    :server_message, :online_gm, :rain_toggle, :role_master_request
   ]
 
   def handle_command(state, {cmd_type, _})

@@ -190,6 +190,33 @@ When in doubt:
     against VB6.
     Outcome: the remaining known semantic edge cases are either matched or
     explicitly documented as out of scope.
+26a. Fix: spell invisibility must NOT break on walking (VB6 parity). DONE.
+    VB6: only Oculto (stealth) breaks on walk for non-Thief/Bandit classes.
+    Spell invisibility (`invisible` flag) is never cleared by movement.
+    Removed incorrect break_invisibility call in movement.ex do_move/8.
+26b. Implement Oculto (stealth/hide skill) as a separate flag from spell invisibility.
+    VB6 has two distinct systems: `invisible` (spell-based, timed buff) and
+    `Oculto` (hide skill, breaks on walk for non-Thief/Bandit, breaks on
+    shout, has its own timer). Currently only spell invisibility exists.
+    Outcome: entity gains `oculto` boolean; walk breaks it for non-stealth
+    classes; shout breaks it; timer expiry breaks it; Thief/Bandit exempt
+    from walk break.
+26c. Fix: offensive spell casting should break both invisible and oculto.
+    VB6: casting a negative spell calls RemoveUserInvisibility on the caster
+    (behind "remove-inv-on-attack" feature flag). Currently not implemented.
+26d. Fix: add NPC leash distance (~15 tiles) so chasing NPCs return to spawn.
+    Outcome: hostile NPCs stop chasing beyond leash range, matching VB6.
+26e. Fix: melee hits should transfer NPC aggro (currently only spells do).
+    Outcome: both melee and spell damage set npc.target_id to the attacker.
+26f. Fix: NPC spell damage should use actual NPC level instead of hardcoded 20.
+    Outcome: npc_def_level/1 returns the NPC definition's level field.
+26g. Implement NoDetectable flag for immunity to RemoveInvisibility spells.
+    VB6: players with NoDetectable=1 are immune to the RemoveInvisibility
+    spell effect. Currently not implemented.
+26h. Fix: entering no-invi maps (SinInviOcul) should clear both flags.
+    VB6: maps flagged SinInviOcul strip invisible+oculto on entry.
+26i. Fix: equipping mount should break both invisible and oculto.
+    VB6: mounting clears both flags unconditionally.
 27. Add authoritative party/clan snapshot packets or a documented backend
     snapshot API for the browser.
     Outcome: frontend party/clan UI can consume backend truth instead of chat

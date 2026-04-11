@@ -705,6 +705,11 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.bank_end(), <<>>)
   end
 
+  # eShowGMPanelForm (ID 84) — no payload, tells client to show the GM panel
+  def encode({:show_gm_panel_form, _params}) do
+    Writer.build_packet(PacketIds.Server.show_gm_panel_form(), <<>>)
+  end
+
   # ---- Helpers ----
 
   defp encode_char_flags(params) do

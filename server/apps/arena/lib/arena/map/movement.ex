@@ -11,7 +11,6 @@ defmodule Arena.Map.Movement do
   require Logger
 
   @base_walk_interval_ms 210
-  @stealth_classes [:thief, :bandit]
   @speed_hack_threshold 3.0
 
   # ---- Movement ----
@@ -171,13 +170,9 @@ defmodule Arena.Map.Movement do
   Returns updated state.
   """
   def do_move(state, char_id, entity, nx, ny, direction, now, min_interval) do
-    # VB6: movement breaks invisibility for non-stealth classes
-    entity =
-      if entity.invisible and entity.class not in @stealth_classes do
-        Helpers.break_invisibility(entity, state, char_id)
-      else
-        entity
-      end
+    # VB6: spell invisibility does NOT break on walking.
+    # Only Oculto (stealth/hide skill) breaks on walk for non-Thief/Bandit.
+    # Oculto is not yet implemented — when it is, break it here for non-stealth classes.
 
     moved_entity = %{
       entity

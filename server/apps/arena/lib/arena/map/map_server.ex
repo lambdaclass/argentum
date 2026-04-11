@@ -142,6 +142,12 @@ defmodule Arena.Map.MapServer do
   def train_skill(map_id, char_id, skill_index), do: GenServer.cast(via(map_id), {:train_skill, char_id, skill_index})
   def double_click(map_id, char_id, x, y), do: GenServer.cast(via(map_id), {:double_click, char_id, x, y})
   def snapshot_entity(map_id, char_id), do: GenServer.call(via(map_id), {:snapshot, char_id})
+  def snapshot_npc(map_id, instance_id), do: GenServer.call(via(map_id), {:snapshot_npc, instance_id})
+
+  @doc "Inject a test NPC into the map (test-only). Returns :ok or {:error, reason}."
+  def inject_test_npc(map_id, instance_id, npc_entity),
+    do: GenServer.call(via(map_id), {:inject_test_npc, instance_id, npc_entity})
+
   def player_count(map_id), do: GenServer.call(via(map_id), :player_count)
   def enlist_faction(map_id, char_id, faction), do: GenServer.cast(via(map_id), {:enlist_faction, char_id, faction})
   def leave_faction(map_id, char_id), do: GenServer.cast(via(map_id), {:leave_faction, char_id})
@@ -318,6 +324,33 @@ defmodule Arena.Map.MapServer do
       {:ok, entity} -> {:reply, {:ok, entity}, state}
       :error -> {:reply, {:error, :not_on_map}, state}
     end
+  end
+
+  @impl true
+  def handle_call({:snapshot_npc, instance_id}, _from, state) do
+    case Map.fetch(state.npcs_live, instance_id) do
+      {:ok, npc} -> {:reply, {:ok, npc}, state}
+      :error -> {:reply, {:error, :not_on_map}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:inject_test_npc, instance_id, npc_entity}, _from, state) do
+    char_index = state.next_char_index
+    npc = %{npc_entity | instance_id: instance_id, char_index: char_index}
+    npcs_live = Map.put(state.npcs_live, instance_id, npc)
+    npc_char_indices = Map.put(state.npc_char_indices, char_index, instance_id)
+    occupancy = Helpers.set_occupancy(state.occupancy, npc.x, npc.y, {:npc, instance_id})
+
+    state = %{
+      state
+      | npcs_live: npcs_live,
+        npc_char_indices: npc_char_indices,
+        occupancy: occupancy,
+        next_char_index: char_index + 1
+    }
+
+    {:reply, :ok, state}
   end
 
   # ---- Inventory (delegated) ----
