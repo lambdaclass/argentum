@@ -16,6 +16,7 @@ import { HechizosPanel } from "../ui/HechizosPanel";
 import { PartyPanel } from "../ui/PartyPanel";
 import { SessionPanel } from "../ui/SessionPanel";
 import { TradePanel } from "../ui/TradePanel";
+import { SpritePreviewPage } from "./spriteRegressionGallery";
 
 function spellSlot(spellId: number): SpellSlot {
   return {
@@ -84,7 +85,8 @@ function HarnessShell({
       { href: "/playwright/session", label: "Session + spellbook" },
       { href: "/playwright/trade", label: "Trade" },
       { href: "/playwright/social", label: "Social" },
-      { href: "/playwright/weather", label: "Weather" }
+      { href: "/playwright/weather", label: "Weather" },
+      { href: "/playwright/sprites", label: "Sprites" }
     ],
     []
   );
@@ -166,6 +168,9 @@ function PlaywrightLanding() {
           </a>
           <a className="ghost-button" href="/playwright/weather">
             Weather
+          </a>
+          <a className="ghost-button" href="/playwright/sprites">
+            Sprites
           </a>
         </div>
       </section>
@@ -647,6 +652,10 @@ export function PlaywrightHarness() {
 
   if (pathname.startsWith("/playwright/weather")) {
     return <WeatherSmokePage />;
+  }
+
+  if (pathname.startsWith("/playwright/sprites")) {
+    return <SpritePreviewPage />;
   }
 
   return <PlaywrightLanding />;
