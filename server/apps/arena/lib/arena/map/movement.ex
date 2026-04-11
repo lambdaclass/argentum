@@ -21,9 +21,6 @@ defmodule Arena.Map.Movement do
   """
   def handle_move(state, char_id, direction) do
     case Map.fetch(state.players, char_id) do
-      {:ok, entity} when entity.dead ->
-        {:reply, {:error, :dead}, state}
-
       {:ok, entity} ->
         now = System.monotonic_time(:millisecond)
         min_interval = trunc(@base_walk_interval_ms / entity.speeding)

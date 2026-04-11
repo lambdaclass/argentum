@@ -33,9 +33,11 @@ defmodule Arena.Data.IniParser do
         line == "" or String.starts_with?(line, "'") ->
           {sections, current_section}
 
-        # Section header
-        String.starts_with?(line, "[") and String.ends_with?(line, "]") ->
-          section = line |> String.slice(1..-2//1) |> String.trim()
+        # Section header — strip trailing VB6 comments: [NPC515] ' Sirena
+        String.starts_with?(line, "[") and String.contains?(line, "]") ->
+          # Extract content between first [ and first ]
+          close = :binary.match(line, "]") |> elem(0)
+          section = String.slice(line, 1, close - 1) |> String.trim()
           {Map.put_new(sections, section, %{}), section}
 
         # Key=Value (strip inline comments)
