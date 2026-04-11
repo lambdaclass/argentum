@@ -304,6 +304,9 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
       return { type: "rain_toggle", raining };
     }
 
+    case 76:
+      return { type: "snow_toggle", snowing: reader.readBool() };
+
     case 60:
       return {
         type: "create_fx",

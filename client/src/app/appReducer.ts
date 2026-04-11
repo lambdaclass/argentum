@@ -1187,6 +1187,15 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
         }
       };
 
+    case "weather/snow":
+      return {
+        ...state,
+        weather: {
+          ...state.weather,
+          snowing: action.snowing
+        }
+      };
+
     case "log/add":
       return {
         ...state,

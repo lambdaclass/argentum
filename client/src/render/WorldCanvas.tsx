@@ -9,6 +9,7 @@ interface WorldCanvasProps {
   assetCatalog: AssetCatalog | null;
   showTileDebug: boolean;
   raining: boolean;
+  snowing: boolean;
   session: SessionClient;
   onTileInteraction?: (payload: TileInteractionPayload) => void;
 }
@@ -18,6 +19,7 @@ export function WorldCanvas({
   assetCatalog,
   showTileDebug,
   raining,
+  snowing,
   session,
   onTileInteraction
 }: WorldCanvasProps) {
@@ -55,6 +57,10 @@ export function WorldCanvas({
   }, [raining]);
 
   useEffect(() => {
+    rendererRef.current?.setSnowing(snowing);
+  }, [snowing]);
+
+  useEffect(() => {
     rendererRef.current?.render(world, assetCatalog, showTileDebug);
   }, [assetCatalog, showTileDebug, world]);
 
@@ -62,6 +68,7 @@ export function WorldCanvas({
     <div
       className="world-canvas"
       data-raining={raining ? "1" : "0"}
+      data-snowing={snowing ? "1" : "0"}
       data-testid="world-canvas"
       ref={rootRef}
     />

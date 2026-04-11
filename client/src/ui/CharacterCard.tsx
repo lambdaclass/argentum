@@ -96,6 +96,9 @@ export function CharacterCard({
   );
   const factionLabel = getFactionStatusLabel(state.world.self.factionStatus);
   const deathLabel = state.world.self.dead ? "Fantasma" : null;
+  const deadCopy = state.world.self.dead
+    ? "Revive before attacking, using items, or re-entering combat flows."
+    : null;
   const effectiveCollapsed = dense || collapsed || isShortViewport;
 
   useEffect(() => {
@@ -132,7 +135,7 @@ export function CharacterCard({
 
   if (dense) {
     return (
-      <section className="character-hero character-hero-dense">
+      <section className={`character-hero character-hero-dense ${state.world.self.dead ? "character-hero-dead" : ""}`}>
         <div className="character-hero-top">
           <div className="character-badge">{badge}</div>
           <div className="character-meta">
@@ -181,13 +184,19 @@ export function CharacterCard({
           <span className="hero-chip">{factionLabel}</span>
           {state.world.self.navigating ? <span className="hero-chip hero-chip-sailing">Navegando</span> : null}
         </div>
+        {deadCopy ? (
+          <div className="character-dead-callout" data-testid="character-dead-callout">
+            <strong>Ghost state</strong>
+            <span>{deadCopy}</span>
+          </div>
+        ) : null}
       </section>
     );
   }
 
   return (
     <section
-      className={`character-hero ${effectiveCollapsed ? "character-hero-collapsed" : ""}`}
+      className={`character-hero ${effectiveCollapsed ? "character-hero-collapsed" : ""} ${state.world.self.dead ? "character-hero-dead" : ""}`}
     >
       <div className="character-hero-top">
         <div className="character-badge">{badge}</div>
@@ -302,6 +311,12 @@ export function CharacterCard({
           {state.world.self.navigating ? <span className="hero-chip hero-chip-sailing">Navegando</span> : null}
           <span className="hero-chip">{mapSummary}</span>
           <span className="hero-chip">World {state.world.mapStatus}</span>
+        </div>
+      ) : null}
+      {deadCopy ? (
+        <div className="character-dead-callout" data-testid="character-dead-callout">
+          <strong>Ghost state</strong>
+          <span>{deadCopy}</span>
         </div>
       ) : null}
     </section>

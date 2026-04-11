@@ -1018,6 +1018,15 @@ export class SessionClient {
         });
         return;
 
+      case "snow_toggle":
+        this.dispatch({ type: "weather/snow", snowing: packet.snowing });
+        this.dispatch({
+          type: "log/add",
+          level: "info",
+          message: packet.snowing ? "Snow started." : "Snow stopped."
+        });
+        return;
+
       case "create_fx":
         this.addFx(packet);
         return;

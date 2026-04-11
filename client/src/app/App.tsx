@@ -52,6 +52,19 @@ const UTILITY_ACTIONS = [
 
 const SPELL_HOTKEY_STORAGE_KEY = "ao_spell_hotkeys";
 const UI_DEMO_QUERY_PARAM = "demo";
+const UI_DEMO_STATE_QUERY_PARAM = "demoState";
+
+type DemoScenario =
+  | "default"
+  | "dead"
+  | "connecting"
+  | "reconnect"
+  | "error-banned"
+  | "error-muted"
+  | "error-server-full"
+  | "error-maintenance"
+  | "error-token-expired"
+  | "map-loading";
 
 function loadSpellHotkeys() {
   if (typeof window === "undefined") {
@@ -83,6 +96,155 @@ function hotkeyIndexFromKey(key: string) {
   }
 
   return null;
+}
+
+function readDemoScenario(): DemoScenario {
+  if (typeof window === "undefined") {
+    return "default";
+  }
+
+  const scenario = new URLSearchParams(window.location.search).get(UI_DEMO_STATE_QUERY_PARAM);
+
+  switch (scenario) {
+    case "dead":
+    case "connecting":
+    case "reconnect":
+    case "error-banned":
+    case "error-muted":
+    case "error-server-full":
+    case "error-maintenance":
+    case "error-token-expired":
+    case "map-loading":
+      return scenario;
+    default:
+      return "default";
+  }
+}
+
+function describeConnectionIssue(error: string | null, hasSavedSession: boolean) {
+  if (!error) {
+    return null;
+  }
+
+  const normalized = error.toLowerCase();
+
+  if (normalized.includes("banned")) {
+    return {
+      eyebrow: "Access",
+      title: "Account banned",
+      copy: "This account is blocked on the client side until the backend or an admin clears the ban.",
+      tone: "danger" as const
+    };
+  }
+
+  if (normalized.includes("muted")) {
+    return {
+      eyebrow: "Access",
+      title: "Chat muted",
+      copy: "The account can still exist, but chat actions are restricted until the mute is cleared.",
+      tone: "warning" as const
+    };
+  }
+
+  if (normalized.includes("server full") || normalized.includes("server-full") || normalized.includes("full")) {
+    return {
+      eyebrow: "Access",
+      title: "Server full",
+      copy: "The world reached its capacity limit. Retry once a slot opens up.",
+      tone: "warning" as const
+    };
+  }
+
+  if (normalized.includes("maintenance")) {
+    return {
+      eyebrow: "Access",
+      title: "Maintenance mode",
+      copy: "The world is offline for maintenance. Try again when the server comes back.",
+      tone: "warning" as const
+    };
+  }
+
+  if (normalized.includes("token expired")) {
+    return {
+      eyebrow: "Access",
+      title: "Session expired",
+      copy: hasSavedSession
+        ? "The saved reconnect token expired. Sign in again to get a fresh session."
+        : "Your session expired. Sign in again to get a fresh token.",
+      tone: "danger" as const
+    };
+  }
+
+  return null;
+}
+
+function applyDemoScenario(dispatch: any, scenario: DemoScenario) {
+  switch (scenario) {
+    case "dead":
+      dispatch({ type: "connection/setStatus", status: "connected" });
+      dispatch({ type: "stats/setHp", current: 0, max: 120 });
+      dispatch({ type: "world/setSelfDead", dead: true });
+      return;
+
+    case "connecting":
+      dispatch({ type: "connection/setStatus", status: "connecting" });
+      return;
+
+    case "reconnect":
+      dispatch({ type: "session/resetRuntime" });
+      dispatch({
+        type: "connection/setCredentials",
+        credentials: { charId: 4701, token: "demo-reconnect-token" }
+      });
+      dispatch({ type: "connection/setStatus", status: "offline" });
+      return;
+
+    case "error-banned":
+      dispatch({ type: "session/resetRuntime" });
+      dispatch({ type: "connection/setStatus", status: "offline", lastError: "Account banned." });
+      return;
+
+    case "error-muted":
+      dispatch({ type: "session/resetRuntime" });
+      dispatch({ type: "connection/setStatus", status: "offline", lastError: "Account muted." });
+      return;
+
+    case "error-server-full":
+      dispatch({ type: "session/resetRuntime" });
+      dispatch({
+        type: "connection/setStatus",
+        status: "offline",
+        lastError: "Server full."
+      });
+      return;
+
+    case "error-maintenance":
+      dispatch({ type: "session/resetRuntime" });
+      dispatch({
+        type: "connection/setStatus",
+        status: "offline",
+        lastError: "Maintenance mode."
+      });
+      return;
+
+    case "error-token-expired":
+      dispatch({ type: "session/resetRuntime" });
+      dispatch({
+        type: "connection/setStatus",
+        status: "offline",
+        lastError: "Token expired."
+      });
+      return;
+
+    case "map-loading":
+      dispatch({ type: "session/resetRuntime" });
+      dispatch({ type: "world/setMapLoading", mapId: 42 });
+      return;
+
+    case "default":
+    default:
+      return;
+  }
 }
 
 export function App() {
@@ -119,6 +281,7 @@ export function App() {
   const manualDisconnectRef = useRef(false);
   const enteredWorldRef = useRef(false);
   const demoBootstrapRef = useRef(false);
+  const uiDemoScenario = useMemo(readDemoScenario, []);
   const uiDemoMode = useMemo(() => {
     if (typeof window === "undefined") {
       return false;
@@ -207,9 +370,11 @@ export function App() {
     });
     dispatch({ type: "trade/setOfferAmount", amount: 3 });
     dispatch({ type: "weather/rain", raining: true });
+    dispatch({ type: "weather/snow", snowing: true });
     dispatch({ type: "trade/markAccepted", accepted: false });
     dispatch({ type: "trade/markPartnerAccepted", accepted: false });
-  }, [uiDemoMode]);
+    applyDemoScenario(dispatch, uiDemoScenario);
+  }, [dispatch, uiDemoMode, uiDemoScenario]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -731,10 +896,19 @@ export function App() {
       return null;
     }
 
+    if (state.connection.status === "connected" && state.world.self.dead) {
+      return {
+        eyebrow: "Ghost",
+        title: "Fantasma activo",
+        copy: "Dead-state actions are disabled until revive. The HUD is showing the current ghost state.",
+        tone: "dead" as const
+      };
+    }
+
     if (state.connection.status === "connecting") {
       return {
         eyebrow: "Cuenta",
-        title: "Connecting",
+        title: state.connection.credentials ? "Reconnecting" : "Connecting",
         copy: state.connection.credentials
           ? "Reusing the saved session to reconnect this account."
           : "Opening the account login flow with the current name and password."
@@ -742,9 +916,18 @@ export function App() {
     }
 
     if (state.connection.status === "offline" && !state.world.map) {
+      const issue = describeConnectionIssue(
+        state.connection.lastError,
+        state.connection.credentials != null
+      );
+
+      if (issue) {
+        return issue;
+      }
+
       return {
         eyebrow: "Cuenta",
-        title: state.connection.lastError ? "Connection Failed" : "Ready To Enter",
+        title: state.connection.credentials ? "Reconnect Ready" : "Ready To Enter",
         copy:
           state.connection.lastError ??
           (state.connection.credentials
@@ -811,6 +994,7 @@ export function App() {
                   assetCatalog={assetCatalog}
                   showTileDebug={showTileDebug}
                   raining={state.weather.raining}
+                  snowing={state.weather.snowing}
                   session={session}
                   onTileInteraction={({ x, y, detail }) => {
                     session.sendLeftClick(x, y);

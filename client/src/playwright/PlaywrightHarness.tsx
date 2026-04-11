@@ -8,6 +8,9 @@ import type {
   WorldMapData
 } from "../app/types";
 import { getSpellMetadata } from "../data/gameData";
+import { SessionClient } from "../net/SessionClient";
+import { WorldCanvas } from "../render/WorldCanvas";
+import { WorldStatusPanel } from "../ui/WorldStatusPanel";
 import { ClansPanel } from "../ui/ClansPanel";
 import { HechizosPanel } from "../ui/HechizosPanel";
 import { PartyPanel } from "../ui/PartyPanel";
@@ -80,7 +83,8 @@ function HarnessShell({
       { href: "/playwright", label: "Home" },
       { href: "/playwright/session", label: "Session + spellbook" },
       { href: "/playwright/trade", label: "Trade" },
-      { href: "/playwright/social", label: "Social" }
+      { href: "/playwright/social", label: "Social" },
+      { href: "/playwright/weather", label: "Weather" }
     ],
     []
   );
@@ -160,6 +164,94 @@ function PlaywrightLanding() {
           <a className="ghost-button" href="/playwright/social">
             Social
           </a>
+          <a className="ghost-button" href="/playwright/weather">
+            Weather
+          </a>
+        </div>
+      </section>
+    </HarnessShell>
+  );
+}
+
+function createWeatherState(): ClientState {
+  const next = cloneInitialState();
+  next.connection.characterName = "PlaywrightWeather";
+  next.world.map = createHarnessMap();
+  next.world.mapId = next.world.map.mapId;
+  next.world.mapStatus = "ready";
+  next.world.self.charIndex = 1;
+  next.world.self.name = "PlaywrightWeather";
+  next.world.self.x = 2;
+  next.world.self.y = 2;
+  next.weather.raining = true;
+  next.weather.snowing = true;
+  return next;
+}
+
+function WeatherSmokePage() {
+  const [state, setState] = useState<ClientState>(() => createWeatherState());
+  const session = useMemo(
+    () =>
+      new SessionClient(
+        () => {},
+        () => state
+      ),
+    []
+  );
+
+  return (
+    <HarnessShell
+      description="Weather smoke route with the real world canvas and global weather flags."
+      title="Weather smoke"
+    >
+      <section className="panel" data-testid="playwright-weather-summary">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Status</p>
+            <h2>World weather</h2>
+          </div>
+          <span className="panel-tag">frontend only</span>
+        </div>
+        <div className="merchant-action-row" style={{ marginTop: "0.75rem" }}>
+          <button
+            className="ghost-button"
+            onClick={() =>
+              setState((current) => ({
+                ...current,
+                weather: { ...current.weather, raining: !current.weather.raining }
+              }))
+            }
+            type="button"
+          >
+            Toggle rain
+          </button>
+          <button
+            className="ghost-button"
+            onClick={() =>
+              setState((current) => ({
+                ...current,
+                weather: { ...current.weather, snowing: !current.weather.snowing }
+              }))
+            }
+            type="button"
+          >
+            Toggle snow
+          </button>
+        </div>
+      </section>
+
+      <WorldStatusPanel state={state} />
+
+      <section className="panel">
+        <div style={{ height: "420px" }}>
+          <WorldCanvas
+            assetCatalog={null}
+            raining={state.weather.raining}
+            session={session}
+            showTileDebug={false}
+            snowing={state.weather.snowing}
+            world={state.world}
+          />
         </div>
       </section>
     </HarnessShell>
@@ -551,6 +643,10 @@ export function PlaywrightHarness() {
 
   if (pathname.startsWith("/playwright/social")) {
     return <SocialSmokePage />;
+  }
+
+  if (pathname.startsWith("/playwright/weather")) {
+    return <WeatherSmokePage />;
   }
 
   return <PlaywrightLanding />;

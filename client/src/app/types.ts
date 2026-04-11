@@ -407,6 +407,7 @@ export type ServerPacket =
   | { type: "mini_stats"; classId: number; raceId: number; genderId: number; factionStatus: number }
   | { type: "send_skills"; skills: SkillEntry[] }
   | { type: "rain_toggle"; raining: boolean }
+  | { type: "snow_toggle"; snowing: boolean }
   | { type: "unknown"; packetId: number };
 
 export type ClientAction =
@@ -514,6 +515,7 @@ export type ClientAction =
   | { type: "clan/setInfo"; name: string; members: string[]; rank: string }
   | { type: "clan/clear" }
   | { type: "weather/rain"; raining: boolean }
+  | { type: "weather/snow"; snowing: boolean }
   | { type: "log/add"; level: LogLevel; message: string }
   | { type: "log/clear" }
   | { type: "session/resetRuntime" };

@@ -695,6 +695,9 @@ export class WorldRenderer {
   private rainLayer: Container | null = null;
   private rainDrops: Graphics[] = [];
   private rainActive = false;
+  private snowLayer: Container | null = null;
+  private snowFlakes: Graphics[] = [];
+  private snowActive = false;
   /**
    * Imperative fast path: immediately start a motion animation for the self
    * character without waiting for React to commit state and trigger render().
@@ -765,6 +768,16 @@ export class WorldRenderer {
     }
   }
 
+  setSnowing(active: boolean) {
+    this.snowActive = active;
+    if (this.snowLayer) {
+      this.snowLayer.visible = active;
+    }
+    if (active) {
+      this.ensureRenderLoop();
+    }
+  }
+
   setRuntimeTick(runtimeTick: ((now: number) => void) | null) {
     this.runtimeTick = runtimeTick;
   }
@@ -792,8 +805,10 @@ export class WorldRenderer {
     this.updateCamera(this.lastWorld);
     this.updateHud(this.lastWorld);
     this.updateRain();
+    this.updateSnow();
 
-    const needsContinuousRender = motionsAnimating || this.transferInProgress || this.rainActive;
+    const needsContinuousRender =
+      motionsAnimating || this.transferInProgress || this.rainActive || this.snowActive;
     if (!needsContinuousRender) {
       this.stopRenderLoop();
     }
@@ -856,6 +871,20 @@ export class WorldRenderer {
       this.rainDrops.push(drop);
     }
     this.app.stage.addChild(this.rainLayer);
+
+    this.snowLayer = new Container();
+    this.snowLayer.visible = false;
+    for (let i = 0; i < 85; i++) {
+      const flake = new Graphics();
+      flake.beginFill(0xf4fbff, 0.8);
+      flake.drawCircle(0, 0, 1.5 + Math.random() * 1.2);
+      flake.endFill();
+      flake.x = Math.random() * VIEWPORT_WIDTH;
+      flake.y = Math.random() * VIEWPORT_HEIGHT;
+      this.snowLayer.addChild(flake);
+      this.snowFlakes.push(flake);
+    }
+    this.app.stage.addChild(this.snowLayer);
 
     this.canvas.addEventListener("click", this.handleCanvasClick);
     this.app.ticker.add(this.tick);
@@ -1657,6 +1686,26 @@ export class WorldRenderer {
     }
   }
 
+  private updateSnow() {
+    if (!this.snowActive) {
+      return;
+    }
+
+    for (const flake of this.snowFlakes) {
+      flake.y += 1.4 + Math.random() * 1.6;
+      flake.x += Math.sin(flake.y / 18) * 0.6;
+      if (flake.y > VIEWPORT_HEIGHT + 4) {
+        flake.y = -6;
+        flake.x = Math.random() * VIEWPORT_WIDTH;
+      }
+      if (flake.x < -10) {
+        flake.x = VIEWPORT_WIDTH + Math.random() * 10;
+      } else if (flake.x > VIEWPORT_WIDTH + 10) {
+        flake.x = -Math.random() * 10;
+      }
+    }
+  }
+
   private updateHud(world: WorldState) {
     if (!this.hudText) {
       return;
@@ -1707,6 +1756,9 @@ export class WorldRenderer {
     this.rainLayer = null;
     this.rainDrops = [];
     this.rainActive = false;
+    this.snowLayer = null;
+    this.snowFlakes = [];
+    this.snowActive = false;
     this.clearStaticSceneCache();
   }
 }

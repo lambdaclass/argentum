@@ -75,14 +75,15 @@ export function ClassicHudPanel({
     y: number;
     lines: string[];
   } | null>(null);
+  const isDead = state.world.self.dead;
   const selected =
     state.inventory.selectedSlot == null
       ? null
       : state.inventory.slots[state.inventory.selectedSlot];
   const selectedName =
     selected == null ? null : getObjectName(assetCatalog, selected.itemId);
-  const selectedCanUse = selected != null && selected.canUse > 0;
-  const selectedCanDrop = selected != null && selected.amount > 0;
+  const selectedCanUse = selected != null && selected.canUse > 0 && !isDead;
+  const selectedCanDrop = selected != null && selected.amount > 0 && !isDead;
   const selectedEquipped = selected?.equipped === true;
   const targetTile = state.world.targetTile;
   const slotLabel =
@@ -96,7 +97,9 @@ export function ClassicHudPanel({
         ? "Conectando"
         : "Offline";
   const selectionHint =
-    selected == null
+    isDead
+      ? "Fantasma activo: revive antes de atacar, comerciar o usar items."
+      : selected == null
       ? "Click equipa, clic derecho usa, Shift tira."
       : selectedEquipped
         ? "Equipado ahora."
@@ -106,7 +109,7 @@ export function ClassicHudPanel({
   const targetLabel = targetTile ? `${targetTile.x},${targetTile.y}` : "Sin objetivo";
 
   return (
-    <section className="panel classic-hud-panel">
+    <section className={`panel classic-hud-panel ${isDead ? "classic-hud-panel-dead" : ""}`}>
       <div className="classic-hud-topline">
         <div>
           <p className="eyebrow">Inventario</p>
@@ -123,6 +126,13 @@ export function ClassicHudPanel({
         <small>{selectionHint}</small>
       </div>
 
+      {isDead ? (
+        <div className="classic-hud-dead-banner" data-testid="hud-dead-banner">
+          <span>Fantasma</span>
+          <strong>Revive antes de usar acciones de combate o inventario.</strong>
+        </div>
+      ) : null}
+
       <div className="classic-hud-combat-card">
         <div className="classic-hud-combat-copy">
           <div>
@@ -137,7 +147,7 @@ export function ClassicHudPanel({
         <div className="classic-hud-combat-actions">
           <button
             className={`ghost-button ${targetTile ? "classic-hud-action-primary" : ""}`}
-            disabled={targetTile == null || state.connection.status !== "connected"}
+            disabled={targetTile == null || state.connection.status !== "connected" || isDead}
             onClick={onAttack}
             type="button"
           >
@@ -145,7 +155,7 @@ export function ClassicHudPanel({
           </button>
           <button
             className={`ghost-button ${targetTile ? "classic-hud-action-primary" : ""}`}
-            disabled={targetTile == null || state.connection.status !== "connected"}
+            disabled={targetTile == null || state.connection.status !== "connected" || isDead}
             onClick={onStartCommerce}
             type="button"
           >
@@ -153,7 +163,7 @@ export function ClassicHudPanel({
           </button>
           <button
             className={`ghost-button ${targetTile ? "classic-hud-action-primary" : ""}`}
-            disabled={targetTile == null || state.connection.status !== "connected"}
+            disabled={targetTile == null || state.connection.status !== "connected" || isDead}
             onClick={onStartBank}
             type="button"
           >
@@ -163,7 +173,7 @@ export function ClassicHudPanel({
             className={`ghost-button ${
               state.combat.safeMode ? "classic-hud-action-primary" : ""
             }`}
-            disabled={state.connection.status !== "connected"}
+            disabled={state.connection.status !== "connected" || isDead}
             onClick={onToggleSafeMode}
             type="button"
           >
@@ -195,6 +205,11 @@ export function ClassicHudPanel({
                 } ${selectedSlot ? "inventory-slot-selected" : ""}`}
                 key={index}
                 onClick={(event) => {
+                  if (isDead) {
+                    onSelectSlot(selectedSlot ? null : index);
+                    return;
+                  }
+
                   if (slot && event.shiftKey) {
                     const rawAmount = window.prompt("Drop how many?", String(slot.amount));
                     const amount = rawAmount == null ? Number.NaN : Number.parseInt(rawAmount, 10);
@@ -215,10 +230,13 @@ export function ClassicHudPanel({
                 }}
                 onContextMenu={(event) => {
                   event.preventDefault();
-                  if (slot) {
+                  if (slot && !isDead) {
                     onUse(index);
                     onSelectSlot(index);
+                    return;
                   }
+
+                  onSelectSlot(index);
                 }}
                 onMouseEnter={(event) => {
                   setTooltip({
@@ -276,10 +294,10 @@ export function ClassicHudPanel({
             className={`ghost-button ${
               selected != null && !selectedCanUse ? "classic-hud-action-primary" : ""
             }`}
-            disabled={state.inventory.selectedSlot == null}
+            disabled={state.inventory.selectedSlot == null || isDead}
             title={selected ? `Equip or unequip ${selectedName}` : "Select an item first"}
             onClick={() => {
-              if (state.inventory.selectedSlot != null) {
+              if (state.inventory.selectedSlot != null && !isDead) {
                 onEquip(state.inventory.selectedSlot);
               }
             }}
@@ -298,7 +316,7 @@ export function ClassicHudPanel({
                 : "Select an item first"
             }
             onClick={() => {
-              if (state.inventory.selectedSlot != null) {
+              if (state.inventory.selectedSlot != null && !isDead) {
                 onUse(state.inventory.selectedSlot);
               }
             }}
@@ -311,7 +329,7 @@ export function ClassicHudPanel({
             disabled={!selectedCanDrop}
             title={selected ? `Drop one ${selectedName}` : "Select an item first"}
             onClick={() => {
-              if (state.inventory.selectedSlot != null) {
+              if (state.inventory.selectedSlot != null && !isDead) {
                 onDrop(state.inventory.selectedSlot, 1);
               }
             }}

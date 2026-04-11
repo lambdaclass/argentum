@@ -46,13 +46,21 @@ test("trade panel exposes offer metadata", async ({ page }) => {
 });
 
 test("world status clarifies global weather state", async ({ page }) => {
-  await page.goto("/?demo=1");
-
-  await page.locator(".sidebar-tabs-ao").getByRole("button", { name: "Mapa" }).click();
+  await page.goto("/playwright/weather");
 
   const worldPanel = page.getByTestId("world-status-panel");
   await expect(worldPanel).toBeVisible();
-  await expect(worldPanel).toContainText("Demo Coast");
-  await expect(worldPanel).toContainText("Lluvia global activa");
+  await expect(worldPanel).toContainText("Playwright Harbor");
+  await expect(worldPanel).toContainText("Lluvia y nieve activas");
   await expect(worldPanel).toContainText("Global state, not just one tile.");
+  await expect(page.getByTestId("world-canvas")).toHaveAttribute("data-raining", "1");
+  await expect(page.getByTestId("world-canvas")).toHaveAttribute("data-snowing", "1");
+
+  await page.getByRole("button", { name: "Toggle snow" }).click();
+  await expect(worldPanel).toContainText("Lluvia global activa");
+  await expect(page.getByTestId("world-canvas")).toHaveAttribute("data-snowing", "0");
+
+  await page.getByRole("button", { name: "Toggle rain" }).click();
+  await expect(worldPanel).toContainText("Cielo despejado");
+  await expect(page.getByTestId("world-canvas")).toHaveAttribute("data-raining", "0");
 });

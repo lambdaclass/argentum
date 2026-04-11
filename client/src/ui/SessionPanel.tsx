@@ -19,6 +19,7 @@ interface SessionPanelProps {
 function describeRecoveryPath(error: string, hasSavedSession: boolean) {
   if (error === "Invalid session token." || error === "Character not found.") {
     return {
+      tone: "warning" as const,
       title: "Saved session rejected",
       copy: hasSavedSession
         ? "The stored reconnect session is no longer valid. Forget it and sign in again with account name and password."
@@ -28,6 +29,7 @@ function describeRecoveryPath(error: string, hasSavedSession: boolean) {
 
   if (error === "Wrong password.") {
     return {
+      tone: "danger" as const,
       title: "Wrong password",
       copy: "Keep the same account name, correct the password, and try again."
     };
@@ -35,6 +37,7 @@ function describeRecoveryPath(error: string, hasSavedSession: boolean) {
 
   if (error === "Character name already taken.") {
     return {
+      tone: "warning" as const,
       title: "Name already in use",
       copy: "Use the correct account for that character, or change the name you are trying to enter with."
     };
@@ -42,6 +45,7 @@ function describeRecoveryPath(error: string, hasSavedSession: boolean) {
 
   if (error === "WebSocket error.") {
     return {
+      tone: "danger" as const,
       title: "Network path failed",
       copy: "Check the endpoint in Advanced only if the default one is not the gateway you want."
     };
@@ -49,12 +53,58 @@ function describeRecoveryPath(error: string, hasSavedSession: boolean) {
 
   if (error.includes("Connection closed during bootstrap")) {
     return {
+      tone: "warning" as const,
       title: "Login did not finish",
       copy: "Your typed account name and password stay in place. Retry directly from this panel."
     };
   }
 
+  const normalized = error.toLowerCase();
+
+  if (normalized.includes("banned")) {
+    return {
+      tone: "danger" as const,
+      title: "Account banned",
+      copy: "This account is blocked until the backend or an admin clears the ban."
+    };
+  }
+
+  if (normalized.includes("muted")) {
+    return {
+      tone: "warning" as const,
+      title: "Chat muted",
+      copy: "The account is present, but chat actions are restricted until the mute is cleared."
+    };
+  }
+
+  if (normalized.includes("server full") || normalized.includes("server-full") || normalized.includes("full")) {
+    return {
+      tone: "warning" as const,
+      title: "Server full",
+      copy: "The world reached its capacity limit. Retry once a slot opens up."
+    };
+  }
+
+  if (normalized.includes("maintenance")) {
+    return {
+      tone: "warning" as const,
+      title: "Maintenance mode",
+      copy: "The world is offline for maintenance. Try again when the server comes back."
+    };
+  }
+
+  if (normalized.includes("token expired")) {
+    return {
+      tone: "danger" as const,
+      title: "Session expired",
+      copy: hasSavedSession
+        ? "The saved reconnect token expired. Sign in again to get a fresh session."
+        : "Your session expired. Sign in again to get a fresh token."
+    };
+  }
+
   return {
+    tone: "neutral" as const,
     title: "Retry from this state",
     copy: "The client kept your current session form intact so you can correct the problem and reconnect."
   };
@@ -145,7 +195,11 @@ export function SessionPanel({
       </div>
 
       {recovery ? (
-        <div className="session-card session-recovery-card">
+        <div
+          className={`session-card session-recovery-card session-recovery-card-${recovery.tone}`}
+          data-testid="session-error-banner"
+        >
+          <div className="session-recovery-pill">{recovery.tone === "danger" ? "Critical" : recovery.tone === "warning" ? "Warning" : "Info"}</div>
           <div>
             <p className="session-card-title">{recovery.title}</p>
             <p>{recovery.copy}</p>
