@@ -17,6 +17,8 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
   chat, gold transfer, and faction donate.
 - Guild UI route hardening completed for current clan UI behavior.
 - VB6 parity test suite seed added.
+- Automated parity gate expanded with `Balance.dat` parity checks, formula
+  golden fixtures, character-creation parity, and a first smoke-bot layer.
 
 ## Core Backend Systems Already Implemented
 

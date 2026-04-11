@@ -7,11 +7,15 @@ This is the only roadmap. `CHANGELOG.md` tracks completed work.
 - **Backend gameplay:** close for the modern web path, but not full VB6 parity.
   Do not call the backend compatible until the backend tasks below are closed
   or deliberately removed from scope.
+- **Parity gate:** partially built. `Balance.dat` parity checks, formula golden
+  fixtures, character-creation parity, and a first `MapServer` smoke layer now
+  exist. Packet replay, AO socket smoke, broader fuzz/property coverage, and
+  load/soak are still open.
 - **Backend environment:** the supported `server/` Nix/dev shell compiles and
   tests cleanly, and recent migrations were verified on clean Postgres.
 - **Web client:** playable development client. Remaining work is weather/social
-  polish, authoritative party/clan state, trade metadata display, E2E coverage,
-  and UX polish.
+  polish, authoritative party/clan state, trade metadata display, browser-side
+  parity tests, and session/auth UX polish.
 - **Post-compat account flow:** not built. Target is username/password or Google
   account login over HTTP, character selection in the browser, then unchanged
   AO socket login with `login_existing_char(char_id, session_token)`.
@@ -32,18 +36,21 @@ tasks below are closed or explicitly deferred.
    Outcome: the roadmap remains accurate instead of becoming historical fiction.
 4. Add packet fixture replay tests from real VB6 client/server traffic.
    Outcome: protocol compatibility is proven by captured traffic, not memory.
-5. Add an AO socket smoke bot for the core player journey.
-   Outcome: login, movement, chat, combat, trade, and relog can be exercised
-   automatically.
-6. Add formula golden tests from VB6 traces.
-   Outcome: combat, XP, regen, prices, and training formulas are checked
-   against VB6 outputs.
-7. Add packet property/fuzz coverage.
+5. Expand the current smoke coverage into an AO socket smoke bot for the core
+   player journey.
+   Outcome: the real protocol path for login, movement, chat, combat, trade,
+   and relog can be exercised automatically instead of stopping at direct
+   `MapServer` calls.
+6. Expand the current formula golden coverage to the remaining VB6 formulas and
+   edge cases.
+   Outcome: combat, XP, regen, prices, training, and remaining formula edge
+   cases are checked against VB6 outputs.
+7. Expand packet property/fuzz coverage.
    Outcome: malformed/random bytes do not crash sessions or mutate gameplay
    state silently.
-8. Add lifecycle tests for login/autosave/logout/crash cleanup/transfer.
+8. Expand lifecycle tests for login/autosave/logout/crash cleanup/transfer.
    Outcome: persistence and ownership transitions stay correct under failure.
-9. Add guild/faction/ban/mute persistence coverage.
+9. Expand guild/faction/ban/mute persistence coverage.
    Outcome: shared cross-map state survives restart and migration.
 10. Add a load/soak gate.
     Outcome: long-running many-session behavior is tested before public use.
@@ -237,8 +244,9 @@ tasks below are closed or explicitly deferred.
     Outcome: session state changes are visible and less confusing.
 81. Add banned/muted/server-full/maintenance/token-expired error states.
     Outcome: common failure modes are handled explicitly in the browser.
-82. Add settings/reconnect/error/banned/muted/maintenance polish.
-    Outcome: the web client can handle common live-session edge states cleanly.
+82. Add browser settings and live-session polish.
+    Outcome: music, SFX, renderer quality, keybinds, reconnect, and
+    banned/muted/maintenance state handling are explicit instead of ad hoc.
 83. Add minimap and/or map markers if they remain part of the web UX target.
     Outcome: navigation polish is explicit instead of ad hoc.
 84. Add sound effects for combat, spells, inventory, UI, doors/teleports, and
