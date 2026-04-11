@@ -1,0 +1,6 @@
+{
+  "description": "Synthetic login fixture for harness validation",
+  "expected_server_packets": [2, 30, 31],
+  "client_packets": [74],
+  "synthetic": true
+}

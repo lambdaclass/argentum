@@ -9,8 +9,14 @@ This is the only roadmap. `CHANGELOG.md` tracks completed work.
   or deliberately removed from scope.
 - **Parity gate:** partially built. `Balance.dat` parity checks, formula golden
   fixtures, character-creation parity, and a first `MapServer` smoke layer are
-  in place. TCP-level replay/smoke, deterministic harnessing, broader
-  fuzz/property coverage, and validated soak/load gates are still open.
+  in place.
+  - TCP harness, sandbox ownership, shared decoder, soak exclusion, scope labels: **DONE**
+  - CI fast/slow lanes: **IN PROGRESS**
+  - StreamData property tests: **IN PROGRESS**
+  - Extended smoke coverage: **IN PROGRESS**
+  - Fixture replay harness: **IN PROGRESS**
+  - VB6 capture corpus: **EMPTY** (needs real VB6 traffic)
+  - Manual VB6 smoke checklist: **DONE** (see `server/VB6_SMOKE_CHECKLIST.md`)
 - **Backend environment:** the supported `server/` Nix/dev shell compiles and
   tests cleanly, and recent migrations were verified on clean Postgres.
 - **Web client:** playable development client. Remaining work is weather/social
