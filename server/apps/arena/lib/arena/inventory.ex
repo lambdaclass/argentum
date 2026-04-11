@@ -172,7 +172,9 @@ defmodule Arena.Inventory do
     Enum.find_index(inventory, fn
       %{item_id: ^item_id, equipped: false} = item ->
         Map.get(item, :elemental_tags, 0) == elemental_tags
-      _ -> false
+
+      _ ->
+        false
     end)
   end
 

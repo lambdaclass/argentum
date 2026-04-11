@@ -12,10 +12,13 @@ defmodule Arena.Map.Visibility do
   alias AoProtocol.Server.Encoder
 
   # cell_size is compile-time; runtime AoI checks use Helpers.aoi_range_x/y()
-  @cell_size max(max(
-    Application.compile_env(:arena, :aoi_range_x, 11),
-    Application.compile_env(:arena, :aoi_range_y, 9)
-  ), 12)
+  @cell_size max(
+               max(
+                 Application.compile_env(:arena, :aoi_range_x, 11),
+                 Application.compile_env(:arena, :aoi_range_y, 9)
+               ),
+               12
+             )
 
   # --- Spatial grid helpers ---
   # Grid cells are @cell_size x @cell_size tiles. Each cell stores a MapSet of char_ids.
@@ -30,8 +33,11 @@ defmodule Arena.Map.Visibility do
 
   def grid_remove(grid, x, y, char_id) do
     key = cell_key(x, y)
+
     case Map.get(grid, key) do
-      nil -> grid
+      nil ->
+        grid
+
       set ->
         new_set = MapSet.delete(set, char_id)
         if MapSet.size(new_set) == 0, do: Map.delete(grid, key), else: Map.put(grid, key, new_set)
@@ -41,7 +47,9 @@ defmodule Arena.Map.Visibility do
   # Collect all char_ids in the 3x3 cell neighborhood around (x, y)
   def grid_nearby_ids(grid, x, y) do
     {cx, cy} = cell_key(x, y)
-    for dx <- -1..1, dy <- -1..1,
+
+    for dx <- -1..1,
+        dy <- -1..1,
         key = {cx + dx, cy + dy},
         set = Map.get(grid, key, nil),
         set != nil,
@@ -54,7 +62,9 @@ defmodule Arena.Map.Visibility do
     for cid <- grid_nearby_ids(grid, origin_x, origin_y),
         cid != exclude_id do
       case Map.get(players, cid) do
-        nil -> :ok
+        nil ->
+          :ok
+
         entity ->
           if abs(entity.x - origin_x) <= Helpers.aoi_range_x() and abs(entity.y - origin_y) <= Helpers.aoi_range_y() do
             case Map.get(sessions, cid) do
@@ -69,7 +79,9 @@ defmodule Arena.Map.Visibility do
   def broadcast_aoi_grid_all(grid, players, sessions, origin_x, origin_y, fun) do
     for cid <- grid_nearby_ids(grid, origin_x, origin_y) do
       case Map.get(players, cid) do
-        nil -> :ok
+        nil ->
+          :ok
+
         entity ->
           if abs(entity.x - origin_x) <= Helpers.aoi_range_x() and abs(entity.y - origin_y) <= Helpers.aoi_range_y() do
             case Map.get(sessions, cid) do
@@ -202,6 +214,7 @@ defmodule Arena.Map.Visibility do
       visible_sets = Map.put(state.visible_sets, entity.char_id, visible_ids)
 
       create_raw = Encoder.encode(Helpers.character_create_packet(entity))
+
       visible_sets =
         Enum.reduce(visible_ids, visible_sets, fn other_id, vs ->
           Helpers.send_to_session(sessions, other_id, {:send_raw, create_raw})
@@ -217,6 +230,7 @@ defmodule Arena.Map.Visibility do
     for {_iid, npc} <- state.npcs_live, npc.alive do
       if abs(npc.x - entity.x) <= Helpers.aoi_range_x() and abs(npc.y - entity.y) <= Helpers.aoi_range_y() do
         npc_def = GameData.get_npc(npc.npc_id)
+
         if npc_def do
           raw = Encoder.encode(Helpers.npc_create_packet(npc, npc_def))
           Helpers.send_to_session(sessions, entity.char_id, {:send_raw, raw})
@@ -260,24 +274,38 @@ defmodule Arena.Map.Visibility do
 
       # Players that just entered mover's AoI: send create both ways
       create_mover_raw = Encoder.encode(Helpers.character_create_packet(entity))
+
       visible_sets =
         Enum.reduce(entered, state.visible_sets, fn other_id, vs ->
           other = Map.get(state.players, other_id)
+
           if other do
-            Helpers.send_to_session(state.sessions, char_id, {:send_raw, Encoder.encode(Helpers.character_create_packet(other))})
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw, Encoder.encode(Helpers.character_create_packet(other))}
+            )
           end
+
           Helpers.send_to_session(state.sessions, other_id, {:send_raw, create_mover_raw})
           Map.update(vs, other_id, MapSet.new([char_id]), &MapSet.put(&1, char_id))
         end)
 
       # Players that just left mover's AoI: send remove both ways
       remove_mover_raw = Encoder.encode({:character_remove, %{char_index: entity.char_index}})
+
       visible_sets =
         Enum.reduce(left, visible_sets, fn other_id, vs ->
           other = Map.get(state.players, other_id)
+
           if other do
-            Helpers.send_to_session(state.sessions, char_id, {:send_raw, Encoder.encode({:character_remove, %{char_index: other.char_index}})})
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw, Encoder.encode({:character_remove, %{char_index: other.char_index}})}
+            )
           end
+
           Helpers.send_to_session(state.sessions, other_id, {:send_raw, remove_mover_raw})
           Map.update(vs, other_id, MapSet.new(), &MapSet.delete(&1, char_id))
         end)
@@ -301,6 +329,7 @@ defmodule Arena.Map.Visibility do
     for {_iid, npc} <- state.npcs_live, npc.alive do
       if abs(npc.x - entity.x) <= Helpers.aoi_range_x() and abs(npc.y - entity.y) <= Helpers.aoi_range_y() do
         npc_def = GameData.get_npc(npc.npc_id)
+
         if npc_def do
           raw = Encoder.encode(Helpers.npc_create_packet(npc, npc_def))
           Helpers.send_to_session(state.sessions, char_id, {:send_raw, raw})

@@ -18,18 +18,37 @@ defmodule Arena.CharacterCreation do
   @gender_names %{1 => :male, 2 => :female}
   # VB6 e_Ciudad enum order
   @home_city_atom %{
-    1 => :ullathorpe, 2 => :nix, 3 => :banderbill, 4 => :lindos,
-    5 => :arghal, 6 => :arkhein, 7 => :forgat, 8 => :eldoria, 9 => :penthar
+    1 => :ullathorpe,
+    2 => :nix,
+    3 => :banderbill,
+    4 => :lindos,
+    5 => :arghal,
+    6 => :arkhein,
+    7 => :forgat,
+    8 => :eldoria,
+    9 => :penthar
   }
 
   # Body IDs per {race_id, gender_id} — from VB6 DarCuerpo
   @body_ids %{
-    {1, 1} => 1,   {1, 2} => 1,    # Humano
-    {2, 1} => 2,   {2, 2} => 2,    # Elfo
-    {3, 1} => 3,   {3, 2} => 3,    # Drow
-    {4, 1} => 300, {4, 2} => 300,  # Enano
-    {5, 1} => 300, {5, 2} => 300,  # Gnomo
-    {6, 1} => 582, {6, 2} => 581   # Orco
+    # Humano
+    {1, 1} => 1,
+    {1, 2} => 1,
+    # Elfo
+    {2, 1} => 2,
+    {2, 2} => 2,
+    # Drow
+    {3, 1} => 3,
+    {3, 2} => 3,
+    # Enano
+    {4, 1} => 300,
+    {4, 2} => 300,
+    # Gnomo
+    {5, 1} => 300,
+    {5, 2} => 300,
+    # Orco
+    {6, 1} => 582,
+    {6, 2} => 581
   }
 
   # Valid head ranges per {race_id, gender_id} — from VB6 ValidarCabeza
@@ -190,9 +209,12 @@ defmodule Arena.CharacterCreation do
     # Blue potions by class
     items =
       case class do
-        c when c in [1, 10] -> [{4336, 850} | items]       # Mago, Druida
-        c when c in [11, 2] -> [{4336, 650} | items]       # Bardo, Clerigo
-        c when c in [3, 9, 8] -> [{4336, 450} | items]     # Paladin, Asesino, Bandido
+        # Mago, Druida
+        c when c in [1, 10] -> [{4336, 850} | items]
+        # Bardo, Clerigo
+        c when c in [11, 2] -> [{4336, 650} | items]
+        # Paladin, Asesino, Bandido
+        c when c in [3, 9, 8] -> [{4336, 450} | items]
         _ -> items
       end
 
@@ -201,9 +223,12 @@ defmodule Arena.CharacterCreation do
       case class do
         c when c in [1, 10] ->
           [{4337, 80} | items]
+
         c when c in [2, 3, 4, 5, 6, 7, 8, 9, 11, 12] ->
           [{4338, 120}, {4337, 100} | items]
-        _ -> items
+
+        _ ->
+          items
       end
 
     # Purple potion + travel pass
@@ -215,8 +240,10 @@ defmodule Arena.CharacterCreation do
     # Armor (last item, before food)
     items =
       case class do
-        c when c in [1, 10, 11] -> [{3502, 1} | items]   # Tunica del Principiante
-        _ -> [{3500, 1} | items]                          # Armadura de Principiante
+        # Tunica del Principiante
+        c when c in [1, 10, 11] -> [{3502, 1} | items]
+        # Armadura de Principiante
+        _ -> [{3500, 1} | items]
       end
 
     # Food and drink
@@ -230,19 +257,31 @@ defmodule Arena.CharacterCreation do
     |> pad_inventory()
   end
 
-  defp class_equipment(1),  do: [{3495, 1}, {3493, 1}]                         # Mago: baston, sombrero
-  defp class_equipment(2),  do: [{3686, 1}, {3487, 1}, {3488, 1}, {3489, 1}, {3490, 1}]  # Clerigo
-  defp class_equipment(3),  do: [{3487, 1}, {3686, 1}, {3488, 1}, {3489, 1}, {3490, 1}]  # Paladin
-  defp class_equipment(4),  do: [{3686, 1}, {3491, 1}, {3492, 1050}, {3489, 1}, {3490, 1}, {3488, 1}] # Cazador
-  defp class_equipment(5),  do: [{3487, 1}, {3488, 1}, {3489, 1}, {3491, 1}, {3492, 850}] # Trabajador
-  defp class_equipment(6),  do: [{3487, 1}, {3488, 1}, {3489, 1}, {3490, 1}, {3491, 1}, {3492, 650}, {3686, 1}] # Guerrero
-  defp class_equipment(7),  do: [{3686, 1}, {1353, 1}, {3488, 1}, {3489, 1}]   # Ladron
-  defp class_equipment(8),  do: [{1353, 1}, {3487, 1}, {3488, 1}, {3489, 1}, {3490, 1}]  # Bandido
-  defp class_equipment(9),  do: [{3686, 1}, {3488, 1}, {3489, 1}, {3490, 1}, {3487, 1}]  # Asesino
-  defp class_equipment(10), do: [{3487, 1}, {3494, 1}, {1778, 1}]              # Druida
-  defp class_equipment(11), do: [{3686, 1}, {3488, 1}, {3489, 1}, {3490, 1}, {3496, 1}]  # Bardo
-  defp class_equipment(12), do: [{3487, 1}, {3488, 1}, {3489, 1}, {3490, 1}, {3497, 1}, {3498, 350}] # Pirata
-  defp class_equipment(_),  do: []
+  # Mago: baston, sombrero
+  defp class_equipment(1), do: [{3495, 1}, {3493, 1}]
+  # Clerigo
+  defp class_equipment(2), do: [{3686, 1}, {3487, 1}, {3488, 1}, {3489, 1}, {3490, 1}]
+  # Paladin
+  defp class_equipment(3), do: [{3487, 1}, {3686, 1}, {3488, 1}, {3489, 1}, {3490, 1}]
+  # Cazador
+  defp class_equipment(4), do: [{3686, 1}, {3491, 1}, {3492, 1050}, {3489, 1}, {3490, 1}, {3488, 1}]
+  # Trabajador
+  defp class_equipment(5), do: [{3487, 1}, {3488, 1}, {3489, 1}, {3491, 1}, {3492, 850}]
+  # Guerrero
+  defp class_equipment(6), do: [{3487, 1}, {3488, 1}, {3489, 1}, {3490, 1}, {3491, 1}, {3492, 650}, {3686, 1}]
+  # Ladron
+  defp class_equipment(7), do: [{3686, 1}, {1353, 1}, {3488, 1}, {3489, 1}]
+  # Bandido
+  defp class_equipment(8), do: [{1353, 1}, {3487, 1}, {3488, 1}, {3489, 1}, {3490, 1}]
+  # Asesino
+  defp class_equipment(9), do: [{3686, 1}, {3488, 1}, {3489, 1}, {3490, 1}, {3487, 1}]
+  # Druida
+  defp class_equipment(10), do: [{3487, 1}, {3494, 1}, {1778, 1}]
+  # Bardo
+  defp class_equipment(11), do: [{3686, 1}, {3488, 1}, {3489, 1}, {3490, 1}, {3496, 1}]
+  # Pirata
+  defp class_equipment(12), do: [{3487, 1}, {3488, 1}, {3489, 1}, {3490, 1}, {3497, 1}, {3498, 350}]
+  defp class_equipment(_), do: []
 
   defp pad_inventory(items) do
     padding = List.duplicate(nil, max(0, 24 - length(items)))
@@ -253,8 +292,10 @@ defmodule Arena.CharacterCreation do
 
   defp build_starting_spells(class) do
     case class do
-      c when c in [1, 2, 10, 11] -> [1, 7]     # Dardo magico, Invocar lobo
-      c when c in [3, 8, 9] -> [291, 12]        # Onda magica, Curar heridas leves
+      # Dardo magico, Invocar lobo
+      c when c in [1, 2, 10, 11] -> [1, 7]
+      # Onda magica, Curar heridas leves
+      c when c in [3, 8, 9] -> [291, 12]
       _ -> []
     end
   end

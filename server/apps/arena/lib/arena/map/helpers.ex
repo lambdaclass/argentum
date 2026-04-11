@@ -37,16 +37,19 @@ defmodule Arena.Map.Helpers do
   def set_occupancy(occ, x, y, value) when x >= 1 and x <= @map_width and y >= 1 and y <= @map_height do
     :array.set(occ_index(x, y), value, occ)
   end
+
   def set_occupancy(occ, _x, _y, _value), do: occ
 
   def clear_occupancy(occ, x, y) when x >= 1 and x <= @map_width and y >= 1 and y <= @map_height do
     :array.set(occ_index(x, y), nil, occ)
   end
+
   def clear_occupancy(occ, _x, _y), do: occ
 
   def get_occupancy(occ, x, y) when x >= 1 and x <= @map_width and y >= 1 and y <= @map_height do
     :array.get(occ_index(x, y), occ)
   end
+
   def get_occupancy(_occ, _x, _y), do: :out_of_bounds
 
   # Direct session sends
@@ -98,25 +101,26 @@ defmodule Arena.Map.Helpers do
     visual = visual_state(entity)
     {clan_index, clan_nivel} = guild_display_info(entity.char_id)
 
-    {:character_create, %{
-      char_index: entity.char_index,
-      body_id: visual.body_id,
-      head_id: visual.head_id,
-      heading: heading_to_int(entity.heading),
-      x: entity.x,
-      y: entity.y,
-      name: entity.name || "Unknown",
-      weapon_id: visual.weapon_id,
-      shield_id: visual.shield_id,
-      helmet_id: visual.helmet_id,
-      min_hp: entity.hp,
-      max_hp: entity.max_hp,
-      min_mana: entity.mana,
-      max_mana: entity.max_mana,
-      speed: entity.speeding,
-      clan_index: clan_index,
-      clan_nivel: clan_nivel
-    }}
+    {:character_create,
+     %{
+       char_index: entity.char_index,
+       body_id: visual.body_id,
+       head_id: visual.head_id,
+       heading: heading_to_int(entity.heading),
+       x: entity.x,
+       y: entity.y,
+       name: entity.name || "Unknown",
+       weapon_id: visual.weapon_id,
+       shield_id: visual.shield_id,
+       helmet_id: visual.helmet_id,
+       min_hp: entity.hp,
+       max_hp: entity.max_hp,
+       min_mana: entity.mana,
+       max_mana: entity.max_mana,
+       speed: entity.speeding,
+       clan_index: clan_index,
+       clan_nivel: clan_nivel
+     }}
   end
 
   defp guild_display_info(char_id) do
@@ -132,15 +136,16 @@ defmodule Arena.Map.Helpers do
   def character_change_packet(entity) do
     visual = visual_state(entity)
 
-    {:character_change, %{
-      char_index: entity.char_index,
-      body_id: visual.body_id,
-      head_id: visual.head_id,
-      heading: heading_to_int(entity.heading),
-      weapon_id: visual.weapon_id,
-      shield_id: visual.shield_id,
-      helmet_id: visual.helmet_id
-    }}
+    {:character_change,
+     %{
+       char_index: entity.char_index,
+       body_id: visual.body_id,
+       head_id: visual.head_id,
+       heading: heading_to_int(entity.heading),
+       weapon_id: visual.weapon_id,
+       shield_id: visual.shield_id,
+       helmet_id: visual.helmet_id
+     }}
   end
 
   @doc """
@@ -149,6 +154,7 @@ defmodule Arena.Map.Helpers do
   """
   def broadcast_character_change(state, entity) do
     raw = Encoder.encode(character_change_packet(entity))
+
     Arena.Map.Visibility.broadcast_visible_all(state, entity.x, entity.y, fn pid ->
       send(pid, {:send_raw, raw})
     end)
@@ -156,48 +162,69 @@ defmodule Arena.Map.Helpers do
 
   # NPC create packet (used by visibility and NPC AI)
   def npc_create_packet(npc_entity, npc_def) do
-    {:character_create, %{
-      char_index: npc_entity.char_index,
-      body_id: npc_def.body,
-      head_id: npc_def.head,
-      heading: npc_def.heading,
-      x: npc_entity.x,
-      y: npc_entity.y,
-      name: npc_def.name || "NPC",
-      min_hp: npc_entity.hp,
-      max_hp: npc_entity.max_hp,
-      es_npc: 1
-    }}
+    {:character_create,
+     %{
+       char_index: npc_entity.char_index,
+       body_id: npc_def.body,
+       head_id: npc_def.head,
+       heading: npc_def.heading,
+       x: npc_entity.x,
+       y: npc_entity.y,
+       name: npc_def.name || "NPC",
+       min_hp: npc_entity.hp,
+       max_hp: npc_entity.max_hp,
+       es_npc: 1
+     }}
   end
 
   # Inventory slot send
   def send_inventory_slot(sessions, char_id, inventory, slot) do
     case Enum.at(inventory, slot) do
       nil ->
-        send_to_session(sessions, char_id, {:send_raw,
-          Encoder.encode({:change_inventory_slot, %{slot: slot + 1, obj_index: 0, amount: 0}})})
+        send_to_session(
+          sessions,
+          char_id,
+          {:send_raw, Encoder.encode({:change_inventory_slot, %{slot: slot + 1, obj_index: 0, amount: 0}})}
+        )
 
       item ->
         item_def = GameData.get_item(item.item_id)
         valor = if item_def, do: item_def.valor, else: 0
         instance_tags = Map.get(item, :elemental_tags, 0)
 
-        send_to_session(sessions, char_id, {:send_raw,
-          Encoder.encode({:change_inventory_slot, %{
-            slot: slot + 1,
-            obj_index: item.item_id,
-            amount: item.amount,
-            equipped: item.equipped,
-            valor: valor / 1,
-            elemental_tags: instance_tags
-          }})})
+        send_to_session(
+          sessions,
+          char_id,
+          {:send_raw,
+           Encoder.encode(
+             {:change_inventory_slot,
+              %{
+                slot: slot + 1,
+                obj_index: item.item_id,
+                amount: item.amount,
+                equipped: item.equipped,
+                valor: valor / 1,
+                elemental_tags: instance_tags
+              }}
+           )}
+        )
     end
   end
 
   # Class/Race integer conversions
   @class_id_map %{
-    mago: 1, clerigo: 2, paladin: 3, cazador: 4, trabajador: 5,
-    guerrero: 6, ladron: 7, bandido: 8, asesino: 9, druida: 10, bardo: 11, pirata: 12
+    mago: 1,
+    clerigo: 2,
+    paladin: 3,
+    cazador: 4,
+    trabajador: 5,
+    guerrero: 6,
+    ladron: 7,
+    bandido: 8,
+    asesino: 9,
+    druida: 10,
+    bardo: 11,
+    pirata: 12
   }
 
   def class_atom_to_id(class_atom), do: Map.get(@class_id_map, class_atom, 6)
@@ -228,8 +255,13 @@ defmodule Arena.Map.Helpers do
     if entity.invisible do
       buffs = Enum.reject(entity.buffs, &(&1.type == :invisible))
       entity = %{entity | invisible: false, buffs: buffs}
-      send_to_session(state.sessions, char_id, {:send_raw,
-        Encoder.encode({:console_msg, %{message: "Has vuelto a ser visible.", font_index: 0}})})
+
+      send_to_session(
+        state.sessions,
+        char_id,
+        {:send_raw, Encoder.encode({:console_msg, %{message: "Has vuelto a ser visible.", font_index: 0}})}
+      )
+
       entity
     else
       entity
@@ -241,7 +273,9 @@ defmodule Arena.Map.Helpers do
     item_def = GameData.get_item(item_id)
     grh = if item_def, do: item_def.grh_index, else: 0
 
-    raw = Encoder.encode({:object_create, %{x: x, y: y, obj_index: grh, amount: amount, elemental_tags: elemental_tags}})
+    raw =
+      Encoder.encode({:object_create, %{x: x, y: y, obj_index: grh, amount: amount, elemental_tags: elemental_tags}})
+
     broadcast_visible_all(state, x, y, fn pid -> send(pid, {:send_raw, raw}) end)
   end
 
@@ -255,35 +289,49 @@ defmodule Arena.Map.Helpers do
   # VB6: GMs bypass all map restrictions
   def check_map_restriction(_mode, %{gm: true}), do: :ok
   def check_map_restriction("", _entity), do: :ok
+
   def check_map_restriction("NEWBIE", entity) do
-    if entity.level <= 12 and not entity.criminal, do: :ok,
+    if entity.level <= 12 and not entity.criminal,
+      do: :ok,
       else: {:error, "No puedes entrar a este mapa."}
   end
+
   # VB6: ARMADA/REAL maps -- only Royal Army faction can enter
   def check_map_restriction("ARMADA", entity) do
-    if Map.get(entity, :faction, :none) == :royal_army, do: :ok,
+    if Map.get(entity, :faction, :none) == :royal_army,
+      do: :ok,
       else: {:error, "Solo miembros del Ejercito Real pueden entrar a este mapa."}
   end
+
   def check_map_restriction("REAL", entity) do
-    if Map.get(entity, :faction, :none) == :royal_army, do: :ok,
+    if Map.get(entity, :faction, :none) == :royal_army,
+      do: :ok,
       else: {:error, "Solo miembros del Ejercito Real pueden entrar a este mapa."}
   end
+
   # VB6: CAOS maps -- only Chaos Legion faction can enter
   def check_map_restriction("CAOS", entity) do
-    if Map.get(entity, :faction, :none) == :chaos_legion, do: :ok,
+    if Map.get(entity, :faction, :none) == :chaos_legion,
+      do: :ok,
       else: {:error, "Solo miembros de la Legion del Caos pueden entrar a este mapa."}
   end
+
   # VB6: CIUDADANO maps -- no criminals allowed (citizens and faction members OK)
   def check_map_restriction("CIUDADANO", entity) do
-    if not entity.criminal, do: :ok,
+    if not entity.criminal,
+      do: :ok,
       else: {:error, "Criminales no pueden entrar a este mapa."}
   end
+
   # VB6: FACCION maps require belonging to a faction (Royal Army or Chaos Legion)
   def check_map_restriction("FACCION", entity) do
     faction = Map.get(entity, :faction, :none)
-    if faction in [:royal_army, :chaos_legion], do: :ok,
+
+    if faction in [:royal_army, :chaos_legion],
+      do: :ok,
       else: {:error, "Necesitas pertenecer a una faccion para entrar."}
   end
+
   def check_map_restriction(_unknown, _entity), do: :ok
 
   # Broadcast helpers — delegate to Visibility module

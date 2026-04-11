@@ -317,9 +317,11 @@ defmodule Arena.Map.AoiVisibilityTest do
       # B is at (50 + aoi_x + 1, 50), moving west puts B at (50 + aoi_x, 50)
       # which is exactly @aoi_x tiles from A — within range
       Process.sleep(250)
+
       case MapServer.move_character(@test_map_id, 12_002, :west) do
         {:ok, _pos} ->
           messages = collect_raw_messages(200)
+
           assert length(messages) > 0,
                  "Moving into AoI range should send character_create to the other player"
 
@@ -347,9 +349,11 @@ defmodule Arena.Map.AoiVisibilityTest do
 
       # Move B east (away from A) — puts B at (aoi_x + 1) distance, outside range
       Process.sleep(250)
+
       case MapServer.move_character(@test_map_id, 12_102, :east) do
         {:ok, _pos} ->
           remove_msgs = collect_raw_messages(200)
+
           assert length(remove_msgs) > 0,
                  "Moving out of AoI range should send character_remove"
 

@@ -38,84 +38,99 @@ defmodule Arena.Map.Movement do
             {:reply, {:error, :too_early}, state}
 
           true ->
-          # Speed hack accumulator
-          elapsed = max(now - entity.last_step_at, 1)
-          delta = (min_interval - elapsed) / min_interval
-          new_counter = if delta > 0,
-            do: entity.speed_hack_counter + delta,
-            else: max(entity.speed_hack_counter + delta * 5, 0.0)
+            # Speed hack accumulator
+            elapsed = max(now - entity.last_step_at, 1)
+            delta = (min_interval - elapsed) / min_interval
 
-          if new_counter > @speed_hack_threshold do
-            # Snap back — reject move, apply penalty
-            Logger.warning("[ANTICHEAT] speed_hack char_id=#{char_id} counter=#{Float.round(new_counter, 2)}")
-            entity = %{entity | speed_hack_counter: 0.0, next_move_at: now + min_interval * 2}
-            players = Map.put(state.players, char_id, entity)
-            Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-              Encoder.encode({:pos_update, %{x: entity.x, y: entity.y}})})
-            {:reply, {:error, :speed_hack}, %{state | players: players}}
-          else
-            entity = %{entity | speed_hack_counter: new_counter}
+            new_counter =
+              if delta > 0,
+                do: entity.speed_hack_counter + delta,
+                else: max(entity.speed_hack_counter + delta * 5, 0.0)
 
-          case TileGrid.move_entity(state.map_id, entity.x, entity.y, direction) do
-            {:ok, %TileGrid.Position{x: nx, y: ny}} ->
-              # VB6: water tiles (value 2) require boat
-              tile_val = TileGrid.get_tile(state.map_id, nx, ny)
-              water_blocked = tile_val == 2 and not entity.navigating
+            if new_counter > @speed_hack_threshold do
+              # Snap back — reject move, apply penalty
+              Logger.warning("[ANTICHEAT] speed_hack char_id=#{char_id} counter=#{Float.round(new_counter, 2)}")
+              entity = %{entity | speed_hack_counter: 0.0, next_move_at: now + min_interval * 2}
+              players = Map.put(state.players, char_id, entity)
 
-              cond do
-                water_blocked ->
-                  {:reply, {:error, :blocked}, state}
+              Helpers.send_to_session(
+                state.sessions,
+                char_id,
+                {:send_raw, Encoder.encode({:pos_update, %{x: entity.x, y: entity.y}})}
+              )
 
-                Helpers.get_occupancy(state.occupancy, nx, ny) == nil ->
-                  # Normal move into empty tile
-                  state = do_move(state, char_id, entity, nx, ny, direction, now, min_interval)
-                  {:reply, {:ok, {nx, ny}}, state}
+              {:reply, {:error, :speed_hack}, %{state | players: players}}
+            else
+              entity = %{entity | speed_hack_counter: new_counter}
 
-                match?({:player, _}, Helpers.get_occupancy(state.occupancy, nx, ny)) ->
-                  # VB6: only dead/GM-invisible players get pushed out of the way.
-                  # Living visible players block the tile.
-                  {:player, other_id} = Helpers.get_occupancy(state.occupancy, nx, ny)
-                  other = Map.get(state.players, other_id)
+              case TileGrid.move_entity(state.map_id, entity.x, entity.y, direction) do
+                {:ok, %TileGrid.Position{x: nx, y: ny}} ->
+                  # VB6: water tiles (value 2) require boat
+                  tile_val = TileGrid.get_tile(state.map_id, nx, ny)
+                  water_blocked = tile_val == 2 and not entity.navigating
 
-                  if other != nil and (other.dead or other.gm) do
-                    old_x = entity.x
-                    old_y = entity.y
+                  cond do
+                    water_blocked ->
+                      {:reply, {:error, :blocked}, state}
 
-                    state = do_move(state, char_id, entity, nx, ny, direction, now, min_interval)
+                    Helpers.get_occupancy(state.occupancy, nx, ny) == nil ->
+                      # Normal move into empty tile
+                      state = do_move(state, char_id, entity, nx, ny, direction, now, min_interval)
+                      {:reply, {:ok, {nx, ny}}, state}
 
-                    # Push the dead/invisible player to our old position
-                    other = Map.get(state.players, other_id) || other
-                    opposite = Helpers.opposite_heading(direction)
-                    swapped_other = %{other | x: old_x, y: old_y, heading: opposite}
+                    match?({:player, _}, Helpers.get_occupancy(state.occupancy, nx, ny)) ->
+                      # VB6: only dead/GM-invisible players get pushed out of the way.
+                      # Living visible players block the tile.
+                      {:player, other_id} = Helpers.get_occupancy(state.occupancy, nx, ny)
+                      other = Map.get(state.players, other_id)
 
-                    players = Map.put(state.players, other_id, swapped_other)
-                    occupancy = Helpers.set_occupancy(state.occupancy, old_x, old_y, {:player, other_id})
-                    grid = Visibility.maybe_grid_remove(state, other.x, other.y, other_id)
-                    grid = Visibility.maybe_grid_add(%{state | grid: grid}, old_x, old_y, other_id)
+                      if other != nil and (other.dead or other.gm) do
+                        old_x = entity.x
+                        old_y = entity.y
 
-                    state = %{state | players: players, occupancy: occupancy, grid: grid}
+                        state = do_move(state, char_id, entity, nx, ny, direction, now, min_interval)
 
-                    Helpers.send_to_session(state.sessions, other_id, {:send_raw,
-                      Encoder.encode({:pos_update, %{x: old_x, y: old_y}})})
-                    swap_raw = Encoder.encode({:character_move, %{char_index: swapped_other.char_index, x: old_x, y: old_y}})
-                    Visibility.broadcast_visible(state, old_x, old_y, other_id, fn pid ->
-                      send(pid, {:send_raw, swap_raw})
-                    end)
+                        # Push the dead/invisible player to our old position
+                        other = Map.get(state.players, other_id) || other
+                        opposite = Helpers.opposite_heading(direction)
+                        swapped_other = %{other | x: old_x, y: old_y, heading: opposite}
 
-                    {:reply, {:ok, {nx, ny}}, state}
-                  else
-                    {:reply, {:error, :blocked}, state}
+                        players = Map.put(state.players, other_id, swapped_other)
+                        occupancy = Helpers.set_occupancy(state.occupancy, old_x, old_y, {:player, other_id})
+                        grid = Visibility.maybe_grid_remove(state, other.x, other.y, other_id)
+                        grid = Visibility.maybe_grid_add(%{state | grid: grid}, old_x, old_y, other_id)
+
+                        state = %{state | players: players, occupancy: occupancy, grid: grid}
+
+                        Helpers.send_to_session(
+                          state.sessions,
+                          other_id,
+                          {:send_raw, Encoder.encode({:pos_update, %{x: old_x, y: old_y}})}
+                        )
+
+                        swap_raw =
+                          Encoder.encode({:character_move, %{char_index: swapped_other.char_index, x: old_x, y: old_y}})
+
+                        Visibility.broadcast_visible(state, old_x, old_y, other_id, fn pid ->
+                          send(pid, {:send_raw, swap_raw})
+                        end)
+
+                        {:reply, {:ok, {nx, ny}}, state}
+                      else
+                        {:reply, {:error, :blocked}, state}
+                      end
+
+                    true ->
+                      # NPC or other non-swappable occupant
+                      {:reply, {:error, :blocked}, state}
                   end
 
-                true ->
-                  # NPC or other non-swappable occupant
+                {:error, :blocked} ->
                   {:reply, {:error, :blocked}, state}
               end
+            end
 
-            {:error, :blocked} ->
-              {:reply, {:error, :blocked}, state}
-          end
-          end  # speed hack else
+            # speed hack else
         end
 
       :error ->
@@ -137,6 +152,7 @@ defmodule Arena.Map.Movement do
 
         state = %{state | players: players}
         heading_raw = Encoder.encode(Helpers.character_change_packet(entity))
+
         Visibility.broadcast_visible(state, entity.x, entity.y, char_id, fn pid ->
           send(pid, {:send_raw, heading_raw})
         end)
@@ -156,27 +172,31 @@ defmodule Arena.Map.Movement do
   """
   def do_move(state, char_id, entity, nx, ny, direction, now, min_interval) do
     # VB6: movement breaks invisibility for non-stealth classes
-    entity = if entity.invisible and entity.class not in @stealth_classes do
-      Helpers.break_invisibility(entity, state, char_id)
-    else
-      entity
-    end
+    entity =
+      if entity.invisible and entity.class not in @stealth_classes do
+        Helpers.break_invisibility(entity, state, char_id)
+      else
+        entity
+      end
 
-    moved_entity = %{entity |
-      x: nx,
-      y: ny,
-      heading: direction,
-      last_step_at: now,
-      next_move_at: now + min_interval,
-      resting: false,
-      meditating: false
+    moved_entity = %{
+      entity
+      | x: nx,
+        y: ny,
+        heading: direction,
+        last_step_at: now,
+        next_move_at: now + min_interval,
+        resting: false,
+        meditating: false
     }
 
     players = Map.put(state.players, char_id, moved_entity)
+
     occupancy =
       state.occupancy
       |> Helpers.clear_occupancy(entity.x, entity.y)
       |> Helpers.set_occupancy(nx, ny, {:player, char_id})
+
     grid = Visibility.maybe_grid_remove(state, entity.x, entity.y, char_id)
     grid = Visibility.maybe_grid_add(%{state | grid: grid}, nx, ny, char_id)
 

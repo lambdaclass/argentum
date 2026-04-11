@@ -79,15 +79,24 @@ defmodule Arena.Data.GameData do
   # Fallback city spawns from Ciudades.Dat values (used when .Dat missing).
   # VB6 e_Ciudad enum order.
   @fallback_city_spawns %{
-    1 => %{map: 1, x: 57, y: 44},      # Ullathorpe
-    2 => %{map: 34, x: 40, y: 87},     # Nix
-    3 => %{map: 59, x: 47, y: 41},     # Banderbill
-    4 => %{map: 62, x: 63, y: 43},     # Lindos
-    5 => %{map: 151, x: 41, y: 50},    # Arghal
-    6 => %{map: 196, x: 49, y: 61},    # Arkhein
-    7 => %{map: 517, x: 49, y: 65},    # Forgat (no Ciudades.Dat section)
-    8 => %{map: 440, x: 51, y: 89},    # Eldoria (no Ciudades.Dat section)
-    9 => %{map: 560, x: 41, y: 70}     # Penthar (no Ciudades.Dat section)
+    # Ullathorpe
+    1 => %{map: 1, x: 57, y: 44},
+    # Nix
+    2 => %{map: 34, x: 40, y: 87},
+    # Banderbill
+    3 => %{map: 59, x: 47, y: 41},
+    # Lindos
+    4 => %{map: 62, x: 63, y: 43},
+    # Arghal
+    5 => %{map: 151, x: 41, y: 50},
+    # Arkhein
+    6 => %{map: 196, x: 49, y: 61},
+    # Forgat (no Ciudades.Dat section)
+    7 => %{map: 517, x: 49, y: 65},
+    # Eldoria (no Ciudades.Dat section)
+    8 => %{map: 440, x: 51, y: 89},
+    # Penthar (no Ciudades.Dat section)
+    9 => %{map: 560, x: 41, y: 70}
   }
 
   # ---- Public API ----
@@ -384,6 +393,7 @@ defmodule Arena.Data.GameData do
 
       {:error, reason} ->
         Logger.warning("Could not load Ciudades.Dat: #{inspect(reason)}. Using fallback spawns.")
+
         for {city_id, spawn} <- @fallback_city_spawns do
           :ets.insert(@table, {{:city_spawn, city_id}, spawn})
         end

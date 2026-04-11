@@ -256,7 +256,8 @@ defmodule Arena.Map.CsmParser do
   defp parse_objects(0, rest), do: {:ok, [], rest}
 
   defp parse_objects(count, data) do
-    parse_n(count, data, 8, fn <<x::little-signed-16, y::little-signed-16, obj_index::little-signed-16, amount::little-signed-16>> ->
+    parse_n(count, data, 8, fn <<x::little-signed-16, y::little-signed-16, obj_index::little-signed-16,
+                                 amount::little-signed-16>> ->
       %{x: x, y: y, obj_index: obj_index, amount: amount}
     end)
   end
@@ -274,7 +275,8 @@ defmodule Arena.Map.CsmParser do
   defp parse_tile_exits(0, rest), do: {:ok, [], rest}
 
   defp parse_tile_exits(count, data) do
-    parse_n(count, data, 10, fn <<x::little-signed-16, y::little-signed-16, dest_map::little-signed-16, dest_x::little-signed-16, dest_y::little-signed-16>> ->
+    parse_n(count, data, 10, fn <<x::little-signed-16, y::little-signed-16, dest_map::little-signed-16,
+                                  dest_x::little-signed-16, dest_y::little-signed-16>> ->
       %{x: x, y: y, dest_map: dest_map, dest_x: dest_x, dest_y: dest_y}
     end)
   end

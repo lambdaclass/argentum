@@ -53,7 +53,9 @@ defmodule Arena.PartyServer do
           [{_, party}] -> Map.get(party, :safe, false)
           [] -> false
         end
-      [] -> false
+
+      [] ->
+        false
     end
   end
 
@@ -65,7 +67,9 @@ defmodule Arena.PartyServer do
           [{_, party}] -> {:ok, party}
           [] -> :not_in_party
         end
-      [] -> :not_in_party
+
+      [] ->
+        :not_in_party
     end
   end
 
@@ -82,7 +86,9 @@ defmodule Arena.PartyServer do
     case get_party(char_id) do
       {:ok, %{members: members}} ->
         case Map.get(players_map, char_id) do
-          nil -> []
+          nil ->
+            []
+
           entity ->
             Enum.filter(members, fn mid ->
               mid != char_id and
@@ -92,7 +98,9 @@ defmodule Arena.PartyServer do
                 end
             end)
         end
-      _ -> []
+
+      _ ->
+        []
     end
   end
 
@@ -124,9 +132,15 @@ defmodule Arena.PartyServer do
               [{_, _}] ->
                 notify(leader_id, "Ese jugador ya esta en un grupo.")
                 {:reply, {:error, :already_in_party}, state}
+
               [] ->
                 now = System.monotonic_time(:millisecond)
-                :ets.insert(@table, {{:invite, target_id}, %{from: leader_id, party_id: party_id, expires_at: now + @invite_ttl_ms}})
+
+                :ets.insert(
+                  @table,
+                  {{:invite, target_id}, %{from: leader_id, party_id: party_id, expires_at: now + @invite_ttl_ms}}
+                )
+
                 notify(target_id, "Has sido invitado a un grupo. Escribe /ACEPTARGRUPO para unirte.")
                 notify(leader_id, "Invitacion enviada.")
                 {:reply, :ok, state}
@@ -188,17 +202,24 @@ defmodule Arena.PartyServer do
 
             # Send party safe confirmation packet to the toggling player
             packet = if new_safe, do: :party_safe_mode_on, else: :party_safe_mode_off
+
             case OnlineDirectory.lookup_by_id(char_id) do
               {:ok, %{session_pid: pid}} ->
                 raw = AoProtocol.Server.Encoder.encode({packet, %{}})
                 send(pid, {:send_raw, raw})
-              _ -> :ok
+
+              _ ->
+                :ok
             end
-          [] -> :ok
+
+          [] ->
+            :ok
         end
+
       [] ->
         notify(char_id, "No perteneces a un grupo.")
     end
+
     {:noreply, state}
   end
 
@@ -215,10 +236,15 @@ defmodule Arena.PartyServer do
               notify(target_id, "Has sido expulsado del grupo.")
               broadcast_party(new_members, "Un jugador fue expulsado del grupo.")
             end
-          _ -> :ok
+
+          _ ->
+            :ok
         end
-      [] -> :ok
+
+      [] ->
+        :ok
     end
+
     {:noreply, state}
   end
 
@@ -229,6 +255,7 @@ defmodule Arena.PartyServer do
     :ets.select_delete(@table, [
       {{{:invite, :_}, %{expires_at: :"$1"}}, [{:<, :"$1", now}], [true]}
     ])
+
     Process.send_after(self(), :cleanup_invites, @invite_ttl_ms)
     {:noreply, state}
   end
@@ -239,6 +266,7 @@ defmodule Arena.PartyServer do
     case :ets.lookup(@table, {:member, char_id}) do
       [{_, party_id}] ->
         {state, party_id}
+
       [] ->
         party_id = state.next_party_id
         :ets.insert(@table, {{:party, party_id}, %{leader: char_id, members: [char_id], safe: false}})
@@ -259,10 +287,12 @@ defmodule Arena.PartyServer do
               :ets.delete(@table, {:member, mid})
               notify(mid, "El grupo se ha disuelto.")
             end
+
             :ets.delete(@table, {:party, party_id})
 
           [{_, party}] ->
             new_members = List.delete(party.members, char_id)
+
             if new_members == [] do
               :ets.delete(@table, {:party, party_id})
             else
@@ -270,9 +300,12 @@ defmodule Arena.PartyServer do
               broadcast_party(new_members, "Un jugador abandono el grupo.")
             end
 
-          [] -> :ok
+          [] ->
+            :ok
         end
-      [] -> :ok
+
+      [] ->
+        :ok
     end
   end
 
@@ -281,7 +314,9 @@ defmodule Arena.PartyServer do
       {:ok, %{session_pid: pid}} ->
         raw = AoProtocol.Server.Encoder.encode({:console_msg, %{message: message, font_index: 0}})
         send(pid, {:send_raw, raw})
-      _ -> :ok
+
+      _ ->
+        :ok
     end
   end
 

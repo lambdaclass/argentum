@@ -13,6 +13,7 @@ defmodule Arena.VB6ParityTest do
       {:ok, _pid} -> :ok
       {:error, {:already_started, _pid}} -> :ok
     end
+
     :ok
   end
 
@@ -138,11 +139,12 @@ defmodule Arena.VB6ParityTest do
           trade_offer_gold: 500,
           trade_offer_items: [%{slot: 0, amount: 1}],
           trade_accepted: true,
-          inventory: [
-            %{item_id: 100, amount: 1, equipped: true},
-            %{item_id: 200, amount: 5, equipped: false},
-            nil
-          ] ++ List.duplicate(nil, 21),
+          inventory:
+            [
+              %{item_id: 100, amount: 1, equipped: true},
+              %{item_id: 200, amount: 5, equipped: false},
+              nil
+            ] ++ List.duplicate(nil, 21),
           equipment: %{weapon: 100, armor: nil, shield: nil, helmet: nil, ring: nil}
         },
         overrides
@@ -188,26 +190,27 @@ defmodule Arena.VB6ParityTest do
     # Helper that applies the same state changes as handle_player_death
     # (extracted from combat_handlers.ex lines 1312-1331)
     defp apply_death_fields(player) do
-      %{player |
-        dead: true,
-        deaths: player.deaths + 1,
-        stamina: 0,
-        hunger: 0,
-        thirst: 0,
-        paralyzed: false,
-        invisible: false,
-        poisoned: false,
-        meditating: false,
-        resting: false,
-        immobilized: false,
-        buffs: [],
-        commerce_npc_id: nil,
-        bank_npc_id: nil,
-        trade_partner_id: nil,
-        trade_request_target: nil,
-        trade_offer_gold: 0,
-        trade_offer_items: [],
-        trade_accepted: false
+      %{
+        player
+        | dead: true,
+          deaths: player.deaths + 1,
+          stamina: 0,
+          hunger: 0,
+          thirst: 0,
+          paralyzed: false,
+          invisible: false,
+          poisoned: false,
+          meditating: false,
+          resting: false,
+          immobilized: false,
+          buffs: [],
+          commerce_npc_id: nil,
+          bank_npc_id: nil,
+          trade_partner_id: nil,
+          trade_request_target: nil,
+          trade_offer_gold: 0,
+          trade_offer_items: [],
+          trade_accepted: false
       }
     end
   end
@@ -217,13 +220,18 @@ defmodule Arena.VB6ParityTest do
   describe "unequip_all_on_death" do
     test "all equipped items are marked unequipped" do
       player = %PlayerEntity{
-        char_id: 1, name: "T", account_id: "t", x: 0, y: 0,
-        inventory: [
-          %{item_id: 10, amount: 1, equipped: true},
-          %{item_id: 20, amount: 1, equipped: true},
-          %{item_id: 30, amount: 5, equipped: false},
-          nil
-        ] ++ List.duplicate(nil, 20),
+        char_id: 1,
+        name: "T",
+        account_id: "t",
+        x: 0,
+        y: 0,
+        inventory:
+          [
+            %{item_id: 10, amount: 1, equipped: true},
+            %{item_id: 20, amount: 1, equipped: true},
+            %{item_id: 30, amount: 5, equipped: false},
+            nil
+          ] ++ List.duplicate(nil, 20),
         equipment: %{weapon: 10, armor: 20, shield: nil, helmet: nil, ring: nil}
       }
 
@@ -244,11 +252,16 @@ defmodule Arena.VB6ParityTest do
 
     test "non-equipped items are not in changed_slots" do
       player = %PlayerEntity{
-        char_id: 1, name: "T", account_id: "t", x: 0, y: 0,
-        inventory: [
-          %{item_id: 30, amount: 5, equipped: false},
-          nil
-        ] ++ List.duplicate(nil, 22),
+        char_id: 1,
+        name: "T",
+        account_id: "t",
+        x: 0,
+        y: 0,
+        inventory:
+          [
+            %{item_id: 30, amount: 5, equipped: false},
+            nil
+          ] ++ List.duplicate(nil, 22),
         equipment: %{weapon: nil, armor: nil, shield: nil, helmet: nil, ring: nil}
       }
 
@@ -321,8 +334,19 @@ defmodule Arena.VB6ParityTest do
       for _ <- 1..100 do
         skill = :rand.uniform(100)
         tactics = :rand.uniform(50)
-        result = Combat.hit_chance(skill, tactics, :rand.uniform(50), 6,
-                                   :rand.uniform(100), :rand.uniform(50), :rand.uniform(50), 6)
+
+        result =
+          Combat.hit_chance(
+            skill,
+            tactics,
+            :rand.uniform(50),
+            6,
+            :rand.uniform(100),
+            :rand.uniform(50),
+            :rand.uniform(50),
+            6
+          )
+
         assert result >= 5 and result <= 95
       end
     end

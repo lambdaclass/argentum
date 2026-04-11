@@ -4,12 +4,12 @@ defmodule GameBackend.InventorySlot do
 
   @primary_key {:id, :id, autogenerate: true}
   schema "inventory_slots" do
-    belongs_to :character, GameBackend.Characters
-    field :slot, :integer
-    field :item_id, :integer
-    field :amount, :integer, default: 1
-    field :equipped, :boolean, default: false
-    field :elemental_tags, :integer, default: 0
+    belongs_to(:character, GameBackend.Characters)
+    field(:slot, :integer)
+    field(:item_id, :integer)
+    field(:amount, :integer, default: 1)
+    field(:equipped, :boolean, default: false)
+    field(:elemental_tags, :integer, default: 0)
     timestamps()
   end
 

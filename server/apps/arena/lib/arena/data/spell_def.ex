@@ -116,6 +116,7 @@ defmodule Arena.Data.SpellDef do
 
   # VB6 default spell cooldown is 2 seconds
   defp parse_cooldown(nil), do: 2
+
   defp parse_cooldown(val) do
     v = parse_int(val)
     if v > 0, do: v, else: 2

@@ -318,6 +318,7 @@ defmodule Arena.StubHandlersTest do
       else
         # If blocked, try east
         result = MapServer.move_character(@test_map_id, 20015, :east)
+
         if match?({:ok, _}, result) do
           {:ok, entity} = MapServer.snapshot_entity(@test_map_id, 20015)
           refute entity.resting

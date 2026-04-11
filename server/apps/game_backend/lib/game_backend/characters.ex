@@ -19,93 +19,126 @@ defmodule GameBackend.Characters do
 
   @primary_key {:id, :id, autogenerate: true}
   schema "characters" do
-    field :name, :string
-    belongs_to :account, GameBackend.Account
-    field :race, :string, default: "human"
-    field :class, :string, default: "warrior"
-    field :gender, :string, default: "male"
-    field :home_city, :string, default: "ullathorpe"
-    field :faction, :string, default: "none"
+    field(:name, :string)
+    belongs_to(:account, GameBackend.Account)
+    field(:race, :string, default: "human")
+    field(:class, :string, default: "warrior")
+    field(:gender, :string, default: "male")
+    field(:home_city, :string, default: "ullathorpe")
+    field(:faction, :string, default: "none")
 
-    field :level, :integer, default: 1
-    field :xp, :integer, default: 0
-    field :skill_points, :integer, default: 0
+    field(:level, :integer, default: 1)
+    field(:xp, :integer, default: 0)
+    field(:skill_points, :integer, default: 0)
 
-    field :map_id, :integer, default: 1
-    field :pos_x, :integer, default: 50
-    field :pos_y, :integer, default: 50
-    field :heading, :string, default: "south"
+    field(:map_id, :integer, default: 1)
+    field(:pos_x, :integer, default: 50)
+    field(:pos_y, :integer, default: 50)
+    field(:heading, :string, default: "south")
 
-    field :hp, :integer, default: 100
-    field :max_hp, :integer, default: 100
-    field :mana, :integer, default: 100
-    field :max_mana, :integer, default: 100
-    field :stamina, :integer, default: 100
-    field :max_stamina, :integer, default: 100
-    field :hunger, :integer, default: 100
-    field :thirst, :integer, default: 100
+    field(:hp, :integer, default: 100)
+    field(:max_hp, :integer, default: 100)
+    field(:mana, :integer, default: 100)
+    field(:max_mana, :integer, default: 100)
+    field(:stamina, :integer, default: 100)
+    field(:max_stamina, :integer, default: 100)
+    field(:hunger, :integer, default: 100)
+    field(:thirst, :integer, default: 100)
 
-    field :str, :integer, default: 18
-    field :agi, :integer, default: 18
-    field :int, :integer, default: 18
-    field :con, :integer, default: 18
-    field :cha, :integer, default: 18
+    field(:str, :integer, default: 18)
+    field(:agi, :integer, default: 18)
+    field(:int, :integer, default: 18)
+    field(:con, :integer, default: 18)
+    field(:cha, :integer, default: 18)
 
-    field :gold, :integer, default: 0
-    field :bank_gold, :integer, default: 0
+    field(:gold, :integer, default: 0)
+    field(:bank_gold, :integer, default: 0)
 
-    field :body_id, :integer, default: 1
-    field :head_id, :integer, default: 1
+    field(:body_id, :integer, default: 1)
+    field(:head_id, :integer, default: 1)
 
     # Faction kill counters
-    field :faction_kills_royal, :integer, default: 0
-    field :faction_kills_chaos, :integer, default: 0
-    field :citizens_killed, :integer, default: 0
-    field :criminals_killed, :integer, default: 0
+    field(:faction_kills_royal, :integer, default: 0)
+    field(:faction_kills_chaos, :integer, default: 0)
+    field(:citizens_killed, :integer, default: 0)
+    field(:criminals_killed, :integer, default: 0)
 
     # Faction progression
-    field :faction_score, :integer, default: 0
-    field :faction_rank_armada, :integer, default: 0
-    field :faction_rank_chaos, :integer, default: 0
-    field :faction_reenlistadas, :integer, default: 0
+    field(:faction_score, :integer, default: 0)
+    field(:faction_rank_armada, :integer, default: 0)
+    field(:faction_rank_chaos, :integer, default: 0)
+    field(:faction_reenlistadas, :integer, default: 0)
 
     # Lifetime counters (mini_stats)
-    field :npcs_killed, :integer, default: 0
-    field :deaths, :integer, default: 0
-    field :penalty, :integer, default: 0
-    field :fishing_points, :integer, default: 0
+    field(:npcs_killed, :integer, default: 0)
+    field(:deaths, :integer, default: 0)
+    field(:penalty, :integer, default: 0)
+    field(:fishing_points, :integer, default: 0)
 
     # Flags stored as booleans
-    field :dead, :boolean, default: false
-    field :criminal, :boolean, default: false
-    field :gm, :boolean, default: false
+    field(:dead, :boolean, default: false)
+    field(:criminal, :boolean, default: false)
+    field(:gm, :boolean, default: false)
 
-    field :muted_until, :integer, default: 0
+    field(:muted_until, :integer, default: 0)
 
-    field :session_token, :string
+    field(:session_token, :string)
 
-    has_many :inventory_slots, InventorySlot, foreign_key: :character_id
-    has_one :equipment, CharacterEquipment, foreign_key: :character_id
-    has_many :character_skills, CharacterSkill, foreign_key: :character_id
-    has_many :character_spells, CharacterSpell, foreign_key: :character_id
-    has_many :bank_items, BankItems, foreign_key: :character_id
+    has_many(:inventory_slots, InventorySlot, foreign_key: :character_id)
+    has_one(:equipment, CharacterEquipment, foreign_key: :character_id)
+    has_many(:character_skills, CharacterSkill, foreign_key: :character_id)
+    has_many(:character_spells, CharacterSpell, foreign_key: :character_id)
+    has_many(:bank_items, BankItems, foreign_key: :character_id)
 
     timestamps()
   end
 
   @required_fields [:name, :account_id]
   @optional_fields [
-    :race, :class, :gender, :home_city, :faction,
-    :level, :xp, :skill_points,
-    :map_id, :pos_x, :pos_y, :heading,
-    :hp, :max_hp, :mana, :max_mana, :stamina, :max_stamina,
-    :hunger, :thirst,
-    :str, :agi, :int, :con, :cha,
-    :gold, :bank_gold, :body_id, :head_id,
-    :faction_kills_royal, :faction_kills_chaos, :citizens_killed, :criminals_killed,
-    :faction_score, :faction_rank_armada, :faction_rank_chaos, :faction_reenlistadas,
-    :npcs_killed, :deaths, :penalty, :fishing_points,
-    :dead, :criminal, :gm,
+    :race,
+    :class,
+    :gender,
+    :home_city,
+    :faction,
+    :level,
+    :xp,
+    :skill_points,
+    :map_id,
+    :pos_x,
+    :pos_y,
+    :heading,
+    :hp,
+    :max_hp,
+    :mana,
+    :max_mana,
+    :stamina,
+    :max_stamina,
+    :hunger,
+    :thirst,
+    :str,
+    :agi,
+    :int,
+    :con,
+    :cha,
+    :gold,
+    :bank_gold,
+    :body_id,
+    :head_id,
+    :faction_kills_royal,
+    :faction_kills_chaos,
+    :citizens_killed,
+    :criminals_killed,
+    :faction_score,
+    :faction_rank_armada,
+    :faction_rank_chaos,
+    :faction_reenlistadas,
+    :npcs_killed,
+    :deaths,
+    :penalty,
+    :fishing_points,
+    :dead,
+    :criminal,
+    :gm,
     :muted_until,
     :session_token
   ]
@@ -196,12 +229,18 @@ defmodule GameBackend.Characters do
 
   # Naked body IDs by {race_string, gender_string} — mirrors @body_ids in CharacterCreation
   @naked_body_ids %{
-    {"humano", "male"} => 1,   {"humano", "female"} => 1,
-    {"elfo", "male"} => 2,     {"elfo", "female"} => 2,
-    {"elfo_oscuro", "male"} => 3, {"elfo_oscuro", "female"} => 3,
-    {"enano", "male"} => 300,  {"enano", "female"} => 300,
-    {"gnomo", "male"} => 300,  {"gnomo", "female"} => 300,
-    {"orco", "male"} => 582,   {"orco", "female"} => 581
+    {"humano", "male"} => 1,
+    {"humano", "female"} => 1,
+    {"elfo", "male"} => 2,
+    {"elfo", "female"} => 2,
+    {"elfo_oscuro", "male"} => 3,
+    {"elfo_oscuro", "female"} => 3,
+    {"enano", "male"} => 300,
+    {"enano", "female"} => 300,
+    {"gnomo", "male"} => 300,
+    {"gnomo", "female"} => 300,
+    {"orco", "male"} => 582,
+    {"orco", "female"} => 581
   }
 
   @doc "Convert a DB record to a PlayerEntity struct."
@@ -379,14 +418,16 @@ defmodule GameBackend.Characters do
           inserted_at: now,
           updated_at: now
         },
-        on_conflict: [set: [item_id: item_id, amount: amount, equipped: equipped, elemental_tags: elemental_tags, updated_at: now]],
+        on_conflict: [
+          set: [item_id: item_id, amount: amount, equipped: equipped, elemental_tags: elemental_tags, updated_at: now]
+        ],
         conflict_target: [:character_id, :slot]
       )
     end)
   end
 
-  defp save_equipment(character_id, equipment) when equipment == %{} or equipment == nil, do:
-    save_equipment(character_id, %{weapon: nil, armor: nil, shield: nil, helmet: nil, ring: nil, municion: nil})
+  defp save_equipment(character_id, equipment) when equipment == %{} or equipment == nil,
+    do: save_equipment(character_id, %{weapon: nil, armor: nil, shield: nil, helmet: nil, ring: nil, municion: nil})
 
   defp save_equipment(character_id, equipment) do
     now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
@@ -409,7 +450,17 @@ defmodule GameBackend.Characters do
         inserted_at: now,
         updated_at: now
       },
-      on_conflict: [set: [weapon: weapon, armor: armor, shield: shield, helmet: helmet, ring: ring, municion: municion, updated_at: now]],
+      on_conflict: [
+        set: [
+          weapon: weapon,
+          armor: armor,
+          shield: shield,
+          helmet: helmet,
+          ring: ring,
+          municion: municion,
+          updated_at: now
+        ]
+      ],
       conflict_target: [:character_id]
     )
   end
@@ -421,13 +472,21 @@ defmodule GameBackend.Characters do
     base = List.duplicate(nil, 24)
 
     Enum.reduce(slots, base, fn slot, acc ->
-      item = %{item_id: slot.item_id, amount: slot.amount, equipped: slot.equipped, elemental_tags: slot.elemental_tags || 0}
+      item = %{
+        item_id: slot.item_id,
+        amount: slot.amount,
+        equipped: slot.equipped,
+        elemental_tags: slot.elemental_tags || 0
+      }
+
       List.replace_at(acc, slot.slot, item)
     end)
   end
 
   defp row_to_equipment(nil), do: %{weapon: nil, armor: nil, shield: nil, helmet: nil, ring: nil, municion: nil}
-  defp row_to_equipment(%Ecto.Association.NotLoaded{}), do: %{weapon: nil, armor: nil, shield: nil, helmet: nil, ring: nil, municion: nil}
+
+  defp row_to_equipment(%Ecto.Association.NotLoaded{}),
+    do: %{weapon: nil, armor: nil, shield: nil, helmet: nil, ring: nil, municion: nil}
 
   defp row_to_equipment(%CharacterEquipment{} = eq) do
     %{weapon: eq.weapon, armor: eq.armor, shield: eq.shield, helmet: eq.helmet, ring: eq.ring, municion: eq.municion}

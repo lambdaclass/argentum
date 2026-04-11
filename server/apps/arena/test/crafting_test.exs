@@ -13,6 +13,7 @@ defmodule Arena.CraftingTest do
       {:ok, _pid} -> :ok
       {:error, {:already_started, _pid}} -> :ok
     end
+
     :ok
   end
 
@@ -64,7 +65,8 @@ defmodule Arena.CraftingTest do
       inv = [%{item_id: 192, amount: 5, equipped: false} | List.duplicate(nil, 23)]
       recipe = CraftingRecipes.find_craftable(:blacksmithing, 10, inv)
       assert recipe != nil
-      assert recipe.result_id == 386  # Lingote de Hierro
+      # Lingote de Hierro
+      assert recipe.result_id == 386
     end
   end
 
@@ -90,10 +92,14 @@ defmodule Arena.CraftingTest do
 
     test "rejects mining without pickaxe equipped" do
       entity = %PlayerEntity{
-        char_id: 1, x: 50, y: 50, stamina: 100,
+        char_id: 1,
+        x: 50,
+        y: 50,
+        stamina: 100,
         equipment: %{weapon: 999, armor: nil, shield: nil, helmet: nil, ring: nil, municion: nil},
         skills: %{mining: 50}
       }
+
       state = make_state(%{1 => entity}, trigger_map: %{{50, 49} => 6})
 
       {:noreply, new_state} = Crafting.handle_work(state, 1, :mining)
@@ -103,10 +109,15 @@ defmodule Arena.CraftingTest do
 
     test "rejects mining without resource nearby" do
       entity = %PlayerEntity{
-        char_id: 1, x: 50, y: 50, heading: :north, stamina: 100,
+        char_id: 1,
+        x: 50,
+        y: 50,
+        heading: :north,
+        stamina: 100,
         equipment: %{weapon: 187, armor: nil, shield: nil, helmet: nil, ring: nil, municion: nil},
         skills: %{mining: 50}
       }
+
       # No trigger at facing tile
       state = make_state(%{1 => entity}, trigger_map: %{})
 
@@ -116,11 +127,16 @@ defmodule Arena.CraftingTest do
 
     test "mining consumes stamina when tool and resource are valid" do
       entity = %PlayerEntity{
-        char_id: 1, x: 50, y: 50, heading: :north, stamina: 100,
+        char_id: 1,
+        x: 50,
+        y: 50,
+        heading: :north,
+        stamina: 100,
         equipment: %{weapon: 187, armor: nil, shield: nil, helmet: nil, ring: nil, municion: nil},
         skills: %{mining: 50},
         inventory: List.duplicate(nil, 24)
       }
+
       # Trigger 6 at facing tile (50, 49)
       state = make_state(%{1 => entity}, trigger_map: %{{50, 49} => 6})
 
@@ -135,11 +151,16 @@ defmodule Arena.CraftingTest do
   describe "Social.handle_train_skill crafting fallthrough" do
     test "crafting skill without trainer falls through to Crafting" do
       entity = %PlayerEntity{
-        char_id: 1, x: 50, y: 50, heading: :north, stamina: 100,
+        char_id: 1,
+        x: 50,
+        y: 50,
+        heading: :north,
+        stamina: 100,
         skill_points: 5,
         equipment: %{weapon: nil, armor: nil, shield: nil, helmet: nil, ring: nil, municion: nil},
         skills: %{mining: 10}
       }
+
       state = make_state(%{1 => entity})
 
       # skill_index 18 = :mining
@@ -152,9 +173,13 @@ defmodule Arena.CraftingTest do
 
     test "non-crafting skill without trainer shows error" do
       entity = %PlayerEntity{
-        char_id: 1, x: 50, y: 50, skill_points: 5,
+        char_id: 1,
+        x: 50,
+        y: 50,
+        skill_points: 5,
         skills: %{combat_weapons: 10}
       }
+
       state = make_state(%{1 => entity})
 
       # skill_index 3 = :combat_weapons (not a crafting skill)

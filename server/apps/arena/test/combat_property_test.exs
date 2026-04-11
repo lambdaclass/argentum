@@ -15,6 +15,7 @@ defmodule Arena.CombatPropertyTest do
       {:ok, _pid} -> :ok
       {:error, {:already_started, _pid}} -> :ok
     end
+
     :ok
   end
 
@@ -33,13 +34,20 @@ defmodule Arena.CombatPropertyTest do
   describe "hit_chance invariant: always in [5, 95]" do
     test "#{@iterations} random combatant pairs" do
       for _ <- 1..@iterations do
-        result = Combat.hit_chance(
-          rand_skill(), rand_stat(), rand_level(), rand_class(),
-          rand_skill(), rand_stat(), rand_level(), rand_class()
-        )
+        result =
+          Combat.hit_chance(
+            rand_skill(),
+            rand_stat(),
+            rand_level(),
+            rand_class(),
+            rand_skill(),
+            rand_stat(),
+            rand_level(),
+            rand_class()
+          )
 
         assert result >= 5 and result <= 95,
-          "hit_chance=#{result} out of [5, 95]"
+               "hit_chance=#{result} out of [5, 95]"
       end
     end
 
@@ -177,7 +185,8 @@ defmodule Arena.CombatPropertyTest do
     test "#{@iterations} random damage and resistance values" do
       for _ <- 1..@iterations do
         damage = rand_damage()
-        resist = :rand.uniform(150)  # Allow >100% to test clamping
+        # Allow >100% to test clamping
+        resist = :rand.uniform(150)
 
         result = Combat.apply_magic_resistance(damage, resist)
         assert result >= 0, "magic_resist=#{result} below 0"
@@ -211,8 +220,9 @@ defmodule Arena.CombatPropertyTest do
         class = rand_class()
 
         result = Combat.npc_hit_chance(poder, tactics, agi, level, class)
+
         assert result >= 10 and result <= 90,
-          "npc_hit_chance=#{result} out of [10, 90]"
+               "npc_hit_chance=#{result} out of [10, 90]"
       end
     end
   end
@@ -272,8 +282,9 @@ defmodule Arena.CombatPropertyTest do
 
       # On average, mage damage should be ~70% of non-mage
       ratio = mage_total / max(non_mage_total, 1)
+
       assert ratio > 0.60 and ratio < 0.80,
-        "mage/non-mage ratio=#{Float.round(ratio, 3)}, expected ~0.70"
+             "mage/non-mage ratio=#{Float.round(ratio, 3)}, expected ~0.70"
     end
   end
 
@@ -326,7 +337,8 @@ defmodule Arena.CombatPropertyTest do
     test "multiplier is exactly 1.5x" do
       assert Combat.apply_critical(100) == 150
       assert Combat.apply_critical(10) == 15
-      assert Combat.apply_critical(1) == 2  # round(1 * 1.5) = 2
+      # round(1 * 1.5) = 2
+      assert Combat.apply_critical(1) == 2
     end
   end
 
@@ -358,8 +370,9 @@ defmodule Arena.CombatPropertyTest do
       for _ <- 1..@iterations do
         base = 5 + :rand.uniform(85)
         result = Combat.adjust_hit_for_meditate(base, true)
+
         assert result >= base,
-          "meditate adjust(#{base})=#{result}, should be >= base"
+               "meditate adjust(#{base})=#{result}, should be >= base"
       end
     end
 
@@ -374,8 +387,9 @@ defmodule Arena.CombatPropertyTest do
       for _ <- 1..@iterations do
         base = :rand.uniform(100)
         result = Combat.adjust_hit_for_meditate(base, true)
+
         assert result >= 10 and result <= 90,
-          "meditate hit=#{result} out of [10, 90]"
+               "meditate hit=#{result} out of [10, 90]"
       end
     end
   end

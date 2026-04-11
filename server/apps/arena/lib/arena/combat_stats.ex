@@ -49,7 +49,9 @@ defmodule Arena.CombatStats do
   """
   def shield_defense_pct(equipment) do
     case Map.get(equipment, :shield) do
-      nil -> 0
+      nil ->
+        0
+
       item_id ->
         case GameData.get_item(item_id) do
           nil -> 0

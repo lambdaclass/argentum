@@ -271,6 +271,7 @@ defmodule Arena.Map.MapServerBugsTest do
       # Two-step transfer: enter destination first, then leave source
       {:ok, _new_idx, dest_players, _weather} =
         MapServer.enter(dest_map, transferred_entity, position: {dest_x, dest_y})
+
       MapServer.leave(@test_map_id, 6501)
 
       dest_entity = Map.get(dest_players, 6501)
@@ -290,13 +291,15 @@ defmodule Arena.Map.MapServerBugsTest do
       dest_map_id = exit_tile.dest_map
       ensure_map_started(dest_map_id)
 
-      entity = %{make_entity(6601, "StatefulTransit") |
-        hp: 42,
-        max_hp: 100,
-        gold: 1234,
-        level: 7,
-        inventory: [%{item_id: 100, amount: 5, equipped: false} | List.duplicate(nil, 23)]
+      entity = %{
+        make_entity(6601, "StatefulTransit")
+        | hp: 42,
+          max_hp: 100,
+          gold: 1234,
+          level: 7,
+          inventory: [%{item_id: 100, amount: 5, equipped: false} | List.duplicate(nil, 23)]
       }
+
       {:ok, _idx, _, _weather} = MapServer.enter(@test_map_id, entity, position: {start_x, start_y})
       flush_mailbox()
 
@@ -402,10 +405,14 @@ defmodule Arena.Map.MapServerBugsTest do
       # For each exit tile, find an adjacent walkable tile to start from.
       # The direction moves FROM start TO exit.
       [
-        {0, -1, :south},  # start is 1 tile north, walk south
-        {1, 0, :west},    # start is 1 tile east, walk west
-        {0, 1, :north},   # start is 1 tile south, walk north
-        {-1, 0, :east}    # start is 1 tile west, walk east
+        # start is 1 tile north, walk south
+        {0, -1, :south},
+        # start is 1 tile east, walk west
+        {1, 0, :west},
+        # start is 1 tile south, walk north
+        {0, 1, :north},
+        # start is 1 tile west, walk east
+        {-1, 0, :east}
       ]
       |> Enum.find_value(fn {dx, dy, dir} ->
         sx = ex.x + dx

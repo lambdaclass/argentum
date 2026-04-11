@@ -16,16 +16,16 @@ defmodule Arena.Data.FactionData do
   alias Arena.Data.IniParser
 
   @type rank :: %{
-    rank: integer(),
-    title: String.t(),
-    required_level: integer(),
-    required_score: integer()
-  }
+          rank: integer(),
+          title: String.t(),
+          required_level: integer(),
+          required_score: integer()
+        }
 
   @type reward :: %{
-    rank: integer(),
-    obj_index: integer()
-  }
+          rank: integer(),
+          obj_index: integer()
+        }
 
   @doc "Load faction ranks from rangos_faccion.dat. Returns {armada_ranks, chaos_ranks}."
   def load_ranks(dat_dir) do
@@ -76,6 +76,7 @@ defmodule Arena.Data.FactionData do
 
         # VB6 splits: first half = Chaos, second half = Armada
         half = div(num_rewards, 2)
+
         {chaos_raw, armada_raw} =
           all_rewards
           |> Enum.with_index(1)

@@ -14,11 +14,11 @@ defmodule GameBackend.BankItems do
 
   @primary_key {:id, :id, autogenerate: true}
   schema "bank_items" do
-    field :character_id, :integer
-    field :slot, :integer
-    field :item_id, :integer
-    field :amount, :integer, default: 1
-    field :elemental_tags, :integer, default: 0
+    field(:character_id, :integer)
+    field(:slot, :integer)
+    field(:item_id, :integer)
+    field(:amount, :integer, default: 1)
+    field(:elemental_tags, :integer, default: 0)
 
     timestamps()
   end
@@ -40,7 +40,8 @@ defmodule GameBackend.BankItems do
 
   @doc "Upsert a bank item: add to existing slot or insert new."
   def upsert(character_id, slot, item_id, amount, elemental_tags \\ 0) do
-    existing = __MODULE__
+    existing =
+      __MODULE__
       |> where(character_id: ^character_id, slot: ^slot)
       |> Repo.one()
 
@@ -50,22 +51,32 @@ defmodule GameBackend.BankItems do
       |> Repo.update()
     else
       %__MODULE__{}
-      |> changeset(%{character_id: character_id, slot: slot, item_id: item_id, amount: amount, elemental_tags: elemental_tags})
+      |> changeset(%{
+        character_id: character_id,
+        slot: slot,
+        item_id: item_id,
+        amount: amount,
+        elemental_tags: elemental_tags
+      })
       |> Repo.insert()
     end
   end
 
   @doc "Remove amount from a bank slot. Deletes the row if amount reaches 0."
   def withdraw(character_id, slot, amount) do
-    existing = __MODULE__
+    existing =
+      __MODULE__
       |> where(character_id: ^character_id, slot: ^slot)
       |> Repo.one()
 
     case existing do
-      nil -> {:error, :not_found}
+      nil ->
+        {:error, :not_found}
+
       bi when bi.amount <= amount ->
         Repo.delete(bi)
         {:ok, :deleted}
+
       bi ->
         bi |> change(%{amount: bi.amount - amount}) |> Repo.update()
     end

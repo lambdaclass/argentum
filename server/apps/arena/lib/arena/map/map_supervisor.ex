@@ -76,7 +76,9 @@ defmodule Arena.Map.MapSupervisor do
     started =
       Enum.reduce(map_ids, 0, fn map_id, acc ->
         case start_map(map_id) do
-          {:ok, _pid} -> acc + 1
+          {:ok, _pid} ->
+            acc + 1
+
           {:error, reason} ->
             Logger.error("Failed to start map #{map_id}: #{inspect(reason)}")
             acc
@@ -100,7 +102,9 @@ defmodule Arena.Map.MapSupervisor do
     {ready, not_ready} =
       Enum.split_with(map_ids, fn id ->
         case Registry.lookup(Arena.MapRegistry, id) do
-          [] -> false
+          [] ->
+            false
+
           _ ->
             try do
               Arena.Map.MapServer.ready?(id)
@@ -116,7 +120,10 @@ defmodule Arena.Map.MapSupervisor do
 
       System.monotonic_time(:millisecond) >= deadline ->
         failed = length(not_ready)
-        Logger.warning("Map boot timed out: #{length(ready)} ready, #{failed} still loading or failed (#{inspect(Enum.take(not_ready, 5))}...)")
+
+        Logger.warning(
+          "Map boot timed out: #{length(ready)} ready, #{failed} still loading or failed (#{inspect(Enum.take(not_ready, 5))}...)"
+        )
 
       true ->
         Process.sleep(poll_ms)

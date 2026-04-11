@@ -4,9 +4,9 @@ defmodule GameBackend.CharacterSkill do
 
   @primary_key {:id, :id, autogenerate: true}
   schema "character_skills" do
-    belongs_to :character, GameBackend.Characters
-    field :skill_name, :string
-    field :level, :integer, default: 0
+    belongs_to(:character, GameBackend.Characters)
+    field(:skill_name, :string)
+    field(:level, :integer, default: 0)
     timestamps()
   end
 

@@ -8,6 +8,7 @@ defmodule Arena.CombatTest do
       {:ok, _pid} -> :ok
       {:error, {:already_started, _pid}} -> :ok
     end
+
     :ok
   end
 
@@ -85,7 +86,8 @@ defmodule Arena.CombatTest do
   describe "xp_gain/5" do
     test "basic XP calculation" do
       xp = Combat.xp_gain(30, 100, 60, 10, 10)
-      assert xp == 50  # 30 * 100 / 60
+      # 30 * 100 / 60
+      assert xp == 50
     end
 
     test "level penalty after 4 levels difference" do

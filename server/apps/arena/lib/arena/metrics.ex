@@ -20,6 +20,7 @@ defmodule Arena.Metrics do
   @doc "Record a move broadcast with the given recipient count."
   def inc_move(recipients) do
     ref = :persistent_term.get(:arena_metrics, nil)
+
     if ref do
       :atomics.add(ref, @move_broadcasts, 1)
       :atomics.add(ref, @move_recipients, recipients)
@@ -29,6 +30,7 @@ defmodule Arena.Metrics do
   @doc "Record a chat broadcast with the given recipient count."
   def inc_chat(recipients) do
     ref = :persistent_term.get(:arena_metrics, nil)
+
     if ref do
       :atomics.add(ref, @chat_broadcasts, 1)
       :atomics.add(ref, @chat_recipients, recipients)
@@ -54,7 +56,9 @@ defmodule Arena.Metrics do
   @doc "Reset all counters to zero."
   def reset do
     case :persistent_term.get(:arena_metrics, nil) do
-      nil -> :ok
+      nil ->
+        :ok
+
       ref ->
         for i <- 1..4, do: :atomics.put(ref, i, 0)
         :ok

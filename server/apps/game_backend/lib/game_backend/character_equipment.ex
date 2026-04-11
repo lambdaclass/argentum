@@ -4,13 +4,13 @@ defmodule GameBackend.CharacterEquipment do
 
   @primary_key {:id, :id, autogenerate: true}
   schema "character_equipment" do
-    belongs_to :character, GameBackend.Characters
-    field :weapon, :integer
-    field :armor, :integer
-    field :shield, :integer
-    field :helmet, :integer
-    field :ring, :integer
-    field :municion, :integer
+    belongs_to(:character, GameBackend.Characters)
+    field(:weapon, :integer)
+    field(:armor, :integer)
+    field(:shield, :integer)
+    field(:helmet, :integer)
+    field(:ring, :integer)
+    field(:municion, :integer)
     timestamps()
   end
 

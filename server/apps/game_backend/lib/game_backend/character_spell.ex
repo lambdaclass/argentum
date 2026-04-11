@@ -4,8 +4,8 @@ defmodule GameBackend.CharacterSpell do
 
   @primary_key {:id, :id, autogenerate: true}
   schema "character_spells" do
-    belongs_to :character, GameBackend.Characters
-    field :spell_id, :integer
+    belongs_to(:character, GameBackend.Characters)
+    field(:spell_id, :integer)
     timestamps()
   end
 

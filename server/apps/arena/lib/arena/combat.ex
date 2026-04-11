@@ -14,8 +14,7 @@ defmodule Arena.Combat do
   evasion = (tactics + 3 * tactics / 100 * agi) * class_mod + 2.5 * max(level - 12, 0)
   hit_chance = clamp(50 + (attack_power - evasion) * 0.4, 5, 95)
   """
-  def hit_chance(atk_skill, atk_agi, atk_level, atk_class_id,
-                 def_tactics, def_agi, def_level, def_class_id) do
+  def hit_chance(atk_skill, atk_agi, atk_level, atk_class_id, def_tactics, def_agi, def_level, def_class_id) do
     atk_mod = GameData.class_attack_mod(atk_class_id)
     def_mod = GameData.class_evasion_mod(def_class_id)
 
@@ -72,6 +71,7 @@ defmodule Arena.Combat do
     chance = clamp(chance, 10, 90)
     Enum.random(1..100) <= chance
   end
+
   def shield_block?(_shield_pct, _defense_skill, _tactics), do: false
 
   @doc """
@@ -113,6 +113,7 @@ defmodule Arena.Combat do
   def apply_magic_resistance(damage, resistance_pct) when resistance_pct > 0 do
     max(round(damage * (1 - resistance_pct / 100)), 0)
   end
+
   def apply_magic_resistance(damage, _), do: damage
 
   @doc """
@@ -139,6 +140,7 @@ defmodule Arena.Combat do
     miss_chance = (100 - hit_chance) * 0.75
     clamp(round(100 - miss_chance), 10, 90)
   end
+
   def adjust_hit_for_meditate(hit_chance, _false), do: hit_chance
 
   @doc """

@@ -68,9 +68,8 @@ defmodule Arena.AppearanceBugsTest do
       binary = Encoder.encode(packet)
 
       # Layout: id(2) + char_index(2) + body_id(2) + head_id(2) + heading(1) + x(1) + y(1) + weapon_id(2)
-      <<_id::little-16, _ci::little-16, _body::little-16, _head::little-16,
-        _heading::8, _x::8, _y::8, weapon_id::little-16, shield_id::little-16,
-        helmet_id::little-16, _rest::binary>> = binary
+      <<_id::little-16, _ci::little-16, _body::little-16, _head::little-16, _heading::8, _x::8, _y::8,
+        weapon_id::little-16, shield_id::little-16, helmet_id::little-16, _rest::binary>> = binary
 
       assert weapon_id == 42,
              "Wire format weapon_id should be 42, got #{weapon_id}"
@@ -119,9 +118,8 @@ defmodule Arena.AppearanceBugsTest do
       binary = Encoder.encode(packet)
 
       # Layout: id(2) + char_index(2) + flags(1) + body(2) + head(2) + heading(1) + weapon(2) + shield(2) + helmet(2)
-      <<_id::little-16, _ci::little-16, _flags::8, _body::little-16,
-        _head::little-16, _heading::8, weapon_id::little-16,
-        shield_id::little-16, helmet_id::little-16, _rest::binary>> = binary
+      <<_id::little-16, _ci::little-16, _flags::8, _body::little-16, _head::little-16, _heading::8,
+        weapon_id::little-16, shield_id::little-16, helmet_id::little-16, _rest::binary>> = binary
 
       assert weapon_id == 42,
              "Wire format weapon_id should be 42, got #{weapon_id}"
@@ -270,6 +268,7 @@ defmodule Arena.AppearanceBugsTest do
 
     test "PlayerEntity has a base_body_id field for naked body restoration" do
       entity = %PlayerEntity{}
+
       assert Map.has_key?(entity, :base_body_id),
              "PlayerEntity should have a base_body_id field so armor unequip can restore naked body"
     end

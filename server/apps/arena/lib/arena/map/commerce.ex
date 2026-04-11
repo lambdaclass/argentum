@@ -27,7 +27,8 @@ defmodule Arena.Map.Commerce do
             {:reply, {:error, :no_target}, state}
         end
 
-      :error -> {:reply, {:error, :not_on_map}, state}
+      :error ->
+        {:reply, {:error, :not_on_map}, state}
     end
   end
 
@@ -57,37 +58,59 @@ defmodule Arena.Map.Commerce do
               buy_price = ceil(item_def.valor / (1 + trading_skill / 100) * amount)
 
               if entity.gold < buy_price do
-                Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                  Encoder.encode({:console_msg, %{message: "No tienes suficiente oro.", font_index: 0}})})
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw, Encoder.encode({:console_msg, %{message: "No tienes suficiente oro.", font_index: 0}})}
+                )
+
                 {:reply, {:error, :not_enough_gold}, state}
               else
                 case find_inventory_slot(entity, shop_item.item_id, item_def.stackable) do
                   nil ->
-                    Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                      Encoder.encode({:console_msg, %{message: "Inventario lleno.", font_index: 0}})})
+                    Helpers.send_to_session(
+                      state.sessions,
+                      char_id,
+                      {:send_raw, Encoder.encode({:console_msg, %{message: "Inventario lleno.", font_index: 0}})}
+                    )
+
                     {:reply, {:error, :inventory_full}, state}
 
                   inv_slot ->
                     entity = %{entity | gold: entity.gold - buy_price}
                     current = Enum.at(entity.inventory, inv_slot)
-                    new_item = if current && current.item_id == shop_item.item_id do
-                      %{current | amount: current.amount + amount}
-                    else
-                      %{item_id: shop_item.item_id, amount: amount, equipped: false}
-                    end
+
+                    new_item =
+                      if current && current.item_id == shop_item.item_id do
+                        %{current | amount: current.amount + amount}
+                      else
+                        %{item_id: shop_item.item_id, amount: amount, equipped: false}
+                      end
+
                     inventory = List.replace_at(entity.inventory, inv_slot, new_item)
                     entity = %{entity | inventory: inventory}
 
-                    Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                      Encoder.encode({:change_inventory_slot, %{
-                        slot: inv_slot + 1,
-                        obj_index: shop_item.item_id,
-                        amount: new_item.amount,
-                        equipped: new_item.equipped,
-                        valor: item_def.valor / 1.0
-                      }})})
-                    Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                      Encoder.encode({:update_gold, %{gold: entity.gold}})})
+                    Helpers.send_to_session(
+                      state.sessions,
+                      char_id,
+                      {:send_raw,
+                       Encoder.encode(
+                         {:change_inventory_slot,
+                          %{
+                            slot: inv_slot + 1,
+                            obj_index: shop_item.item_id,
+                            amount: new_item.amount,
+                            equipped: new_item.equipped,
+                            valor: item_def.valor / 1.0
+                          }}
+                       )}
+                    )
+
+                    Helpers.send_to_session(
+                      state.sessions,
+                      char_id,
+                      {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
+                    )
 
                     players = Map.put(state.players, char_id, entity)
                     {:reply, :ok, %{state | players: players}}
@@ -97,7 +120,8 @@ defmodule Arena.Map.Commerce do
           end
         end
 
-      :error -> {:reply, {:error, :not_on_map}, state}
+      :error ->
+        {:reply, {:error, :not_on_map}, state}
     end
   end
 
@@ -126,44 +150,72 @@ defmodule Arena.Map.Commerce do
               # VB6: newbie items cannot be sold
               cond do
                 item_def != nil and item_def.newbie ->
-                  Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                    Encoder.encode({:console_msg, %{message: "Objetos newbies no se pueden vender.", font_index: 0}})})
+                  Helpers.send_to_session(
+                    state.sessions,
+                    char_id,
+                    {:send_raw,
+                     Encoder.encode({:console_msg, %{message: "Objetos newbies no se pueden vender.", font_index: 0}})}
+                  )
+
                   {:reply, {:error, :newbie_item}, state}
 
                 true ->
-              sell_price = if item_def, do: div(item_def.valor, 3) * amount, else: 0
+                  sell_price = if item_def, do: div(item_def.valor, 3) * amount, else: 0
 
-              new_amount = inv_item.amount - amount
-              inventory = if new_amount <= 0 do
-                List.replace_at(entity.inventory, inv_idx, nil)
-              else
-                List.replace_at(entity.inventory, inv_idx, %{inv_item | amount: new_amount})
-              end
+                  new_amount = inv_item.amount - amount
 
-              entity = %{entity | inventory: inventory, gold: entity.gold + sell_price}
+                  inventory =
+                    if new_amount <= 0 do
+                      List.replace_at(entity.inventory, inv_idx, nil)
+                    else
+                      List.replace_at(entity.inventory, inv_idx, %{inv_item | amount: new_amount})
+                    end
 
-              if new_amount <= 0 do
-                Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                  Encoder.encode({:change_inventory_slot, %{slot: slot, obj_index: 0, amount: 0, equipped: false, valor: 0.0}})})
-              else
-                valor = if item_def, do: item_def.valor / 1.0, else: 0.0
-                Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                  Encoder.encode({:change_inventory_slot, %{
-                    slot: slot, obj_index: inv_item.item_id, amount: new_amount,
-                    equipped: inv_item.equipped, valor: valor
-                  }})})
-              end
+                  entity = %{entity | inventory: inventory, gold: entity.gold + sell_price}
 
-              Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                Encoder.encode({:update_gold, %{gold: entity.gold}})})
+                  if new_amount <= 0 do
+                    Helpers.send_to_session(
+                      state.sessions,
+                      char_id,
+                      {:send_raw,
+                       Encoder.encode(
+                         {:change_inventory_slot, %{slot: slot, obj_index: 0, amount: 0, equipped: false, valor: 0.0}}
+                       )}
+                    )
+                  else
+                    valor = if item_def, do: item_def.valor / 1.0, else: 0.0
 
-              players = Map.put(state.players, char_id, entity)
-              {:reply, :ok, %{state | players: players}}
+                    Helpers.send_to_session(
+                      state.sessions,
+                      char_id,
+                      {:send_raw,
+                       Encoder.encode(
+                         {:change_inventory_slot,
+                          %{
+                            slot: slot,
+                            obj_index: inv_item.item_id,
+                            amount: new_amount,
+                            equipped: inv_item.equipped,
+                            valor: valor
+                          }}
+                       )}
+                    )
+                  end
+
+                  Helpers.send_to_session(
+                    state.sessions,
+                    char_id,
+                    {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
+                  )
+
+                  players = Map.put(state.players, char_id, entity)
+                  {:reply, :ok, %{state | players: players}}
               end
           end
         end
 
-      :error -> {:reply, {:error, :not_on_map}, state}
+      :error ->
+        {:reply, {:error, :not_on_map}, state}
     end
   end
 
@@ -171,12 +223,12 @@ defmodule Arena.Map.Commerce do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         entity = %{entity | commerce_npc_id: nil}
-        Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-          Encoder.encode({:commerce_end, %{}})})
+        Helpers.send_to_session(state.sessions, char_id, {:send_raw, Encoder.encode({:commerce_end, %{}})})
         players = Map.put(state.players, char_id, entity)
         {:reply, :ok, %{state | players: players}}
 
-      :error -> {:reply, {:error, :not_on_map}, state}
+      :error ->
+        {:reply, {:error, :not_on_map}, state}
     end
   end
 
@@ -197,22 +249,33 @@ defmodule Arena.Map.Commerce do
       true ->
         entity = %{entity | commerce_npc_id: npc.npc_id}
 
-        Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-          Encoder.encode({:commerce_init, %{npc_name: npc_def.name || "Comerciante"}})})
+        Helpers.send_to_session(
+          state.sessions,
+          char_id,
+          {:send_raw, Encoder.encode({:commerce_init, %{npc_name: npc_def.name || "Comerciante"}})}
+        )
 
         npc_def.shop_items
         |> Enum.with_index(1)
         |> Enum.each(fn {%{item_id: item_id}, slot} ->
           item_def = GameData.get_item(item_id)
+
           if item_def do
-            Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-              Encoder.encode({:change_npc_inventory_slot, %{
-                slot: slot,
-                obj_index: item_id,
-                amount: 10000,
-                price: item_def.valor / 1.0,
-                puede_usar: 1
-              }})})
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw,
+               Encoder.encode(
+                 {:change_npc_inventory_slot,
+                  %{
+                    slot: slot,
+                    obj_index: item_id,
+                    amount: 10000,
+                    price: item_def.valor / 1.0,
+                    puede_usar: 1
+                  }}
+               )}
+            )
           end
         end)
 
@@ -226,10 +289,12 @@ defmodule Arena.Map.Commerce do
   defp find_inventory_slot(entity, item_id, stackable) do
     if stackable do
       # Try to find existing stack first
-      idx = Enum.find_index(entity.inventory, fn
-        %{item_id: ^item_id} -> true
-        _ -> false
-      end)
+      idx =
+        Enum.find_index(entity.inventory, fn
+          %{item_id: ^item_id} -> true
+          _ -> false
+        end)
+
       idx || Enum.find_index(entity.inventory, &is_nil/1)
     else
       Enum.find_index(entity.inventory, &is_nil/1)

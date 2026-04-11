@@ -85,25 +85,50 @@ defmodule Arena.Map.MapServer do
   def drop_item(map_id, char_id, slot, amount), do: GenServer.call(via(map_id), {:drop_item, char_id, slot, amount})
   def equip_item(map_id, char_id, slot), do: GenServer.call(via(map_id), {:equip_item, char_id, slot})
   def use_item(map_id, char_id, slot), do: GenServer.call(via(map_id), {:use_item, char_id, slot})
-  def attack(map_id, char_id, target_x \\ nil, target_y \\ nil), do: GenServer.call(via(map_id), {:attack, char_id, target_x, target_y})
-  def cast_spell(map_id, char_id, spell_slot, target_x, target_y), do: GenServer.call(via(map_id), {:cast_spell, char_id, spell_slot, target_x, target_y})
+
+  def attack(map_id, char_id, target_x \\ nil, target_y \\ nil),
+    do: GenServer.call(via(map_id), {:attack, char_id, target_x, target_y})
+
+  def cast_spell(map_id, char_id, spell_slot, target_x, target_y),
+    do: GenServer.call(via(map_id), {:cast_spell, char_id, spell_slot, target_x, target_y})
+
   def safe_toggle(map_id, char_id), do: GenServer.call(via(map_id), {:safe_toggle, char_id})
-  def open_commerce(map_id, char_id, target_x, target_y), do: GenServer.call(via(map_id), {:open_commerce, char_id, target_x, target_y})
-  def commerce_buy(map_id, char_id, slot, amount), do: GenServer.call(via(map_id), {:commerce_buy, char_id, slot, amount})
-  def commerce_sell(map_id, char_id, slot, amount), do: GenServer.call(via(map_id), {:commerce_sell, char_id, slot, amount})
+
+  def open_commerce(map_id, char_id, target_x, target_y),
+    do: GenServer.call(via(map_id), {:open_commerce, char_id, target_x, target_y})
+
+  def commerce_buy(map_id, char_id, slot, amount),
+    do: GenServer.call(via(map_id), {:commerce_buy, char_id, slot, amount})
+
+  def commerce_sell(map_id, char_id, slot, amount),
+    do: GenServer.call(via(map_id), {:commerce_sell, char_id, slot, amount})
+
   def commerce_end(map_id, char_id), do: GenServer.call(via(map_id), {:commerce_end, char_id})
-  def open_bank(map_id, char_id, target_x, target_y), do: GenServer.call(via(map_id), {:open_bank, char_id, target_x, target_y})
-  def bank_deposit(map_id, char_id, slot, amount, slot_destino), do: GenServer.call(via(map_id), {:bank_deposit, char_id, slot, amount, slot_destino})
-  def bank_extract_item(map_id, char_id, slot, amount, slot_destino), do: GenServer.call(via(map_id), {:bank_extract_item, char_id, slot, amount, slot_destino})
+
+  def open_bank(map_id, char_id, target_x, target_y),
+    do: GenServer.call(via(map_id), {:open_bank, char_id, target_x, target_y})
+
+  def bank_deposit(map_id, char_id, slot, amount, slot_destino),
+    do: GenServer.call(via(map_id), {:bank_deposit, char_id, slot, amount, slot_destino})
+
+  def bank_extract_item(map_id, char_id, slot, amount, slot_destino),
+    do: GenServer.call(via(map_id), {:bank_extract_item, char_id, slot, amount, slot_destino})
+
   def bank_deposit_gold(map_id, char_id, amount), do: GenServer.call(via(map_id), {:bank_deposit_gold, char_id, amount})
   def bank_extract_gold(map_id, char_id, amount), do: GenServer.call(via(map_id), {:bank_extract_gold, char_id, amount})
   def bank_end(map_id, char_id), do: GenServer.call(via(map_id), {:bank_end, char_id})
-  def user_trade_offer(map_id, char_id, obj_index, amount), do: GenServer.call(via(map_id), {:user_trade_offer, char_id, obj_index, amount})
+
+  def user_trade_offer(map_id, char_id, obj_index, amount),
+    do: GenServer.call(via(map_id), {:user_trade_offer, char_id, obj_index, amount})
+
   def user_trade_accept(map_id, char_id), do: GenServer.call(via(map_id), {:user_trade_accept, char_id})
   def user_trade_reject(map_id, char_id), do: GenServer.call(via(map_id), {:user_trade_reject, char_id})
   def user_trade_end(map_id, char_id), do: GenServer.call(via(map_id), {:user_trade_end, char_id})
   def yell(map_id, char_id, message), do: GenServer.cast(via(map_id), {:yell, char_id, message})
-  def whisper(map_id, char_id, target_char_id, message), do: GenServer.cast(via(map_id), {:whisper, char_id, target_char_id, message})
+
+  def whisper(map_id, char_id, target_char_id, message),
+    do: GenServer.cast(via(map_id), {:whisper, char_id, target_char_id, message})
+
   def rest(map_id, char_id), do: GenServer.cast(via(map_id), {:rest, char_id})
   def meditate(map_id, char_id), do: GenServer.cast(via(map_id), {:meditate, char_id})
   def heal(map_id, char_id), do: GenServer.cast(via(map_id), {:heal, char_id})
@@ -126,7 +151,10 @@ defmodule Arena.Map.MapServer do
   def modify_skills(map_id, char_id, points), do: GenServer.cast(via(map_id), {:modify_skills, char_id, points})
   def change_description(map_id, char_id, desc), do: GenServer.cast(via(map_id), {:change_description, char_id, desc})
   def spell_info(map_id, char_id, slot), do: GenServer.cast(via(map_id), {:spell_info, char_id, slot})
-  def move_item(map_id, char_id, from_slot, to_slot), do: GenServer.cast(via(map_id), {:move_item, char_id, from_slot, to_slot})
+
+  def move_item(map_id, char_id, from_slot, to_slot),
+    do: GenServer.cast(via(map_id), {:move_item, char_id, from_slot, to_slot})
+
   def modify_gold(map_id, char_id, amount), do: GenServer.cast(via(map_id), {:modify_gold, char_id, amount})
 
   @doc "Check if a map process is loaded and ready to accept commands."
@@ -152,8 +180,12 @@ defmodule Arena.Map.MapServer do
 
     map_data_result =
       case map_id do
-        @benchmark_map_id -> {:ok, benchmark_map_data()}
-        @crowd_arena_map_id -> {:ok, crowd_arena_map_data()}
+        @benchmark_map_id ->
+          {:ok, benchmark_map_data()}
+
+        @crowd_arena_map_id ->
+          {:ok, crowd_arena_map_data()}
+
         _ ->
           csm_path = Path.join(maps_dir(), "mapa#{map_id}.csm")
           CsmParser.parse_file(csm_path)
@@ -180,6 +212,7 @@ defmodule Arena.Map.MapServer do
           visibility_mode = Application.get_env(:arena, :visibility_mode, :aoi_grid)
 
           occupancy = :array.new(Helpers.map_width() * Helpers.map_height(), default: nil)
+
           {npcs_live, npc_char_indices, occupancy, next_idx} =
             spawn_npcs(map_data.npcs, map_id, occupancy)
 
@@ -289,18 +322,25 @@ defmodule Arena.Map.MapServer do
   @impl true
   def handle_call({:pick_up, char_id}, _from, state), do: InventoryHandlers.handle_pick_up(state, char_id)
   @impl true
-  def handle_call({:drop_item, char_id, slot, amount}, _from, state), do: InventoryHandlers.handle_drop_item(state, char_id, slot, amount)
+  def handle_call({:drop_item, char_id, slot, amount}, _from, state),
+    do: InventoryHandlers.handle_drop_item(state, char_id, slot, amount)
+
   @impl true
-  def handle_call({:equip_item, char_id, slot}, _from, state), do: InventoryHandlers.handle_equip_item(state, char_id, slot)
+  def handle_call({:equip_item, char_id, slot}, _from, state),
+    do: InventoryHandlers.handle_equip_item(state, char_id, slot)
+
   @impl true
   def handle_call({:use_item, char_id, slot}, _from, state), do: InventoryHandlers.handle_use_item(state, char_id, slot)
 
   # ---- Combat (delegated) ----
 
   @impl true
-  def handle_call({:attack, char_id, target_x, target_y}, _from, state), do: CombatHandlers.handle_attack(state, char_id, target_x, target_y)
+  def handle_call({:attack, char_id, target_x, target_y}, _from, state),
+    do: CombatHandlers.handle_attack(state, char_id, target_x, target_y)
+
   @impl true
-  def handle_call({:cast_spell, char_id, spell_slot, target_x, target_y}, _from, state), do: CombatHandlers.handle_cast_spell(state, char_id, spell_slot, target_x, target_y)
+  def handle_call({:cast_spell, char_id, spell_slot, target_x, target_y}, _from, state),
+    do: CombatHandlers.handle_cast_spell(state, char_id, spell_slot, target_x, target_y)
 
   # ---- Commerce / Bank / Trade (delegated) ----
 
@@ -309,27 +349,43 @@ defmodule Arena.Map.MapServer do
   @impl true
   def handle_call({:safe_toggle, char_id}, _from, state), do: Social.handle_safe_toggle(state, char_id)
   @impl true
-  def handle_call({:open_commerce, char_id, tx, ty}, _from, state), do: Commerce.handle_open_commerce(state, char_id, tx, ty)
+  def handle_call({:open_commerce, char_id, tx, ty}, _from, state),
+    do: Commerce.handle_open_commerce(state, char_id, tx, ty)
+
   @impl true
-  def handle_call({:commerce_buy, char_id, slot, amount}, _from, state), do: Commerce.handle_commerce_buy(state, char_id, slot, amount)
+  def handle_call({:commerce_buy, char_id, slot, amount}, _from, state),
+    do: Commerce.handle_commerce_buy(state, char_id, slot, amount)
+
   @impl true
-  def handle_call({:commerce_sell, char_id, slot, amount}, _from, state), do: Commerce.handle_commerce_sell(state, char_id, slot, amount)
+  def handle_call({:commerce_sell, char_id, slot, amount}, _from, state),
+    do: Commerce.handle_commerce_sell(state, char_id, slot, amount)
+
   @impl true
   def handle_call({:commerce_end, char_id}, _from, state), do: Commerce.handle_commerce_end(state, char_id)
   @impl true
   def handle_call({:open_bank, char_id, tx, ty}, _from, state), do: Bank.handle_open_bank(state, char_id, tx, ty)
   @impl true
-  def handle_call({:bank_deposit, char_id, slot, amount, slot_destino}, _from, state), do: Bank.handle_bank_deposit(state, char_id, slot, amount, slot_destino)
+  def handle_call({:bank_deposit, char_id, slot, amount, slot_destino}, _from, state),
+    do: Bank.handle_bank_deposit(state, char_id, slot, amount, slot_destino)
+
   @impl true
-  def handle_call({:bank_extract_item, char_id, slot, amount, slot_destino}, _from, state), do: Bank.handle_bank_extract_item(state, char_id, slot, amount, slot_destino)
+  def handle_call({:bank_extract_item, char_id, slot, amount, slot_destino}, _from, state),
+    do: Bank.handle_bank_extract_item(state, char_id, slot, amount, slot_destino)
+
   @impl true
-  def handle_call({:bank_deposit_gold, char_id, amount}, _from, state), do: Bank.handle_bank_deposit_gold(state, char_id, amount)
+  def handle_call({:bank_deposit_gold, char_id, amount}, _from, state),
+    do: Bank.handle_bank_deposit_gold(state, char_id, amount)
+
   @impl true
-  def handle_call({:bank_extract_gold, char_id, amount}, _from, state), do: Bank.handle_bank_extract_gold(state, char_id, amount)
+  def handle_call({:bank_extract_gold, char_id, amount}, _from, state),
+    do: Bank.handle_bank_extract_gold(state, char_id, amount)
+
   @impl true
   def handle_call({:bank_end, char_id}, _from, state), do: Bank.handle_bank_end(state, char_id)
   @impl true
-  def handle_call({:user_trade_offer, char_id, obj_index, amount}, _from, state), do: Trade.handle_user_trade_offer(state, char_id, obj_index, amount)
+  def handle_call({:user_trade_offer, char_id, obj_index, amount}, _from, state),
+    do: Trade.handle_user_trade_offer(state, char_id, obj_index, amount)
+
   @impl true
   def handle_call({:user_trade_accept, char_id}, _from, state), do: Trade.handle_user_trade_accept(state, char_id)
   @impl true
@@ -354,6 +410,7 @@ defmodule Arena.Map.MapServer do
       object_count: length(state.meta.objects),
       exit_count: length(state.meta.tile_exits)
     }
+
     {:reply, info, state}
   end
 
@@ -378,8 +435,12 @@ defmodule Arena.Map.MapServer do
       layers: [encode_layer.(l1), encode_layer.(l2), encode_layer.(l3), encode_layer.(l4)],
       npcs: Enum.map(state.meta.npcs, fn npc -> %{x: npc.x, y: npc.y, id: npc.npc_index} end),
       objects: Enum.map(state.meta.objects, fn obj -> %{x: obj.x, y: obj.y, id: obj.obj_index, amount: obj.amount} end),
-      exits: Enum.map(state.meta.tile_exits, fn ex -> %{x: ex.x, y: ex.y, dest_map: ex.dest_map, dest_x: ex.dest_x, dest_y: ex.dest_y} end)
+      exits:
+        Enum.map(state.meta.tile_exits, fn ex ->
+          %{x: ex.x, y: ex.y, dest_map: ex.dest_map, dest_x: ex.dest_x, dest_y: ex.dest_y}
+        end)
     }
+
     {:reply, data, state}
   end
 
@@ -391,7 +452,9 @@ defmodule Arena.Map.MapServer do
   # ---- Casts (delegated) ----
 
   @impl true
-  def handle_cast({:change_heading, char_id, heading}, state), do: Movement.handle_change_heading(state, char_id, heading)
+  def handle_cast({:change_heading, char_id, heading}, state),
+    do: Movement.handle_change_heading(state, char_id, heading)
+
   @impl true
   def handle_cast({:chat, char_id, message}, state), do: Social.handle_chat(state, char_id, message)
   @impl true
@@ -407,7 +470,9 @@ defmodule Arena.Map.MapServer do
   @impl true
   def handle_cast({:request_atributes, char_id}, state), do: Social.handle_request_atributes(state, char_id)
   @impl true
-  def handle_cast({:train_skill, char_id, skill_index}, state), do: Social.handle_train_skill(state, char_id, skill_index)
+  def handle_cast({:train_skill, char_id, skill_index}, state),
+    do: Social.handle_train_skill(state, char_id, skill_index)
+
   @impl true
   def handle_cast({:request_skills, char_id}, state), do: Social.handle_request_skills(state, char_id)
   @impl true
@@ -429,15 +494,21 @@ defmodule Arena.Map.MapServer do
   @impl true
   def handle_cast({:pet_leave_all, char_id}, state), do: Social.handle_pet_leave_all(state, char_id)
   @impl true
-  def handle_cast({:move_spell, char_id, upwards, slot}, state), do: Social.handle_move_spell(state, char_id, upwards, slot)
+  def handle_cast({:move_spell, char_id, upwards, slot}, state),
+    do: Social.handle_move_spell(state, char_id, upwards, slot)
+
   @impl true
   def handle_cast({:modify_skills, char_id, points}, state), do: Social.handle_modify_skills(state, char_id, points)
   @impl true
-  def handle_cast({:change_description, char_id, desc}, state), do: Social.handle_change_description(state, char_id, desc)
+  def handle_cast({:change_description, char_id, desc}, state),
+    do: Social.handle_change_description(state, char_id, desc)
+
   @impl true
   def handle_cast({:spell_info, char_id, slot}, state), do: Social.handle_spell_info(state, char_id, slot)
   @impl true
-  def handle_cast({:move_item, char_id, from_slot, to_slot}, state), do: Social.handle_move_item(state, char_id, from_slot, to_slot)
+  def handle_cast({:move_item, char_id, from_slot, to_slot}, state),
+    do: Social.handle_move_item(state, char_id, from_slot, to_slot)
+
   @impl true
   def handle_cast({:modify_gold, char_id, amount}, state), do: Social.handle_modify_gold(state, char_id, amount)
 
@@ -448,6 +519,7 @@ defmodule Arena.Map.MapServer do
     for {char_id, entity} <- state.players do
       Helpers.send_to_session(state.sessions, char_id, {:autosave, entity})
     end
+
     Process.send_after(self(), :autosave, @autosave_interval_ms)
     {:noreply, state}
   end
@@ -463,13 +535,14 @@ defmodule Arena.Map.MapServer do
   def handle_info(:buff_tick, state) do
     now = System.monotonic_time(:millisecond)
 
-    state = Enum.reduce(state.players, state, fn {char_id, entity}, state ->
-      if entity.buffs == [] do
-        state
-      else
-        CombatHandlers.process_player_buffs(state, char_id, entity, now)
-      end
-    end)
+    state =
+      Enum.reduce(state.players, state, fn {char_id, entity}, state ->
+        if entity.buffs == [] do
+          state
+        else
+          CombatHandlers.process_player_buffs(state, char_id, entity, now)
+        end
+      end)
 
     Process.send_after(self(), :buff_tick, 1000)
     {:noreply, state}
@@ -488,12 +561,14 @@ defmodule Arena.Map.MapServer do
     case Map.fetch(state.monitor_refs, ref) do
       {:ok, char_id} ->
         Logger.warning("Session #{char_id} crashed, cleaning up from map #{state.map_id}")
+
         case Map.fetch(state.players, char_id) do
           {:ok, entity} ->
             {:noreply, do_remove_player(state, char_id, entity)}
+
           :error ->
-            {:noreply, %{state | monitors: Map.delete(state.monitors, char_id),
-                                  monitor_refs: Map.delete(state.monitor_refs, ref)}}
+            {:noreply,
+             %{state | monitors: Map.delete(state.monitors, char_id), monitor_refs: Map.delete(state.monitor_refs, ref)}}
         end
 
       :error ->
@@ -543,8 +618,15 @@ defmodule Arena.Map.MapServer do
     occupancy = Helpers.set_occupancy(state.occupancy, x, y, {:player, entity.char_id})
     grid = Visibility.maybe_grid_add(state, x, y, entity.char_id)
 
-    state = %{state | players: players, sessions: sessions, monitors: monitors,
-                      monitor_refs: monitor_refs, occupancy: occupancy, grid: grid}
+    state = %{
+      state
+      | players: players,
+        sessions: sessions,
+        monitors: monitors,
+        monitor_refs: monitor_refs,
+        occupancy: occupancy,
+        grid: grid
+    }
 
     {visible_sets, reply_players} = Visibility.enter_visibility(state, entity, sessions)
 
@@ -566,21 +648,30 @@ defmodule Arena.Map.MapServer do
 
     # Demonitor session
     {ref, monitors} = Map.pop(state.monitors, char_id)
-    monitor_refs = if ref do
-      Process.demonitor(ref, [:flush])
-      Map.delete(state.monitor_refs, ref)
-    else
-      state.monitor_refs
-    end
+
+    monitor_refs =
+      if ref do
+        Process.demonitor(ref, [:flush])
+        Map.delete(state.monitor_refs, ref)
+      else
+        state.monitor_refs
+      end
 
     players = Map.delete(state.players, char_id)
     sessions = Map.delete(state.sessions, char_id)
     occupancy = Helpers.clear_occupancy(state.occupancy, entity.x, entity.y)
     grid = Visibility.maybe_grid_remove(state, entity.x, entity.y, char_id)
 
-    %{state | players: players, sessions: sessions, monitors: monitors,
-              monitor_refs: monitor_refs, occupancy: occupancy, grid: grid,
-              visible_sets: visible_sets}
+    %{
+      state
+      | players: players,
+        sessions: sessions,
+        monitors: monitors,
+        monitor_refs: monitor_refs,
+        occupancy: occupancy,
+        grid: grid,
+        visible_sets: visible_sets
+    }
   end
 
   defp despawn_player_pets(state, char_id) do
@@ -633,19 +724,19 @@ defmodule Arena.Map.MapServer do
   defp spawn_npcs(npc_spawns, map_id, occupancy) do
     Enum.reduce(npc_spawns, {%{}, %{}, occupancy, 1}, fn npc_spawn, {live, indices, occ, next_idx} ->
       case GameData.get_npc(npc_spawn.npc_index) do
-        nil -> {live, indices, occ, next_idx}
+        nil ->
+          {live, indices, occ, next_idx}
+
         npc_def ->
           x = npc_spawn.x
           y = npc_spawn.y
 
           if x >= 1 and x <= Helpers.map_width() and y >= 1 and y <= Helpers.map_height() and
-             TileGrid.is_walkable(map_id, x, y) and :array.get(Helpers.occ_index(x, y), occ) == nil do
+               TileGrid.is_walkable(map_id, x, y) and :array.get(Helpers.occ_index(x, y), occ) == nil do
             instance_id = next_idx
             entity = NpcEntity.from_def(npc_def, instance_id, next_idx, x, y)
             occ = Helpers.set_occupancy(occ, x, y, {:npc, instance_id})
-            {Map.put(live, instance_id, entity),
-             Map.put(indices, next_idx, instance_id),
-             occ, next_idx + 1}
+            {Map.put(live, instance_id, entity), Map.put(indices, next_idx, instance_id), occ, next_idx + 1}
           else
             {live, indices, occ, next_idx}
           end

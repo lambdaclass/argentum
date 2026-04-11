@@ -5,10 +5,10 @@ defmodule GameBackend.Account do
 
   @primary_key {:id, :id, autogenerate: true}
   schema "accounts" do
-    field :username, :string
-    field :password_hash, :string
-    field :banned_until, :utc_datetime
-    has_many :characters, GameBackend.Characters, foreign_key: :account_id
+    field(:username, :string)
+    field(:password_hash, :string)
+    field(:banned_until, :utc_datetime)
+    has_many(:characters, GameBackend.Characters, foreign_key: :account_id)
     timestamps()
   end
 
@@ -56,7 +56,9 @@ defmodule GameBackend.Account do
   @doc "Ban an account until the given `DateTime`."
   def ban(account_id, %DateTime{} = until) do
     case Repo.get(__MODULE__, account_id) do
-      nil -> {:error, :not_found}
+      nil ->
+        {:error, :not_found}
+
       account ->
         account
         |> change(%{banned_until: DateTime.truncate(until, :second)})
@@ -67,7 +69,9 @@ defmodule GameBackend.Account do
   @doc "Remove a ban from an account."
   def unban(account_id) do
     case Repo.get(__MODULE__, account_id) do
-      nil -> {:error, :not_found}
+      nil ->
+        {:error, :not_found}
+
       account ->
         account
         |> change(%{banned_until: nil})

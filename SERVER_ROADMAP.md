@@ -74,18 +74,30 @@ reference and historical phase plan.
 13. **Gameplay wiring pass** — `modify_skills` (point distribution with cap), `change_description`, `spell_info`, `move_item` (slot swap), `move_spell`, `modify_gold`, pet control (`pet_mode` on NpcEntity), party chat (`grupo_msg`), gold transfer, faction donate all wired to real game logic.
 
 **Remaining backend gaps (gameplay tail):**
-1. **`/HOGAR` final parity** — no-revive, gold cost, penalty/home checks done.
+1. **Local test toolchain** — Fix the Elixir/Hex/OTP mismatch so `mix compile`
+   and `mix test` run reliably from a clean checkout.
+2. **Recent migrations need real DB verification** — Run clean-db +
+   existing-dev-db migration path; verify
+   character/inventory/bank/guild/faction loads after migration.
+3. **`/HOGAR` final parity** — no-revive, gold cost, penalty/home checks done.
    Still missing: VB6-style delayed travel bar/effect, jail restricted area,
    NEWBIE zone, CARCEL trigger, reto/traveling cancel behavior.
-2. **Guild UI proposal behavior** — finish old-client peace/alliance/list/detail
+4. **Guild UI proposal behavior** — finish old-client peace/alliance/list/detail
    behavior and add packet replay tests for the old clan windows.
-3. **Elemental/rune content support** — per-instance tags are persisted/protocol-visible. Current raw data scan found no active elemental values; defer unless content enables it.
-4. **Automated parity gate expansion** — Initial parity test suite exists. Still needed: packet trace replay, AO smoke bot, property/fuzz, lifecycle tests, load/soak.
-5. **Recent migrations need real DB verification** — Run clean-db + existing-dev-db migration path; verify character/inventory/bank/guild/faction loads after migration.
-6. **Local test toolchain** — Fix the Elixir/Hex/OTP mismatch so `mix compile` and `mix test` run reliably from a clean checkout.
-7. **Tighten placeholder routes** — `gm_message` needs real server-wide broadcast; `rain_toggle` needs direct MapServer path instead of text dispatch; `role_master_request` needs handler.
-8. **Ops tail** — Dashboards, alerts, deploy pipeline, backup-restore, runbooks. Not gameplay, but backend production work (Phase 15 + 17).
-9. **Perf tail** — NPC aggro still scans all players; pet targeting scans all NPCs; no outbound backpressure; no load/soak gate. NPC broadcast AoI is fixed (Phase 17).
+5. **Tighten placeholder routes** — `gm_message` needs real server-wide
+   broadcast; `rain_toggle` needs direct MapServer path instead of text
+   dispatch; `role_master_request` needs handler.
+6. **Elemental/rune content support** — per-instance tags are
+   persisted/protocol-visible. Current raw data scan found no active elemental
+   values; defer unless content enables it.
+7. **Automated parity gate expansion** — Initial parity test suite exists. Still
+   needed: packet trace replay, AO smoke bot, property/fuzz, lifecycle tests,
+   load/soak.
+8. **Ops tail** — Dashboards, alerts, deploy pipeline, backup-restore, runbooks.
+   Not gameplay, but backend production work (Phase 15 + 17).
+9. **Perf tail** — NPC aggro still scans all players; pet targeting scans all
+   NPCs; no outbound backpressure; no load/soak gate. NPC broadcast AoI is
+   fixed (Phase 17).
 
 **Remaining non-backend gaps:**
 - Weather: snow rendering on client (server packet/state exists; rain rendering done)
@@ -100,20 +112,29 @@ reference and historical phase plan.
 
 For the full product order, use `ROADMAP.md`. Backend sequencing is:
 
-1. Stabilize the current branch: track pending test files, track all migrations, run migrations, fix the local Hex/OTP toolchain if needed, and run compile/tests from a clean checkout.
-2. Build the automated parity gate: VB6 packet replay, formula golden fixtures, property/fuzz tests, lifecycle tests, AO smoke bot, browser E2E, load/soak.
+1. Stabilize the current branch: keep the branch clean, fix the local Hex/OTP
+   toolchain, run compile/tests from a clean checkout, and run recent
+   migrations on real Postgres.
+2. Build the automated parity gate: VB6 packet replay, formula golden fixtures,
+   property/fuzz tests, lifecycle tests, AO smoke bot, browser E2E, and
+   load/soak.
 3. Close the core backend parity tail in this order: `/HOGAR` delayed travel
    bar/effect and remaining restrictions, guild UI proposal behavior + replay
-   tests, elemental/rune content only if data enables it, tighten placeholder
-   routes (gm_message broadcast, rain_toggle, role_master_request),
-   migration/runtime verification.
-4. Close the old-client packet/UI tail: old crafting UI open/add/remove packets,
-   and the selected GM/admin binary packet target.
-5. Close old VB6 side systems that are in-scope for this shard: quests, auction,
-   forum, events/tournaments, duels/reto, invasions, treasure search, marriage,
-   gambling/arena payment, mounts, and old account/lobby packets if not replaced.
-6. Close operations tail: metrics, dashboards, alerts, release/deploy pipeline, backup/restore and shutdown runbooks.
-7. Build post-compat account API only after the compatibility gate is green: username/password or Google account login, character list/create/select, character token issue, unchanged AO socket login.
+   tests, placeholder routes (`gm_message`, `rain_toggle`,
+   `role_master_request`), then elemental/rune content only if data enables it.
+4. Close the old-client packet/UI tail: remaining old crafting UI packets and
+   the selected GM/admin binary packet target.
+5. Close old VB6 side systems that are in-scope for this shard in this order:
+   quests, duels/reto, events/tournaments/invasions, auction, mounts if target
+   data requires them, gambling/arena payment, treasure search, forum,
+   marriage, and finally the old account/lobby packets if they are not
+   explicitly replaced.
+6. Close operations/performance tail: metrics, dashboards, alerts,
+   release/deploy pipeline, backup/restore and shutdown runbooks, plus the
+   remaining perf hardening work.
+7. Build post-compat account API only after the compatibility gate is green:
+   username/password or Google account login, character list/create/select,
+   character token issue, unchanged AO socket login.
 
 ---
 
@@ -166,13 +187,12 @@ patching or behavior-specific workarounds.
 - ~~Keep extension packets out of VB6 path~~ — **Done.** `session_token` (ID 200) is WS-only, injected by WsHandler, never sent on TCP.
 - Remaining: old guild/clan UI response encoders, core routes, and payload
   consumption for known old-client guild packets exist. Harden the remaining
-  route behaviors and add VB6 packet replay tests. `online` returns player count; `use_spell_macro` is
-  intentionally server-side no-op because the client resolves macros into
-  `cast_spell`.
+  route behaviors and add VB6 packet replay tests. `online` returns player
+  count; `use_spell_macro` is intentionally server-side no-op because the
+  client resolves macros into `cast_spell`.
 - Remaining old-client packets that are not part of the current core web path:
-  pet commands, crafting windows, training/spell windows, help/MOTD/uptime/info
-  windows, faction/council command packets, raw `ehome`, raw account/lobby
-  packet flow if kept, and the selected GM/admin binary packet family.
+  the rest of the old crafting window packet surface, raw account/lobby packet
+  flow if kept, and the selected GM/admin binary packet family.
 
 ### Behavior parity backlog
 
@@ -197,9 +217,9 @@ patching or behavior-specific workarounds.
   - ~~deep player death helper~~ — **Done.** PvP, NPC, poison, starvation, and GM kill enter the same cleanup path.
   - ~~NPC gold drop~~ — **Done.** NPC `GiveGLD` drops as a gold ground object.
 - Remaining open items:
-  - `/HOGAR` / home-city death recovery: add delayed travel/bar/effect, full
-    VB6 restrictions, and raw `ehome` SessionLogic route. No-resurrection,
-    gold cost, already-home, penalty check, and city mapping are implemented.
+  - `/HOGAR` / home-city death recovery: add delayed travel/bar/effect and full
+    VB6 restrictions. No-resurrection, raw `ehome` routing, gold cost,
+    already-home, penalty check, and city mapping are implemented.
   - old guild UI route/election behavior and replay tests
   - interval clamps that may still differ from raw VB6 data-driven timing
   - ongoing invisibility / AI / spell-selection edge-case review
@@ -227,36 +247,36 @@ These items are larger than the core web gameplay path. Keep them visible until
 the product owner either implements them or explicitly declares them out of scope.
 
 **Old-client packet / UI families still to cover:**
-- `ehome` raw packet for `/HOGAR` is decoded; route it in SessionLogic.
-- Pet commands: stand, follow, leave, follow-all, leave-all. Decoders exist;
-  route them to the pet system.
+- `ehome` is decoded and routed. The remaining `/HOGAR` work is semantic parity:
+  delayed travel bar/effect and the full restriction set.
+- Pet commands are decoded and routed. Keep them covered by parity tests.
 - Crafting commands/windows: old carpenter / blacksmith / alchemy / tailor
   forms, work-left-click, open crafting, add/remove ingredients and catalysts,
-  move craft item, craft item, close crafting. Some legacy craft decoders exist;
-  complete the packet surface and route it.
-- Training/spell commands/windows: train list, train target list, train action,
-  spell info, move spell. Some decoders exist; route them and add responses.
-- Info/service windows: account balance, help, stats/info, reward, MOTD,
-  uptime, punishments, map entrance price, online faction/GM/map lists. Some
-  decoders exist; route them and add response packets.
-- Faction/council packet commands: faction message, council message,
-  leave-faction, online royal/chaos, royal/chaos GM broadcast paths. Some
-  decoders exist; route them.
+  move craft item, craft item, close crafting. Some legacy craft decoders and
+  routes exist; complete the remaining packet surface and response behavior.
+- Training/spell commands/windows are decoded and routed on the current live
+  path. Keep them covered by parity tests and finish any old response semantics
+  the VB6 client still expects.
+- Info/service windows are decoded and routed on the current live path. Keep
+  them covered by parity tests and finish any missing response packets.
+- Faction/council packet commands are decoded and routed on the current live
+  path. Keep them covered by parity tests and finish any missing old response
+  behavior.
 - GM/admin binary commands selected for the target shard. Slash GM commands are
-  useful, but are not old-client packet parity. A core decoder subset exists;
-  route it or document the replacement.
+  useful, but are not old-client packet parity. A core decoder/routing subset
+  exists; finish the target packet family or document the replacement.
 
 **Old backend systems still to implement if kept in scope:**
 - Quests and quest NPC protocol.
-- Auction / subasta.
-- Forum / in-game message board.
+- Duels / reto.
 - Events, tournaments, lobby/capture events, invasions, and global world-event
   announcements.
-- Duels / reto.
-- Treasure search.
-- Marriage.
-- Gambling and paid arena / map-entrance side flows.
+- Auction / subasta.
 - Mounts, if target data expects mounts as a separate system from boats.
+- Gambling and paid arena / map-entrance side flows.
+- Treasure search.
+- Forum / in-game message board.
+- Marriage.
 - Old account/lobby packets, unless the HTTP account/character lobby is the
   explicit replacement after compatibility.
 

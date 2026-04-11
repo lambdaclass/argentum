@@ -17,6 +17,7 @@ defmodule Arena.TrainerWeatherTest do
       {:ok, _pid} -> :ok
       {:error, {:already_started, _pid}} -> :ok
     end
+
     :ok
   end
 
@@ -25,7 +26,9 @@ defmodule Arena.TrainerWeatherTest do
   describe "trainer NPC gating for skill training" do
     test "training is rejected when no trainer NPC is nearby" do
       entity = %PlayerEntity{
-        char_id: 1, x: 50, y: 50,
+        char_id: 1,
+        x: 50,
+        y: 50,
         skill_points: 5,
         skills: %{combat_weapons: 10}
       }
@@ -50,7 +53,9 @@ defmodule Arena.TrainerWeatherTest do
 
     test "training succeeds when trainer NPC is nearby" do
       entity = %PlayerEntity{
-        char_id: 1, x: 50, y: 50,
+        char_id: 1,
+        x: 50,
+        y: 50,
         skill_points: 5,
         skills: %{short_weapons: 10}
       }

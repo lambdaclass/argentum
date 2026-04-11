@@ -15,42 +15,51 @@ defmodule Arena.Map.InventoryHandlers do
       if entity.dead do
         {:reply, {:error, :dead}, state}
       else
-      entity = Helpers.break_invisibility(entity, state, char_id)
-      pos = {entity.x, entity.y}
+        entity = Helpers.break_invisibility(entity, state, char_id)
+        pos = {entity.x, entity.y}
 
-      case Map.get(state.ground_items, pos) do
-        nil ->
-          {:reply, {:error, :no_item}, state}
+        case Map.get(state.ground_items, pos) do
+          nil ->
+            {:reply, {:error, :no_item}, state}
 
-        ground_item ->
-          case Inventory.add_item(entity.inventory, ground_item.item_id, ground_item.amount, Map.get(ground_item, :elemental_tags, 0)) do
-            {:gold, amount} ->
-              entity = %{entity | gold: entity.gold + amount}
-              players = Map.put(state.players, char_id, entity)
-              ground_items = Map.delete(state.ground_items, pos)
-              state = %{state | players: players, ground_items: ground_items}
+          ground_item ->
+            case Inventory.add_item(
+                   entity.inventory,
+                   ground_item.item_id,
+                   ground_item.amount,
+                   Map.get(ground_item, :elemental_tags, 0)
+                 ) do
+              {:gold, amount} ->
+                entity = %{entity | gold: entity.gold + amount}
+                players = Map.put(state.players, char_id, entity)
+                ground_items = Map.delete(state.ground_items, pos)
+                state = %{state | players: players, ground_items: ground_items}
 
-              Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                Encoder.encode({:update_gold, %{gold: entity.gold}})})
-              Helpers.broadcast_object_delete(state, entity.x, entity.y)
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
+                )
 
-              {:reply, :ok, state}
+                Helpers.broadcast_object_delete(state, entity.x, entity.y)
 
-            {:ok, new_inventory, slot} ->
-              entity = %{entity | inventory: new_inventory}
-              players = Map.put(state.players, char_id, entity)
-              ground_items = Map.delete(state.ground_items, pos)
-              state = %{state | players: players, ground_items: ground_items}
+                {:reply, :ok, state}
 
-              Helpers.send_inventory_slot(state.sessions, char_id, new_inventory, slot)
-              Helpers.broadcast_object_delete(state, entity.x, entity.y)
+              {:ok, new_inventory, slot} ->
+                entity = %{entity | inventory: new_inventory}
+                players = Map.put(state.players, char_id, entity)
+                ground_items = Map.delete(state.ground_items, pos)
+                state = %{state | players: players, ground_items: ground_items}
 
-              {:reply, :ok, state}
+                Helpers.send_inventory_slot(state.sessions, char_id, new_inventory, slot)
+                Helpers.broadcast_object_delete(state, entity.x, entity.y)
 
-            {:error, :inventory_full} ->
-              {:reply, {:error, :inventory_full}, state}
-          end
-      end
+                {:reply, :ok, state}
+
+              {:error, :inventory_full} ->
+                {:reply, {:error, :inventory_full}, state}
+            end
+        end
       end
     end)
   end
@@ -60,87 +69,114 @@ defmodule Arena.Map.InventoryHandlers do
       if entity.dead do
         {:reply, {:error, :dead}, state}
       else
-      pos = {entity.x, entity.y}
+        pos = {entity.x, entity.y}
 
-      case Inventory.get_slot(entity.inventory, slot) do
-        nil ->
-          {:reply, {:error, :empty_slot}, state}
+        case Inventory.get_slot(entity.inventory, slot) do
+          nil ->
+            {:reply, {:error, :empty_slot}, state}
 
-        item ->
-          item_def = GameData.get_item(item.item_id)
+          item ->
+            item_def = GameData.get_item(item.item_id)
 
-          # VB6: newbie items cannot be dropped, intirable=0 means non-throwable
-          cond do
-            item_def != nil and item_def.newbie ->
-              Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                Encoder.encode({:console_msg, %{message: "Objetos newbies no se pueden tirar.", font_index: 0}})})
-              {:reply, {:error, :newbie_item}, state}
+            # VB6: newbie items cannot be dropped, intirable=0 means non-throwable
+            cond do
+              item_def != nil and item_def.newbie ->
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw,
+                   Encoder.encode({:console_msg, %{message: "Objetos newbies no se pueden tirar.", font_index: 0}})}
+                )
 
-            item_def != nil and not item_def.intirable ->
-              Helpers.send_to_session(state.sessions, char_id, {:send_raw,
-                Encoder.encode({:console_msg, %{message: "Este objeto no se puede tirar.", font_index: 0}})})
-              {:reply, {:error, :not_throwable}, state}
+                {:reply, {:error, :newbie_item}, state}
 
-            true ->
-          # VB6: allow stacking same item on ground tile
-          existing = Map.get(state.ground_items, pos)
-          cond do
-            existing != nil and existing.item_id != item.item_id ->
-              {:reply, {:error, :tile_occupied}, state}
+              item_def != nil and not item_def.intirable ->
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw,
+                   Encoder.encode({:console_msg, %{message: "Este objeto no se puede tirar.", font_index: 0}})}
+                )
 
-            true ->
-              drop_amount = min(amount, item.amount)
+                {:reply, {:error, :not_throwable}, state}
 
-              case Inventory.remove_from_slot(entity.inventory, slot, drop_amount) do
-                {:ok, new_inventory, _slot} ->
-                  # If the dropped item was equipped, clear the equipment slot
-                  new_equipment =
-                    if item.equipped do
-                      if item_def && item_def.equip_slot do
-                        Map.put(entity.equipment, item_def.equip_slot, nil)
-                      else
-                        entity.equipment
-                      end
-                    else
-                      entity.equipment
+              true ->
+                # VB6: allow stacking same item on ground tile
+                existing = Map.get(state.ground_items, pos)
+
+                cond do
+                  existing != nil and existing.item_id != item.item_id ->
+                    {:reply, {:error, :tile_occupied}, state}
+
+                  true ->
+                    drop_amount = min(amount, item.amount)
+
+                    case Inventory.remove_from_slot(entity.inventory, slot, drop_amount) do
+                      {:ok, new_inventory, _slot} ->
+                        # If the dropped item was equipped, clear the equipment slot
+                        new_equipment =
+                          if item.equipped do
+                            if item_def && item_def.equip_slot do
+                              Map.put(entity.equipment, item_def.equip_slot, nil)
+                            else
+                              entity.equipment
+                            end
+                          else
+                            entity.equipment
+                          end
+
+                        visual_changed = item.equipped and entity.equipment != new_equipment
+
+                        new_body_id =
+                          if visual_changed and item_def && item_def.equip_slot == :armor do
+                            entity.base_body_id
+                          else
+                            entity.body_id
+                          end
+
+                        entity = %{entity | inventory: new_inventory, equipment: new_equipment, body_id: new_body_id}
+                        players = Map.put(state.players, char_id, entity)
+
+                        if item_def && item_def.destruye do
+                          # Destruye items are destroyed on drop, not placed on ground
+                          state = %{state | players: players}
+                          Helpers.send_inventory_slot(state.sessions, char_id, new_inventory, slot)
+                          if visual_changed, do: Helpers.broadcast_character_change(state, entity)
+                          {:reply, :ok, state}
+                        else
+                          # Stack with existing ground item or create new
+                          new_amount = drop_amount + if existing, do: existing.amount, else: 0
+                          item_tags = Map.get(item, :elemental_tags, 0)
+
+                          ground_items =
+                            Map.put(state.ground_items, pos, %{
+                              item_id: item.item_id,
+                              amount: new_amount,
+                              elemental_tags: item_tags
+                            })
+
+                          state = %{state | players: players, ground_items: ground_items}
+                          Helpers.send_inventory_slot(state.sessions, char_id, new_inventory, slot)
+
+                          Helpers.broadcast_object_create(
+                            state,
+                            entity.x,
+                            entity.y,
+                            item.item_id,
+                            new_amount,
+                            item_tags
+                          )
+
+                          if visual_changed, do: Helpers.broadcast_character_change(state, entity)
+                          {:reply, :ok, state}
+                        end
+
+                      {:error, reason} ->
+                        {:reply, {:error, reason}, state}
                     end
-
-                  visual_changed = item.equipped and entity.equipment != new_equipment
-
-                  new_body_id =
-                    if visual_changed and item_def && item_def.equip_slot == :armor do
-                      entity.base_body_id
-                    else
-                      entity.body_id
-                    end
-
-                  entity = %{entity | inventory: new_inventory, equipment: new_equipment, body_id: new_body_id}
-                  players = Map.put(state.players, char_id, entity)
-
-                  if item_def && item_def.destruye do
-                    # Destruye items are destroyed on drop, not placed on ground
-                    state = %{state | players: players}
-                    Helpers.send_inventory_slot(state.sessions, char_id, new_inventory, slot)
-                    if visual_changed, do: Helpers.broadcast_character_change(state, entity)
-                    {:reply, :ok, state}
-                  else
-                    # Stack with existing ground item or create new
-                    new_amount = drop_amount + (if existing, do: existing.amount, else: 0)
-                    item_tags = Map.get(item, :elemental_tags, 0)
-                    ground_items = Map.put(state.ground_items, pos, %{item_id: item.item_id, amount: new_amount, elemental_tags: item_tags})
-                    state = %{state | players: players, ground_items: ground_items}
-                    Helpers.send_inventory_slot(state.sessions, char_id, new_inventory, slot)
-                    Helpers.broadcast_object_create(state, entity.x, entity.y, item.item_id, new_amount, item_tags)
-                    if visual_changed, do: Helpers.broadcast_character_change(state, entity)
-                    {:reply, :ok, state}
-                  end
-
-                {:error, reason} ->
-                  {:reply, {:error, reason}, state}
-              end
-          end
-          end
-      end
+                end
+            end
+        end
       end
     end)
   end
@@ -150,49 +186,50 @@ defmodule Arena.Map.InventoryHandlers do
       if entity.dead do
         {:reply, {:error, :dead}, state}
       else
-      character_info = %{
-        level: entity.level,
-        class: entity.class,
-        race: entity.race,
-        gender: entity.gender
-      }
-      case Inventory.equip_toggle(entity.inventory, entity.equipment, slot, character_info) do
-        {:ok, new_inventory, new_equipment, changed_slots} ->
-          new_body_id =
-            if new_equipment[:armor] != entity.equipment[:armor] do
-              case new_equipment[:armor] do
-                nil ->
-                  entity.base_body_id
+        character_info = %{
+          level: entity.level,
+          class: entity.class,
+          race: entity.race,
+          gender: entity.gender
+        }
 
-                armor_id ->
-                  item_def = GameData.get_item(armor_id)
+        case Inventory.equip_toggle(entity.inventory, entity.equipment, slot, character_info) do
+          {:ok, new_inventory, new_equipment, changed_slots} ->
+            new_body_id =
+              if new_equipment[:armor] != entity.equipment[:armor] do
+                case new_equipment[:armor] do
+                  nil ->
+                    entity.base_body_id
 
-                  if item_def && item_def.ropaje do
-                    key = ropaje_key(entity.race, entity.gender)
-                    Map.get(item_def.ropaje, key, entity.body_id)
-                  else
-                    entity.body_id
-                  end
+                  armor_id ->
+                    item_def = GameData.get_item(armor_id)
+
+                    if item_def && item_def.ropaje do
+                      key = ropaje_key(entity.race, entity.gender)
+                      Map.get(item_def.ropaje, key, entity.body_id)
+                    else
+                      entity.body_id
+                    end
+                end
+              else
+                entity.body_id
               end
-            else
-              entity.body_id
+
+            entity = %{entity | inventory: new_inventory, equipment: new_equipment, body_id: new_body_id}
+            players = Map.put(state.players, char_id, entity)
+            state = %{state | players: players}
+
+            for s <- changed_slots do
+              Helpers.send_inventory_slot(state.sessions, char_id, new_inventory, s)
             end
 
-          entity = %{entity | inventory: new_inventory, equipment: new_equipment, body_id: new_body_id}
-          players = Map.put(state.players, char_id, entity)
-          state = %{state | players: players}
+            Helpers.broadcast_character_change(state, entity)
 
-          for s <- changed_slots do
-            Helpers.send_inventory_slot(state.sessions, char_id, new_inventory, s)
-          end
+            {:reply, :ok, state}
 
-          Helpers.broadcast_character_change(state, entity)
-
-          {:reply, :ok, state}
-
-        {:error, reason} ->
-          {:reply, {:error, reason}, state}
-      end
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
       end
     end)
   end
@@ -202,9 +239,15 @@ defmodule Arena.Map.InventoryHandlers do
       now = System.monotonic_time(:millisecond)
 
       cond do
-        entity.dead -> {:reply, {:error, :dead}, state}
-        entity.paralyzed -> {:reply, {:error, :paralyzed}, state}
-        now < entity.next_item_use_at -> {:reply, {:error, :cooldown}, state}
+        entity.dead ->
+          {:reply, {:error, :dead}, state}
+
+        entity.paralyzed ->
+          {:reply, {:error, :paralyzed}, state}
+
+        now < entity.next_item_use_at ->
+          {:reply, {:error, :cooldown}, state}
+
         true ->
           case Inventory.get_slot(entity.inventory, slot) do
             nil ->
@@ -257,8 +300,13 @@ defmodule Arena.Map.InventoryHandlers do
       14 ->
         new_nav = not entity.navigating
         entity = %{entity | navigating: new_nav}
-        Helpers.send_to_session(state.sessions, entity.char_id, {:send_raw,
-          Encoder.encode({:navigate_toggle, %{new_state: new_nav}})})
+
+        Helpers.send_to_session(
+          state.sessions,
+          entity.char_id,
+          {:send_raw, Encoder.encode({:navigate_toggle, %{new_state: new_nav}})}
+        )
+
         players = Map.put(state.players, entity.char_id, entity)
         state = %{state | players: players}
         {:ok, entity, state}
@@ -273,24 +321,37 @@ defmodule Arena.Map.InventoryHandlers do
 
     case item_def.tipo_pocion do
       # HP potion
-      1 -> %{entity | hp: min(entity.hp + amount, entity.max_hp)}
+      1 ->
+        %{entity | hp: min(entity.hp + amount, entity.max_hp)}
+
       # Mana potion
-      2 -> %{entity | mana: min(entity.mana + amount, entity.max_mana)}
+      2 ->
+        %{entity | mana: min(entity.mana + amount, entity.max_mana)}
+
       # Stamina potion
-      4 -> %{entity | stamina: min(entity.stamina + amount, entity.max_stamina)}
+      4 ->
+        %{entity | stamina: min(entity.stamina + amount, entity.max_stamina)}
+
       # Poison cure
       5 ->
         buffs = Enum.reject(entity.buffs, &(&1.type == :poisoned))
         %{entity | poisoned: false, buffs: buffs}
+
       # Strength potion
-      6 -> %{entity | str_buff: entity.str_buff + amount}
+      6 ->
+        %{entity | str_buff: entity.str_buff + amount}
+
       # Agility potion
-      7 -> %{entity | agi_buff: entity.agi_buff + amount}
+      7 ->
+        %{entity | agi_buff: entity.agi_buff + amount}
+
       # Paralysis cure
       8 ->
         buffs = Enum.reject(entity.buffs, &(&1.type == :paralyzed))
         %{entity | paralyzed: false, buffs: buffs}
-      _ -> entity
+
+      _ ->
+        entity
     end
   end
 
@@ -304,26 +365,55 @@ defmodule Arena.Map.InventoryHandlers do
 
     case effect_type do
       :hunger ->
-        Helpers.send_to_session(state.sessions, entity.char_id, {:send_raw,
-          Encoder.encode({:update_hunger_and_thirst, %{
-            max_hunger: 100, min_hunger: entity.hunger,
-            max_thirst: 100, min_thirst: entity.thirst
-          }})})
+        Helpers.send_to_session(
+          state.sessions,
+          entity.char_id,
+          {:send_raw,
+           Encoder.encode(
+             {:update_hunger_and_thirst,
+              %{
+                max_hunger: 100,
+                min_hunger: entity.hunger,
+                max_thirst: 100,
+                min_thirst: entity.thirst
+              }}
+           )}
+        )
 
       :thirst ->
-        Helpers.send_to_session(state.sessions, entity.char_id, {:send_raw,
-          Encoder.encode({:update_hunger_and_thirst, %{
-            max_hunger: 100, min_hunger: entity.hunger,
-            max_thirst: 100, min_thirst: entity.thirst
-          }})})
+        Helpers.send_to_session(
+          state.sessions,
+          entity.char_id,
+          {:send_raw,
+           Encoder.encode(
+             {:update_hunger_and_thirst,
+              %{
+                max_hunger: 100,
+                min_hunger: entity.hunger,
+                max_thirst: 100,
+                min_thirst: entity.thirst
+              }}
+           )}
+        )
 
       :potion ->
-        Helpers.send_to_session(state.sessions, entity.char_id, {:send_raw,
-          Encoder.encode({:update_hp, %{min_hp: entity.hp}})})
-        Helpers.send_to_session(state.sessions, entity.char_id, {:send_raw,
-          Encoder.encode({:update_mana, %{min_mana: entity.mana}})})
-        Helpers.send_to_session(state.sessions, entity.char_id, {:send_raw,
-          Encoder.encode({:update_stamina, %{min_sta: entity.stamina}})})
+        Helpers.send_to_session(
+          state.sessions,
+          entity.char_id,
+          {:send_raw, Encoder.encode({:update_hp, %{min_hp: entity.hp}})}
+        )
+
+        Helpers.send_to_session(
+          state.sessions,
+          entity.char_id,
+          {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+        )
+
+        Helpers.send_to_session(
+          state.sessions,
+          entity.char_id,
+          {:send_raw, Encoder.encode({:update_stamina, %{min_sta: entity.stamina}})}
+        )
     end
 
     state
