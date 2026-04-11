@@ -72,7 +72,6 @@ defmodule Arena.CharacterCreationParityTest do
     9 => "penthar"
   }
 
-
   setup_all do
     case GameData.start_link() do
       {:ok, _pid} -> :ok
@@ -264,41 +263,31 @@ defmodule Arena.CharacterCreationParityTest do
     test "head just outside range fails" do
       # Humano male: valid 1-41, so 42 should fail (before second range 778-791)
       assert {:error, :invalid_head} =
-               CharacterCreation.create(
-                 valid_params(%{race: @humano, gender: @male, head: 42})
-               )
+               CharacterCreation.create(valid_params(%{race: @humano, gender: @male, head: 42}))
     end
 
     test "head 0 fails for all races" do
       for race <- 1..6, gender <- 1..2 do
         assert {:error, :invalid_head} =
-                 CharacterCreation.create(
-                   valid_params(%{race: race, gender: gender, head: 0})
-                 ),
+                 CharacterCreation.create(valid_params(%{race: race, gender: gender, head: 0})),
                "head 0 should be invalid for race #{race}, gender #{gender}"
       end
     end
 
     test "head in secondary range passes (humano male 778-791)" do
       assert {:ok, _} =
-               CharacterCreation.create(
-                 valid_params(%{race: @humano, gender: @male, head: 785})
-               )
+               CharacterCreation.create(valid_params(%{race: @humano, gender: @male, head: 785}))
     end
 
     test "head between disjoint ranges fails (humano male 42-777)" do
       assert {:error, :invalid_head} =
-               CharacterCreation.create(
-                 valid_params(%{race: @humano, gender: @male, head: 100})
-               )
+               CharacterCreation.create(valid_params(%{race: @humano, gender: @male, head: 100}))
     end
 
     test "wrong race head fails (elfo head on humano)" do
       # Elfo male head range starts at 101
       assert {:error, :invalid_head} =
-               CharacterCreation.create(
-                 valid_params(%{race: @humano, gender: @male, head: 110})
-               )
+               CharacterCreation.create(valid_params(%{race: @humano, gender: @male, head: 110}))
     end
   end
 
@@ -310,9 +299,7 @@ defmodule Arena.CharacterCreationParityTest do
         {lo, _} = hd(@head_ranges[{race, gender}])
 
         {:ok, entity} =
-          CharacterCreation.create(
-            valid_params(%{race: race, gender: gender, head: lo})
-          )
+          CharacterCreation.create(valid_params(%{race: race, gender: gender, head: lo}))
 
         assert entity.body_id == expected_body,
                "race #{race}, gender #{gender}: expected body_id #{expected_body}, got #{entity.body_id}"
@@ -324,14 +311,10 @@ defmodule Arena.CharacterCreationParityTest do
 
     test "orco female gets 581, orco male gets 582" do
       {:ok, male} =
-        CharacterCreation.create(
-          valid_params(%{race: @orco, gender: @male, head: 500})
-        )
+        CharacterCreation.create(valid_params(%{race: @orco, gender: @male, head: 500}))
 
       {:ok, female} =
-        CharacterCreation.create(
-          valid_params(%{race: @orco, gender: @female, head: 550})
-        )
+        CharacterCreation.create(valid_params(%{race: @orco, gender: @female, head: 550}))
 
       assert male.body_id == 582
       assert female.body_id == 581
@@ -346,9 +329,7 @@ defmodule Arena.CharacterCreationParityTest do
         {lo, _} = hd(@head_ranges[{race, @male}])
 
         {:ok, entity} =
-          CharacterCreation.create(
-            valid_params(%{race: race, head: lo})
-          )
+          CharacterCreation.create(valid_params(%{race: race, head: lo}))
 
         assert entity.str == 18 + GameData.race_mod(race, :str),
                "race #{race}: str mismatch"
@@ -713,9 +694,7 @@ defmodule Arena.CharacterCreationParityTest do
 
     test "each class gets correct race/class/gender string" do
       {:ok, entity} =
-        CharacterCreation.create(
-          valid_params(%{race: @elfo, gender: @female, class: @mago, head: 150})
-        )
+        CharacterCreation.create(valid_params(%{race: @elfo, gender: @female, class: @mago, head: 150}))
 
       assert entity.race == "elfo"
       assert entity.class == "mago"

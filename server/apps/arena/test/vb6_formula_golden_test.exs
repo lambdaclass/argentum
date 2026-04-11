@@ -73,8 +73,14 @@ defmodule Arena.VB6FormulaGoldenTest do
 
       expected =
         expected_hit_chance(
-          50, 20, 25, ctx.guerrero_atk_mod,
-          50, 20, 25, ctx.guerrero_eva_mod
+          50,
+          20,
+          25,
+          ctx.guerrero_atk_mod,
+          50,
+          20,
+          25,
+          ctx.guerrero_eva_mod
         )
 
       assert result == expected
@@ -85,8 +91,14 @@ defmodule Arena.VB6FormulaGoldenTest do
 
       expected =
         expected_hit_chance(
-          100, 50, 50, ctx.guerrero_atk_mod,
-          0, 0, 1, ctx.guerrero_eva_mod
+          100,
+          50,
+          50,
+          ctx.guerrero_atk_mod,
+          0,
+          0,
+          1,
+          ctx.guerrero_eva_mod
         )
 
       assert result == expected
@@ -98,8 +110,14 @@ defmodule Arena.VB6FormulaGoldenTest do
 
       expected =
         expected_hit_chance(
-          0, 0, 1, ctx.guerrero_atk_mod,
-          100, 50, 50, ctx.guerrero_eva_mod
+          0,
+          0,
+          1,
+          ctx.guerrero_atk_mod,
+          100,
+          50,
+          50,
+          ctx.guerrero_eva_mod
         )
 
       assert result == expected
@@ -112,8 +130,14 @@ defmodule Arena.VB6FormulaGoldenTest do
 
       expected =
         expected_hit_chance(
-          60, 25, 30, ctx.guerrero_atk_mod,
-          40, 20, 25, ctx.mago_eva_mod
+          60,
+          25,
+          30,
+          ctx.guerrero_atk_mod,
+          40,
+          20,
+          25,
+          ctx.mago_eva_mod
         )
 
       assert result == expected
@@ -125,8 +149,14 @@ defmodule Arena.VB6FormulaGoldenTest do
 
       expected =
         expected_hit_chance(
-          30, 15, 1, ctx.guerrero_atk_mod,
-          30, 15, 1, ctx.guerrero_eva_mod
+          30,
+          15,
+          1,
+          ctx.guerrero_atk_mod,
+          30,
+          15,
+          1,
+          ctx.guerrero_eva_mod
         )
 
       assert result == expected
@@ -138,8 +168,14 @@ defmodule Arena.VB6FormulaGoldenTest do
 
       expected =
         expected_hit_chance(
-          50, 20, 45, ctx.guerrero_atk_mod,
-          50, 20, 45, ctx.guerrero_eva_mod
+          50,
+          20,
+          45,
+          ctx.guerrero_atk_mod,
+          50,
+          20,
+          45,
+          ctx.guerrero_eva_mod
         )
 
       assert result == expected
@@ -151,8 +187,14 @@ defmodule Arena.VB6FormulaGoldenTest do
 
       expected =
         expected_hit_chance(
-          50, 20, 45, ctx.guerrero_atk_mod,
-          50, 20, 10, ctx.guerrero_eva_mod
+          50,
+          20,
+          45,
+          ctx.guerrero_atk_mod,
+          50,
+          20,
+          10,
+          ctx.guerrero_eva_mod
         )
 
       assert result == expected

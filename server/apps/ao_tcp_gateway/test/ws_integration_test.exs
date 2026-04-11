@@ -17,8 +17,12 @@ defmodule AoTcpGateway.WsIntegrationTest do
   @pkt_walk 78
 
   setup do
-    Ecto.Adapters.SQL.Sandbox.checkout(GameBackend.Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(GameBackend.Repo, {:shared, self()})
+    owner_pid = Ecto.Adapters.SQL.Sandbox.start_owner!(GameBackend.Repo, shared: true)
+
+    on_exit(fn ->
+      Process.sleep(200)
+      Ecto.Adapters.SQL.Sandbox.stop_owner(owner_pid)
+    end)
 
     :ok
   end
