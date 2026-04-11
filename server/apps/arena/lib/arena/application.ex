@@ -11,6 +11,7 @@ defmodule Arena.Application do
       {Registry, keys: :unique, name: Arena.MapRegistry},
       {Phoenix.PubSub, name: Arena.PubSub},
       Arena.Data.GameData,
+      Arena.WorldWeather,
       Arena.PartyServer,
       Arena.GuildServer,
       Supervisor.child_spec(Arena.Map.MapSupervisor, shutdown: 30_000),

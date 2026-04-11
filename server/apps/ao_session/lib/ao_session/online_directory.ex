@@ -18,7 +18,12 @@ defmodule AoSession.OnlineDirectory do
   @doc "Register an online character."
   def register(char_id, name, map_id, session_pid) do
     normalized = String.downcase(String.trim(name))
-    :ets.insert(@table, {{:by_id, char_id}, %{name: name, map_id: map_id, session_pid: session_pid}})
+
+    :ets.insert(
+      @table,
+      {{:by_id, char_id}, %{name: name, map_id: map_id, session_pid: session_pid}}
+    )
+
     :ets.insert(@table, {{:by_name, normalized}, char_id})
     :ok
   end
@@ -75,7 +80,7 @@ defmodule AoSession.OnlineDirectory do
   @doc "Count online players."
   def online_count do
     # Count :by_id entries only (not :by_name which are secondary index)
-    :ets.select_count(@table, [{{{{:by_id, :_}}, :_}, [], [true]}])
+    :ets.select_count(@table, [{{{:by_id, :_}, :_}, [], [true]}])
   end
 
   @doc "Send a message to every connected session pid."

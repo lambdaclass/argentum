@@ -87,10 +87,12 @@ integration tests below.
 | 9 | `apps/arena/test/map_server_bugs_test.exs` | MapServer regression tests: bugs found in Phase 1 review; requires tile NIF and map files | Exists, passes |
 | 10 | `apps/arena/test/combat_lifecycle_test.exs` | Full combat lifecycle: enter -> fight -> die -> verify death state -> snapshot; runs against real MapServer | Exists, passes |
 | 11 | `apps/arena/test/aoi_visibility_test.exs` | AoI grid visibility culling: players outside AoI range do NOT receive broadcasts, players inside range DO; uses production AoI half-ranges | Exists, passes |
+| 12 | `apps/ao_tcp_gateway/test/lifecycle_persistence_test.exs` | Full TCP lifecycle: login, autosave on disconnect (position/stats/inventory persist), crash cleanup (kill process removes entity and session), map transfer persistence, concurrent disconnect safety, double-login rejection, dead-state persistence, online directory cleanup, session token validation | Exists, passes |
+| 13 | `apps/arena/test/session_lifecycle_test.exs` | MapServer-level session lifecycle: login/entity spawn, autosave to DB, clean logout, crash cleanup via :DOWN monitor, map transfer without duplicates, double-login prevention, dead-state disconnect, online directory consistency, session registry lifecycle | Exists, passes |
 
 ### Pass Criteria
 
-All 31 files (20 Tier 1 + 11 Tier 2) pass with 0 failures, 0 errors. Database
+All 33 files (20 Tier 1 + 13 Tier 2) pass with 0 failures, 0 errors. Database
 migrations apply cleanly. No test is tagged `:skip` or `:pending`. Total
 wall-clock time under 3 minutes on CI.
 
@@ -160,11 +162,11 @@ server crashes observed.
 | Tier | Files | All Pass? | CI Gate? |
 |------|-------|-----------|----------|
 | Tier 1 -- Fast | 20 | Yes | Yes (`fast` job) |
-| Tier 2 -- Integration | 11 (+20 from T1) | Yes | Yes (`slow` job) |
+| Tier 2 -- Integration | 13 (+20 from T1) | Yes | Yes (`slow` job) |
 | Tier 3 -- Soak | 1 | Yes | No (on-demand) |
 | Tier 4 -- Manual | checklist | N/A | No (pre-release) |
 
-Total test files: **32**
+Total test files: **34**
 
 
 ## Gaps -- Missing Coverage
@@ -189,11 +191,6 @@ Total test files: **32**
 
 ### Tier 2 (Integration)
 
-- **Persistence round-trip**: no integration test that creates a character,
-  performs actions, saves to DB, restarts the server, and verifies the character
-  loads with correct state.
-- **Multi-map transition**: no test covering a player walking from map 1 to map
-  2 over TCP with correct change_map packet and entity cleanup.
 - **Concurrent combat integration**: no test with two TCP clients attacking the
   same NPC simultaneously.
 - **Guild persistence integration**: no test that creates a guild over TCP,

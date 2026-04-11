@@ -1473,7 +1473,7 @@ defmodule Arena.Map.CombatHandlers do
       end)
 
     # Process poison ticks on active poison buffs
-    {entity, active} =
+    {active, entity} =
       Enum.map_reduce(active, entity, fn buff, ent ->
         if buff.type == :poisoned and now >= (buff[:next_tick] || 0) do
           damage = max(Enum.random(3..5) * div(ent.max_hp, 100), 1)

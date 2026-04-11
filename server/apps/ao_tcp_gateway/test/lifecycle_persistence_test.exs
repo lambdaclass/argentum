@@ -42,8 +42,7 @@ defmodule AoTcpGateway.LifecyclePersistenceTest do
   end
 
   setup do
-    Ecto.Adapters.SQL.Sandbox.checkout(GameBackend.Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(GameBackend.Repo, {:shared, self()})
+    owner_pid = Ecto.Adapters.SQL.Sandbox.start_owner!(GameBackend.Repo, shared: true)
 
     listener_name = :"test_lifecycle_#{System.unique_integer([:positive])}"
 
@@ -58,7 +57,11 @@ defmodule AoTcpGateway.LifecyclePersistenceTest do
 
     port = :ranch.get_port(listener_name)
 
-    on_exit(fn -> :ranch.stop_listener(listener_name) end)
+    on_exit(fn ->
+      :ranch.stop_listener(listener_name)
+      Process.sleep(200)
+      Ecto.Adapters.SQL.Sandbox.stop_owner(owner_pid)
+    end)
 
     %{port: port}
   end
@@ -772,6 +775,95 @@ defmodule AoTcpGateway.LifecyclePersistenceTest do
       # Both should be persisted in DB (not lost)
       assert GameBackend.Characters.get(char_id_a) != nil
       assert GameBackend.Characters.get(char_id_b) != nil
+    end
+  end
+
+  describe "dead state persists across disconnect" do
+    test "dead character reconnects with dead=true and hp=0 preserved", %{port: port} do
+      name = unique_name()
+      {socket1, _packets1, char_id} = login_new(port, name)
+      on_exit(fn -> cleanup_char(char_id) end)
+
+      assert char_id != nil
+
+      # Disconnect first session
+      :gen_tcp.close(socket1)
+      Process.sleep(500)
+
+      # Directly set the character as dead in DB (simulating death that was saved)
+      char = GameBackend.Characters.get(char_id)
+      entity = GameBackend.Characters.to_entity(char)
+      dead_attrs = GameBackend.Characters.from_entity(%{entity | dead: true, hp: 0, stamina: 0})
+
+      {:ok, _} =
+        GameBackend.Characters.save_snapshot(char_id, dead_attrs,
+          inventory: GameBackend.Characters.inventory_from_entity(entity),
+          equipment: GameBackend.Characters.equipment_from_entity(entity),
+          skills: GameBackend.Characters.skills_from_entity(entity),
+          spells: GameBackend.Characters.spells_from_entity(entity)
+        )
+
+      # Verify DB has dead state
+      db_char = GameBackend.Characters.get(char_id)
+      assert db_char.dead == true
+      assert db_char.hp == 0
+
+      # Reconnect and verify the dead state comes through in packets
+      token = db_char.session_token
+      socket2 = connect(port)
+      send_login_existing(socket2, char_id, token)
+      data2 = recv_all(socket2)
+      packets2 = decode_all_packets(data2)
+      on_exit(fn -> :gen_tcp.close(socket2) end)
+
+      # HP should be 0 (dead)
+      {27, hp_data} = find_packet(packets2, 27)
+      assert hp_data.min_hp == 0
+    end
+  end
+
+  describe "online directory cleared on disconnect" do
+    test "disconnecting removes player from online directory", %{port: port} do
+      name = unique_name()
+      {socket, _packets, char_id} = login_new(port, name)
+      on_exit(fn -> cleanup_char(char_id) end)
+
+      assert char_id != nil
+
+      # Player should be in the online directory
+      {:ok, info} = AoSession.OnlineDirectory.lookup_by_id(char_id)
+      assert info.name == name
+
+      # Disconnect
+      :gen_tcp.close(socket)
+      Process.sleep(500)
+
+      # Online directory should be cleared
+      assert :not_found = AoSession.OnlineDirectory.lookup_by_id(char_id)
+      assert :not_found = AoSession.OnlineDirectory.lookup_by_name(name)
+    end
+  end
+
+  describe "session token required for reconnect" do
+    test "wrong token is rejected", %{port: port} do
+      name = unique_name()
+      {socket1, _packets1, char_id} = login_new(port, name)
+      on_exit(fn -> cleanup_char(char_id) end)
+
+      # Disconnect first session
+      :gen_tcp.close(socket1)
+      Process.sleep(500)
+
+      # Try to reconnect with a bogus token
+      socket2 = connect(port)
+      send_login_existing(socket2, char_id, "totally_wrong_token_value")
+      data2 = recv_all(socket2)
+      packets2 = decode_all_packets(data2)
+      on_exit(fn -> :gen_tcp.close(socket2) end)
+
+      # Should get error message about invalid token
+      assert {73, error} = find_packet(packets2, 73)
+      assert error.message =~ "Invalid session token"
     end
   end
 

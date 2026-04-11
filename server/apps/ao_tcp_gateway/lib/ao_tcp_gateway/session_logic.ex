@@ -138,8 +138,9 @@ defmodule AoTcpGateway.SessionLogic do
           is_gm: entity.gm == true
       }
 
+      global_rain = try do Arena.WorldWeather.raining?() rescue _ -> weather.rain catch :exit, _ -> weather.rain end
       weather_packets =
-        (if weather.rain, do: [{:rain_toggle, %{raining: true}}], else: []) ++
+        (if global_rain, do: [{:rain_toggle, %{raining: true}}], else: []) ++
         (if weather.snow, do: [{:snow_toggle, %{snowing: true}}], else: [])
 
       packets =
@@ -198,8 +199,9 @@ defmodule AoTcpGateway.SessionLogic do
 
       state = %{state | map_id: dest_map, char_index: char_index, entity: entity}
 
+      global_rain = try do Arena.WorldWeather.raining?() rescue _ -> weather.rain catch :exit, _ -> weather.rain end
       weather_packets =
-        (if weather.rain, do: [{:rain_toggle, %{raining: true}}], else: [{:rain_toggle, %{raining: false}}]) ++
+        (if global_rain, do: [{:rain_toggle, %{raining: true}}], else: [{:rain_toggle, %{raining: false}}]) ++
         (if weather.snow, do: [{:snow_toggle, %{snowing: true}}], else: [{:snow_toggle, %{snowing: false}}])
 
       packets =
@@ -1225,7 +1227,8 @@ defmodule AoTcpGateway.SessionLogic do
 
   def handle_command(state, {:gm_message, %{message: message}})
       when state.character_id != nil and state.is_gm == true do
-    raw = AoProtocol.Server.Encoder.encode({:console_msg, %{message: message, font_index: 0}})
+    broadcast_msg = "Servidor> " <> message
+    raw = AoProtocol.Server.Encoder.encode({:console_msg, %{message: broadcast_msg, font_index: 1}})
     AoSession.OnlineDirectory.broadcast_all({:send_raw, raw})
     {state, []}
   end
@@ -1244,7 +1247,7 @@ defmodule AoTcpGateway.SessionLogic do
 
   def handle_command(state, {:rain_toggle, _})
       when state.character_id != nil and state.is_gm == true do
-    Arena.Map.MapServer.gm_rain_toggle(state.map_id, state.character_id)
+    Arena.WorldWeather.toggle_rain()
     {state, []}
   end
 

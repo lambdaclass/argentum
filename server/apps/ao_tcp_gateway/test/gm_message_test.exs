@@ -100,9 +100,13 @@ defmodule AoTcpGateway.GmMessageTest do
       assert length(send_raw_msgs) >= 1,
         "Listener should receive broadcast console_msg, got: #{inspect(listener_msgs)}"
 
-      # Verify the packet contains console_msg (packet ID 37)
+      # Verify the packet contains console_msg (packet ID 37) with "Servidor> " prefix and font_index 1
       [{:send_raw, raw_data}] = send_raw_msgs
-      <<37::little-16, _payload::binary>> = raw_data
+      <<37::little-16, payload::binary>> = raw_data
+      # Decode the string8 (length-prefixed) message from payload
+      <<msg_len::little-16, msg_bytes::binary-size(msg_len), font_byte::8, _rest::binary>> = payload
+      assert msg_bytes == "Servidor> Server maintenance in 5 minutes!"
+      assert font_byte == 1
     end
 
     test "non-GM player cannot broadcast gm_message" do
