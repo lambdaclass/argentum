@@ -198,98 +198,169 @@ tasks below are closed or explicitly deferred.
     Outcome: shutdown does not lose player state or corrupt runtime processes.
 63. Add pre-public scripted load/soak runs.
     Outcome: operational confidence exists before open testing.
-64. Run the current client checks once from a clean checkout.
-    Outcome: `npm run typecheck` and `npm run build` succeed.
-65. Keep client packet encode/decode locked to current server protocol.
+64. Run `npm run typecheck` from a clean checkout.
+    Outcome: the current browser code passes the static TypeScript gate.
+65. Run `npm run build` from a clean checkout.
+    Outcome: the production browser bundle builds successfully.
+66. Keep client packet decode/encode locked to current server protocol.
     Outcome: browser packet handling does not drift from `ao_protocol`.
-66. Add browser-side packet fixture tests using the shared VB6 fixtures.
+67. Add browser-side packet fixture tests using the shared VB6 fixtures.
     Outcome: client protocol compatibility is checked against the same captured
     bytes as the server.
-67. Add browser-side decoder fuzz tests.
+68. Add browser-side decoder fuzz tests.
     Outcome: malformed packet payloads do not crash or corrupt client state.
-68. Add browser-side reducer/state tests for inventory, bank, trade, party,
-    clan, weather, and death.
-    Outcome: client gameplay state stays deterministic under packet sequences.
-69. Add browser visual fixture tests for bodies, equipment overlays, and common
-    NPC sprites.
-    Outcome: skeleton/boar/wolf/ant and equipment/body mappings do not drift
-    again.
-70. Keep WebSocket/session bootstrap isolated from gameplay bytes.
+69. Add browser-side reducer/state tests for inventory.
+    Outcome: inventory state stays deterministic under packet sequences.
+70. Add browser-side reducer/state tests for bank.
+    Outcome: bank state stays deterministic under packet sequences.
+71. Add browser-side reducer/state tests for trade.
+    Outcome: trade state stays deterministic under packet sequences.
+72. Add browser-side reducer/state tests for party and clan.
+    Outcome: social state stays deterministic under packet sequences.
+73. Add browser-side reducer/state tests for weather and death.
+    Outcome: weather/death state stays deterministic under packet sequences.
+74. Add browser visual fixture tests for player bodies and equipment overlays.
+    Outcome: body/head/equipment composition does not drift visually.
+75. Add browser visual fixture tests for common NPC sprites.
+    Outcome: skeleton/boar/wolf/ant style mapping regressions are caught early.
+76. Keep WebSocket/session bootstrap isolated from gameplay bytes.
     Outcome: browser auth/lobby flow never contaminates AO gameplay packet
     semantics.
-71. Decode, dispatch, and render snow when `snow_toggle` is active.
+77. Decode and dispatch `snow_toggle`.
+    Outcome: snow state reaches the browser renderer correctly.
+78. Render snow when `snow_toggle` is active.
     Outcome: weather parity is visually complete in the browser.
-72. Show trade item name / GRH / tags in the trade panel.
-    Outcome: trade metadata visible in packets is actually shown to the user.
-73. Improve spell panel hints.
-    Outcome: cooldowns, requirements, land/water/staff/dead targeting rules,
-    and AoE/radius hints are visible when the server exposes them.
-74. Keep NPC sprite/body mappings checked by fixture or screenshot tests.
+79. Show trade item name in the trade panel.
+    Outcome: the player sees the real item label from packet 100.
+80. Show trade item `GRH`/sprite metadata in the trade panel.
+    Outcome: trade visuals use the metadata already sent by the server.
+81. Show trade item elemental tags in the trade panel.
+    Outcome: non-zero item tags are visible instead of hidden protocol data.
+82. Show spell cooldown hints.
+    Outcome: spell timing constraints are visible before the server rejects the
+    cast.
+83. Show spell requirement hints.
+    Outcome: land/water/staff/dead targeting rules are visible in the browser.
+84. Show spell AoE/radius hints.
+    Outcome: spell area semantics are visible before cast.
+85. Keep NPC sprite/body mappings checked by fixture or screenshot tests.
     Outcome: visual regressions in body-to-sprite mapping are caught early.
-75. Make party panels use authoritative state instead of console-text
+86. Make party panels use authoritative state instead of console-text
     inference.
     Outcome: party UI reflects backend truth.
-76. Make clan panels use authoritative state instead of console-text inference.
+87. Make clan panels use authoritative state instead of console-text inference.
     Outcome: clan UI reflects backend truth.
-77. Show party/clan member online state, rank/role, faction/guild alignment,
-    party safe state, and leader/permissions where supported.
-    Outcome: social UI surfaces the real backend state instead of a flat member
+88. Show party member online state, leader/permissions, and party safe state.
+    Outcome: party UI surfaces the real backend state instead of a flat member
     list.
-78. Keep faction/guild/party chat visible as distinct chat streams.
-    Outcome: social communication is not collapsed into generic log lines.
-79. Improve death UX in the web client.
-    Outcome: ghost/dead state is visually obvious and rejected actions are
-    pre-disabled where appropriate.
-80. Add loading and reconnect overlays.
-    Outcome: session state changes are visible and less confusing.
-81. Add banned/muted/server-full/maintenance/token-expired error states.
-    Outcome: common failure modes are handled explicitly in the browser.
-82. Add browser settings and live-session polish.
-    Outcome: music, SFX, renderer quality, keybinds, reconnect, and
-    banned/muted/maintenance state handling are explicit instead of ad hoc.
-83. Add minimap and/or map markers if they remain part of the web UX target.
-    Outcome: navigation polish is explicit instead of ad hoc.
-84. Add sound effects for combat, spells, inventory, UI, doors/teleports, and
-    weather.
-    Outcome: browser gameplay feedback is not visually silent.
-85. Add a responsive layout pass for laptop, desktop, and common browser zoom
-    levels.
-    Outcome: the client remains usable across normal browser sizes.
-86. Add web E2E smoke coverage for the current client gameplay path.
-    Outcome: the browser path is tested end-to-end, not only by unit tests.
-87. Add `POST /api/auth/login`.
-    Outcome: account-level username/password login exists over HTTP.
-88. Add `POST /api/auth/google`.
-    Outcome: account-level Google login exists over HTTP.
-89. Add `GET /api/auth/session`.
-    Outcome: browser session restore works without touching the AO socket.
-90. Add `POST /api/auth/logout`.
-    Outcome: account logout is explicit and clean.
-91. Add `GET /api/characters`.
-    Outcome: the browser can list account-owned characters.
-92. Add `POST /api/characters`.
-    Outcome: character creation exists in the account lobby flow.
-93. Add `POST /api/characters/:id/session`.
-    Outcome: selecting a character yields the token needed for unchanged AO
-    socket entry.
-94. Support password-only, Google-only, and linked accounts.
-    Outcome: account identity model is explicit and flexible.
-95. Build browser login/session restore flow.
-    Outcome: users can authenticate and resume browser sessions cleanly.
-96. Build browser Google login/link flow.
-    Outcome: Google auth is first-class in the browser, not a token paste path.
-97. Build browser character picker/create flow.
-    Outcome: the browser chooses or creates a character before opening the AO
-    session.
-98. Include race/class/head/home/stat choices in the browser character create
-    flow.
-    Outcome: browser-side character creation exposes the same core setup choices
-    as the gameplay backend expects.
-99. Stop using socket `login_new_char` as the primary browser account flow.
-    Outcome: account auth and gameplay auth are clearly separated.
-100. Launch the AO socket with `login_existing_char(char_id, session_token)`.
+89. Show clan member online state, rank/role, and faction/guild alignment.
+    Outcome: clan UI surfaces the real backend state instead of a flat member
+    list.
+90. Keep faction chat visible as a distinct chat stream.
+    Outcome: faction communication is not collapsed into generic log lines.
+91. Keep guild chat visible as a distinct chat stream.
+    Outcome: guild communication is not collapsed into generic log lines.
+92. Keep party chat visible as a distinct chat stream.
+    Outcome: party communication is not collapsed into generic log lines.
+93. Add clear ghost/dead HUD cues.
+    Outcome: dead state is visually obvious in the browser.
+94. Disable actions that the dead state will reject anyway.
+    Outcome: obvious dead-state rejections are prevented client-side.
+95. Add a loading overlay.
+    Outcome: map/session transitions are visible instead of abrupt.
+96. Add a reconnect overlay.
+    Outcome: connection recovery is visible and less confusing.
+97. Add a banned error state.
+    Outcome: banned users get an explicit browser state instead of a generic
+    failure.
+98. Add a muted error/state message.
+    Outcome: muted users see a clear chat restriction state.
+99. Add a server-full error state.
+    Outcome: capacity failures are explicit in the browser.
+100. Add a maintenance error state.
+     Outcome: maintenance mode is explicit in the browser.
+101. Add a token-expired error state.
+     Outcome: auth/session expiry is explicit in the browser.
+102. Add browser music settings.
+     Outcome: music can be enabled, disabled, and persisted intentionally.
+103. Add browser SFX settings.
+     Outcome: sound effects can be enabled, disabled, and persisted
+     intentionally.
+104. Add browser renderer-quality settings.
+     Outcome: users can trade fidelity for performance explicitly.
+105. Add browser keybind settings.
+     Outcome: controls can be configured instead of hardcoded.
+106. Add a minimap if it remains part of the web UX target.
+     Outcome: navigation support is explicit instead of ad hoc.
+107. Add map markers if they remain part of the web UX target.
+     Outcome: navigation targets are explicit instead of ad hoc.
+108. Add combat and spell sound effects.
+     Outcome: combat feedback is not visually silent.
+109. Add inventory and UI sound effects.
+     Outcome: inventory and menu interactions have immediate feedback.
+110. Add door, teleport, and weather sound effects.
+     Outcome: world transitions and ambience have immediate feedback.
+111. Add a responsive layout pass for desktop.
+     Outcome: the client remains usable on normal desktop browser sizes.
+112. Add a responsive layout pass for laptop and common browser zoom levels.
+     Outcome: the client remains usable on tighter browser layouts and zoomed
+     views.
+113. Add web E2E smoke coverage for browser login/lobby flows once they exist.
+     Outcome: the account/lobby browser path is tested end-to-end.
+114. Add web E2E smoke coverage for connect, map load, and inventory.
+     Outcome: the basic gameplay browser path is tested end-to-end.
+115. Add web E2E smoke coverage for combat, spells, death, and revive.
+     Outcome: the core gameplay browser path is tested end-to-end.
+116. Add web E2E smoke coverage for bank, trade, social UI, weather, and
+     reconnect.
+     Outcome: advanced browser gameplay flows are tested end-to-end.
+117. Add `POST /api/auth/login`.
+     Outcome: account-level username/password login exists over HTTP.
+118. Add `POST /api/auth/google`.
+     Outcome: account-level Google login exists over HTTP.
+119. Add `GET /api/auth/session`.
+     Outcome: browser session restore works without touching the AO socket.
+120. Add `POST /api/auth/logout`.
+     Outcome: account logout is explicit and clean.
+121. Add `GET /api/characters`.
+     Outcome: the browser can list account-owned characters.
+122. Add `POST /api/characters`.
+     Outcome: character creation exists in the account lobby flow.
+123. Add `POST /api/characters/:id/session`.
+     Outcome: selecting a character yields the token needed for unchanged AO
+     socket entry.
+124. Support password-only accounts.
+     Outcome: the account model works without Google linkage.
+125. Support Google-only accounts.
+     Outcome: the account model works without a local password.
+126. Support linked password+Google accounts.
+     Outcome: one account can support both auth methods cleanly.
+127. Build the browser username/password login flow.
+     Outcome: users can sign in with credentials before the AO session starts.
+128. Build the browser session-restore flow.
+     Outcome: users can resume account sessions cleanly.
+129. Build the browser Google login flow.
+     Outcome: Google auth is first-class in the browser, not a token paste
+     path.
+130. Build the browser Google account-link flow.
+     Outcome: existing accounts can attach Google auth cleanly.
+131. Build the browser character list flow.
+     Outcome: the browser shows owned characters before opening the AO session.
+132. Build the browser character creation flow.
+     Outcome: the browser can create a new character before opening the AO
+     session.
+133. Build the browser character selection flow.
+     Outcome: the browser chooses a character before opening the AO session.
+134. Include race/class choices in the browser character create flow.
+     Outcome: browser-side character creation exposes core class/race setup.
+135. Include head/home/stat choices in the browser character create flow.
+     Outcome: browser-side character creation exposes the remaining setup
+     choices the backend expects.
+136. Stop using socket `login_new_char` as the primary browser account flow.
+     Outcome: account auth and gameplay auth are clearly separated.
+137. Launch the AO socket with `login_existing_char(char_id, session_token)`.
      Outcome: gameplay protocol stays unchanged after the HTTP lobby.
-101. Prefer same-origin serving or proxying for the account API.
+138. Prefer same-origin serving or proxying for the account API.
      Outcome: cookies/session handling stays simple.
 
 ## Checks To Run
