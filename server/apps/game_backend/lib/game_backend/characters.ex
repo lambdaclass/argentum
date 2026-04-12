@@ -82,6 +82,9 @@ defmodule GameBackend.Characters do
 
     field(:muted_until, :integer, default: 0)
 
+    # Marriage: VB6 SpouseId (0 = not married)
+    field(:spouse_id, :integer, default: 0)
+
     field(:session_token, :string)
 
     has_many(:inventory_slots, InventorySlot, foreign_key: :character_id)
@@ -140,6 +143,7 @@ defmodule GameBackend.Characters do
     :criminal,
     :gm,
     :muted_until,
+    :spouse_id,
     :session_token
   ]
 
@@ -192,6 +196,41 @@ defmodule GameBackend.Characters do
     __MODULE__
     |> Repo.get_by(name: name)
     |> preload_associations()
+  end
+
+  @doc "Load all characters that belong to the given account."
+  def list_for_account(account_id) do
+    __MODULE__
+    |> where([c], c.account_id == ^account_id)
+    |> order_by([c], asc: c.inserted_at, asc: c.id)
+    |> Repo.all()
+    |> Repo.preload([:equipment])
+  end
+
+  @doc "Load a character only if it belongs to the given account."
+  def get_for_account(account_id, char_id) do
+    __MODULE__
+    |> where([c], c.account_id == ^account_id and c.id == ^char_id)
+    |> Repo.one()
+    |> case do
+      nil -> nil
+      character -> Repo.preload(character, [:equipment])
+    end
+  end
+
+  @doc "Return the general ranking ordered by level, XP, and total kills."
+  def general_ranking(limit \\ 50) do
+    __MODULE__
+    |> order_by(
+      [c],
+      desc: c.level,
+      desc: c.xp,
+      desc: fragment("? + ?", c.citizens_killed, c.criminals_killed),
+      asc: c.name
+    )
+    |> limit(^limit)
+    |> Repo.all()
+    |> Repo.preload([:equipment])
   end
 
   defp preload_associations(nil), do: nil
@@ -299,6 +338,7 @@ defmodule GameBackend.Characters do
       criminal: c.criminal,
       gm: c.gm,
       muted_until: c.muted_until || 0,
+      spouse_id: c.spouse_id || 0,
       map_id: c.map_id
     }
   end
@@ -350,6 +390,7 @@ defmodule GameBackend.Characters do
       dead: e.dead,
       criminal: e.criminal,
       muted_until: e.muted_until,
+      spouse_id: e.spouse_id,
       map_id: e.map_id
     }
   end

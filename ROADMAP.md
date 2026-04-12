@@ -13,23 +13,28 @@ This is the only roadmap. `CHANGELOG.md` tracks completed work.
 - **Backend environment:** the supported `server/` Nix/dev shell compiles and
   tests cleanly, and recent migrations were verified on clean Postgres.
 - **Web client:** playable development client. The big remaining frontend gap
-  is no longer the in-game HUD; it is the browser product shell around it:
-  account/lobby flow, authoritative party/clan state, settings/audio polish,
-  browser-side proof, and session/auth UX.
-- **Post-compat account flow:** not built. Target is username/password or Google
-  account login over HTTP, character selection in the browser, then unchanged
-  AO socket login with `login_existing_char(char_id, session_token)`.
+  is no longer the in-game HUD. A minimal browser product shell is landed:
+  HTTP username/password auth, session restore, character list/create/select,
+  ranking, and gameplay launch via `login_existing_char(char_id, session_token)`.
+  The main remaining frontend gaps are authoritative party/clan state,
+  settings/audio polish, browser-side proof, and product-shell hardening.
+- **Post-compat account flow:** partially built. Username/password browser
+  account flow is landed; remaining product work is Google auth/account
+  linking, browser-flow hardening, and later i18n/multi-realm.
 - **Code size now:** backend runtime code is ~21k Elixir LOC, backend tests are
   ~17k Elixir LOC, and the web client source is ~15k TypeScript/React/CSS LOC.
 
 ## Frontend Product Snapshot
 
-- **Big missing frontend work:** the browser product shell around the gameplay
-  client, not the in-game HUD.
+- **Big remaining frontend work:** hardening and extending the browser product
+  shell around the gameplay client, not rebuilding the in-game HUD.
 - **Actual gaps:**
-  - proper browser account/lobby flow is still missing: HTTP auth, session
-    restore, character list/create/select, then unchanged AO socket login via
-    `login_existing_char(char_id, session_token)`
+  - the minimal browser account/lobby flow is now landed: HTTP username/
+    password auth, session restore, character list/create/select, ranking, and
+    unchanged AO socket login via `login_existing_char(char_id, session_token)`
+  - product-shell hardening is still missing: browser login/lobby smoke
+    coverage, stronger recovery behavior across refresh/logout/partial
+    bootstrap, and clearer completion criteria for the account flow
   - party/clan UI exists, but it is not yet fully authoritative: the browser
     still needs richer backend truth for online state, roles/ranks,
     permissions, safe-state, alignment, and cleaner snapshots
@@ -77,6 +82,19 @@ This is the only roadmap. `CHANGELOG.md` tracks completed work.
   - React may mount host nodes and pass coarse-grained state into the renderer,
     but it must not own per-frame drawing, animation loops, or fast-path
     canvas mutations
+- **Long-term browser-shell design:**
+  - copy the old webclient's browser product flow, not its implementation or
+    renderer architecture
+  - treat login, register, session restore, character list/create/select,
+    ranking, and similar account/lobby surfaces as normal HTTP browser product
+    work
+  - keep gameplay entry as a narrow handoff: the browser shell obtains
+    `login_existing_char(char_id, session_token)` credentials, then the AO
+    gameplay session starts unchanged
+  - keep product-shell routes, modules, and state isolated from gameplay boot
+    so account/lobby concerns do not spread through the gameplay client
+  - do not use the AO gameplay protocol as the primary browser auth/lobby
+    transport
 - **Recommended frontend priority:**
   1. Fast tests and build gates.
   2. Frontend-only parity and UX.
@@ -155,6 +173,10 @@ Why fifth:
 - `login_existing_char(char_id, session_token)` flow
 - i18n
 - multi-realm
+- copy the old browser flow shape where useful, but do not transplant old
+  renderer/client implementation details
+- keep the product shell on HTTP/browser routes and keep the AO gameplay socket
+  handoff narrow and explicit
 
 Why sixth:
 
@@ -682,6 +704,9 @@ When in doubt:
      Outcome: gameplay protocol stays unchanged after the HTTP lobby.
 124. Prefer same-origin serving or proxying for the account API.
      Outcome: cookies/session handling stays simple.
+     Design note: this browser product-shell lane should copy the old web flow
+     shape where it helps, but must not copy old renderer/client architecture
+     or let account/lobby state leak into the gameplay fast path.
 125. Define supported locales and fallback behavior.
      Outcome: internationalization has an explicit scope instead of ad hoc text
      replacement.

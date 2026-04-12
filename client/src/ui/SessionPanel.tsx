@@ -14,7 +14,7 @@ interface SessionPanelProps {
   connection: ClientState["connection"];
   mapPackError: string | null;
   mapPackProgressLabel: string;
-  mapPackStatus: "loading" | "ready" | "error";
+  mapPackStatus: "idle" | "loading" | "ready" | "error";
   settings: ClientState["settings"];
   title: string;
   showTileDebug: boolean;
@@ -185,12 +185,12 @@ function describeBootstrapRecovery(
     };
   }
 
-  if (assetStatus === "loading" || mapPackStatus === "loading") {
+  if (assetStatus === "loading" || mapPackStatus === "loading" || mapPackStatus === "idle") {
     return {
       tone: "neutral" as const,
       title: "Preparing client data",
       copy:
-        mapPackStatus === "loading"
+        mapPackStatus === "loading" || mapPackStatus === "idle"
           ? mapPackProgressLabel
           : "Loading the sprite and metadata indices used by the browser client."
     };
@@ -263,7 +263,11 @@ export const SessionPanel = memo(function SessionPanel({
     { label: "Reconnect", value: credentials ? `char_id ${credentials.charId}` : "None saved" },
     { label: "World", value: connected ? title : world.mapStatus },
     { label: "Assets", value: assetStatus },
-    { label: "World data", value: mapPackStatus === "loading" ? "Loading" : mapPackStatus }
+    {
+      label: "World data",
+      value:
+        mapPackStatus === "loading" ? "Loading" : mapPackStatus === "idle" ? "Pending" : mapPackStatus
+    }
   ];
   const musicPercent = Math.round(settings.audio.musicVolume * 100);
   const soundPercent = Math.round(settings.audio.soundVolume * 100);

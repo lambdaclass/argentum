@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { appReducer, createInitialState } from "./appReducer";
+import { buildBrowserPath, normalizeBrowserRoute, type BrowserRoute } from "./browserRoutes";
 import { bindingMatches } from "./settings";
 import type { Direction, KeyBindingAction } from "./types";
 import { SessionClient, type MovementDebugSnapshot } from "../net/SessionClient";
@@ -21,6 +22,8 @@ import { TradePanel } from "../ui/TradePanel";
 import { BankPanel } from "../ui/BankPanel";
 import { PartyPanel } from "../ui/PartyPanel";
 import { ClansPanel } from "../ui/ClansPanel";
+import { ProductShell } from "../ui/ProductShell";
+import type { BrowserCharacter } from "../product/api";
 
 const MOVE_KEYS: Record<string, Direction> = {
   ArrowUp: "north",
@@ -151,7 +154,7 @@ export function App({ uiDemoMode = false }: AppProps) {
   const [assetCatalog, setAssetCatalog] = useState<AssetCatalog | null>(null);
   const [assetStatus, setAssetStatus] = useState<"loading" | "ready" | "error">("loading");
   const [assetError, setAssetError] = useState<string | null>(null);
-  const [mapPackStatus, setMapPackStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [mapPackStatus, setMapPackStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [mapPackError, setMapPackError] = useState<string | null>(null);
   const [mapPackProgress, setMapPackProgress] = useState<MapPackProgress>({
     phase: "download",
@@ -163,6 +166,9 @@ export function App({ uiDemoMode = false }: AppProps) {
   const [activeRightTab, setActiveRightTab] = useState<
     "hud" | "trade" | "bank" | "commerce" | "skills" | "spells" | "world" | "session" | "chat" | "debug"
   >("hud");
+  const [browserRoute, setBrowserRoute] = useState<BrowserRoute>(() =>
+    typeof window === "undefined" ? "/" : normalizeBrowserRoute(window.location.pathname)
+  );
   const [showTileDebug, setShowTileDebug] = useState(false);
   const [showMoveDebug, setShowMoveDebug] = useState(false);
   const [spellHotkeys, setSpellHotkeys] = useState<Array<number | null>>(() => loadSpellHotkeys());
@@ -182,10 +188,27 @@ export function App({ uiDemoMode = false }: AppProps) {
   const manualDisconnectRef = useRef(false);
   const enteredWorldRef = useRef(false);
   const demoBootstrapRef = useRef(false);
+  const gameplayRouteRef = useRef(browserRoute === "/play");
+  const isGameplayRoute = browserRoute === "/play";
 
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const handlePopState = () => {
+      setBrowserRoute(normalizeBrowserRoute(window.location.pathname));
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, []);
 
   useEffect(() => {
     if (!__AO_ENABLE_TEST_SURFACES__ || !uiDemoMode || demoBootstrapRef.current) {
@@ -360,6 +383,17 @@ export function App({ uiDemoMode = false }: AppProps) {
       return;
     }
 
+    if (!isGameplayRoute) {
+      setMapPackStatus("idle");
+      setMapPackError(null);
+      setMapPackProgress({
+        phase: "download",
+        loadedBytes: 0,
+        totalBytes: null
+      });
+      return;
+    }
+
     let cancelled = false;
     setMapPackStatus("loading");
     setMapPackError(null);
@@ -396,7 +430,7 @@ export function App({ uiDemoMode = false }: AppProps) {
     return () => {
       cancelled = true;
     };
-  }, [mapPackReloadNonce, state.connection.endpoint]);
+  }, [isGameplayRoute, mapPackReloadNonce, state.connection.endpoint, uiDemoMode]);
 
   const mapPackProgressLabel = useMemo(() => {
     const { loadedBytes, totalBytes, phase } = mapPackProgress;
@@ -439,6 +473,10 @@ export function App({ uiDemoMode = false }: AppProps) {
   const controlBindings = state.settings.controls.bindings;
 
   useEffect(() => {
+    if (!isGameplayRoute) {
+      return;
+    }
+
     const handler = (event: KeyboardEvent) => {
       const target = event.target;
       if (
@@ -563,7 +601,7 @@ export function App({ uiDemoMode = false }: AppProps) {
       window.removeEventListener("keyup", releaseHandler);
       window.removeEventListener("blur", blurHandler);
     };
-  }, [controlBindings, session, spellHotkeys]);
+  }, [controlBindings, isGameplayRoute, session, spellHotkeys]);
 
   const hasTransientWorldState =
     state.world.chatBubbles.length > 0 ||
@@ -603,6 +641,10 @@ export function App({ uiDemoMode = false }: AppProps) {
   }, [music, session, sound]);
 
   useEffect(() => {
+    if (!isGameplayRoute) {
+      return;
+    }
+
     if (activeRightTab !== "debug" || !showMoveDebug) {
       return;
     }
@@ -616,10 +658,10 @@ export function App({ uiDemoMode = false }: AppProps) {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [activeRightTab, session, showMoveDebug]);
+  }, [activeRightTab, isGameplayRoute, session, showMoveDebug]);
 
   useEffect(() => {
-    if (uiDemoMode) {
+    if (uiDemoMode || !isGameplayRoute) {
       return;
     }
 
@@ -663,6 +705,7 @@ export function App({ uiDemoMode = false }: AppProps) {
   }, [
     assetStatus,
     bootConnectAttempts,
+    isGameplayRoute,
     mapPackStatus,
     session,
     state.connection.bootstrapPassword,
@@ -675,6 +718,11 @@ export function App({ uiDemoMode = false }: AppProps) {
   ]);
 
   useEffect(() => {
+    if (!isGameplayRoute) {
+      music.stop();
+      return;
+    }
+
     if (assetStatus !== "ready") {
       return;
     }
@@ -691,9 +739,14 @@ export function App({ uiDemoMode = false }: AppProps) {
         message: error instanceof Error ? error.message : "Music initialization failed."
       });
     });
-  }, [assetStatus, dispatch, music, state.settings.audio.musicEnabled]);
+  }, [assetStatus, dispatch, isGameplayRoute, music, state.settings.audio.musicEnabled]);
 
   useEffect(() => {
+    if (!isGameplayRoute) {
+      music.stop();
+      return;
+    }
+
     if (state.world.mapStatus !== "ready" || !state.world.map) {
       return;
     }
@@ -713,6 +766,7 @@ export function App({ uiDemoMode = false }: AppProps) {
   }, [
     dispatch,
     music,
+    isGameplayRoute,
     state.connection.endpoint,
     state.settings.audio.musicEnabled,
     state.world.map,
@@ -724,6 +778,39 @@ export function App({ uiDemoMode = false }: AppProps) {
       music.stop();
     }
   }, [music, state.connection.status, state.world.map]);
+
+  useEffect(() => {
+    if (gameplayRouteRef.current && !isGameplayRoute) {
+      manualDisconnectRef.current = true;
+      enteredWorldRef.current = false;
+      setBootConnectAttempts(0);
+      session.disconnect();
+      dispatch({ type: "session/resetRuntime" });
+      music.stop();
+    }
+
+    gameplayRouteRef.current = isGameplayRoute;
+  }, [dispatch, isGameplayRoute, music, session]);
+
+  const handleNavigate = useCallback((route: BrowserRoute) => {
+    if (route === "/play") {
+      manualDisconnectRef.current = false;
+      enteredWorldRef.current = false;
+      setBootConnectAttempts(0);
+    }
+
+    if (typeof window === "undefined") {
+      setBrowserRoute(route);
+      return;
+    }
+
+    const nextPath = buildBrowserPath(route, window.location.pathname);
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({}, "", nextPath);
+    }
+
+    setBrowserRoute(route);
+  }, []);
 
   const handleConnect = useCallback(() => {
     const current = stateRef.current;
@@ -865,6 +952,36 @@ export function App({ uiDemoMode = false }: AppProps) {
   const handleForgetSession = useCallback(() => {
     dispatch({ type: "connection/setCredentials", credentials: null });
   }, [dispatch]);
+
+  const handleClearGameplaySession = useCallback(() => {
+    manualDisconnectRef.current = true;
+    enteredWorldRef.current = false;
+    setBootConnectAttempts(0);
+    session.disconnect();
+    dispatch({ type: "connection/setCredentials", credentials: null });
+    dispatch({ type: "session/resetRuntime" });
+  }, [dispatch, session]);
+
+  const handleLaunchBrowserCharacter = useCallback(
+    (character: BrowserCharacter, credentials: { char_id: number; token: string }) => {
+      manualDisconnectRef.current = false;
+      enteredWorldRef.current = false;
+      setBootConnectAttempts(0);
+      session.disconnect();
+      dispatch({ type: "session/resetRuntime" });
+      dispatch({ type: "connection/setCharacterName", characterName: character.name });
+      dispatch({
+        type: "connection/setCredentials",
+        credentials: {
+          charId: credentials.char_id,
+          token: credentials.token
+        }
+      });
+      setActiveRightTab("hud");
+      handleNavigate("/play");
+    },
+    [dispatch, handleNavigate, session]
+  );
 
   const handleSetMusicEnabled = useCallback((enabled: boolean) => {
     dispatch({ type: "settings/setMusicEnabled", enabled });
@@ -1019,6 +1136,20 @@ export function App({ uiDemoMode = false }: AppProps) {
       `Corrections: ${movementDebug.correctionCount} (${correctionAgo})`
     ].join("\n");
   }, [movementDebug]);
+
+  if (!isGameplayRoute) {
+    return (
+      <ProductShell
+        assetCatalog={assetCatalog}
+        assetError={assetError}
+        assetStatus={assetStatus}
+        currentRoute={browserRoute}
+        onClearGameplaySession={handleClearGameplaySession}
+        onLaunchCharacter={handleLaunchBrowserCharacter}
+        onNavigate={handleNavigate}
+      />
+    );
+  }
 
   return (
     <div className="client-shell">

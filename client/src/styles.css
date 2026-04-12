@@ -17,6 +17,248 @@
   font-family: "Avenir Next", "Segoe UI", sans-serif;
 }
 
+.product-shell {
+  width: 100%;
+  height: 100vh;
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(280px, 24vw, 340px);
+  gap: 18px;
+  padding: 18px;
+  overflow: auto;
+}
+
+.product-main,
+.product-side {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.product-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.product-hero h1 {
+  max-width: 18ch;
+  font-size: clamp(2rem, 3vw, 2.8rem);
+  line-height: 1.05;
+}
+
+.product-nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.product-banner {
+  padding: 14px 18px;
+  border-radius: 18px;
+}
+
+.product-banner.success {
+  border-color: rgba(115, 194, 109, 0.35);
+  background: rgba(40, 75, 46, 0.72);
+}
+
+.product-banner.danger {
+  border-color: rgba(212, 96, 79, 0.35);
+  background: rgba(73, 34, 30, 0.78);
+}
+
+.product-lobby-layout,
+.product-create-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(260px, 0.7fr);
+  gap: 18px;
+}
+
+.product-character-list,
+.product-ranking-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.product-character-row,
+.product-ranking-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  text-align: left;
+}
+
+.product-character-row-selected {
+  border-color: rgba(240, 202, 106, 0.42);
+  background: rgba(240, 202, 106, 0.08);
+}
+
+.product-character-row-copy,
+.product-ranking-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.product-character-row-copy strong,
+.product-ranking-copy strong {
+  font-size: 15px;
+}
+
+.product-character-row-copy small,
+.product-ranking-copy small,
+.product-head-picker small {
+  color: var(--text-soft);
+}
+
+.product-ranking-rank {
+  width: 34px;
+  text-align: center;
+  font-weight: 700;
+  color: var(--accent-strong);
+}
+
+.product-selected-card,
+.product-side-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.product-auth-layout,
+.product-form-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.product-auth-tabs,
+.product-form-actions,
+.product-head-picker-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.product-head-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.product-empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px dashed var(--line);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.character-preview-stage {
+  position: relative;
+  width: 92px;
+  min-width: 92px;
+  height: 122px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 216, 132, 0.16);
+  background:
+    radial-gradient(circle at top center, rgba(240, 202, 106, 0.12), transparent 30%),
+    linear-gradient(180deg, rgba(25, 18, 12, 0.9), rgba(9, 13, 20, 0.96));
+  overflow: hidden;
+}
+
+.character-preview-stage.compact {
+  width: 68px;
+  min-width: 68px;
+  height: 92px;
+}
+
+.character-preview-stage.compact .character-preview-layer {
+  opacity: 0.95;
+}
+
+.character-preview-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+}
+
+.character-preview-fallback {
+  width: 92px;
+  min-width: 92px;
+  height: 122px;
+  display: grid;
+  place-items: center;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 216, 132, 0.16);
+  background: linear-gradient(180deg, rgba(25, 18, 12, 0.9), rgba(9, 13, 20, 0.96));
+  color: var(--accent-strong);
+  font-family: "Palatino Linotype", "Book Antiqua", serif;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.character-preview-fallback.compact {
+  width: 68px;
+  min-width: 68px;
+  height: 92px;
+  font-size: 18px;
+}
+
+@media (max-width: 1080px) {
+  .product-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .product-lobby-layout,
+  .product-create-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 780px) {
+  .product-shell {
+    padding: 12px;
+  }
+
+  .product-hero {
+    flex-direction: column;
+  }
+
+  .product-character-row,
+  .product-ranking-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .product-character-row .panel-tag,
+  .product-ranking-row .panel-tag,
+  .product-ranking-rank {
+    grid-column: 2;
+  }
+}
+
 * {
   box-sizing: border-box;
 }

@@ -1,11 +1,12 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ command, mode }) => {
   const enableTestSurfaces = mode === "test-ui" || process.env.VITE_ENABLE_TEST_SURFACES === "1";
+  const clientBase = command === "build" ? "/client/" : "/";
 
   return {
-    base: "/",
+    base: clientBase,
     define: {
       __AO_ENABLE_TEST_SURFACES__: JSON.stringify(enableTestSurfaces)
     },
@@ -29,7 +30,13 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       host: "127.0.0.1",
-      port: 5173
+      port: 5173,
+      proxy: {
+        "/api": {
+          target: "http://127.0.0.1:7667",
+          changeOrigin: true
+        }
+      }
     },
     preview: {
       host: "127.0.0.1",

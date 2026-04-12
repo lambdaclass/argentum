@@ -12,8 +12,16 @@ defmodule AoTcpGateway.WsRouter do
 
   use Plug.Router
 
+  plug Plug.Session,
+    store: :cookie,
+    key: "_argentum_browser_session",
+    signing_salt: "browser-login-v1",
+    same_site: "Lax",
+    max_age: 30 * 24 * 60 * 60
+
   plug :serve_runtime_static
   plug Plug.Parsers, parsers: [:json], json_decoder: Jason
+  plug :fetch_session
   plug :match
   plug :dispatch
 
@@ -44,6 +52,49 @@ defmodule AoTcpGateway.WsRouter do
 
   get "/client/index.html" do
     serve_serious_client(conn)
+  end
+
+  get "/client/*_rest" do
+    serve_serious_client(conn)
+  end
+
+  get "/api/auth/session" do
+    AoTcpGateway.BrowserApi.session(conn)
+  end
+
+  post "/api/auth/register" do
+    AoTcpGateway.BrowserApi.register(conn, conn.body_params)
+  end
+
+  post "/api/auth/login" do
+    AoTcpGateway.BrowserApi.login(conn, conn.body_params)
+  end
+
+  post "/api/auth/logout" do
+    AoTcpGateway.BrowserApi.logout(conn)
+  end
+
+  get "/api/meta/character-options" do
+    AoTcpGateway.BrowserApi.character_options(conn)
+  end
+
+  get "/api/characters" do
+    AoTcpGateway.BrowserApi.list_characters(conn)
+  end
+
+  post "/api/characters" do
+    AoTcpGateway.BrowserApi.create_character(conn, conn.body_params)
+  end
+
+  post "/api/characters/:id/session" do
+    case Integer.parse(id) do
+      {char_id, ""} -> AoTcpGateway.BrowserApi.create_character_session(conn, char_id)
+      _ -> send_resp(conn, 404, "Not found")
+    end
+  end
+
+  get "/api/ranking/general" do
+    AoTcpGateway.BrowserApi.ranking(conn, conn.params)
   end
 
   get "/api/map/:id" do

@@ -16,6 +16,29 @@ defmodule Arena.CharacterCreation do
   @valid_cities 1..9
 
   @gender_names %{1 => :male, 2 => :female}
+  @gender_labels %{1 => "Hombre", 2 => "Mujer"}
+  @race_labels %{
+    1 => "Humano",
+    2 => "Elfo",
+    3 => "Elfo Oscuro",
+    4 => "Enano",
+    5 => "Gnomo",
+    6 => "Orco"
+  }
+  @class_labels %{
+    1 => "Mago",
+    2 => "Clérigo",
+    3 => "Paladín",
+    4 => "Cazador",
+    5 => "Trabajador",
+    6 => "Guerrero",
+    7 => "Ladrón",
+    8 => "Bandido",
+    9 => "Asesino",
+    10 => "Druida",
+    11 => "Bardo",
+    12 => "Pirata"
+  }
   # VB6 e_Ciudad enum order
   @home_city_atom %{
     1 => :ullathorpe,
@@ -27,6 +50,17 @@ defmodule Arena.CharacterCreation do
     7 => :forgat,
     8 => :eldoria,
     9 => :penthar
+  }
+  @home_city_labels %{
+    1 => "Ullathorpe",
+    2 => "Nix",
+    3 => "Banderbill",
+    4 => "Lindos",
+    5 => "Arghal",
+    6 => "Arkhein",
+    7 => "Forgat",
+    8 => "Eldoria",
+    9 => "Penthar"
   }
 
   # Body IDs per {race_id, gender_id} — from VB6 DarCuerpo
@@ -92,6 +126,31 @@ defmodule Arena.CharacterCreation do
     end
   end
 
+  @doc "Expose browser-friendly character creation options from the canonical VB6 rules."
+  def browser_options do
+    %{
+      races: enum_options(@valid_races, @race_labels),
+      genders: enum_options(@valid_genders, @gender_labels),
+      classes: enum_options(@valid_classes, @class_labels),
+      home_cities: enum_options(@valid_cities, @home_city_labels),
+      head_ranges:
+        for {{race_id, gender_id}, ranges} <- @head_ranges, into: %{} do
+          {"#{race_id}:#{gender_id}", Enum.map(ranges, fn {min, max} -> %{min: min, max: max} end)}
+        end,
+      body_ids:
+        for {{race_id, gender_id}, body_id} <- @body_ids, into: %{} do
+          {"#{race_id}:#{gender_id}", body_id}
+        end,
+      defaults: %{
+        race: 1,
+        gender: 1,
+        class: 6,
+        home_city: 1,
+        head: default_head(1, 1)
+      }
+    }
+  end
+
   # ---- Validation ----
 
   defp validate_name(name) when is_binary(name) do
@@ -107,6 +166,19 @@ defmodule Arena.CharacterCreation do
   end
 
   defp validate_name(_), do: {:error, :name_invalid}
+
+  defp enum_options(range, labels) do
+    Enum.map(range, fn id ->
+      %{id: id, label: Map.fetch!(labels, id)}
+    end)
+  end
+
+  defp default_head(race, gender) do
+    case Map.get(@head_ranges, {race, gender}, []) do
+      [{min, _max} | _] -> min
+      [] -> 1
+    end
+  end
 
   defp validate_range(field, value, range) do
     if value in range, do: :ok, else: {:error, {:"invalid_#{field}", value}}
