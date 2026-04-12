@@ -9,6 +9,7 @@ export const DEFAULT_KEY_BINDINGS: ClientState["settings"]["controls"]["bindings
   safeToggle: "g",
   commerce: "e",
   bank: "b",
+  resyncPosition: "l",
   tileDebug: "F1",
   moveDebug: "F2"
 };
@@ -24,6 +25,11 @@ export const KEY_BINDING_FIELDS: Array<{
   { action: "safeToggle", label: "Safe Mode", description: "Toggle attack safe mode." },
   { action: "commerce", label: "Commerce", description: "Open the merchant window with an NPC." },
   { action: "bank", label: "Bank", description: "Open the bank window with a banker." },
+  {
+    action: "resyncPosition",
+    label: "Resync Position",
+    description: "Ask the server for your authoritative position and recenter there."
+  },
   { action: "tileDebug", label: "Tile Debug", description: "Toggle tile debug overlay." },
   { action: "moveDebug", label: "Move Debug", description: "Toggle movement debug panel." }
 ];
@@ -161,4 +167,3 @@ export function persistSettings(settings: ClientState["settings"]) {
 
   window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
 }
-

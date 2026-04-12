@@ -72,4 +72,104 @@ describe("GameRuntime movement prediction", () => {
     expect(state.world.self.y).toBe(2);
     expect(state.world.self.heading).toBe(2);
   });
+
+  it("does not predict a water step while not navigating", () => {
+    const state = createInitialState();
+    state.connection.status = "connected";
+    state.world.mapStatus = "ready";
+    state.world.map = {
+      mapId: 78,
+      name: "Costas de nix",
+      width: 5,
+      height: 5,
+      tiles: new Uint8Array(25),
+      musicHi: 0,
+      musicLow: 0,
+      layers: [[], [], [], []],
+      npcs: [],
+      exits: []
+    };
+    state.world.map.tiles[(2 - 1) * state.world.map.width + (3 - 1)] = 2;
+    state.world.self.x = 2;
+    state.world.self.y = 2;
+    state.world.self.heading = 1;
+    state.world.self.speed = 1;
+    state.world.self.navigating = false;
+
+    const transport = {
+      sendWalk: vi.fn(),
+      sendHeading: vi.fn(),
+      requestPositionUpdate: vi.fn()
+    };
+    const ui = {
+      getState: () => state,
+      setSelfPosition: (x: number, y: number) => {
+        state.world.self.x = x;
+        state.world.self.y = y;
+      },
+      setSelfHeading: (heading: number) => {
+        state.world.self.heading = heading;
+      }
+    };
+
+    const runtime = new GameRuntime(transport, ui);
+    runtime.onMapLoaded(78);
+    runtime.rememberMovementKey("east");
+    runtime.tick(1_000);
+
+    expect(transport.sendWalk).not.toHaveBeenCalled();
+    expect(transport.sendHeading).toHaveBeenCalledWith("east");
+    expect(state.world.self.x).toBe(2);
+    expect(state.world.self.y).toBe(2);
+  });
+
+  it("predicts a water step while navigating", () => {
+    const state = createInitialState();
+    state.connection.status = "connected";
+    state.world.mapStatus = "ready";
+    state.world.map = {
+      mapId: 78,
+      name: "Costas de nix",
+      width: 5,
+      height: 5,
+      tiles: new Uint8Array(25),
+      musicHi: 0,
+      musicLow: 0,
+      layers: [[], [], [], []],
+      npcs: [],
+      exits: []
+    };
+    state.world.map.tiles[(2 - 1) * state.world.map.width + (3 - 1)] = 2;
+    state.world.self.x = 2;
+    state.world.self.y = 2;
+    state.world.self.heading = 1;
+    state.world.self.speed = 1;
+    state.world.self.navigating = true;
+
+    const transport = {
+      sendWalk: vi.fn(),
+      sendHeading: vi.fn(),
+      requestPositionUpdate: vi.fn()
+    };
+    const ui = {
+      getState: () => state,
+      setSelfPosition: (x: number, y: number) => {
+        state.world.self.x = x;
+        state.world.self.y = y;
+      },
+      setSelfHeading: (heading: number) => {
+        state.world.self.heading = heading;
+      }
+    };
+
+    const runtime = new GameRuntime(transport, ui);
+    runtime.onMapLoaded(78);
+    runtime.rememberMovementKey("east");
+    runtime.tick(1_000);
+
+    expect(transport.sendWalk).toHaveBeenCalledWith("east");
+    expect(state.world.self.x).toBe(3);
+    expect(state.world.self.y).toBe(2);
+    expect(state.world.self.heading).toBe(2);
+  });
 });

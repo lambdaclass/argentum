@@ -29,6 +29,11 @@ interface RuntimeUiBridge {
   setSelfHeading(heading: number): void;
 }
 
+const runtimeTimers = {
+  setTimeout: globalThis.setTimeout.bind(globalThis),
+  clearTimeout: globalThis.clearTimeout.bind(globalThis)
+};
+
 export class GameRuntime {
   private readonly transport: RuntimeTransport;
   private readonly ui: RuntimeUiBridge;
@@ -201,17 +206,31 @@ export class GameRuntime {
     return (y - 1) * width + (x - 1);
   }
 
-  private isTileBlocked(x: number, y: number) {
+  private tileValueAt(x: number, y: number) {
     const map = this.ui.getState().world.map;
     if (!map) {
-      return false;
+      return 0;
     }
 
     if (x < 1 || x > map.width || y < 1 || y > map.height) {
-      return true;
+      return 1;
     }
 
-    return (map.tiles[this.tileIndex(x, y, map.width)] ?? 0) !== 0;
+    return map.tiles[this.tileIndex(x, y, map.width)] ?? 0;
+  }
+
+  private isTileBlocked(x: number, y: number) {
+    const tileValue = this.tileValueAt(x, y);
+
+    if (tileValue === 0 || tileValue === 4) {
+      return false;
+    }
+
+    if (tileValue === 2) {
+      return !this.ui.getState().world.self.navigating;
+    }
+
+    return true;
   }
 
   private isTileOccupied(x: number, y: number) {
@@ -254,7 +273,7 @@ export class GameRuntime {
     const step = {
       x,
       y,
-      timeoutId: window.setTimeout(() => {
+      timeoutId: runtimeTimers.setTimeout(() => {
         if (
           this.pendingWalkSteps.length > 0 &&
           this.pendingWalkSteps[this.pendingWalkSteps.length - 1] === step
@@ -269,7 +288,7 @@ export class GameRuntime {
 
   private clearPendingWalkSteps() {
     for (const step of this.pendingWalkSteps) {
-      window.clearTimeout(step.timeoutId);
+      runtimeTimers.clearTimeout(step.timeoutId);
     }
     this.pendingWalkSteps = [];
   }
@@ -279,7 +298,7 @@ export class GameRuntime {
       const step = this.pendingWalkSteps[index];
       if (step.x === x && step.y === y) {
         for (let consumed = 0; consumed <= index; consumed += 1) {
-          window.clearTimeout(this.pendingWalkSteps[consumed].timeoutId);
+          runtimeTimers.clearTimeout(this.pendingWalkSteps[consumed].timeoutId);
         }
         this.pendingWalkSteps = this.pendingWalkSteps.slice(index + 1);
         return true;

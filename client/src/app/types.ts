@@ -8,6 +8,7 @@ export type KeyBindingAction =
   | "safeToggle"
   | "commerce"
   | "bank"
+  | "resyncPosition"
   | "tileDebug"
   | "moveDebug";
 

@@ -107,4 +107,37 @@ describe("appReducer", () => {
     expect(next.connection.status).toBe("offline");
     expect(next.world.map).toBeNull();
   });
+
+  it("does not mark NPCs dead just because character_create reports zero HP", () => {
+    const state = appReducer(createInitialState(), {
+      type: "world/upsertCharacter",
+      self: false,
+      character: {
+        charIndex: 77,
+        bodyId: 117,
+        headId: 3,
+        weaponId: 0,
+        shieldId: 0,
+        helmetId: 0,
+        cartId: 0,
+        backpackId: 0,
+        effectId: 0,
+        effectLoops: 0,
+        heading: 3,
+        x: 50,
+        y: 50,
+        name: "Guardia Imperial",
+        speed: 1,
+        minHp: 0,
+        maxHp: 0,
+        minMana: 0,
+        maxMana: 0,
+        isNpc: true,
+        clanIndex: 0,
+        clanLevel: 0
+      }
+    });
+
+    expect(state.world.others[77]?.dead).toBe(false);
+  });
 });

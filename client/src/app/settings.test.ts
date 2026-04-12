@@ -27,4 +27,8 @@ describe("settings helpers", () => {
     expect(next.pickUp).toBe("f");
     expect(next.attack).toBeNull();
   });
+
+  it("ships the server position resync binding by default", () => {
+    expect(DEFAULT_KEY_BINDINGS.resyncPosition).toBe("l");
+  });
 });

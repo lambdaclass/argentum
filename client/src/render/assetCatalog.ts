@@ -1,5 +1,6 @@
 import { BaseTexture, MIPMAP_MODES, Rectangle, SCALE_MODES, Texture } from "pixi.js";
 import { buildAssetOriginCandidates, buildAssetUrlFromOrigin, fetchJsonWithFallback } from "../net/assetHost";
+import type { GroundObject, WorldMapData } from "../app/types";
 
 interface DirectionalFrames {
   up: number;
@@ -69,6 +70,7 @@ export interface GrhFrameDef {
 const catalogCache = new Map<string, Promise<AssetCatalog>>();
 const baseTextureCache = new Map<string, BaseTexture>();
 const textureCache = new Map<string, Texture>();
+const imagePreloadCache = new Map<string, Promise<void>>();
 
 export function loadAssetCatalog(endpoint: string) {
   if (!catalogCache.has(endpoint)) {
@@ -127,6 +129,19 @@ function getDirectionalGrh(direction: "north" | "east" | "south" | "west", entry
       return entry.left;
     case "south":
       return entry.down;
+  }
+}
+
+function headingToDirection(heading: number): "north" | "east" | "south" | "west" {
+  switch (heading) {
+    case 1:
+      return "north";
+    case 2:
+      return "east";
+    case 4:
+      return "west";
+    default:
+      return "south";
   }
 }
 
@@ -259,6 +274,18 @@ export function getObjectGrh(catalog: AssetCatalog | null, objectId: number) {
   return catalog?.objects[objectId]?.grh ?? null;
 }
 
+export interface SceneCharacterAssetDescriptor {
+  bodyId: number;
+  headId: number;
+  weaponId: number;
+  shieldId: number;
+  helmetId: number;
+  cartId: number;
+  backpackId: number;
+  effectId: number;
+  heading: number;
+}
+
 export function getObjectFrameDef(catalog: AssetCatalog | null, objectId: number) {
   const grhId = getObjectGrh(catalog, objectId);
   if (!catalog || !grhId) {
@@ -266,6 +293,87 @@ export function getObjectFrameDef(catalog: AssetCatalog | null, objectId: number
   }
 
   return getGrhFrameDef(catalog, grhId);
+}
+
+function preloadImage(url: string) {
+  const existing = imagePreloadCache.get(url);
+  if (existing) {
+    return existing;
+  }
+
+  const promise = new Promise<void>((resolve) => {
+    const image = new Image();
+
+    const finish = () => {
+      image.onload = null;
+      image.onerror = null;
+      resolve();
+    };
+
+    image.onload = finish;
+    image.onerror = finish;
+    image.decoding = "async";
+    image.src = url;
+
+    if (image.complete) {
+      finish();
+    }
+  });
+
+  imagePreloadCache.set(url, promise);
+  return promise;
+}
+
+export function collectSceneAssetUrls(
+  catalog: AssetCatalog,
+  map: WorldMapData,
+  characters: SceneCharacterAssetDescriptor[] = [],
+  groundObjects: GroundObject[] = []
+) {
+  const urls = new Set<string>();
+
+  const addFrameUrl = (grhId: number | null | undefined, useCharIndex = false) => {
+    if (!grhId) {
+      return;
+    }
+
+    const frame = getGrhFrameDef(catalog, grhId, useCharIndex);
+    if (frame) {
+      urls.add(frame.url);
+    }
+  };
+
+  for (const layer of map.layers) {
+    for (const tile of layer ?? []) {
+      addFrameUrl(tile.grhIndex, false);
+    }
+  }
+
+  for (const object of groundObjects) {
+    addFrameUrl(getObjectGrh(catalog, object.id), false);
+  }
+
+  for (const character of characters) {
+    const direction = headingToDirection(character.heading);
+    addFrameUrl(bodyGrhForDirection(catalog, character.bodyId, direction), true);
+    addFrameUrl(headGrhForDirection(catalog, character.headId, direction), true);
+    addFrameUrl(character.weaponId, true);
+    addFrameUrl(character.shieldId, true);
+    addFrameUrl(character.helmetId, true);
+    addFrameUrl(character.cartId, true);
+    addFrameUrl(character.backpackId, true);
+    addFrameUrl(character.effectId, true);
+  }
+
+  return [...urls];
+}
+
+export async function preloadSceneAssets(urls: Iterable<string>) {
+  await Promise.all([...new Set(urls)].map((url) => preloadImage(url)));
+}
+
+export function getUncachedSceneAssetUrls(urls: Iterable<string>) {
+  return [...new Set(urls)].filter((url) => !imagePreloadCache.has(url));
 }
 
 export function getObjectIconFrame(catalog: AssetCatalog | null, objectId: number) {

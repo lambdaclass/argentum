@@ -543,6 +543,13 @@ export function App({ uiDemoMode = false }: AppProps) {
         return;
       }
 
+      if (bindingMatches(event.key, controlBindings.resyncPosition)) {
+        event.preventDefault();
+        session.clearMovementKeys();
+        session.requestPositionUpdate();
+        return;
+      }
+
       const hotkeyIndex = hotkeyIndexFromKey(event.key);
       if (hotkeyIndex != null) {
         if (event.ctrlKey || event.metaKey) {

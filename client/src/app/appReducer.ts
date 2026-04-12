@@ -25,6 +25,10 @@ function isDeadBody(bodyId: number) {
   return bodyId === GHOST_BODY_ID;
 }
 
+function isCharacterCreateDead(target: CharacterCreatePacket) {
+  return isDeadBody(target.bodyId) || (!target.isNpc && target.minHp <= 0);
+}
+
 function defaultEndpoint() {
   if (typeof window === "undefined") {
     return DEFAULT_ENDPOINT;
@@ -166,7 +170,7 @@ function applyCharacter(target: CharacterCreatePacket, character: ClientState["w
   character.name = target.name;
   character.x = target.x;
   character.y = target.y;
-  character.dead = isDeadBody(target.bodyId) || target.minHp <= 0;
+  character.dead = isCharacterCreateDead(target);
   character.heading = target.heading;
   character.bodyId = target.bodyId;
   character.headId = target.headId;
@@ -544,7 +548,7 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
               name: action.character.name,
               x: action.character.x,
               y: action.character.y,
-              dead: isDeadBody(action.character.bodyId) || action.character.minHp <= 0,
+              dead: isCharacterCreateDead(action.character),
               heading: action.character.heading,
               bodyId: action.character.bodyId,
               headId: action.character.headId,
