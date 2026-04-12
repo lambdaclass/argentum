@@ -276,8 +276,12 @@ defmodule AoProtocol.Client.Decoder do
   # UpTime (ID 58)
   defp decode_packet(58, rest), do: {:ok, {:uptime, %{}}, rest}
 
-  # RoleMasterRequest (ID 63)
-  defp decode_packet(63, rest), do: {:ok, {:role_master_request, %{}}, rest}
+  # RoleMasterRequest (ID 63) — request(S8)
+  defp decode_packet(63, rest) do
+    with {:ok, request, rest} <- Reader.read_string8(rest) do
+      {:ok, {:role_master_request, %{request: request}}, rest}
+    end
+  end
 
   # LeaveFaction (ID 69)
   defp decode_packet(69, rest), do: {:ok, {:leave_faction, %{}}, rest}
@@ -832,6 +836,15 @@ defmodule AoProtocol.Client.Decoder do
     with {:ok, from_slot, rest} <- Reader.read_int8(rest),
          {:ok, to_slot, rest} <- Reader.read_int8(rest) do
       {:ok, {:move_item, %{from_slot: from_slot, to_slot: to_slot}}, rest}
+    end
+  end
+
+  # QuestionGM (ID 215) — consulta(S8) + tipo(S8) + packet_counter(I32)
+  defp decode_packet(215, rest) do
+    with {:ok, consulta, rest} <- Reader.read_string8(rest),
+         {:ok, tipo, rest} <- Reader.read_string8(rest),
+         {:ok, _packet_counter, rest} <- Reader.read_int32(rest) do
+      {:ok, {:question_gm, %{consulta: consulta, tipo: tipo}}, rest}
     end
   end
 

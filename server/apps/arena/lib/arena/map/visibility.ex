@@ -199,11 +199,8 @@ defmodule Arena.Map.Visibility do
     end
   end
 
-  # Handle enter: compute visible set, send creates both ways, send nearby NPCs
+  # Handle enter: compute visible set, send creates both ways
   def enter_visibility(state, entity, sessions) do
-    # Send nearby NPC creates to the entering player
-    send_nearby_npcs(state, entity, sessions)
-
     if state.visible_sets == nil do
       # :global mode -- broadcast to everyone, no visible set tracking
       create_raw = Encoder.encode(Helpers.character_create_packet(entity))
@@ -226,16 +223,18 @@ defmodule Arena.Map.Visibility do
     end
   end
 
-  def send_nearby_npcs(state, entity, sessions) do
-    for {_iid, npc} <- state.npcs_live, npc.alive do
-      if abs(npc.x - entity.x) <= Helpers.aoi_range_x() and abs(npc.y - entity.y) <= Helpers.aoi_range_y() do
-        npc_def = GameData.get_npc(npc.npc_id)
-
-        if npc_def do
-          raw = Encoder.encode(Helpers.npc_create_packet(npc, npc_def))
-          Helpers.send_to_session(sessions, entity.char_id, {:send_raw, raw})
-        end
-      end
+  @doc """
+  Return pre-encoded NPC create packets for NPCs within AoI range of entity.
+  The caller is responsible for delivering these to the entering player's session.
+  """
+  def nearby_npc_packets(state, entity) do
+    for {_iid, npc} <- state.npcs_live,
+        npc.alive,
+        abs(npc.x - entity.x) <= Helpers.aoi_range_x(),
+        abs(npc.y - entity.y) <= Helpers.aoi_range_y(),
+        npc_def = GameData.get_npc(npc.npc_id),
+        npc_def != nil do
+      Encoder.encode(Helpers.npc_create_packet(npc, npc_def))
     end
   end
 
@@ -313,28 +312,9 @@ defmodule Arena.Map.Visibility do
       visible_sets = Map.put(visible_sets, char_id, new_visible)
       state = %{state | visible_sets: visible_sets}
 
-      # Send NPC create/remove for NPCs entering/leaving this player's AoI
-      send_npc_boundary_updates(state, char_id, entity)
-
+      # NPC boundary updates are sent by the caller (do_move) via
+      # nearby_npc_packets/2 to keep side-effect sends out of visibility logic.
       state
-    end
-  end
-
-  # Send NPC create packets for NPCs now in range, remove for those out of range.
-  # old_x/old_y come from the entity before the move was applied — but entity already
-  # has the new position, so we compare against the previous position stored in the
-  # caller. To keep it simple, we just re-send creates for all nearby NPCs on every
-  # move. The client handles duplicate creates as no-ops (same char_index overwrites).
-  defp send_npc_boundary_updates(state, char_id, entity) do
-    for {_iid, npc} <- state.npcs_live, npc.alive do
-      if abs(npc.x - entity.x) <= Helpers.aoi_range_x() and abs(npc.y - entity.y) <= Helpers.aoi_range_y() do
-        npc_def = GameData.get_npc(npc.npc_id)
-
-        if npc_def do
-          raw = Encoder.encode(Helpers.npc_create_packet(npc, npc_def))
-          Helpers.send_to_session(state.sessions, char_id, {:send_raw, raw})
-        end
-      end
     end
   end
 

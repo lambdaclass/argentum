@@ -139,9 +139,10 @@ defmodule AoTcpGateway.SessionLogic do
       }
 
       global_rain = try do Arena.WorldWeather.raining?() rescue _ -> weather.rain catch :exit, _ -> weather.rain end
+      global_snow = try do Arena.WorldWeather.snowing?() rescue _ -> weather.snow catch :exit, _ -> weather.snow end
       weather_packets =
         (if global_rain, do: [{:rain_toggle, %{raining: true}}], else: []) ++
-        (if weather.snow, do: [{:snow_toggle, %{snowing: true}}], else: [])
+        (if global_snow, do: [{:snow_toggle, %{snowing: true}}], else: [])
 
       packets =
         [
@@ -173,7 +174,9 @@ defmodule AoTcpGateway.SessionLogic do
           end ++
           [{:console_msg, %{message: "Welcome to Argentum Online!", font_index: 0}}]
 
-      AoSession.OnlineDirectory.register(entity.char_id, entity.name, map_id, self())
+      AoSession.OnlineDirectory.register(entity.char_id, entity.name, map_id, self(),
+        is_gm: state.is_gm
+      )
       {state, packets}
     else
       {:error, reason} ->
@@ -200,9 +203,10 @@ defmodule AoTcpGateway.SessionLogic do
       state = %{state | map_id: dest_map, char_index: char_index, entity: entity}
 
       global_rain = try do Arena.WorldWeather.raining?() rescue _ -> weather.rain catch :exit, _ -> weather.rain end
+      global_snow = try do Arena.WorldWeather.snowing?() rescue _ -> weather.snow catch :exit, _ -> weather.snow end
       weather_packets =
         (if global_rain, do: [{:rain_toggle, %{raining: true}}], else: [{:rain_toggle, %{raining: false}}]) ++
-        (if weather.snow, do: [{:snow_toggle, %{snowing: true}}], else: [{:snow_toggle, %{snowing: false}}])
+        (if global_snow, do: [{:snow_toggle, %{snowing: true}}], else: [{:snow_toggle, %{snowing: false}}])
 
       packets =
         [
@@ -348,13 +352,13 @@ defmodule AoTcpGateway.SessionLogic do
             Arena.GuildServer.declare_war(state.character_id, target_name)
             {state, []}
 
-          {:guild_peace, target_name} ->
-            Arena.GuildServer.propose_peace(state.character_id, target_name)
-            {state, []}
+          {:guild_peace, _target_name} ->
+            msg = AoProtocol.Server.Encoder.encode({:console_msg, %{message: "Relaciones de clan desactivadas por el momento.", font_index: 0}})
+            {state, [{:send_raw, msg}]}
 
-          {:guild_alliance, target_name} ->
-            Arena.GuildServer.propose_alliance(state.character_id, target_name)
-            {state, []}
+          {:guild_alliance, _target_name} ->
+            msg = AoProtocol.Server.Encoder.encode({:console_msg, %{message: "Relaciones de clan desactivadas por el momento.", font_index: 0}})
+            {state, [{:send_raw, msg}]}
 
           {:guild_request, guild_name, desc} ->
             Arena.GuildServer.request_membership(state.character_id, guild_name, desc)
@@ -387,17 +391,33 @@ defmodule AoTcpGateway.SessionLogic do
                 {state, []}
 
               :not_faction_command ->
-                case parse_report_command(message) do
-                  {:report, target_name, reason} ->
-                    Arena.AuditLog.log_report(state.character_id, target_name, reason)
-                    {state, [{:console_msg, %{message: "Denuncia registrada.", font_index: 0}}]}
+                case parse_marriage_command(message) do
+                  {:propose, target_name} ->
+                    case AoSession.OnlineDirectory.lookup_by_name(target_name) do
+                      {:ok, target_id, _info} ->
+                        Arena.Map.MapServer.propose_marriage(state.map_id, state.character_id, target_id)
+                      :not_found ->
+                        send_console(state, "Usuario offline.")
+                    end
+                    {state, []}
 
-                  :not_report_command ->
-                    if String.upcase(String.trim(message)) == "/HOGAR" do
-                      handle_hogar(state)
-                    else
-                      Arena.Map.MapServer.chat(state.map_id, state.character_id, message)
-                      {state, []}
+                  :divorce ->
+                    Arena.Map.MapServer.divorce(state.map_id, state.character_id)
+                    {state, []}
+
+                  :not_marriage_command ->
+                    case parse_report_command(message) do
+                      {:report, target_name, reason} ->
+                        Arena.AuditLog.log_report(state.character_id, target_name, reason)
+                        {state, [{:console_msg, %{message: "Denuncia registrada.", font_index: 0}}]}
+
+                      :not_report_command ->
+                        if String.upcase(String.trim(message)) == "/HOGAR" do
+                          handle_hogar(state)
+                        else
+                          Arena.Map.MapServer.chat(state.map_id, state.character_id, message)
+                          {state, []}
+                        end
                     end
                 end
             end
@@ -781,16 +801,6 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
-  def handle_command(state, {:guild_offer_peace, %{guild: guild_name}}) when state.character_id != nil do
-    Arena.GuildServer.propose_peace(state.character_id, guild_name)
-    {state, []}
-  end
-
-  def handle_command(state, {:guild_offer_alliance, %{guild: guild_name}}) when state.character_id != nil do
-    Arena.GuildServer.propose_alliance(state.character_id, guild_name)
-    {state, []}
-  end
-
   def handle_command(state, {:guild_kick_member, %{username: target_name}}) when state.character_id != nil do
     case AoSession.OnlineDirectory.lookup_by_name(target_name) do
       {:ok, target_id, _info} -> Arena.GuildServer.kick(state.character_id, target_id)
@@ -870,52 +880,54 @@ defmodule AoTcpGateway.SessionLogic do
     end
   end
 
-  # ---- Guild relation accept/reject (binary packet handlers) ----
+  # ---- Guild relation packets: VB6 disabled stubs (Tasks 20) ----
+  # Alliance/peace systems are deferred; return VB6-parity disabled messages.
 
-  # Accept peace proposal — our GuildServer applies peace immediately on propose,
-  # so accept is a confirmation acknowledgement. Apply peace if still at war.
-  def handle_command(state, {:guild_accept_peace, %{guild: guild_name}}) when state.character_id != nil do
-    Arena.GuildServer.propose_peace(state.character_id, guild_name)
-    {state, []}
+  @guild_relations_disabled "Relaciones de clan desactivadas por el momento."
+
+  def handle_command(state, {:guild_accept_peace, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: @guild_relations_disabled, font_index: 0}}]}
   end
 
-  # Reject peace — notify the proposer's guild
-  def handle_command(state, {:guild_reject_peace, %{guild: guild_name}}) when state.character_id != nil do
-    {state, [{:console_msg, %{message: "Propuesta de paz con '#{guild_name}' rechazada.", font_index: 0}}]}
+  def handle_command(state, {:guild_reject_peace, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: @guild_relations_disabled, font_index: 0}}]}
   end
 
-  # Accept alliance proposal
-  def handle_command(state, {:guild_accept_alliance, %{guild: guild_name}}) when state.character_id != nil do
-    Arena.GuildServer.propose_alliance(state.character_id, guild_name)
-    {state, []}
+  def handle_command(state, {:guild_accept_alliance, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: @guild_relations_disabled, font_index: 0}}]}
   end
 
-  # Reject alliance
-  def handle_command(state, {:guild_reject_alliance, %{guild: guild_name}}) when state.character_id != nil do
-    {state, [{:console_msg, %{message: "Propuesta de alianza con '#{guild_name}' rechazada.", font_index: 0}}]}
+  def handle_command(state, {:guild_reject_alliance, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: @guild_relations_disabled, font_index: 0}}]}
   end
 
-  # Alliance/peace details — show guild details for the named guild
-  def handle_command(state, {:guild_alliance_details, %{guild: guild_name}}) when state.character_id != nil do
-    handle_command(state, {:guild_request_details, %{guild: guild_name}})
+  def handle_command(state, {:guild_offer_peace, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: @guild_relations_disabled, font_index: 0}}]}
   end
 
-  def handle_command(state, {:guild_peace_details, %{guild: guild_name}}) when state.character_id != nil do
-    handle_command(state, {:guild_request_details, %{guild: guild_name}})
+  def handle_command(state, {:guild_offer_alliance, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: @guild_relations_disabled, font_index: 0}}]}
+  end
+
+  def handle_command(state, {:guild_alliance_details, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: @guild_relations_disabled, font_index: 0}}]}
+  end
+
+  def handle_command(state, {:guild_peace_details, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: @guild_relations_disabled, font_index: 0}}]}
+  end
+
+  def handle_command(state, {:guild_alliance_prop_list, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: @guild_relations_disabled, font_index: 0}}]}
+  end
+
+  def handle_command(state, {:guild_peace_prop_list, _}) when state.character_id != nil do
+    {state, [{:console_msg, %{message: @guild_relations_disabled, font_index: 0}}]}
   end
 
   # Joiner info — show character info for a membership applicant
   def handle_command(state, {:guild_request_joiner_info, %{username: name}}) when state.character_id != nil do
     handle_command(state, {:guild_member_info, %{username: name}})
-  end
-
-  # Alliance/peace proposal lists — list guilds with active relations
-  def handle_command(state, {:guild_alliance_prop_list, _}) when state.character_id != nil do
-    {state, [{:console_msg, %{message: "No hay propuestas de alianza pendientes.", font_index: 0}}]}
-  end
-
-  def handle_command(state, {:guild_peace_prop_list, _}) when state.character_id != nil do
-    {state, [{:console_msg, %{message: "No hay propuestas de paz pendientes.", font_index: 0}}]}
   end
 
   # Update guild website URL
@@ -1297,11 +1309,25 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
+  # FONTTYPE_GMMSG = 16 in the VB6 e_FontTypeNames enum (0-based).
+  @fonttype_gmmsg 16
+
   def handle_command(state, {:gm_message, %{message: message}})
       when state.character_id != nil and state.is_gm == true do
-    broadcast_msg = "Servidor> " <> message
-    raw = AoProtocol.Server.Encoder.encode({:console_msg, %{message: broadcast_msg, font_index: 1}})
-    AoSession.OnlineDirectory.broadcast_all({:send_raw, raw})
+    if byte_size(message) > 0 do
+      sender_name = state.entity.name
+      broadcast_msg = sender_name <> " > " <> message
+
+      Logger.info("GM audit: #{sender_name} sent GM message: #{message}")
+
+      raw =
+        AoProtocol.Server.Encoder.encode(
+          {:console_msg, %{message: broadcast_msg, font_index: @fonttype_gmmsg}}
+        )
+
+      AoSession.OnlineDirectory.broadcast_to_gms({:send_raw, raw})
+    end
+
     {state, []}
   end
 
@@ -1323,10 +1349,49 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
-  # RoleMasterRequest — GM requests the GM panel form (VB6: "Maestro de Roles")
-  def handle_command(state, {:role_master_request, _})
-      when state.character_id != nil and state.is_gm == true do
-    {state, [{:show_gm_panel_form, %{}}]}
+  # RoleMasterRequest (ID 63) — any player sends a question to RoleMasters.
+  # VB6: reads request string, forwards to online RoleMasters, confirms to player.
+  def handle_command(state, {:role_master_request, %{request: request}})
+      when state.character_id != nil do
+    if request != "" do
+      player_name = resolve_char_name(state.character_id)
+
+      raw =
+        AoProtocol.Server.Encoder.encode(
+          {:console_msg, %{message: "#{player_name} PREGUNTA ROL: #{request}", font_index: 3}}
+        )
+
+      AoSession.OnlineDirectory.broadcast_to_gms({:send_raw, raw})
+      {state, [{:console_msg, %{message: "Su solicitud ha sido enviada.", font_index: 0}}]}
+    else
+      {state, []}
+    end
+  end
+
+  # QuestionGM (ID 215) — player sends a support question to online admins.
+  # VB6: reads consulta + tipo, pushes to Ayuda queue, notifies admins, confirms.
+  def handle_command(state, {:question_gm, %{consulta: consulta, tipo: tipo}})
+      when state.character_id != nil do
+    if consulta != "" do
+      player_name = resolve_char_name(state.character_id)
+
+      raw =
+        AoProtocol.Server.Encoder.encode(
+          {:console_msg,
+           %{
+             message: "Se ha recibido un nuevo mensaje de soporte de #{player_name}.",
+             font_index: 1
+           }}
+        )
+
+      AoSession.OnlineDirectory.broadcast_to_gms({:send_raw, raw})
+      Logger.info("QuestionGM from #{player_name} (#{tipo}): #{consulta}")
+
+      {state,
+       [{:console_msg, %{message: "Tu mensaje fue recibido por el equipo de soporte.", font_index: 0}}]}
+    else
+      {state, []}
+    end
   end
 
   # Catch-all for GM commands attempted without privileges
@@ -1334,7 +1399,7 @@ defmodule AoTcpGateway.SessionLogic do
     :go_to_char, :warp_me_to_target, :warp_char, :invisible, :silence,
     :jail, :kick, :execute, :ban_char, :unban_char, :revive_char,
     :summon_char, :kill_npc, :request_char_info, :where, :gm_message,
-    :server_message, :online_gm, :rain_toggle, :role_master_request
+    :server_message, :online_gm, :rain_toggle
   ]
 
   def handle_command(state, {cmd_type, _})
@@ -1789,6 +1854,23 @@ defmodule AoTcpGateway.SessionLogic do
         msg = String.trim(String.slice(message, 9..-1//1))
         {:faction_chat, msg}
       true -> :not_faction_command
+    end
+  end
+
+  @doc false
+  def parse_marriage_command(message) do
+    upper = String.upcase(String.trim(message))
+
+    cond do
+      String.starts_with?(upper, "/PROPONER ") ->
+        name = String.trim(String.slice(message, 10..-1//1))
+        {:propose, name}
+
+      upper == "/DIVORCIAR" ->
+        :divorce
+
+      true ->
+        :not_marriage_command
     end
   end
 

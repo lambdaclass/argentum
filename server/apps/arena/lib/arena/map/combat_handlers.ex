@@ -697,7 +697,15 @@ defmodule Arena.Map.CombatHandlers do
                     spell_req_fail(state, char_id, "Necesitas el tipo de arma correcto para lanzar ese hechizo.")
 
                   true ->
-                    entity = Helpers.break_invisibility(entity, state, char_id)
+                    # VB6 26c: offensive spell casting breaks invisible + oculto
+                    # Only negative/offensive spells (TargetEffectType=2) break invis
+                    entity =
+                      if spell_def.target_effect_type == 2 do
+                        Helpers.break_invisibility(entity, state, char_id)
+                      else
+                        entity
+                      end
+
                     # VB6: per-spell cooldown in seconds
                     cooldown_ms = spell_def.cooldown * 1000
 
@@ -822,6 +830,10 @@ defmodule Arena.Map.CombatHandlers do
 
         apply_spell_heal(state, char_id, entity, heal, spell_def, target_x, target_y)
 
+      # VB6 26g: RemoveInvisibility spell (area detection)
+      spell_def.remove_invisibility ->
+        apply_spell_remove_invisibility(state, char_id, entity, spell_def, target_x, target_y)
+
       # Status effects
       spell_def.paraliza or spell_def.envenena or spell_def.cura_veneno or
         spell_def.invisibilidad or spell_def.inmoviliza ->
@@ -848,6 +860,40 @@ defmodule Arena.Map.CombatHandlers do
         players = Map.put(state.players, char_id, entity)
         %{state | players: players}
     end
+  end
+
+  # VB6 26g: RemoveInvisibility spell — reveals invisible players in 11-tile radius
+  # Players with no_detectable flag are immune.
+  def apply_spell_remove_invisibility(state, char_id, entity, _spell_def, target_x, target_y) do
+    cx = target_x || entity.x
+    cy = target_y || entity.y
+    radius = 11
+
+    state =
+      Enum.reduce(state.players, state, fn {pid, target}, acc ->
+        if pid != char_id and target.invisible and not target.no_detectable and
+             abs(target.x - cx) <= radius and abs(target.y - cy) <= radius do
+          buffs = Enum.reject(target.buffs, &(&1.type == :invisible))
+          updated = %{target | invisible: false, buffs: buffs}
+          players = Map.put(acc.players, pid, updated)
+
+          Helpers.send_to_session(
+            acc.sessions,
+            pid,
+            {:send_raw,
+             Encoder.encode(
+               {:console_msg, %{message: "Tu invisibilidad ya no tiene efecto.", font_index: 0}}
+             )}
+          )
+
+          %{acc | players: players}
+        else
+          acc
+        end
+      end)
+
+    players = Map.put(state.players, char_id, entity)
+    %{state | players: players}
   end
 
   def apply_spell_damage(state, char_id, entity, damage, target_x, target_y) do
@@ -1258,7 +1304,8 @@ defmodule Arena.Map.CombatHandlers do
           buffs: [],
           paralyzed: false,
           poisoned: false,
-          invisible: false
+          invisible: false,
+          oculto: false
       }
 
       # Notify revived player
@@ -1467,6 +1514,7 @@ defmodule Arena.Map.CombatHandlers do
           :paralyzed -> %{ent | paralyzed: false}
           :poisoned -> %{ent | poisoned: false}
           :invisible -> %{ent | invisible: false}
+          :oculto -> %{ent | oculto: false}
           :immobilized -> %{ent | immobilized: false}
           :str_buff -> %{ent | str_buff: max(ent.str_buff - (buff[:value] || 0), 0)}
           :agi_buff -> %{ent | agi_buff: max(ent.agi_buff - (buff[:value] || 0), 0)}
@@ -1697,6 +1745,7 @@ defmodule Arena.Map.CombatHandlers do
         thirst: 0,
         paralyzed: false,
         invisible: false,
+        oculto: false,
         poisoned: false,
         meditating: false,
         resting: false,

@@ -250,11 +250,12 @@ defmodule Arena.Map.Helpers do
   def race_to_int(:dwarf), do: 5
   def race_to_int(_), do: 1
 
-  # Break invisibility (used by combat, inventory, movement)
+  # Break invisibility and oculto (used by combat, inventory, movement)
+  # VB6: RemoveUserInvisibility clears both invisible and oculto flags
   def break_invisibility(entity, state, char_id) do
-    if entity.invisible do
-      buffs = Enum.reject(entity.buffs, &(&1.type == :invisible))
-      entity = %{entity | invisible: false, buffs: buffs}
+    if entity.invisible or entity.oculto do
+      buffs = Enum.reject(entity.buffs, &(&1.type in [:invisible, :oculto]))
+      entity = %{entity | invisible: false, oculto: false, buffs: buffs}
 
       send_to_session(
         state.sessions,

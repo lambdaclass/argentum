@@ -124,6 +124,7 @@ defmodule AoTcpGateway.BrowserApiTest do
     conn =
       method
       |> conn(path, body && Jason.encode!(body))
+      |> Map.put(:secret_key_base, "QK4nHna6CWP5+KH2khYXzdIAM2GmQ1B7xwDP6fdjhQro1659xfFvC+69Joj/dKyw")
       |> put_req_header("content-type", "application/json")
       |> maybe_recycle(previous_conn)
 

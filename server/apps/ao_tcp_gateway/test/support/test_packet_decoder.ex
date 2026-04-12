@@ -314,9 +314,9 @@ defmodule AoTcpGateway.TestPacketDecoder do
   defp decode_server_packet(54, <<midi_id::little-signed-16, loops::little-signed-16, rest::binary>>),
     do: {:ok, %{midi_id: midi_id, loops: loops}, rest}
 
-  # play_wave (55): Int16 + Int8 + Int8
-  defp decode_server_packet(55, <<wave_id::little-signed-16, x::8, y::8, rest::binary>>),
-    do: {:ok, %{wave_id: wave_id, x: x, y: y}, rest}
+  # play_wave (55): Int16 + Int8 + Int8 + Int8 + Int8
+  defp decode_server_packet(55, <<wave_id::little-signed-16, x::8, y::8, cancel_last::8, localize::8, rest::binary>>),
+    do: {:ok, %{wave_id: wave_id, x: x, y: y, cancel_last: cancel_last, localize: localize}, rest}
 
   # guild_list (56): string8
   defp decode_server_packet(56, data), do: decode_single_string(data)
@@ -403,6 +403,10 @@ defmodule AoTcpGateway.TestPacketDecoder do
       _is_bindable::8, rest::binary>>) do
     {:ok, %{slot: slot, obj_index: obj_index, amount: amount}, rest}
   end
+
+  # flash_screen (129): Int32 + Int32 + Bool = 9 bytes
+  defp decode_server_packet(129, <<color::little-signed-32, duration::little-signed-32, _ignore::8, rest::binary>>),
+    do: {:ok, %{color: color, duration: duration}, rest}
 
   # intervals (158): 12 × Int32 = 48 bytes
   defp decode_server_packet(158, <<

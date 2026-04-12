@@ -208,6 +208,12 @@ defmodule Arena.Map.Movement do
       send(pid, {:send_raw, move_raw})
     end)
 
+    # NPC boundary updates: send nearby NPC creates to the mover's session.
+    # The client handles duplicate creates as no-ops (same char_index overwrites).
+    for raw <- Visibility.nearby_npc_packets(state, moved_entity) do
+      Helpers.send_to_session(state.sessions, char_id, {:send_raw, raw})
+    end
+
     state
   end
 

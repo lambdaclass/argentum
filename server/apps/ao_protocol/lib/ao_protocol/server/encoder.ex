@@ -599,6 +599,16 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.snow_toggle(), payload)
   end
 
+  # eFlashScreen (ID 129) — color(Int32) + duration(Int32) + ignore(Bool)
+  def encode({:flash_screen, params}) do
+    payload =
+      Writer.write_int32(params[:color] || 0) <>
+        Writer.write_int32(params[:duration] || 0) <>
+        Writer.write_bool(params[:ignore] || false)
+
+    Writer.build_packet(PacketIds.Server.flash_screen(), payload)
+  end
+
   # ePartySafeModeOn (ID 22) — no payload
   def encode({:party_safe_mode_on, _params}) do
     Writer.build_packet(PacketIds.Server.party_safe_mode_on(), <<>>)

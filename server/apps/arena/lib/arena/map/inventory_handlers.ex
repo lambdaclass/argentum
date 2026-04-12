@@ -216,6 +216,18 @@ defmodule Arena.Map.InventoryHandlers do
               end
 
             entity = %{entity | inventory: new_inventory, equipment: new_equipment, body_id: new_body_id}
+
+            # VB6 26i: equipping a mount (otSaddles = 44) breaks invisible + oculto
+            item = Inventory.get_slot(new_inventory, slot)
+            item_def = if item, do: GameData.get_item(item.item_id)
+
+            entity =
+              if item_def && item_def.obj_type == 44 do
+                Helpers.break_invisibility(entity, state, char_id)
+              else
+                entity
+              end
+
             players = Map.put(state.players, char_id, entity)
             state = %{state | players: players}
 

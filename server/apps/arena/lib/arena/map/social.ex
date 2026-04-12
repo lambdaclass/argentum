@@ -2165,4 +2165,156 @@ defmodule Arena.Map.Social do
         {:noreply, state}
     end
   end
+
+  # ==================================================================
+  # Marriage system (VB6: HandleCasamiento)
+  # ==================================================================
+
+  @doc """
+  Handle a marriage proposal.
+
+  VB6 flow (Protocol.bas HandleCasamiento):
+  1. Target must be online (on same map)
+  2. Proposer must have clicked a priest NPC (Revividor, type 1)
+  3. Priest must be within 10 tiles
+  4. Cannot marry yourself
+  5. Proposer must not already be married
+  6. Target must not already be married
+  7. If target already proposed to proposer (mutual), marry them
+  8. Otherwise, set proposer's candidato = target, notify target
+  """
+  def handle_propose_marriage(state, char_id, target_char_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        case Map.fetch(state.players, target_char_id) do
+          {:ok, target_entity} ->
+            do_propose_marriage(state, char_id, entity, target_char_id, target_entity)
+
+          :error ->
+            msg(state, char_id, "El jugador no se encuentra en este mapa.")
+            {:noreply, state}
+        end
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  defp do_propose_marriage(state, char_id, entity, target_char_id, target_entity) do
+    priest_result = find_nearby_npc_of_type(state, entity, [@npc_type_revividor])
+
+    cond do
+      # Must be near a priest
+      priest_result == :not_found ->
+        msg(state, char_id, "Primero haz click sobre un sacerdote.")
+        {:noreply, state}
+
+      # Priest too far (find_nearby_npc_of_type already checks distance <= 5)
+      # If we got here, priest is nearby. Check other conditions.
+
+      # Cannot marry yourself
+      char_id == target_char_id ->
+        msg(state, char_id, "No puedes casarte contigo mismo.")
+        {:noreply, state}
+
+      # Proposer already married
+      entity.spouse_id != 0 and entity.spouse_id != nil ->
+        msg(state, char_id, "Ya estas casado! Debes divorciarte de tu actual pareja para casarte nuevamente.")
+        {:noreply, state}
+
+      # Target already married
+      target_entity.spouse_id != 0 and target_entity.spouse_id != nil ->
+        msg(state, char_id, "Tu pareja debe divorciarse antes de tomar tu mano en matrimonio.")
+        {:noreply, state}
+
+      # Mutual proposal: target already proposed to us -> marry!
+      target_entity.marriage_proposal_target == char_id ->
+        {:ok, _npc, _npc_def} = priest_result
+
+        # Set both as married
+        entity = %{entity | spouse_id: target_entity.char_id, marriage_proposal_target: nil}
+        target_entity = %{target_entity | spouse_id: entity.char_id, marriage_proposal_target: nil}
+
+        players =
+          state.players
+          |> Map.put(char_id, entity)
+          |> Map.put(target_char_id, target_entity)
+
+        state = %{state | players: players}
+
+        # Broadcast marriage announcement (VB6: SendData ToAll)
+        announce = "El sacerdote celebra el casamiento entre #{entity.name} y #{target_entity.name}."
+
+        Enum.each(state.sessions, fn {_cid, session_pid} ->
+          send(session_pid, {:send_packet, {:console_msg, %{message: announce, font_index: 0}}})
+        end)
+
+        # Congratulations to both (VB6: Msg1414/1415)
+        congrats = "Los declaro unidos en legal matrimonio. Felicidades!"
+        msg(state, char_id, congrats)
+        msg(state, target_char_id, congrats)
+
+        {:noreply, state}
+
+      # First proposal: set candidato, notify target
+      true ->
+        entity = %{entity | marriage_proposal_target: target_char_id}
+        players = Map.put(state.players, char_id, entity)
+        state = %{state | players: players}
+
+        msg(state, char_id, "La solicitud de casamiento ha sido enviada a #{target_entity.name}.")
+
+        # VB6: Msg1956
+        msg(
+          state,
+          target_char_id,
+          "#{entity.name} desea casarse contigo, para permitirlo haz click en el sacerdote y escribe /PROPONER #{entity.name}."
+        )
+
+        {:noreply, state}
+    end
+  end
+
+  @doc """
+  Handle divorce.
+
+  VB6 uses a special potion, but we also support a /DIVORCIAR command.
+  Both players must be on the same map. Sets spouse_id = 0 on both.
+  """
+  def handle_divorce(state, char_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        if entity.spouse_id == 0 or entity.spouse_id == nil do
+          msg(state, char_id, "No estas casado.")
+          {:noreply, state}
+        else
+          spouse_id = entity.spouse_id
+
+          entity = %{entity | spouse_id: 0, marriage_proposal_target: nil}
+          players = Map.put(state.players, char_id, entity)
+          state = %{state | players: players}
+
+          # Try to update spouse if on same map
+          case Map.fetch(state.players, spouse_id) do
+            {:ok, spouse_entity} ->
+              spouse_entity = %{spouse_entity | spouse_id: 0, marriage_proposal_target: nil}
+              players = Map.put(state.players, spouse_id, spouse_entity)
+              state = %{state | players: players}
+
+              msg(state, char_id, "Te has divorciado.")
+              msg(state, spouse_id, "#{entity.name} se ha divorciado de ti.")
+
+              {:noreply, state}
+
+            :error ->
+              # Spouse offline or on another map -- only clear our side
+              msg(state, char_id, "Te has divorciado.")
+              {:noreply, state}
+          end
+        end
+
+      :error ->
+        {:noreply, state}
+    end
+  end
 end

@@ -72,6 +72,8 @@ defmodule Arena.SpellEffectGoldenTest do
       poisoned: false,
       criminal: false,
       invisible: false,
+      oculto: false,
+      no_detectable: false,
       paralyzed: false,
       immobilized: false,
       meditating: false,

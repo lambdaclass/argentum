@@ -16,12 +16,13 @@ defmodule AoSession.OnlineDirectory do
   end
 
   @doc "Register an online character."
-  def register(char_id, name, map_id, session_pid) do
+  def register(char_id, name, map_id, session_pid, opts \\ []) do
     normalized = String.downcase(String.trim(name))
+    is_gm = Keyword.get(opts, :is_gm, false)
 
     :ets.insert(
       @table,
-      {{:by_id, char_id}, %{name: name, map_id: map_id, session_pid: session_pid}}
+      {{:by_id, char_id}, %{name: name, map_id: map_id, session_pid: session_pid, is_gm: is_gm}}
     )
 
     :ets.insert(@table, {{:by_name, normalized}, char_id})
@@ -88,6 +89,22 @@ defmodule AoSession.OnlineDirectory do
     :ets.foldl(
       fn
         {{:by_id, _char_id}, %{session_pid: pid}}, acc ->
+          send(pid, message)
+          acc + 1
+
+        _other, acc ->
+          acc
+      end,
+      0,
+      @table
+    )
+  end
+
+  @doc "Send a message only to GM/admin session pids."
+  def broadcast_to_gms(message) do
+    :ets.foldl(
+      fn
+        {{:by_id, _char_id}, %{session_pid: pid, is_gm: true}}, acc ->
           send(pid, message)
           acc + 1
 

@@ -2,15 +2,20 @@ defmodule AoTcpGateway.GmMessageTest do
   @moduledoc """
   Tests for the GM broadcast message (gm_message) packet handler.
 
-  The gm_message handler should:
-  - Only allow GM-privileged users to broadcast
-  - Send a console_msg to ALL connected players via OnlineDirectory
-  - Non-GM users should be silently ignored
+  VB6 semantics (Protocol_GmCommands.bas HandleGMMessage):
+  - Only GMs (EsGM) can send
+  - Broadcast to GMs only (SendTarget.ToAdmins)
+  - Format: "name > message" with FONTTYPE_GMMSG (index 16)
+  - Empty messages are silently ignored
+  - Logged via LogGM for audit
   """
   use ExUnit.Case
 
   alias AoTcpGateway.SessionLogic
   alias Arena.Entity.PlayerEntity
+
+  # FONTTYPE_GMMSG = 16 in the VB6 e_FontTypeNames enum (0-based)
+  @fonttype_gmmsg 16
 
   setup_all do
     unless Process.whereis(AoSession.OnlineDirectory) do
@@ -51,85 +56,114 @@ defmodule AoTcpGateway.GmMessageTest do
     )
   end
 
-  describe "gm_message broadcast" do
-    test "GM player broadcasts console_msg to all connected sessions" do
+  describe "gm_message broadcast (VB6 parity)" do
+    test "GM message is sent only to GM sessions, not to regular players" do
       test_pid = self()
 
-      # Register a listener session in OnlineDirectory
-      listener_pid =
-        spawn(fn ->
-          forward_loop = fn forward_loop ->
-            receive do
-              :stop -> :ok
-              msg ->
-                send(test_pid, {:listener_msg, msg})
-                forward_loop.(forward_loop)
-            end
-          end
+      gm_listener_pid = spawn_listener(test_pid, :gm_listener_msg)
+      regular_listener_pid = spawn_listener(test_pid, :regular_listener_msg)
 
-          forward_loop.(forward_loop)
-        end)
-
-      AoSession.OnlineDirectory.register(60010, "Listener", 1, listener_pid)
+      # Register a GM listener (is_gm: true)
+      AoSession.OnlineDirectory.register(60010, "GMListener", 1, gm_listener_pid, is_gm: true)
+      # Register a regular player listener (is_gm: false, the default)
+      AoSession.OnlineDirectory.register(60011, "RegularPlayer", 1, regular_listener_pid)
 
       on_exit(fn ->
         AoSession.OnlineDirectory.unregister(60010)
-        send(listener_pid, :stop)
+        AoSession.OnlineDirectory.unregister(60011)
+        send(gm_listener_pid, :stop)
+        send(regular_listener_pid, :stop)
       end)
 
       state = base_state()
 
       {_returned_state, packets} =
-        SessionLogic.handle_command(state, {:gm_message, %{message: "Server maintenance in 5 minutes!"}})
+        SessionLogic.handle_command(state, {:gm_message, %{message: "Maintenance in 5 min!"}})
 
       # No direct reply packets (broadcast is via OnlineDirectory)
       assert packets == []
 
-      # Wait for message delivery
       Process.sleep(50)
 
-      # Collect forwarded messages from listener
-      listener_msgs = collect_tagged_messages(:listener_msg)
+      # GM listener should receive the message
+      gm_msgs = collect_tagged_messages(:gm_listener_msg)
 
       send_raw_msgs =
-        Enum.filter(listener_msgs, fn
+        Enum.filter(gm_msgs, fn
           {:send_raw, _data} -> true
           _ -> false
         end)
 
-      assert length(send_raw_msgs) >= 1,
-        "Listener should receive broadcast console_msg, got: #{inspect(listener_msgs)}"
+      assert length(send_raw_msgs) == 1,
+        "GM listener should receive broadcast, got: #{inspect(gm_msgs)}"
 
-      # Verify the packet contains console_msg (packet ID 37) with "Servidor> " prefix and font_index 1
-      [{:send_raw, raw_data}] = send_raw_msgs
-      <<37::little-16, payload::binary>> = raw_data
-      # Decode the string8 (length-prefixed) message from payload
-      <<msg_len::little-16, msg_bytes::binary-size(msg_len), font_byte::8, _rest::binary>> = payload
-      assert msg_bytes == "Servidor> Server maintenance in 5 minutes!"
-      assert font_byte == 1
+      # Regular player should NOT receive any message
+      regular_msgs = collect_tagged_messages(:regular_listener_msg)
+      assert regular_msgs == [],
+        "Regular player should NOT receive GM message, got: #{inspect(regular_msgs)}"
     end
 
-    test "non-GM player cannot broadcast gm_message" do
+    test "message format is 'name > message' with FONTTYPE_GMMSG (16)" do
       test_pid = self()
+      gm_listener_pid = spawn_listener(test_pid, :fmt_listener_msg)
 
-      listener_pid =
-        spawn(fn ->
-          forward_loop = fn forward_loop ->
-            receive do
-              :stop -> :ok
-              msg ->
-                send(test_pid, {:listener_msg, msg})
-                forward_loop.(forward_loop)
-            end
-          end
-
-          forward_loop.(forward_loop)
-        end)
-
-      AoSession.OnlineDirectory.register(60011, "Listener2", 1, listener_pid)
+      AoSession.OnlineDirectory.register(60020, "FmtGMListener", 1, gm_listener_pid, is_gm: true)
 
       on_exit(fn ->
-        AoSession.OnlineDirectory.unregister(60011)
+        AoSession.OnlineDirectory.unregister(60020)
+        send(gm_listener_pid, :stop)
+      end)
+
+      state = base_state()
+
+      {_state, _packets} =
+        SessionLogic.handle_command(state, {:gm_message, %{message: "Hello GMs"}})
+
+      Process.sleep(50)
+
+      msgs = collect_tagged_messages(:fmt_listener_msg)
+      [{:send_raw, raw_data}] = Enum.filter(msgs, &match?({:send_raw, _}, &1))
+
+      # Decode: packet ID 37 (console_msg), then string8 message, then font byte
+      <<37::little-16, payload::binary>> = raw_data
+      <<msg_len::little-16, msg_bytes::binary-size(msg_len), font_byte::8, _rest::binary>> = payload
+
+      assert msg_bytes == "GMBroadcaster > Hello GMs"
+      assert font_byte == @fonttype_gmmsg
+    end
+
+    test "empty message is silently ignored (no broadcast)" do
+      test_pid = self()
+      gm_listener_pid = spawn_listener(test_pid, :empty_listener_msg)
+
+      AoSession.OnlineDirectory.register(60030, "EmptyGMListener", 1, gm_listener_pid, is_gm: true)
+
+      on_exit(fn ->
+        AoSession.OnlineDirectory.unregister(60030)
+        send(gm_listener_pid, :stop)
+      end)
+
+      state = base_state()
+
+      {_state, packets} =
+        SessionLogic.handle_command(state, {:gm_message, %{message: ""}})
+
+      assert packets == []
+
+      Process.sleep(50)
+
+      msgs = collect_tagged_messages(:empty_listener_msg)
+      assert msgs == [], "Empty message should not trigger broadcast, got: #{inspect(msgs)}"
+    end
+
+    test "non-GM player cannot send gm_message" do
+      test_pid = self()
+
+      listener_pid = spawn_listener(test_pid, :nongm_listener_msg)
+      AoSession.OnlineDirectory.register(60040, "NGMListener", 1, listener_pid, is_gm: true)
+
+      on_exit(fn ->
+        AoSession.OnlineDirectory.unregister(60040)
         send(listener_pid, :stop)
       end)
 
@@ -150,7 +184,7 @@ defmodule AoTcpGateway.GmMessageTest do
 
       Process.sleep(50)
 
-      listener_msgs = collect_tagged_messages(:listener_msg)
+      listener_msgs = collect_tagged_messages(:nongm_listener_msg)
       assert listener_msgs == [], "Non-GM should not be able to broadcast, got: #{inspect(listener_msgs)}"
     end
 
@@ -162,6 +196,23 @@ defmodule AoTcpGateway.GmMessageTest do
 
       assert packets == [{:console_msg, %{message: "No tienes privilegios de GM.", font_index: 0}}]
     end
+  end
+
+  # ---- Helpers ----
+
+  defp spawn_listener(test_pid, tag) do
+    spawn(fn ->
+      forward_loop = fn forward_loop ->
+        receive do
+          :stop -> :ok
+          msg ->
+            send(test_pid, {tag, msg})
+            forward_loop.(forward_loop)
+        end
+      end
+
+      forward_loop.(forward_loop)
+    end)
   end
 
   defp collect_tagged_messages(tag) do

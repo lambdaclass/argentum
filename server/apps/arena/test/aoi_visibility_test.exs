@@ -88,6 +88,30 @@ defmodule Arena.Map.AoiVisibilityTest do
     end
   end
 
+  # Enter a player from a separate process so that NPC create packets and other
+  # side-effect messages go to that process instead of polluting the test mailbox.
+  # The spawned process stays alive to act as the player's session.
+  defp enter_from_other_process(map_id, entity, opts) do
+    test_pid = self()
+
+    pid =
+      spawn(fn ->
+        result = MapServer.enter(map_id, entity, opts)
+        send(test_pid, {:enter_result, result})
+
+        # Stay alive so the MapServer keeps this session registered
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    receive do
+      {:enter_result, result} -> {pid, result}
+    after
+      5000 -> raise "enter_from_other_process timed out"
+    end
+  end
+
   describe "far players are invisible" do
     test "enter does NOT send character_create to a player outside AoI range" do
       # Place player A at (10, 10). We are A's session process.
@@ -95,10 +119,11 @@ defmodule Arena.Map.AoiVisibilityTest do
       {:ok, _, _, _weather} = MapServer.enter(@test_map_id, a, position: {10, 10})
       flush_mailbox()
 
-      # Place player B far away — more than @aoi_x tiles apart in X
+      # Place player B far away — more than @aoi_x tiles apart in X.
+      # Enter B from a separate process so B's NPC creates don't pollute our mailbox.
       far_x = 10 + @aoi_x + 5
       b = make_entity(10_002, "FarB", far_x, 10)
-      MapServer.enter(@test_map_id, b, position: {far_x, 10})
+      {b_pid, _result} = enter_from_other_process(@test_map_id, b, position: {far_x, 10})
 
       # A should NOT receive a character_create for B
       messages = collect_raw_messages(200)
@@ -106,6 +131,7 @@ defmodule Arena.Map.AoiVisibilityTest do
 
       MapServer.leave(@test_map_id, 10_001)
       MapServer.leave(@test_map_id, 10_002)
+      send(b_pid, :stop)
     end
 
     test "enter returns only nearby players in the visible set" do
@@ -126,28 +152,19 @@ defmodule Arena.Map.AoiVisibilityTest do
     end
 
     test "movement broadcast does NOT reach a far player" do
-      # A at (10, 10), B at (10 + aoi_x + 5, 10) — outside range
-      a = make_entity(10_201, "MoveA", 10, 10)
+      # B enters first from a separate process (far away)
       far_x = 10 + @aoi_x + 5
       b = make_entity(10_202, "MoveB", far_x, 10)
-
-      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, b, position: {far_x, 10})
-      flush_mailbox()
+      {b_pid, _result} = enter_from_other_process(@test_map_id, b, position: {far_x, 10})
 
       # Enter A — we are A's session
+      a = make_entity(10_201, "MoveA", 10, 10)
       {:ok, _, _, _weather} = MapServer.enter(@test_map_id, a, position: {10, 10})
       flush_mailbox()
 
-      # Move B (call from B's perspective, but we're A's session receiving)
-      # We need a helper process to act as B's session and move B
-      b_session = spawn(fn -> Process.sleep(5000) end)
-      # Re-enter B with b_session as its session pid
-      MapServer.leave(@test_map_id, 10_202)
-      flush_mailbox()
-
-      # Directly enter B with the helper pid as caller won't work easily.
-      # Instead, just move A and check B doesn't see it.
-      # We are A's session. Move A south.
+      # Move A. The mover receives pos_update and NPC creates (direct messages),
+      # but should NOT receive a character_move broadcast (excluded as mover).
+      # B is far away — B should not receive A's move broadcast either.
       result =
         Enum.find_value([:south, :north, :east, :west], fn dir ->
           case MapServer.move_character(@test_map_id, 10_201, dir) do
@@ -158,18 +175,20 @@ defmodule Arena.Map.AoiVisibilityTest do
 
       assert result, "at least one direction should be walkable"
 
-      # B is far away — B should not receive the move broadcast.
-      # But we are A's session process, not B's. The test process won't
-      # receive B's messages. Instead we verify by the visible set:
-      # A's movement should produce 0 broadcast recipients (nobody nearby).
-      # We can check that A's session (us) did NOT receive anything either.
+      # Collect all messages and filter out direct messages to the mover
+      # (pos_update ID=22 and NPC creates ID=42). Only character_move (ID=44)
+      # broadcasts would indicate a leak.
       messages = collect_raw_messages(200)
-      # A moved, but there's nobody near A to broadcast to.
-      # A's own session doesn't get its own move broadcast.
-      assert messages == [], "No broadcast should reach us (we are the mover)"
+      broadcast_msgs =
+        Enum.filter(messages, fn <<packet_id, _rest::binary>> ->
+          packet_id == 44
+        end)
 
-      Process.exit(b_session, :kill)
+      assert broadcast_msgs == [], "No character_move broadcast should reach the mover"
+
       MapServer.leave(@test_map_id, 10_201)
+      MapServer.leave(@test_map_id, 10_202)
+      send(b_pid, :stop)
     end
 
     test "leave does NOT send character_remove to a far player" do
@@ -180,8 +199,7 @@ defmodule Arena.Map.AoiVisibilityTest do
       # We are A's session
       {:ok, _, _, _weather} = MapServer.enter(@test_map_id, a, position: {10, 10})
       flush_mailbox()
-      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, b, position: {far_x, 10})
-      flush_mailbox()
+      {b_pid, _result} = enter_from_other_process(@test_map_id, b, position: {far_x, 10})
 
       # B leaves — A should NOT get character_remove
       MapServer.leave(@test_map_id, 10_302)
@@ -190,6 +208,7 @@ defmodule Arena.Map.AoiVisibilityTest do
       assert messages == [], "Far player leaving should not send remove to us"
 
       MapServer.leave(@test_map_id, 10_301)
+      send(b_pid, :stop)
     end
   end
 
@@ -201,13 +220,14 @@ defmodule Arena.Map.AoiVisibilityTest do
 
       # B enters 1 tile away — well within AoI
       b = make_entity(11_002, "NearEnterB", 51, 50)
-      MapServer.enter(@test_map_id, b, position: {51, 50})
+      {b_pid, _result} = enter_from_other_process(@test_map_id, b, position: {51, 50})
 
       messages = collect_raw_messages(200)
       assert length(messages) > 0, "Nearby player entering should trigger character_create"
 
       MapServer.leave(@test_map_id, 11_001)
       MapServer.leave(@test_map_id, 11_002)
+      send(b_pid, :stop)
     end
 
     test "movement broadcast reaches a nearby player" do
@@ -217,7 +237,7 @@ defmodule Arena.Map.AoiVisibilityTest do
       # We are B's session
       {:ok, _, _, _weather} = MapServer.enter(@test_map_id, b, position: {52, 50})
       flush_mailbox()
-      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, a, position: {50, 50})
+      {a_pid, _result} = enter_from_other_process(@test_map_id, a, position: {50, 50})
       flush_mailbox()
 
       # Move A — B should receive the move broadcast
@@ -233,6 +253,7 @@ defmodule Arena.Map.AoiVisibilityTest do
 
       MapServer.leave(@test_map_id, 11_101)
       MapServer.leave(@test_map_id, 11_102)
+      send(a_pid, :stop)
     end
 
     test "leave sends character_remove to a nearby player" do
@@ -242,7 +263,7 @@ defmodule Arena.Map.AoiVisibilityTest do
       # We are A's session
       {:ok, _, _, _weather} = MapServer.enter(@test_map_id, a, position: {50, 50})
       flush_mailbox()
-      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, b, position: {51, 50})
+      {b_pid, _result} = enter_from_other_process(@test_map_id, b, position: {51, 50})
       flush_mailbox()
 
       # B leaves — A should get character_remove
@@ -252,6 +273,7 @@ defmodule Arena.Map.AoiVisibilityTest do
       assert length(messages) > 0, "Nearby player leaving should send character_remove"
 
       MapServer.leave(@test_map_id, 11_201)
+      send(b_pid, :stop)
     end
 
     test "heading change reaches a nearby player" do
@@ -260,7 +282,7 @@ defmodule Arena.Map.AoiVisibilityTest do
 
       {:ok, _, _, _weather} = MapServer.enter(@test_map_id, b, position: {51, 50})
       flush_mailbox()
-      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, a, position: {50, 50})
+      {a_pid, _result} = enter_from_other_process(@test_map_id, a, position: {50, 50})
       flush_mailbox()
 
       # A changes heading — B (us) should receive the broadcast
@@ -272,6 +294,7 @@ defmodule Arena.Map.AoiVisibilityTest do
 
       MapServer.leave(@test_map_id, 11_301)
       MapServer.leave(@test_map_id, 11_302)
+      send(a_pid, :stop)
     end
 
     test "heading change does NOT reach a far player" do
@@ -281,7 +304,7 @@ defmodule Arena.Map.AoiVisibilityTest do
 
       {:ok, _, _, _weather} = MapServer.enter(@test_map_id, b, position: {far_x, 10})
       flush_mailbox()
-      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, a, position: {10, 10})
+      {a_pid, _result} = enter_from_other_process(@test_map_id, a, position: {10, 10})
       flush_mailbox()
 
       # A changes heading — B (us) should NOT receive it
@@ -293,6 +316,7 @@ defmodule Arena.Map.AoiVisibilityTest do
 
       MapServer.leave(@test_map_id, 11_401)
       MapServer.leave(@test_map_id, 11_402)
+      send(a_pid, :stop)
     end
   end
 
@@ -374,13 +398,14 @@ defmodule Arena.Map.AoiVisibilityTest do
 
       {:ok, _, _, _weather} = MapServer.enter(@test_map_id, a, position: {50, 50})
       flush_mailbox()
-      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, b, position: {50, far_y})
+      {b_pid, _result} = enter_from_other_process(@test_map_id, b, position: {50, far_y})
 
       messages = collect_raw_messages(200)
       assert messages == [], "Player outside Y AoI range should be invisible"
 
       MapServer.leave(@test_map_id, 13_001)
       MapServer.leave(@test_map_id, 13_002)
+      send(b_pid, :stop)
     end
 
     test "player at Y boundary is visible" do
@@ -390,13 +415,14 @@ defmodule Arena.Map.AoiVisibilityTest do
 
       {:ok, _, _, _weather} = MapServer.enter(@test_map_id, a, position: {50, 50})
       flush_mailbox()
-      {:ok, _, _, _weather} = MapServer.enter(@test_map_id, b, position: {50, edge_y})
+      {b_pid, _result} = enter_from_other_process(@test_map_id, b, position: {50, edge_y})
 
       messages = collect_raw_messages(200)
       assert length(messages) > 0, "Player at Y AoI boundary should be visible"
 
-      MapServer.leave(@test_map_id, 13_101)
-      MapServer.leave(@test_map_id, 13_102)
+      MapServer.leave(@test_map_id, 13_001)
+      MapServer.leave(@test_map_id, 13_002)
+      send(b_pid, :stop)
     end
   end
 end

@@ -97,6 +97,8 @@ defmodule Arena.Entity.PlayerEntity do
     poisoned: false,
     criminal: false,
     invisible: false,
+    oculto: false,
+    no_detectable: false,
     paralyzed: false,
     immobilized: false,
     meditating: false,
@@ -148,6 +150,11 @@ defmodule Arena.Entity.PlayerEntity do
     # Chat moderation: mute expiry (monotonic ms, 0 = not muted)
     muted_until: 0,
     # Chat rate limit: last chat timestamp (monotonic ms, far-past = never)
-    last_chat_at: -1_000_000_000_000
+    last_chat_at: -1_000_000_000_000,
+
+    # Marriage: VB6 SpouseId (persisted char_id, 0 = not married)
+    spouse_id: 0,
+    # Transient: char_id of the player we proposed to (VB6: Candidato)
+    marriage_proposal_target: nil
   ]
 end

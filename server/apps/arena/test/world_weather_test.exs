@@ -35,7 +35,7 @@ defmodule Arena.WorldWeatherTest do
     test "toggles rain from off to on" do
       assert Arena.WorldWeather.raining?() == false
       result = Arena.WorldWeather.toggle_rain()
-      assert result == true
+      assert result == {true, true}
       assert Arena.WorldWeather.raining?() == true
     end
 
@@ -44,7 +44,7 @@ defmodule Arena.WorldWeatherTest do
       assert Arena.WorldWeather.raining?() == true
 
       result = Arena.WorldWeather.toggle_rain()
-      assert result == false
+      assert result == {false, false}
       assert Arena.WorldWeather.raining?() == false
     end
 

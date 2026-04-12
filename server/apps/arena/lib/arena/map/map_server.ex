@@ -20,6 +20,8 @@ defmodule Arena.Map.MapServer do
 
   use GenServer
 
+  import Bitwise, only: [band: 2]
+
   require Logger
 
   alias Arena.Map.CsmParser
@@ -169,6 +171,11 @@ defmodule Arena.Map.MapServer do
 
   def modify_gold(map_id, char_id, amount), do: GenServer.cast(via(map_id), {:modify_gold, char_id, amount})
 
+  def propose_marriage(map_id, char_id, target_char_id),
+    do: GenServer.cast(via(map_id), {:propose_marriage, char_id, target_char_id})
+
+  def divorce(map_id, char_id), do: GenServer.cast(via(map_id), {:divorce, char_id})
+
   @doc "Check if a map process is loaded and ready to accept commands."
   def ready?(map_id) do
     GenServer.call(via(map_id), :ready?)
@@ -234,12 +241,23 @@ defmodule Arena.Map.MapServer do
           trigger_map = Map.new(map_data.triggers, fn t -> {{t.x, t.y}, t.trigger} end)
 
           # Static metadata — never changes after init
+          # VB6: restrict_mode is a numeric bitmask string; parse flags
+          restrict_mode_str = Map.get(map_data, :restrict_mode, "")
+
+          restrict_mode_int =
+            case Integer.parse(restrict_mode_str) do
+              {n, _} -> n
+              :error -> 0
+            end
+
           meta = %{
             name: map_data.map_name,
             zone: map_data.zone,
             terrain: map_data.terrain,
             safe_zone: map_data.safe_zone,
-            restrict_mode: Map.get(map_data, :restrict_mode, ""),
+            restrict_mode: restrict_mode_str,
+            # VB6 26h: bit 16 (0x10) = SinInviOcul -- strip invisible+oculto on entry
+            sin_invi_ocul: band(restrict_mode_int, 16) != 0,
             music_hi: map_data.music_hi,
             music_low: map_data.music_low,
             layers: map_data.layers,
@@ -558,6 +576,13 @@ defmodule Arena.Map.MapServer do
   @impl true
   def handle_cast({:modify_gold, char_id, amount}, state), do: Social.handle_modify_gold(state, char_id, amount)
 
+  @impl true
+  def handle_cast({:propose_marriage, char_id, target_char_id}, state),
+    do: Social.handle_propose_marriage(state, char_id, target_char_id)
+
+  @impl true
+  def handle_cast({:divorce, char_id}, state), do: Social.handle_divorce(state, char_id)
+
   # ---- Timers ----
 
   @impl true
@@ -654,6 +679,26 @@ defmodule Arena.Map.MapServer do
 
     entity = %{entity | x: x, y: y, char_index: char_index, map_id: state.map_id}
 
+    # VB6 26h: SinInviOcul maps strip invisible + oculto on entry
+    entity =
+      if state.meta.sin_invi_ocul and (entity.invisible or entity.oculto) and not entity.gm do
+        buffs = Enum.reject(entity.buffs, &(&1.type in [:invisible, :oculto]))
+
+        Helpers.send_to_session(
+          state.sessions,
+          entity.char_id,
+          {:send_raw,
+           Encoder.encode(
+             {:console_msg,
+              %{message: "Una fuerza divina que vigila esta zona te ha vuelto visible.", font_index: 0}}
+           )}
+        )
+
+        %{entity | invisible: false, oculto: false, buffs: buffs}
+      else
+        entity
+      end
+
     # Monitor session process for crash cleanup
     ref = Process.monitor(caller_pid)
 
@@ -675,6 +720,13 @@ defmodule Arena.Map.MapServer do
     }
 
     {visible_sets, reply_players} = Visibility.enter_visibility(state, entity, sessions)
+
+    # Send nearby NPC creates directly to the entering player's session (caller_pid).
+    # This is done here (not in enter_visibility) to keep visibility logic side-effect-free
+    # for NPC concerns, and to ensure NPC creates target the actual caller.
+    for raw <- Visibility.nearby_npc_packets(state, entity) do
+      send(caller_pid, {:send_raw, raw})
+    end
 
     Logger.info("#{entity.name} (#{entity.char_id}) entered map #{state.map_id} at (#{x}, #{y}) index=#{char_index}")
     Arena.AuditLog.log_login(entity.char_id, entity.name, state.map_id)
