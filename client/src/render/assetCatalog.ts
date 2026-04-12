@@ -1,6 +1,7 @@
 import { BaseTexture, MIPMAP_MODES, Rectangle, SCALE_MODES, Texture } from "pixi.js";
 import { buildAssetOriginCandidates, buildAssetUrlFromOrigin, fetchJsonWithFallback } from "../net/assetHost";
 import type { GroundObject, WorldMapData } from "../app/types";
+import { getRawNpcBodyDef, getRawNpcBodySheetUrl } from "./npcRawBodies.generated";
 
 interface DirectionalFrames {
   up: number;
@@ -67,10 +68,26 @@ export interface GrhFrameDef {
   height: number;
 }
 
+const GHOST_BODY_ID = 829;
+const GHOST_BODY_DEF = {
+  north: 51672,
+  east: 51673,
+  south: 51671,
+  west: 51674
+} as const;
+
 const catalogCache = new Map<string, Promise<AssetCatalog>>();
 const baseTextureCache = new Map<string, BaseTexture>();
 const textureCache = new Map<string, Texture>();
-const imagePreloadCache = new Map<string, Promise<void>>();
+const scenePreloadCache = new Map<string, Promise<void>>();
+
+const sceneBaseTextureOptions = {
+  scaleMode: SCALE_MODES.NEAREST,
+  mipmap: MIPMAP_MODES.OFF,
+  resourceOptions: {
+    autoLoad: false
+  }
+} as const;
 
 export function loadAssetCatalog(endpoint: string) {
   if (!catalogCache.has(endpoint)) {
@@ -178,6 +195,27 @@ export function getGrhFrameDef(
   };
 }
 
+function getGrhUrls(catalog: AssetCatalog, grhId: number, useCharIndex = false) {
+  const index = useCharIndex ? catalog.grhChar : catalog.grhMap;
+  const entry = index[grhId];
+  if (!entry) {
+    return [];
+  }
+
+  if (entry.frames && entry.frames.length > 0) {
+    const urls = new Set<string>();
+    for (const frameId of entry.frames) {
+      const frame = index[frameId];
+      if (frame) {
+        urls.add(sheetUrl(catalog.assetOrigin, frame.grafico, useCharIndex));
+      }
+    }
+    return [...urls];
+  }
+
+  return [sheetUrl(catalog.assetOrigin, entry.grafico, useCharIndex)];
+}
+
 export function getGrhTexture(
   catalog: AssetCatalog,
   grhId: number,
@@ -275,6 +313,8 @@ export function getObjectGrh(catalog: AssetCatalog | null, objectId: number) {
 }
 
 export interface SceneCharacterAssetDescriptor {
+  x?: number;
+  y?: number;
   bodyId: number;
   headId: number;
   weaponId: number;
@@ -286,6 +326,13 @@ export interface SceneCharacterAssetDescriptor {
   heading: number;
 }
 
+export interface SceneAssetBounds {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
 export function getObjectFrameDef(catalog: AssetCatalog | null, objectId: number) {
   const grhId = getObjectGrh(catalog, objectId);
   if (!catalog || !grhId) {
@@ -295,32 +342,50 @@ export function getObjectFrameDef(catalog: AssetCatalog | null, objectId: number
   return getGrhFrameDef(catalog, grhId);
 }
 
-function preloadImage(url: string) {
-  const existing = imagePreloadCache.get(url);
+function evictFailedSceneTexture(url: string, baseTexture: BaseTexture) {
+  scenePreloadCache.delete(url);
+  Texture.removeFromCache(url);
+  BaseTexture.removeFromCache(url);
+  if (!baseTexture.destroyed) {
+    baseTexture.destroy();
+  }
+}
+
+function preloadSceneTexture(url: string) {
+  const existing = scenePreloadCache.get(url);
   if (existing) {
     return existing;
   }
 
-  const promise = new Promise<void>((resolve) => {
-    const image = new Image();
-
-    const finish = () => {
-      image.onload = null;
-      image.onerror = null;
-      resolve();
-    };
-
-    image.onload = finish;
-    image.onerror = finish;
-    image.decoding = "async";
-    image.src = url;
-
-    if (image.complete) {
-      finish();
+  const promise = (async () => {
+    const baseTexture = BaseTexture.from(url, sceneBaseTextureOptions, false);
+    if (baseTexture.valid) {
+      return;
     }
+
+    const { resource } = baseTexture;
+    if (!resource) {
+      evictFailedSceneTexture(url, baseTexture);
+      throw new Error(`Failed to preload scene asset ${url}`);
+    }
+
+    try {
+      await resource.load();
+    } catch {
+      evictFailedSceneTexture(url, baseTexture);
+      throw new Error(`Failed to preload scene asset ${url}`);
+    }
+
+    if (!baseTexture.valid) {
+      evictFailedSceneTexture(url, baseTexture);
+      throw new Error(`Failed to preload scene asset ${url}`);
+    }
+  })().catch((error) => {
+    scenePreloadCache.delete(url);
+    throw error;
   });
 
-  imagePreloadCache.set(url, promise);
+  scenePreloadCache.set(url, promise);
   return promise;
 }
 
@@ -328,52 +393,115 @@ export function collectSceneAssetUrls(
   catalog: AssetCatalog,
   map: WorldMapData,
   characters: SceneCharacterAssetDescriptor[] = [],
-  groundObjects: GroundObject[] = []
+  groundObjects: GroundObject[] = [],
+  bounds?: SceneAssetBounds
 ) {
   const urls = new Set<string>();
+  const isInBounds = (x: number, y: number) =>
+    !bounds || (x >= bounds.minX && x <= bounds.maxX && y >= bounds.minY && y <= bounds.maxY);
 
-  const addFrameUrl = (grhId: number | null | undefined, useCharIndex = false) => {
+  const addGrhUrls = (grhId: number | null | undefined, useCharIndex = false) => {
     if (!grhId) {
       return;
     }
 
-    const frame = getGrhFrameDef(catalog, grhId, useCharIndex);
-    if (frame) {
-      urls.add(frame.url);
+    for (const url of getGrhUrls(catalog, grhId, useCharIndex)) {
+      urls.add(url);
     }
   };
 
   for (const layer of map.layers) {
     for (const tile of layer ?? []) {
-      addFrameUrl(tile.grhIndex, false);
+      if (!isInBounds(tile.x, tile.y)) {
+        continue;
+      }
+
+      addGrhUrls(tile.grhIndex, false);
     }
   }
 
   for (const object of groundObjects) {
-    addFrameUrl(getObjectGrh(catalog, object.id), false);
+    if (!isInBounds(object.x, object.y)) {
+      continue;
+    }
+
+    addGrhUrls(getObjectGrh(catalog, object.id), false);
   }
 
   for (const character of characters) {
+    if (character.x != null && character.y != null && !isInBounds(character.x, character.y)) {
+      continue;
+    }
+
     const direction = headingToDirection(character.heading);
-    addFrameUrl(bodyGrhForDirection(catalog, character.bodyId, direction), true);
-    addFrameUrl(headGrhForDirection(catalog, character.headId, direction), true);
-    addFrameUrl(character.weaponId, true);
-    addFrameUrl(character.shieldId, true);
-    addFrameUrl(character.helmetId, true);
-    addFrameUrl(character.cartId, true);
-    addFrameUrl(character.backpackId, true);
-    addFrameUrl(character.effectId, true);
+    if (character.bodyId === GHOST_BODY_ID) {
+      addGrhUrls(GHOST_BODY_DEF[direction], false);
+    } else {
+      const rawNpcBody =
+        character.bodyId > 0 && !catalog.bodies[character.bodyId]
+          ? getRawNpcBodyDef(character.bodyId)
+          : null;
+
+      if (rawNpcBody?.type === "molded") {
+        const rawSheetUrl = getRawNpcBodySheetUrl(rawNpcBody.fileNum);
+        if (rawSheetUrl) {
+          urls.add(rawSheetUrl);
+        }
+      } else if (rawNpcBody?.type === "direct") {
+        addGrhUrls(rawNpcBody[direction], true);
+      } else {
+        addGrhUrls(bodyGrhForDirection(catalog, character.bodyId, direction), true);
+      }
+
+      addGrhUrls(headGrhForDirection(catalog, character.headId, direction), true);
+      addGrhUrls(character.weaponId, true);
+      addGrhUrls(character.shieldId, true);
+      addGrhUrls(character.helmetId, true);
+      addGrhUrls(character.cartId, true);
+      addGrhUrls(character.backpackId, true);
+      addGrhUrls(character.effectId, true);
+    }
   }
 
   return [...urls];
 }
 
 export async function preloadSceneAssets(urls: Iterable<string>) {
-  await Promise.all([...new Set(urls)].map((url) => preloadImage(url)));
+  const pending = [...new Set(urls)];
+  const concurrency = Math.min(6, pending.length);
+  let nextIndex = 0;
+
+  async function loadOne(url: string) {
+    let lastError: unknown = null;
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await preloadSceneTexture(url);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 2) {
+          await new Promise((resolve) => globalThis.setTimeout(resolve, 60 * (attempt + 1)));
+        }
+      }
+    }
+
+    throw lastError;
+  }
+
+  async function worker() {
+    while (nextIndex < pending.length) {
+      const url = pending[nextIndex];
+      nextIndex += 1;
+      await loadOne(url);
+    }
+  }
+
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
 }
 
 export function getUncachedSceneAssetUrls(urls: Iterable<string>) {
-  return [...new Set(urls)].filter((url) => !imagePreloadCache.has(url));
+  return [...new Set(urls)].filter((url) => !scenePreloadCache.has(url));
 }
 
 export function getObjectIconFrame(catalog: AssetCatalog | null, objectId: number) {

@@ -92,4 +92,99 @@ describe("collectSceneAssetUrls", () => {
     expect(urls).toContain("http://127.0.0.1:7667/graficos_char/6113.png");
     expect(urls).toContain("http://127.0.0.1:7667/graficos/9999.png");
   });
+
+  it("includes all frame sheets for animated GRHs", () => {
+    const catalog: AssetCatalog = {
+      endpoint: "ws://127.0.0.1:7667/ao",
+      assetOrigin: "http://127.0.0.1:7667",
+      bodies: [],
+      heads: [],
+      objects: [],
+      npcs: [],
+      grhMap: [],
+      grhChar: []
+    };
+
+    catalog.grhMap[100] = {
+      id: 100,
+      grafico: 0,
+      offX: 0,
+      offY: 0,
+      width: 32,
+      height: 32,
+      frames: [101, 102]
+    };
+    catalog.grhMap[101] = { id: 101, grafico: 5001, offX: 0, offY: 0, width: 32, height: 32 };
+    catalog.grhMap[102] = { id: 102, grafico: 5002, offX: 0, offY: 0, width: 32, height: 32 };
+
+    const urls = collectSceneAssetUrls(
+      catalog,
+      {
+        mapId: 1,
+        name: "Anim",
+        width: 1,
+        height: 1,
+        tiles: new Uint8Array(1),
+        musicHi: 0,
+        musicLow: 0,
+        layers: [[{ x: 1, y: 1, grhIndex: 100 }], [], [], []],
+        npcs: [],
+        exits: []
+      }
+    );
+
+    expect(urls).toContain("http://127.0.0.1:7667/graficos/5001.png");
+    expect(urls).toContain("http://127.0.0.1:7667/graficos/5002.png");
+  });
+
+  it("includes ghost body sheets for dead characters", () => {
+    const catalog: AssetCatalog = {
+      endpoint: "ws://127.0.0.1:7667/ao",
+      assetOrigin: "http://127.0.0.1:7667",
+      bodies: [],
+      heads: [],
+      objects: [],
+      npcs: [],
+      grhMap: [],
+      grhChar: []
+    };
+
+    catalog.grhMap[51671] = { id: 51671, grafico: 6215, offX: 0, offY: 0, width: 32, height: 32 };
+    catalog.grhMap[51672] = { id: 51672, grafico: 6215, offX: 0, offY: 0, width: 32, height: 32 };
+    catalog.grhMap[51673] = { id: 51673, grafico: 6215, offX: 0, offY: 0, width: 32, height: 32 };
+    catalog.grhMap[51674] = { id: 51674, grafico: 6215, offX: 0, offY: 0, width: 32, height: 32 };
+
+    const urls = collectSceneAssetUrls(
+      catalog,
+      {
+        mapId: 2,
+        name: "Ghost",
+        width: 1,
+        height: 1,
+        tiles: new Uint8Array(1),
+        musicHi: 0,
+        musicLow: 0,
+        layers: [[], [], [], []],
+        npcs: [],
+        exits: []
+      },
+      [
+        {
+          x: 1,
+          y: 1,
+          bodyId: 829,
+          headId: 0,
+          weaponId: 0,
+          shieldId: 0,
+          helmetId: 0,
+          cartId: 0,
+          backpackId: 0,
+          effectId: 0,
+          heading: 3
+        }
+      ]
+    );
+
+    expect(urls).toContain("http://127.0.0.1:7667/graficos/6215.png");
+  });
 });

@@ -62,6 +62,8 @@ const UTILITY_ACTIONS = [
 ];
 
 const SPELL_HOTKEY_STORAGE_KEY = "ao_spell_hotkeys";
+const GHOST_BODY_ID = 829;
+const GHOST_HEAD_ID = 0;
 
 function loadSpellHotkeys() {
   if (typeof window === "undefined") {
@@ -173,6 +175,7 @@ export function App({ uiDemoMode = false }: AppProps) {
   const [sceneBootstrapStatus, setSceneBootstrapStatus] = useState<
     "idle" | "loading" | "ready" | "error"
   >("idle");
+  const [sceneBootstrapError, setSceneBootstrapError] = useState<string | null>(null);
   const [activeRightTab, setActiveRightTab] = useState<
     "hud" | "trade" | "bank" | "commerce" | "skills" | "spells" | "world" | "session" | "chat" | "debug"
   >("hud");
@@ -293,37 +296,55 @@ export function App({ uiDemoMode = false }: AppProps) {
   }, [bootConnectAttempts, state.world.map, state.world.mapStatus]);
 
   useEffect(() => {
-    if (
-      !isGameplayRoute ||
-      assetStatus !== "ready" ||
-      mapPackStatus !== "ready" ||
+    if (!isGameplayRoute || assetStatus !== "ready" || mapPackStatus !== "ready") {
+      if (state.connection.status === "offline" && state.world.map == null) {
+        initialSceneBootstrapDoneRef.current = false;
+        setSceneBootstrapStatus("idle");
+        setSceneBootstrapError(null);
+      }
+      return;
+    }
+
+    if (!initialSceneBootstrapDoneRef.current) {
+      if (
+        state.connection.status !== "connected" ||
+        state.world.mapStatus !== "ready" ||
+        !state.world.map ||
+        state.world.self.charIndex == null ||
+        state.world.self.x == null ||
+        state.world.self.y == null
+      ) {
+        setSceneBootstrapStatus("loading");
+        setSceneBootstrapError(null);
+        return;
+      }
+    } else if (
       state.connection.status !== "connected" ||
       state.world.mapStatus !== "ready" ||
       !state.world.map ||
       state.world.self.charIndex == null
     ) {
-      if (state.connection.status === "offline" && state.world.map == null) {
-        initialSceneBootstrapDoneRef.current = false;
-        setSceneBootstrapStatus("idle");
-      }
       return;
     }
 
     if (initialSceneBootstrapDoneRef.current || !assetCatalog) {
       setSceneBootstrapStatus("ready");
+      setSceneBootstrapError(null);
       return;
     }
 
     const sceneCharacters = [
       {
-        bodyId: state.world.self.bodyId,
-        headId: state.world.self.headId,
-        weaponId: state.world.self.weaponId,
-        shieldId: state.world.self.shieldId,
-        helmetId: state.world.self.helmetId,
-        cartId: state.world.self.cartId,
-        backpackId: state.world.self.backpackId,
-        effectId: state.world.self.effectId,
+        x: state.world.self.x!,
+        y: state.world.self.y!,
+        bodyId: state.world.self.dead ? GHOST_BODY_ID : state.world.self.bodyId,
+        headId: state.world.self.dead ? GHOST_HEAD_ID : state.world.self.headId,
+        weaponId: state.world.self.dead ? 0 : state.world.self.weaponId,
+        shieldId: state.world.self.dead ? 0 : state.world.self.shieldId,
+        helmetId: state.world.self.dead ? 0 : state.world.self.helmetId,
+        cartId: state.world.self.dead ? 0 : state.world.self.cartId,
+        backpackId: state.world.self.dead ? 0 : state.world.self.backpackId,
+        effectId: state.world.self.dead ? 0 : state.world.self.effectId,
         heading: state.world.self.heading
       },
       ...state.world.map.npcs.flatMap((npc) => {
@@ -334,6 +355,8 @@ export function App({ uiDemoMode = false }: AppProps) {
 
         return [
           {
+            x: npc.x,
+            y: npc.y,
             bodyId: def.body,
             headId: def.head,
             weaponId: 0,
@@ -359,23 +382,28 @@ export function App({ uiDemoMode = false }: AppProps) {
     if (uncachedUrls.length === 0) {
       initialSceneBootstrapDoneRef.current = true;
       setSceneBootstrapStatus("ready");
+      setSceneBootstrapError(null);
       return;
     }
 
     let cancelled = false;
     setSceneBootstrapStatus("loading");
+    setSceneBootstrapError(null);
 
     void preloadSceneAssets(uncachedUrls)
       .then(() => {
         if (!cancelled) {
           initialSceneBootstrapDoneRef.current = true;
           setSceneBootstrapStatus("ready");
+          setSceneBootstrapError(null);
         }
       })
-      .catch(() => {
+      .catch((error) => {
         if (!cancelled) {
-          initialSceneBootstrapDoneRef.current = true;
           setSceneBootstrapStatus("error");
+          setSceneBootstrapError(
+            error instanceof Error ? error.message : "The first map scene could not be prepared."
+          );
         }
       });
 
@@ -395,12 +423,15 @@ export function App({ uiDemoMode = false }: AppProps) {
     state.world.self.bodyId,
     state.world.self.cartId,
     state.world.self.charIndex,
+    state.world.self.dead,
     state.world.self.effectId,
     state.world.self.heading,
     state.world.self.headId,
     state.world.self.helmetId,
     state.world.self.shieldId,
-    state.world.self.weaponId
+    state.world.self.weaponId,
+    state.world.self.x,
+    state.world.self.y
   ]);
 
   useEffect(() => {
@@ -980,6 +1011,9 @@ export function App({ uiDemoMode = false }: AppProps) {
 
   const handleRetryBootstrap = useCallback(() => {
     resetMapPackCache();
+    initialSceneBootstrapDoneRef.current = false;
+    setSceneBootstrapStatus("idle");
+    setSceneBootstrapError(null);
     setAssetReloadNonce((current) => current + 1);
     setMapPackReloadNonce((current) => current + 1);
   }, []);
@@ -1238,6 +1272,15 @@ export function App({ uiDemoMode = false }: AppProps) {
       };
     }
 
+    if (sceneBootstrapStatus === "error") {
+      return {
+        eyebrow: "Map",
+        title: "Scene Load Failed",
+        copy: sceneBootstrapError ?? "The first map scene could not be prepared.",
+        tone: "error" as const
+      };
+    }
+
     if (state.connection.status === "offline" && !state.world.map) {
       const issue = describeConnectionIssue(
         state.connection.lastError,
@@ -1270,6 +1313,7 @@ export function App({ uiDemoMode = false }: AppProps) {
     state.world.mapError,
     state.world.mapId,
     state.world.mapStatus,
+    sceneBootstrapError,
     sceneBootstrapStatus
   ]);
 
@@ -1308,7 +1352,11 @@ export function App({ uiDemoMode = false }: AppProps) {
       <main className="world-column">
         <section className="world-stage world-stage-shell">
           <div className="world-canvas-frame">
-            {assetStatus === "ready" && mapPackStatus === "ready" && sceneBootstrapStatus !== "loading" ? (
+            {assetStatus === "ready" &&
+            mapPackStatus === "ready" &&
+            state.connection.status === "connected" &&
+            state.world.mapStatus === "ready" &&
+            sceneBootstrapStatus === "ready" ? (
               <>
                 <WorldCanvas
                   world={state.world}
@@ -1335,6 +1383,16 @@ export function App({ uiDemoMode = false }: AppProps) {
                     ? "Asset Load Failed"
                     : mapPackStatus === "error"
                       ? "Map Pack Load Failed"
+                      : state.connection.status === "connecting"
+                        ? "Connecting"
+                      : state.world.mapStatus === "error"
+                        ? "Map Load Failed"
+                      : state.world.mapStatus === "loading" || state.world.mapStatus === "transferring"
+                        ? state.world.mapStatus === "transferring"
+                          ? "Changing Map"
+                          : "Loading Map"
+                      : sceneBootstrapStatus === "error"
+                        ? "Scene Load Failed"
                       : sceneBootstrapStatus === "loading"
                         ? "Preparing Scene"
                       : mapPackStatus === "ready"
@@ -1346,13 +1404,21 @@ export function App({ uiDemoMode = false }: AppProps) {
                     ? assetError ?? "The web client could not load its sprite indices."
                     : mapPackStatus === "error"
                       ? mapPackError ?? "The web client could not load its prepacked map bundle."
+                      : state.connection.status === "connecting"
+                        ? "Restoring the saved gameplay session and waiting for the server bootstrap."
+                      : state.world.mapStatus === "error"
+                        ? state.world.mapError ?? "The world data could not be loaded."
+                      : state.world.mapStatus === "loading" || state.world.mapStatus === "transferring"
+                        ? "Keeping the session alive while the destination map is prepared."
+                      : sceneBootstrapStatus === "error"
+                        ? sceneBootstrapError ?? "The first map scene could not be prepared."
                       : sceneBootstrapStatus === "loading"
                         ? "Loading the first scene's textures before entering the world."
                       : mapPackStatus !== "ready"
                         ? mapPackProgressLabel
                         : "Waiting for the same sprite/index catalog used by the historical clients before entering the world."}
                 </p>
-                {assetStatus === "error" || mapPackStatus === "error" ? (
+                {assetStatus === "error" || mapPackStatus === "error" || sceneBootstrapStatus === "error" ? (
                   <div className="world-loading-actions">
                     {assetStatus === "error" ? (
                       <button className="ghost-button" onClick={handleRetryAssets} type="button">
