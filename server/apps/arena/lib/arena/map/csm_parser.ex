@@ -302,15 +302,42 @@ defmodule Arena.Map.CsmParser do
 
   # ---- Build tile grid ----
 
-  defp build_tile_grid(sections) do
-    # Start with all tiles walkable (0)
-    grid = :array.new(Helpers.map_width() * Helpers.map_height(), default: 0)
+  # VB6 water tile detection: layer 1 GRH in these ranges AND layer 2 empty
+  # (bridges on layer 2 make the tile walkable, not water)
+  @water_grh_ranges [{1505, 1520}, {5665, 5680}, {13547, 13562}]
 
-    # Apply blocked tiles
+  defp build_tile_grid(sections) do
+    w = Helpers.map_width()
+    # Start with all tiles walkable (0)
+    grid = :array.new(w * Helpers.map_height(), default: 0)
+
+    # Build layer 1 and layer 2 lookup maps for water detection
+    l1_map =
+      sections.layers
+      |> Enum.at(0, [])
+      |> Map.new(fn %{x: x, y: y, grh_index: g} -> {{x, y}, g} end)
+
+    l2_map =
+      sections.layers
+      |> Enum.at(1, [])
+      |> Map.new(fn %{x: x, y: y, grh_index: g} -> {{x, y}, g} end)
+
+    # Mark water tiles (value 2) from layer 1 GRH indices
+    grid =
+      Enum.reduce(l1_map, grid, fn {{x, y}, grh}, grid ->
+        if valid_pos?(x, y) and water_grh?(grh) and not Map.has_key?(l2_map, {x, y}) do
+          idx = (y - 1) * w + (x - 1)
+          :array.set(idx, 2, grid)
+        else
+          grid
+        end
+      end)
+
+    # Apply blocked tiles (overrides water where both exist)
     grid =
       Enum.reduce(sections.blocked, grid, fn %{x: x, y: y, blocked: lados}, grid ->
         if valid_pos?(x, y) do
-          idx = (y - 1) * Helpers.map_width() + (x - 1)
+          idx = (y - 1) * w + (x - 1)
           :array.set(idx, lados, grid)
         else
           grid
@@ -319,6 +346,10 @@ defmodule Arena.Map.CsmParser do
 
     # Convert to flat list
     :array.to_list(grid)
+  end
+
+  defp water_grh?(grh) do
+    Enum.any?(@water_grh_ranges, fn {lo, hi} -> grh >= lo and grh <= hi end)
   end
 
   defp valid_pos?(x, y), do: x >= 1 and x <= Helpers.map_width() and y >= 1 and y <= Helpers.map_height()

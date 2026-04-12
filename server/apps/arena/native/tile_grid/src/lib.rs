@@ -126,7 +126,7 @@ fn move_entity(map_id: u16, x: u32, y: u32, direction: Atom) -> Result<Position,
     match maps.get(&map_id) {
         Some(grid) => {
             let v = grid[idx(nx, ny)];
-            if v == 0 || v == 4 {
+            if v == 0 || v == 2 || v == 4 {
                 Ok(Position { x: nx, y: ny })
             } else {
                 Err(atoms::blocked())
