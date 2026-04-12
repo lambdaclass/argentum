@@ -419,13 +419,12 @@ When in doubt:
     Outcome: role_master_request forwards to online GMs with VB6 format,
     question_gm routes support queries to admins. Fixed decoder to read
     request payload. 12 tests.
-24. Keep elemental/rune combat effects data-driven. IN PROGRESS (Batch A).
-    Outcome: elemental tags remain inert unless target data enables them; if it
-    does, the combat matrix/effects are implemented without inventing new
-    rules.
-25. Audit remaining interval/timer clamps against VB6. IN PROGRESS (Batch A).
-    Outcome: regen, hunger/thirst, buff timing, and other periodic behavior do
-    not drift on edge intervals.
+24. Keep elemental/rune combat effects data-driven. DONE.
+    Elemental tags parsed from obj.dat/npcs.dat, bitmask matrix from Balance.dat,
+    apply_elemental_modifiers/3 implements VB6 cross-product loop. 8 tests.
+25. Audit remaining interval/timer clamps against VB6. DONE.
+    Separate thirst (54 ticks/~162s) and hunger (60 ticks/~180s) counters,
+    poison at 3600ms, stamina drain when starving. Updated parity tests.
 26. Audit remaining invisibility, NPC AI, and spell-selection edge cases
     against VB6.
     Outcome: the remaining known semantic edge cases are either matched or
@@ -464,12 +463,13 @@ When in doubt:
 29. Add out-of-sequence packet validation. DONE.
     Outcome: is_dead guards on attack/cast/equip/use, in_trade guards on
     commerce packets. 14 tests.
-30. Expand remaining production recipe coverage to the target data set. IN PROGRESS (Batch A).
-    Outcome: tailoring and any still-missing production recipes are covered if
-    the target shard expects them.
-31. Finish the remaining old crafting UI packet surface. IN PROGRESS (Batch A).
-    Outcome: old carpenter/blacksmith/alchemy/tailor windows can drive the
-    existing crafting backend through open/add/remove/move/craft/close flows.
+30. Expand remaining production recipe coverage to the target data set. DONE.
+    Complete rewrite with correct VB6 ingredient IDs for all 4 skills
+    (blacksmith, carpenter, alchemy, tailoring). craftable_item_ids/2,
+    find_recipe_by_item/2 APIs.
+31. Finish the remaining old crafting UI packet surface. DONE.
+    All 4 crafting skills: open window sends recipe list, craft_item/4 validates
+    skill + ingredients. Encoder/decoder for all crafting packets. 15+ tests.
 32. Finish the remaining training/spell window response semantics.
     Outcome: the VB6 client gets the exact remaining responses it still expects
     for spell info, spell movement, trainer lists, trainer summon responses,
@@ -489,17 +489,18 @@ When in doubt:
     Outcome: the supported old GM/admin packet family works end-to-end.
 37. Implement quests and quest-NPC protocol.
     Outcome: quest state and quest NPC interactions exist on the backend.
-38. Implement duels / reto exact flow. IN PROGRESS (Batch A).
-    Outcome: the reto/duel lifecycle matches old server behavior instead of a
-    simplified approximation.
+38. Implement duels / reto exact flow. DONE.
+    DuelServer GenServer: best-of-3 rounds, gold betting with 10% tax,
+    /RETAR /ACEPTAR /CANCELAR /ABANDONAR commands, combat restriction +
+    death hook. 12 tests.
 39. Implement events / tournaments / lobby events / capture events /
     invasions / global world-event announcements.
     Outcome: server-side event systems match the selected old-server feature
     set, including the old event-lobby protocol where that baseline depends on
     it.
-40. Implement auction / subasta. IN PROGRESS (Batch A).
-    Outcome: the old auction backend exists and is reachable through the
-    compatible protocol/UI path.
+40. Implement auction / subasta. DONE.
+    Auction GenServer: timed bidding, auto-cancel, 5% fee, Subastador NPC
+    (type 16) handler. Encoder/decoder for auction packets. 10 tests.
 41. Implement mounts if the target data expects mounts separate from
     boats/navigation.
     Outcome: mount behavior is present where the target shard/data requires it.
@@ -507,8 +508,9 @@ When in doubt:
     Outcome: gambler flows, priest donation-forgiveness semantics, priced-entry
     travel/arena flows, and the related old economy side systems exist with VB6
     behavior instead of modern substitutes.
-43. Implement treasure search. IN PROGRESS (Batch A).
-    Outcome: treasure-search gameplay exists on the backend.
+43. Implement treasure search. DONE.
+    TreasureEvent GenServer: treasure/gift/NPC GM events, place_event_item/5,
+    check_treasure_event/4 on item pickup. Tesoros.dat loader. 8 tests.
 44. Implement forum / in-game message board.
     Outcome: the old in-game board/forum backend exists and persists correctly.
 45. Implement marriage. DONE.
