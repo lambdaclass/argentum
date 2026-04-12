@@ -335,10 +335,12 @@ defmodule Arena.Map.CsmParser do
 
     # Apply blocked tiles (overrides water where both exist)
     grid =
-      Enum.reduce(sections.blocked, grid, fn %{x: x, y: y, blocked: lados}, grid ->
+      Enum.reduce(sections.blocked, grid, fn %{x: x, y: y, blocked: _lados}, grid ->
         if valid_pos?(x, y) do
           idx = (y - 1) * w + (x - 1)
-          :array.set(idx, lados, grid)
+          # Normalize to 1 (blocked) — raw lados values like 2 would collide
+          # with the water tile value (2) and confuse the NIF/movement code
+          :array.set(idx, 1, grid)
         else
           grid
         end
