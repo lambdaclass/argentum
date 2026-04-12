@@ -98,7 +98,7 @@ export function ClassicHudPanel({
         : "Offline";
   const selectionHint =
     isDead
-      ? "Fantasma activo: revive antes de atacar, comerciar o usar items."
+      ? "Como fantasma solo puedes caminar."
       : selected == null
       ? "Click equipa, clic derecho usa, Shift tira."
       : selectedEquipped
@@ -125,13 +125,6 @@ export function ClassicHudPanel({
         </div>
         <small>{selectionHint}</small>
       </div>
-
-      {isDead ? (
-        <div className="classic-hud-dead-banner" data-testid="hud-dead-banner">
-          <span>Fantasma activo</span>
-          <strong>Revive antes de atacar, comerciar o usar items.</strong>
-        </div>
-      ) : null}
 
       <div className="classic-hud-combat-card">
         <div className="classic-hud-combat-copy">

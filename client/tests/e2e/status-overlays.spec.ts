@@ -4,19 +4,18 @@ test("dead state disables obvious combat and inventory actions", async ({ page }
   await page.goto("/?demo=1&demoState=dead");
   await page.getByRole("button", { name: "HUD" }).click();
 
-  await expect(page.getByTestId("hud-dead-banner")).toContainText("Fantasma activo");
-  await expect(page.getByTestId("character-dead-callout")).toContainText("Estado fantasma");
-  await expect(page.getByTestId("world-overlay-state")).toContainText("Fantasma activo");
+  await expect(page.getByTestId("world-overlay-state")).toHaveCount(0);
+  await expect(page.getByTestId("hud-dead-banner")).toHaveCount(0);
+  await expect(page.getByTestId("character-dead-callout")).toHaveCount(0);
 
   await expect(page.getByRole("button", { name: "Atacar" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Comercio" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Banco" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Seguro OFF" })).toBeDisabled();
 
-  await page.locator(".inventory-slot").first().click();
-  await expect(page.getByTestId("hud-dead-banner")).toContainText(
-    "Revive antes de atacar, comerciar o usar items."
-  );
+  await page.getByRole("button", { name: "Hechizos" }).click();
+  await expect(page.getByTestId("spellbook-panel")).toContainText("Detectar Invisibilidad");
+  await expect(page.getByRole("button", { name: "Lanzar" })).toBeDisabled();
 });
 
 test("reconnect and loading overlays stay explicit", async ({ page }) => {

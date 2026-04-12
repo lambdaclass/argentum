@@ -26,7 +26,14 @@ defmodule ArenaWeb.StaticAssets do
       entries
       |> Enum.filter(fn {_at, from} -> File.dir?(from) end)
       |> Enum.map(fn {at, from} ->
-        opts = Plug.Static.init(at: at, from: from, gzip: false)
+        opts =
+          Plug.Static.init(
+            at: at,
+            from: from,
+            gzip: false,
+            headers: [{"access-control-allow-origin", "*"}]
+          )
+
         {at, opts}
       end)
 

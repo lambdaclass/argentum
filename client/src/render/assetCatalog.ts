@@ -1,4 +1,5 @@
 import { BaseTexture, MIPMAP_MODES, Rectangle, SCALE_MODES, Texture } from "pixi.js";
+import { buildAssetOriginCandidates, buildAssetUrlFromOrigin, fetchJsonWithFallback } from "../net/assetHost";
 
 interface DirectionalFrames {
   up: number;
@@ -43,6 +44,7 @@ export interface GrhDef {
 
 export interface AssetCatalog {
   endpoint: string;
+  assetOrigin: string;
   bodies: Array<BodyDef | null>;
   heads: Array<HeadDef | null>;
   objects: Array<ObjectDef | null>;
@@ -68,58 +70,46 @@ const catalogCache = new Map<string, Promise<AssetCatalog>>();
 const baseTextureCache = new Map<string, BaseTexture>();
 const textureCache = new Map<string, Texture>();
 
-function isLocalDevServer() {
-  if (typeof window === "undefined") {
-    return false;
-  }
-
-  return window.location.port === "5173" || window.location.port === "4173";
-}
-
-function buildAssetUrl(endpoint: string, path: string) {
-  if (typeof window !== "undefined" && !isLocalDevServer()) {
-    return new URL(path, window.location.origin).toString();
-  }
-
-  const url = new URL(endpoint);
-  url.protocol = url.protocol === "wss:" ? "https:" : "http:";
-  url.pathname = path;
-  url.search = "";
-  url.hash = "";
-  return url.toString();
-}
-
-async function fetchJson<T>(endpoint: string, path: string) {
-  const response = await fetch(buildAssetUrl(endpoint, path));
-
-  if (!response.ok) {
-    throw new Error(`Failed to load ${path} (${response.status})`);
-  }
-
-  return (await response.json()) as T;
-}
-
 export function loadAssetCatalog(endpoint: string) {
   if (!catalogCache.has(endpoint)) {
     const promise = Promise.all([
-      fetchJson<Array<BodyDef | null>>(endpoint, "/indices/cuerpos.json"),
-      fetchJson<Array<HeadDef | null>>(endpoint, "/indices/cabezas.json"),
-      fetchJson<Array<ObjectDef | null>>(endpoint, "/indices/objs.json"),
-      fetchJson<Array<NpcDef | null>>(endpoint, "/indices/npcs.json"),
-      fetchJson<Array<GrhDef | null>>(endpoint, "/indices/graficos_full.json"),
-      fetchJson<Array<GrhDef | null>>(endpoint, "/indices/graficos.json")
-    ]).then(([bodies, heads, objects, npcs, grhMap, grhChar]) => ({
-      endpoint,
-      bodies,
-      heads,
-      objects,
-      npcs,
-      grhMap,
-      grhChar
-    })).catch((error) => {
-      catalogCache.delete(endpoint);
-      throw error;
-    });
+      fetchJsonWithFallback<Array<BodyDef | null>>(endpoint, "/indices/cuerpos.json"),
+      fetchJsonWithFallback<Array<HeadDef | null>>(endpoint, "/indices/cabezas.json"),
+      fetchJsonWithFallback<Array<ObjectDef | null>>(endpoint, "/indices/objs.json"),
+      fetchJsonWithFallback<Array<NpcDef | null>>(endpoint, "/indices/npcs.json"),
+      fetchJsonWithFallback<Array<GrhDef | null>>(endpoint, "/indices/graficos_full.json"),
+      fetchJsonWithFallback<Array<GrhDef | null>>(endpoint, "/indices/graficos.json")
+    ])
+      .then(([bodies, heads, objects, npcs, grhMap, grhChar]) => {
+        const originCandidates = buildAssetOriginCandidates(endpoint);
+        const endpointOrigin = originCandidates[originCandidates.length - 1] ?? bodies.origin;
+        const resolvedOrigins = [
+          bodies.origin,
+          heads.origin,
+          objects.origin,
+          npcs.origin,
+          grhMap.origin,
+          grhChar.origin
+        ];
+        const assetOrigin = resolvedOrigins.includes(endpointOrigin)
+          ? endpointOrigin
+          : grhMap.origin;
+
+        return {
+          endpoint,
+          assetOrigin,
+          bodies: bodies.data,
+          heads: heads.data,
+          objects: objects.data,
+          npcs: npcs.data,
+          grhMap: grhMap.data,
+          grhChar: grhChar.data
+        };
+      })
+      .catch((error) => {
+        catalogCache.delete(endpoint);
+        throw error;
+      });
 
     catalogCache.set(endpoint, promise);
   }
@@ -140,9 +130,9 @@ function getDirectionalGrh(direction: "north" | "east" | "south" | "west", entry
   }
 }
 
-function sheetUrl(endpoint: string, sheet: string | number, useCharIndex: boolean) {
+function sheetUrl(assetOrigin: string, sheet: string | number, useCharIndex: boolean) {
   const basePath = useCharIndex ? "/graficos_char" : "/graficos";
-  return buildAssetUrl(endpoint, `${basePath}/${sheet}.png`);
+  return buildAssetUrlFromOrigin(assetOrigin, `${basePath}/${sheet}.png`);
 }
 
 export function getGrhFrameDef(
@@ -165,7 +155,7 @@ export function getGrhFrameDef(
   }
 
   return {
-    url: sheetUrl(catalog.endpoint, entry.grafico, useCharIndex),
+    url: sheetUrl(catalog.assetOrigin, entry.grafico, useCharIndex),
     offX: entry.offX,
     offY: entry.offY,
     width: entry.width,
@@ -178,7 +168,7 @@ export function getGrhTexture(
   grhId: number,
   useCharIndex = false
 ): Texture | null {
-  const cacheKey = `${catalog.endpoint}:${useCharIndex ? "char" : "map"}:${grhId}`;
+  const cacheKey = `${catalog.assetOrigin}:${useCharIndex ? "char" : "map"}:${grhId}`;
   const cached = textureCache.get(cacheKey);
   if (cached) {
     return cached;
@@ -198,10 +188,10 @@ export function getGrhTexture(
     }
   }
 
-  const textureKey = `${catalog.endpoint}:${useCharIndex ? "char" : "map"}:${entry.grafico}`;
+  const textureKey = `${catalog.assetOrigin}:${useCharIndex ? "char" : "map"}:${entry.grafico}`;
   let baseTexture = baseTextureCache.get(textureKey);
   if (!baseTexture) {
-    baseTexture = BaseTexture.from(sheetUrl(catalog.endpoint, entry.grafico, useCharIndex), {
+    baseTexture = BaseTexture.from(sheetUrl(catalog.assetOrigin, entry.grafico, useCharIndex), {
       scaleMode: SCALE_MODES.NEAREST,
       mipmap: MIPMAP_MODES.OFF
     });

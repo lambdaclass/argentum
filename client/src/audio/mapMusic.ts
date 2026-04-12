@@ -1,3 +1,5 @@
+import { buildAssetUrlCandidates } from "../net/assetHost";
+
 type SoundfontInstrument = {
   play: (noteName: string, when?: number, options?: { gain?: number }) => void;
 };
@@ -33,24 +35,6 @@ const SOUNDFONT_PLAYER_URL =
   "https://cdn.jsdelivr.net/npm/soundfont-player@0.12.0/dist/soundfont-player.min.js";
 
 const loadedScripts = new Map<string, Promise<void>>();
-
-function buildAssetUrl(endpoint: string, path: string) {
-  if (
-    typeof window !== "undefined" &&
-    window.location.protocol.startsWith("http") &&
-    window.location.port !== "5173" &&
-    window.location.port !== "4173"
-  ) {
-    return new URL(path, window.location.origin).toString();
-  }
-
-  const url = new URL(endpoint);
-  url.protocol = url.protocol === "wss:" ? "https:" : "http:";
-  url.pathname = path;
-  url.search = "";
-  url.hash = "";
-  return url.toString();
-}
 
 function loadScript(url: string) {
   if (loadedScripts.has(url)) {
@@ -130,8 +114,17 @@ export class MapMusicController {
       return;
     }
 
-    const response = await fetch(buildAssetUrl(endpoint, `/midi/${musicId}.mid`));
-    if (!response.ok) {
+    let response: Response | null = null;
+
+    for (const url of buildAssetUrlCandidates(endpoint, `/midi/${musicId}.mid`)) {
+      const candidate = await fetch(url);
+      if (candidate.ok) {
+        response = candidate;
+        break;
+      }
+    }
+
+    if (!response) {
       throw new Error(`MIDI file not found: ${musicId}.mid`);
     }
 

@@ -35,7 +35,7 @@ export function HechizosPanel({
   const selectedMetadata =
     selectedSlot == null ? null : getSpellMetadata(selectedSlot.spellId);
   const requirementLabels = getSpellRequirementLabels(selectedMetadata);
-  const canCast = connected && selectedSlotIndex != null && selectedSlot != null;
+  const canCast = connected && !state.world.self.dead && selectedSlotIndex != null && selectedSlot != null;
   const spellSummary = selectedMetadata
     ? [
         `Mana ${selectedMetadata.manaRequired}`,
@@ -129,7 +129,7 @@ export function HechizosPanel({
               key={`${spell?.spellId ?? "empty"}-${index}`}
               onClick={() => onSelectSlot(index)}
               onDoubleClick={() => {
-                if (spell != null && connected) {
+                if (spell != null && canCast) {
                   onCast(index);
                 }
               }}
@@ -156,16 +156,18 @@ export function HechizosPanel({
           className="ghost-button"
           disabled={!canCast}
           onClick={() => {
-            if (selectedSlotIndex != null && connected) {
+            if (selectedSlotIndex != null && canCast) {
               onCast(selectedSlotIndex);
             }
           }}
           title={
             selectedSlot == null
               ? "Selecciona un hechizo primero"
-              : connected
-                ? `Lanzar ${selectedSlot.name}`
-                : "Conecta la sesion para lanzar hechizos"
+              : !connected
+                ? "Conecta la sesion para lanzar hechizos"
+                : state.world.self.dead
+                  ? "Como fantasma solo puedes caminar"
+                  : `Lanzar ${selectedSlot.name}`
           }
           type="button"
         >

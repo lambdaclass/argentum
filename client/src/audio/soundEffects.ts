@@ -1,22 +1,5 @@
+import { buildAssetUrlCandidates } from "../net/assetHost";
 import type { SoundEffectPayload } from "../net/SessionClient";
-
-function buildAssetUrl(endpoint: string, path: string) {
-  if (
-    typeof window !== "undefined" &&
-    window.location.protocol.startsWith("http") &&
-    window.location.port !== "5173" &&
-    window.location.port !== "4173"
-  ) {
-    return new URL(path, window.location.origin).toString();
-  }
-
-  const url = new URL(endpoint);
-  url.protocol = url.protocol === "wss:" ? "https:" : "http:";
-  url.pathname = path;
-  url.search = "";
-  url.hash = "";
-  return url.toString();
-}
 
 function localePrefixes() {
   if (typeof navigator === "undefined") {
@@ -41,10 +24,13 @@ export class SoundEffectsController {
       return;
     }
 
-    const candidates = [
+    const candidatePaths = [
       ...(payload.localize ? localePrefixes().map((prefix) => `/sounds/${prefix}_${payload.wav}.ogg`) : []),
       `/sounds/${payload.wav}.ogg`
     ];
+    const candidates = Array.from(
+      new Set(candidatePaths.flatMap((path) => buildAssetUrlCandidates(endpoint, path)))
+    );
 
     if (payload.cancelLast && this.cancellableAudio) {
       this.cancellableAudio.pause();
@@ -52,7 +38,7 @@ export class SoundEffectsController {
       this.cancellableAudio = null;
     }
 
-    void this.tryPlay(endpoint, candidates, payload.cancelLast);
+    void this.tryPlay(candidates, payload.cancelLast);
   }
 
   destroy() {
@@ -63,9 +49,9 @@ export class SoundEffectsController {
     }
   }
 
-  private async tryPlay(endpoint: string, candidates: string[], trackAsCancellable: boolean) {
+  private async tryPlay(candidates: string[], trackAsCancellable: boolean) {
     for (const candidate of candidates) {
-      const audio = new Audio(buildAssetUrl(endpoint, candidate));
+      const audio = new Audio(candidate);
       audio.preload = "auto";
       audio.volume = 0.85;
 

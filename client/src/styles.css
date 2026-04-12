@@ -2308,8 +2308,8 @@ h3 {
 }
 
 .spellbook-list-compact {
-  flex: 1;
-  min-height: 0;
+  flex: 1 1 180px;
+  min-height: 180px;
   overflow: auto;
   gap: 6px;
 }

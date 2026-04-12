@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { Suspense, lazy, useMemo, useState, type ReactNode } from "react";
 import { createInitialState } from "../app/appReducer";
 import type {
   ClientState,
@@ -16,7 +16,10 @@ import { HechizosPanel } from "../ui/HechizosPanel";
 import { PartyPanel } from "../ui/PartyPanel";
 import { SessionPanel } from "../ui/SessionPanel";
 import { TradePanel } from "../ui/TradePanel";
-import { SpritePreviewPage } from "./spriteRegressionGallery";
+const SpritePreviewPage = lazy(async () => {
+  const module = await import("./spriteRegressionGallery");
+  return { default: module.SpritePreviewPage };
+});
 
 function spellSlot(spellId: number): SpellSlot {
   return {
@@ -655,7 +658,11 @@ export function PlaywrightHarness() {
   }
 
   if (pathname.startsWith("/playwright/sprites")) {
-    return <SpritePreviewPage />;
+    return (
+      <Suspense fallback={null}>
+        <SpritePreviewPage />
+      </Suspense>
+    );
   }
 
   return <PlaywrightLanding />;

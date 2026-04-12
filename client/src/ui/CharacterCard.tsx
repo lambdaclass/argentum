@@ -96,9 +96,6 @@ export function CharacterCard({
   );
   const factionLabel = getFactionStatusLabel(state.world.self.factionStatus);
   const deathLabel = state.world.self.dead ? "Fantasma" : null;
-  const deadCopy = state.world.self.dead
-    ? "Revive antes de atacar, usar items o volver al combate."
-    : null;
   const effectiveCollapsed = dense || collapsed || isShortViewport;
 
   useEffect(() => {
@@ -184,12 +181,6 @@ export function CharacterCard({
           <span className="hero-chip">{factionLabel}</span>
           {state.world.self.navigating ? <span className="hero-chip hero-chip-sailing">Navegando</span> : null}
         </div>
-        {deadCopy ? (
-          <div className="character-dead-callout" data-testid="character-dead-callout">
-            <strong>Estado fantasma</strong>
-            <span>{deadCopy}</span>
-          </div>
-        ) : null}
       </section>
     );
   }
@@ -311,12 +302,6 @@ export function CharacterCard({
           {state.world.self.navigating ? <span className="hero-chip hero-chip-sailing">Navegando</span> : null}
           <span className="hero-chip">{mapSummary}</span>
           <span className="hero-chip">World {state.world.mapStatus}</span>
-        </div>
-      ) : null}
-      {deadCopy ? (
-        <div className="character-dead-callout" data-testid="character-dead-callout">
-          <strong>Estado fantasma</strong>
-          <span>{deadCopy}</span>
         </div>
       ) : null}
     </section>

@@ -516,7 +516,7 @@ export function App() {
       totalBytes: null
     });
 
-    loadMapPack((progress) => {
+    loadMapPack(state.connection.endpoint, (progress) => {
       if (!cancelled) {
         setMapPackProgress(progress);
       }
@@ -543,7 +543,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [state.connection.endpoint]);
 
   const mapPackProgressLabel = useMemo(() => {
     const { loadedBytes, totalBytes, phase } = mapPackProgress;
@@ -918,15 +918,6 @@ export function App() {
       return null;
     }
 
-    if (state.connection.status === "connected" && state.world.self.dead) {
-      return {
-        eyebrow: "Ghost",
-        title: "Fantasma activo",
-        copy: "Las acciones del estado muerto quedan deshabilitadas hasta revivir. El HUD muestra el estado fantasma.",
-        tone: "dead" as const
-      };
-    }
-
     if (state.connection.status === "connecting") {
       return {
         eyebrow: "Cuenta",
@@ -1114,11 +1105,7 @@ export function App() {
             ))}
           </div>
 
-          <div
-            className={`sidebar-tab-body ${
-              activeRightTab === "spells" ? "sidebar-tab-body-fixed" : ""
-            }`}
-          >
+          <div className="sidebar-tab-body">
             {activeRightTab === "session" ? (
               <SessionPanel
                 assetError={assetError}

@@ -105,40 +105,60 @@ defmodule AoTcpGateway.WsRouter do
 
   defp runtime_static_opts do
     [
-      [at: "/", from: webclient_dir(), only: ~w(css js fonts imagenes graficos indices audio)],
-      [at: "/graficos", from: graphics_dir()],
-      [at: "/graficos_char", from: char_graphics_dir()],
-      [at: "/indices", from: indices_dir()],
-      [at: "/midi", from: midi_dir()],
-      [at: "/sounds", from: sounds_dir()],
+      [
+        at: "/",
+        from: webclient_dir(),
+        only: ~w(css js fonts imagenes graficos indices audio),
+        headers: [{"access-control-allow-origin", "*"}]
+      ],
+      [at: "/graficos", from: graphics_dir(), headers: [{"access-control-allow-origin", "*"}]],
+      [at: "/graficos_char", from: char_graphics_dir(), headers: [{"access-control-allow-origin", "*"}]],
+      [at: "/indices", from: indices_dir(), headers: [{"access-control-allow-origin", "*"}]],
+      [at: "/midi", from: midi_dir(), headers: [{"access-control-allow-origin", "*"}]],
+      [at: "/sounds", from: sounds_dir(), headers: [{"access-control-allow-origin", "*"}]],
       [
         at: "/client/assets",
         from: serious_client_assets_dir(),
-        headers: [{"cache-control", "public, max-age=31536000, immutable"}]
+        headers: [
+          {"cache-control", "public, max-age=31536000, immutable"},
+          {"access-control-allow-origin", "*"}
+        ]
       ],
       [
         at: "/client/data/packs",
         from: serious_client_pack_dir(),
         gzip: true,
-        headers: [{"cache-control", "public, max-age=31536000, immutable"}]
+        headers: [
+          {"cache-control", "public, max-age=31536000, immutable"},
+          {"access-control-allow-origin", "*"}
+        ]
       ],
       [
         at: "/client/data",
         from: serious_client_data_dir(),
         only: ~w(map-pack.json),
-        headers: [{"cache-control", "public, max-age=60, must-revalidate"}]
+        headers: [
+          {"cache-control", "public, max-age=60, must-revalidate"},
+          {"access-control-allow-origin", "*"}
+        ]
       ],
       [
         at: "/data/packs",
         from: serious_client_pack_dir(),
         gzip: true,
-        headers: [{"cache-control", "public, max-age=31536000, immutable"}]
+        headers: [
+          {"cache-control", "public, max-age=31536000, immutable"},
+          {"access-control-allow-origin", "*"}
+        ]
       ],
       [
         at: "/data",
         from: serious_client_data_dir(),
         only: ~w(map-pack.json),
-        headers: [{"cache-control", "public, max-age=60, must-revalidate"}]
+        headers: [
+          {"cache-control", "public, max-age=60, must-revalidate"},
+          {"access-control-allow-origin", "*"}
+        ]
       ]
     ]
     |> Enum.filter(fn opts -> File.dir?(Keyword.fetch!(opts, :from)) end)

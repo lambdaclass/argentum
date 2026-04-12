@@ -1,4 +1,5 @@
 import { BinaryReader } from "../protocol/BinaryReader";
+import { buildAssetOriginCandidates, buildAssetUrlFromOrigin, fetchJsonAtOrigin } from "./assetHost";
 import type {
   GroundObject,
   MapExit,
@@ -69,36 +70,33 @@ export function buildGroundObjectRecord(objects: GroundObject[]) {
   return Object.fromEntries(objects.map((object) => [`${object.x},${object.y}`, object]));
 }
 
-function buildManifestUrls() {
-  if (typeof window === "undefined") {
-    return ["/client/data/map-pack.json", "/data/map-pack.json"];
-  }
+function buildManifestUrls(endpoint: string) {
+  const urls: string[] = [];
 
-  const origin = window.location.origin;
-  const urls = [
-    new URL("/client/data/map-pack.json", origin).toString(),
-    new URL("/data/map-pack.json", origin).toString()
-  ];
+  for (const origin of buildAssetOriginCandidates(endpoint)) {
+    urls.push(buildAssetUrlFromOrigin(origin, "/client/data/map-pack.json"));
+    urls.push(buildAssetUrlFromOrigin(origin, "/data/map-pack.json"));
 
-  if (import.meta.env.BASE_URL) {
-    urls.push(new URL("data/map-pack.json", new URL(import.meta.env.BASE_URL, origin)).toString());
+    if (
+      typeof window !== "undefined" &&
+      origin === window.location.origin &&
+      import.meta.env.BASE_URL
+    ) {
+      urls.push(new URL("data/map-pack.json", new URL(import.meta.env.BASE_URL, origin)).toString());
+    }
   }
 
   return Array.from(new Set(urls));
 }
 
-async function loadManifest() {
+async function loadManifest(endpoint: string) {
   let lastError: Error | null = null;
 
-  for (const url of buildManifestUrls()) {
+  for (const url of buildManifestUrls(endpoint)) {
     try {
-      const response = await fetch(url, { cache: "no-cache" });
-
-      if (!response.ok) {
-        throw new Error(`Map pack manifest fetch failed with status ${response.status} at ${url}`);
-      }
-
-      const manifest = (await response.json()) as MapPackManifest;
+      const origin = new URL(url).origin;
+      const pathname = new URL(url).pathname;
+      const manifest = await fetchJsonAtOrigin<MapPackManifest>(origin, pathname, { cache: "no-cache" });
 
       if (manifest.version !== MAP_PACK_VERSION) {
         throw new Error(
@@ -118,8 +116,8 @@ async function loadManifest() {
   throw lastError ?? new Error("Map pack manifest fetch failed.");
 }
 
-async function fetchMapPack(onProgress?: (progress: MapPackProgress) => void) {
-  const { manifest, manifestUrl } = await loadManifest();
+async function fetchMapPack(endpoint: string, onProgress?: (progress: MapPackProgress) => void) {
+  const { manifest, manifestUrl } = await loadManifest(endpoint);
   const packUrl = new URL(`packs/${manifest.filename}`, manifestUrl).toString();
   const response = await fetch(packUrl, { cache: "force-cache" });
 
@@ -289,7 +287,7 @@ async function readResponseWithProgress(
   return mergeChunks(chunks, loadedBytes);
 }
 
-export async function loadMapPack(onProgress?: (progress: MapPackProgress) => void) {
+export async function loadMapPack(endpoint: string, onProgress?: (progress: MapPackProgress) => void) {
   if (decodedMapCache) {
     onProgress?.({
       phase: "ready",
@@ -300,7 +298,7 @@ export async function loadMapPack(onProgress?: (progress: MapPackProgress) => vo
   }
 
   if (!mapPackPromise) {
-    mapPackPromise = fetchMapPack(onProgress)
+    mapPackPromise = fetchMapPack(endpoint, onProgress)
       .then((buffer) => {
         onProgress?.({
           phase: "decode",
@@ -328,8 +326,8 @@ export function getMapPackRecord(mapId: number) {
   return decodedMapCache?.get(mapId) ?? null;
 }
 
-export async function fetchMapData(_endpoint: string, mapId: number) {
-  const maps = await loadMapPack();
+export async function fetchMapData(endpoint: string, mapId: number) {
+  const maps = await loadMapPack(endpoint);
   const record = maps.get(mapId);
 
   if (!record) {
