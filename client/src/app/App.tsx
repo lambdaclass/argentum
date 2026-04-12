@@ -7,7 +7,14 @@ import { SessionClient, type MovementDebugSnapshot } from "../net/SessionClient"
 import { MapMusicController } from "../audio/mapMusic";
 import { SoundEffectsController } from "../audio/soundEffects";
 import { WorldCanvas } from "../render/WorldCanvas";
-import { loadAssetCatalog, type AssetCatalog } from "../render/assetCatalog";
+import {
+  collectSceneAssetUrls,
+  getNpcDef,
+  getUncachedSceneAssetUrls,
+  loadAssetCatalog,
+  preloadSceneAssets,
+  type AssetCatalog
+} from "../render/assetCatalog";
 import { loadMapPack, resetMapPackCache, type MapPackProgress } from "../net/mapApi";
 import { SessionPanel } from "../ui/SessionPanel";
 import { PacketLogPanel } from "../ui/PacketLogPanel";
@@ -163,6 +170,9 @@ export function App({ uiDemoMode = false }: AppProps) {
   });
   const [assetReloadNonce, setAssetReloadNonce] = useState(0);
   const [mapPackReloadNonce, setMapPackReloadNonce] = useState(0);
+  const [sceneBootstrapStatus, setSceneBootstrapStatus] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
   const [activeRightTab, setActiveRightTab] = useState<
     "hud" | "trade" | "bank" | "commerce" | "skills" | "spells" | "world" | "session" | "chat" | "debug"
   >("hud");
@@ -187,6 +197,7 @@ export function App({ uiDemoMode = false }: AppProps) {
   const stateRef = useRef(state);
   const manualDisconnectRef = useRef(false);
   const enteredWorldRef = useRef(false);
+  const initialSceneBootstrapDoneRef = useRef(false);
   const demoBootstrapRef = useRef(false);
   const gameplayRouteRef = useRef(browserRoute === "/play");
   const isGameplayRoute = browserRoute === "/play";
@@ -280,6 +291,117 @@ export function App({ uiDemoMode = false }: AppProps) {
       }
     }
   }, [bootConnectAttempts, state.world.map, state.world.mapStatus]);
+
+  useEffect(() => {
+    if (
+      !isGameplayRoute ||
+      assetStatus !== "ready" ||
+      mapPackStatus !== "ready" ||
+      state.connection.status !== "connected" ||
+      state.world.mapStatus !== "ready" ||
+      !state.world.map ||
+      state.world.self.charIndex == null
+    ) {
+      if (state.connection.status === "offline" && state.world.map == null) {
+        initialSceneBootstrapDoneRef.current = false;
+        setSceneBootstrapStatus("idle");
+      }
+      return;
+    }
+
+    if (initialSceneBootstrapDoneRef.current || !assetCatalog) {
+      setSceneBootstrapStatus("ready");
+      return;
+    }
+
+    const sceneCharacters = [
+      {
+        bodyId: state.world.self.bodyId,
+        headId: state.world.self.headId,
+        weaponId: state.world.self.weaponId,
+        shieldId: state.world.self.shieldId,
+        helmetId: state.world.self.helmetId,
+        cartId: state.world.self.cartId,
+        backpackId: state.world.self.backpackId,
+        effectId: state.world.self.effectId,
+        heading: state.world.self.heading
+      },
+      ...state.world.map.npcs.flatMap((npc) => {
+        const def = getNpcDef(assetCatalog, npc.id);
+        if (!def) {
+          return [];
+        }
+
+        return [
+          {
+            bodyId: def.body,
+            headId: def.head,
+            weaponId: 0,
+            shieldId: 0,
+            helmetId: 0,
+            cartId: 0,
+            backpackId: 0,
+            effectId: 0,
+            heading: def.heading
+          }
+        ];
+      })
+    ];
+
+    const urls = collectSceneAssetUrls(
+      assetCatalog,
+      state.world.map,
+      sceneCharacters,
+      Object.values(state.world.groundObjects)
+    );
+    const uncachedUrls = getUncachedSceneAssetUrls(urls);
+
+    if (uncachedUrls.length === 0) {
+      initialSceneBootstrapDoneRef.current = true;
+      setSceneBootstrapStatus("ready");
+      return;
+    }
+
+    let cancelled = false;
+    setSceneBootstrapStatus("loading");
+
+    void preloadSceneAssets(uncachedUrls)
+      .then(() => {
+        if (!cancelled) {
+          initialSceneBootstrapDoneRef.current = true;
+          setSceneBootstrapStatus("ready");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          initialSceneBootstrapDoneRef.current = true;
+          setSceneBootstrapStatus("error");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    assetCatalog,
+    assetStatus,
+    isGameplayRoute,
+    mapPackStatus,
+    state.connection.status,
+    state.world.groundObjects,
+    state.world.map,
+    state.world.mapStatus,
+    state.world.self.backpackId,
+    state.world.self.bodyId,
+    state.world.self.cartId,
+    state.world.self.charIndex,
+    state.world.self.effectId,
+    state.world.self.heading,
+    state.world.self.headId,
+    state.world.self.helmetId,
+    state.world.self.shieldId,
+    state.world.self.weaponId
+  ]);
 
   useEffect(() => {
     if (state.trade.open) {
@@ -1107,6 +1229,15 @@ export function App({ uiDemoMode = false }: AppProps) {
       };
     }
 
+    if (sceneBootstrapStatus === "loading") {
+      return {
+        eyebrow: "Map",
+        title: "Preparing Scene",
+        copy: "Loading the current map art and actor sheets before entering the world.",
+        tone: "loading" as const
+      };
+    }
+
     if (state.connection.status === "offline" && !state.world.map) {
       const issue = describeConnectionIssue(
         state.connection.lastError,
@@ -1138,7 +1269,8 @@ export function App({ uiDemoMode = false }: AppProps) {
     state.world.map,
     state.world.mapError,
     state.world.mapId,
-    state.world.mapStatus
+    state.world.mapStatus,
+    sceneBootstrapStatus
   ]);
 
   const moveDebugText = useMemo(() => {
@@ -1176,7 +1308,7 @@ export function App({ uiDemoMode = false }: AppProps) {
       <main className="world-column">
         <section className="world-stage world-stage-shell">
           <div className="world-canvas-frame">
-            {assetStatus === "ready" && mapPackStatus === "ready" ? (
+            {assetStatus === "ready" && mapPackStatus === "ready" && sceneBootstrapStatus !== "loading" ? (
               <>
                 <WorldCanvas
                   world={state.world}
@@ -1203,6 +1335,8 @@ export function App({ uiDemoMode = false }: AppProps) {
                     ? "Asset Load Failed"
                     : mapPackStatus === "error"
                       ? "Map Pack Load Failed"
+                      : sceneBootstrapStatus === "loading"
+                        ? "Preparing Scene"
                       : mapPackStatus === "ready"
                         ? "Loading Assets"
                         : "Loading Map Pack"}
@@ -1212,6 +1346,8 @@ export function App({ uiDemoMode = false }: AppProps) {
                     ? assetError ?? "The web client could not load its sprite indices."
                     : mapPackStatus === "error"
                       ? mapPackError ?? "The web client could not load its prepacked map bundle."
+                      : sceneBootstrapStatus === "loading"
+                        ? "Loading the first scene's textures before entering the world."
                       : mapPackStatus !== "ready"
                         ? mapPackProgressLabel
                         : "Waiting for the same sprite/index catalog used by the historical clients before entering the world."}

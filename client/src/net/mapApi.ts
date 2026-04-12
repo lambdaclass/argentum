@@ -360,6 +360,6 @@ export async function fetchMapData(endpoint: string, mapId: number) {
 
   return {
     map: record.map,
-    groundObjects: { ...record.groundObjects }
+    groundObjects: record.groundObjects
   };
 }

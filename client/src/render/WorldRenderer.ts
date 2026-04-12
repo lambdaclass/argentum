@@ -709,6 +709,7 @@ export class WorldRenderer {
   private otherNodes = new Map<number, CharacterNode>();
   private staticSceneCache = new Map<string, StaticSceneLayers>();
   private adjacentSceneWarmupTimer: number | null = null;
+  private adjacentSceneIdleWarmupHandle: number | null = null;
   private transferInProgress = false;
   private liveNpcMapId: number | null = null;
   private sawLiveNpcThisMap = false;
@@ -773,6 +774,7 @@ export class WorldRenderer {
   }
 
   beginMapTransfer() {
+    this.cancelAdjacentSceneWarmup();
     this.transferInProgress = true;
     this.ensureRenderLoop();
   }
@@ -1076,10 +1078,7 @@ export class WorldRenderer {
   }
 
   private clearStaticSceneCache() {
-    if (this.adjacentSceneWarmupTimer != null) {
-      window.clearTimeout(this.adjacentSceneWarmupTimer);
-      this.adjacentSceneWarmupTimer = null;
-    }
+    this.cancelAdjacentSceneWarmup();
 
     for (const scene of this.staticSceneCache.values()) {
       scene.belowCharacters.destroy({ children: true });
@@ -1099,36 +1098,73 @@ export class WorldRenderer {
       return;
     }
 
-    if (this.adjacentSceneWarmupTimer != null) {
-      window.clearTimeout(this.adjacentSceneWarmupTimer);
-    }
+    this.cancelAdjacentSceneWarmup();
 
     this.adjacentSceneWarmupTimer = window.setTimeout(() => {
       this.adjacentSceneWarmupTimer = null;
 
-      const destinationMapIds = Array.from(
-        new Set(
-          map.exits
-            .map((exit) => exit.destMap)
-            .filter((destMap) => destMap > 0 && destMap !== map.mapId)
-        )
-      ).slice(0, 6);
+      const warmup = () => {
+        this.adjacentSceneIdleWarmupHandle = null;
 
-      for (const destMapId of destinationMapIds) {
-        const record = getMapPackRecord(destMapId);
-        if (!record) {
-          continue;
+        if (this.transferInProgress || this.renderedMap?.mapId !== map.mapId) {
+          return;
         }
 
-        const cacheKey = this.staticSceneCacheKey(record.map, showTileDebug);
-        if (!this.staticSceneCache.has(cacheKey)) {
-          this.staticSceneCache.set(
-            cacheKey,
-            this.buildStaticScene(record.map, assetCatalog, showTileDebug)
-          );
+        const destinationMapIds = Array.from(
+          new Set(
+            map.exits
+              .map((exit) => exit.destMap)
+              .filter((destMap) => destMap > 0 && destMap !== map.mapId)
+          )
+        ).slice(0, 2);
+
+        for (const destMapId of destinationMapIds) {
+          const record = getMapPackRecord(destMapId);
+          if (!record) {
+            continue;
+          }
+
+          const cacheKey = this.staticSceneCacheKey(record.map, showTileDebug);
+          if (!this.staticSceneCache.has(cacheKey)) {
+            this.staticSceneCache.set(
+              cacheKey,
+              this.buildStaticScene(record.map, assetCatalog, showTileDebug)
+            );
+          }
         }
+      };
+
+      const requestIdleCallback =
+        "requestIdleCallback" in window ? window.requestIdleCallback.bind(window) : null;
+
+      if (requestIdleCallback) {
+        this.adjacentSceneIdleWarmupHandle = requestIdleCallback(() => {
+          warmup();
+        }, { timeout: 500 });
+        return;
       }
-    }, 40);
+
+      this.adjacentSceneIdleWarmupHandle = window.setTimeout(warmup, 220);
+    }, 120);
+  }
+
+  private cancelAdjacentSceneWarmup() {
+    if (this.adjacentSceneWarmupTimer != null) {
+      window.clearTimeout(this.adjacentSceneWarmupTimer);
+      this.adjacentSceneWarmupTimer = null;
+    }
+
+    if (this.adjacentSceneIdleWarmupHandle != null) {
+      const cancelIdleCallback =
+        "cancelIdleCallback" in window ? window.cancelIdleCallback.bind(window) : null;
+
+      if (cancelIdleCallback) {
+        cancelIdleCallback(this.adjacentSceneIdleWarmupHandle);
+      } else {
+        window.clearTimeout(this.adjacentSceneIdleWarmupHandle);
+      }
+      this.adjacentSceneIdleWarmupHandle = null;
+    }
   }
 
   private swapStaticScene(
@@ -1819,6 +1855,7 @@ export class WorldRenderer {
   destroy() {
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
+    this.cancelAdjacentSceneWarmup();
 
     if (this.app) {
       this.canvas?.removeEventListener("click", this.handleCanvasClick);
