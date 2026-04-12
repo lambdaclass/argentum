@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import type { WorldState } from "../app/types";
 import type { SessionClient } from "../net/SessionClient";
 import type { AssetCatalog } from "./assetCatalog";
@@ -14,7 +14,7 @@ interface WorldCanvasProps {
   onTileInteraction?: (payload: TileInteractionPayload) => void;
 }
 
-export function WorldCanvas({
+export const WorldCanvas = memo(function WorldCanvas({
   world,
   assetCatalog,
   showTileDebug,
@@ -73,4 +73,6 @@ export function WorldCanvas({
       ref={rootRef}
     />
   );
-}
+});
+
+WorldCanvas.displayName = "WorldCanvas";

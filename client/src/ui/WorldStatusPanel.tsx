@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { ClientState } from "../app/types";
 import { drawMinimap } from "./minimap";
 
 interface WorldStatusPanelProps {
-  state: ClientState;
+  stats: ClientState["stats"];
+  weather: ClientState["weather"];
+  world: ClientState["world"];
 }
 
 function clampPercent(current: number, max: number) {
@@ -58,29 +60,33 @@ function describeWeather(raining: boolean, snowing: boolean) {
   return "Cielo despejado";
 }
 
-export function WorldStatusPanel({ state }: WorldStatusPanelProps) {
+export const WorldStatusPanel = memo(function WorldStatusPanel({
+  stats,
+  weather,
+  world
+}: WorldStatusPanelProps) {
   const [expanded, setExpanded] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const expandedCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const mapLabel = state.world.map?.name ?? `Map ${state.world.mapId ?? "--"}`;
+  const mapLabel = world.map?.name ?? `Map ${world.mapId ?? "--"}`;
   const position =
-    state.world.self.x != null && state.world.self.y != null
-      ? `${state.world.self.x},${state.world.self.y}`
+    world.self.x != null && world.self.y != null
+      ? `${world.self.x},${world.self.y}`
       : "--,--";
-  const otherCount = Object.keys(state.world.others).length;
-  const npcCount = state.world.map?.npcs.length ?? 0;
-  const exitCount = state.world.map?.exits.length ?? 0;
-  const weatherLabel = describeWeather(state.weather.raining, state.weather.snowing);
+  const otherCount = Object.keys(world.others).length;
+  const npcCount = world.map?.npcs.length ?? 0;
+  const exitCount = world.map?.exits.length ?? 0;
+  const weatherLabel = describeWeather(weather.raining, weather.snowing);
 
   useEffect(() => {
     if (canvasRef.current) {
-      drawMinimap(canvasRef.current, state, 156);
+      drawMinimap(canvasRef.current, world, 156);
     }
 
     if (expandedCanvasRef.current) {
-      drawMinimap(expandedCanvasRef.current, state, 288);
+      drawMinimap(expandedCanvasRef.current, world, 288);
     }
-  }, [expanded, state]);
+  }, [expanded, world]);
 
   return (
     <section className="panel world-status-card" data-testid="world-status-panel">
@@ -90,7 +96,7 @@ export function WorldStatusPanel({ state }: WorldStatusPanelProps) {
           <h2>{mapLabel}</h2>
           <p className="world-status-subtitle">Pos {position}</p>
         </div>
-        <span className="panel-tag">Map {state.world.mapId ?? "--"}</span>
+        <span className="panel-tag">Map {world.mapId ?? "--"}</span>
       </div>
 
       <div className="world-status-grid">
@@ -116,20 +122,20 @@ export function WorldStatusPanel({ state }: WorldStatusPanelProps) {
           <div className="world-vitals">
             <VitalBar
               label="Health"
-              current={state.stats.hpCurrent}
-              max={state.stats.hpMax}
+              current={stats.hpCurrent}
+              max={stats.hpMax}
               tone="health"
             />
             <VitalBar
               label="Mana"
-              current={state.stats.manaCurrent}
-              max={state.stats.manaMax}
+              current={stats.manaCurrent}
+              max={stats.manaMax}
               tone="mana"
             />
             <VitalBar
               label="Stamina"
-              current={state.stats.staminaCurrent}
-              max={state.stats.staminaMax}
+              current={stats.staminaCurrent}
+              max={stats.staminaMax}
               tone="stamina"
             />
           </div>
@@ -158,15 +164,15 @@ export function WorldStatusPanel({ state }: WorldStatusPanelProps) {
             </div>
             <div className="world-status-chip">
               <span>Gold</span>
-              <strong>{state.stats.gold}</strong>
+              <strong>{stats.gold}</strong>
             </div>
             <div className="world-status-chip">
               <span>Hunger</span>
-              <strong>{state.stats.hunger}</strong>
+              <strong>{stats.hunger}</strong>
             </div>
             <div className="world-status-chip">
               <span>Thirst</span>
-              <strong>{state.stats.thirst}</strong>
+              <strong>{stats.thirst}</strong>
             </div>
           </div>
         </div>
@@ -222,4 +228,6 @@ export function WorldStatusPanel({ state }: WorldStatusPanelProps) {
       ) : null}
     </section>
   );
-}
+});
+
+WorldStatusPanel.displayName = "WorldStatusPanel";

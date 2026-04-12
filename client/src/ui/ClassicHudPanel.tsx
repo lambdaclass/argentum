@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import type { ClientState } from "../app/types";
 import type { AssetCatalog } from "../render/assetCatalog";
 import { getObjectIconFrame, getObjectName } from "../render/assetCatalog";
@@ -19,7 +19,9 @@ function factionLabel(factionStatus: number | null): string {
 
 interface ClassicHudPanelProps {
   assetCatalog: AssetCatalog | null;
-  state: ClientState;
+  combat: ClientState["combat"];
+  connection: ClientState["connection"];
+  inventory: ClientState["inventory"];
   onSelectSlot: (slotIndex: number | null) => void;
   onEquip: (slotIndex: number) => void;
   onUse: (slotIndex: number) => void;
@@ -27,7 +29,9 @@ interface ClassicHudPanelProps {
   onAttack: () => void;
   onStartCommerce: () => void;
   onStartBank: () => void;
+  stats: ClientState["stats"];
   onToggleSafeMode: () => void;
+  world: ClientState["world"];
 }
 
 function HudBar({
@@ -58,9 +62,11 @@ function HudBar({
   );
 }
 
-export function ClassicHudPanel({
+export const ClassicHudPanel = memo(function ClassicHudPanel({
   assetCatalog,
-  state,
+  combat,
+  connection,
+  inventory,
   onSelectSlot,
   onEquip,
   onUse,
@@ -68,32 +74,34 @@ export function ClassicHudPanel({
   onAttack,
   onStartCommerce,
   onStartBank,
-  onToggleSafeMode
+  stats,
+  onToggleSafeMode,
+  world
 }: ClassicHudPanelProps) {
   const [tooltip, setTooltip] = useState<{
     x: number;
     y: number;
     lines: string[];
   } | null>(null);
-  const isDead = state.world.self.dead;
+  const isDead = world.self.dead;
   const selected =
-    state.inventory.selectedSlot == null
+    inventory.selectedSlot == null
       ? null
-      : state.inventory.slots[state.inventory.selectedSlot];
+      : inventory.slots[inventory.selectedSlot];
   const selectedName =
     selected == null ? null : getObjectName(assetCatalog, selected.itemId);
   const selectedCanUse = selected != null && selected.canUse > 0 && !isDead;
   const selectedCanDrop = selected != null && selected.amount > 0 && !isDead;
   const selectedEquipped = selected?.equipped === true;
-  const targetTile = state.world.targetTile;
+  const targetTile = world.targetTile;
   const slotLabel =
-    state.inventory.selectedSlot == null
-      ? `${state.inventory.slots.length} slots`
-      : `Slot ${state.inventory.selectedSlot + 1} / ${state.inventory.slots.length}`;
+    inventory.selectedSlot == null
+      ? `${inventory.slots.length} slots`
+      : `Slot ${inventory.selectedSlot + 1} / ${inventory.slots.length}`;
   const connectionLabel =
-    state.connection.status === "connected"
+    connection.status === "connected"
       ? "Conectado"
-      : state.connection.status === "connecting"
+      : connection.status === "connecting"
         ? "Conectando"
         : "Offline";
   const selectionHint =
@@ -134,13 +142,13 @@ export function ClassicHudPanel({
           </div>
           <div>
             <span>Ultimo evento</span>
-            <strong>{state.combat.lastEvent ?? "Sin novedades"}</strong>
+            <strong>{combat.lastEvent ?? "Sin novedades"}</strong>
           </div>
         </div>
         <div className="classic-hud-combat-actions">
           <button
             className={`ghost-button ${targetTile ? "classic-hud-action-primary" : ""}`}
-            disabled={targetTile == null || state.connection.status !== "connected" || isDead}
+            disabled={targetTile == null || connection.status !== "connected" || isDead}
             onClick={onAttack}
             type="button"
           >
@@ -148,7 +156,7 @@ export function ClassicHudPanel({
           </button>
           <button
             className={`ghost-button ${targetTile ? "classic-hud-action-primary" : ""}`}
-            disabled={targetTile == null || state.connection.status !== "connected" || isDead}
+            disabled={targetTile == null || connection.status !== "connected" || isDead}
             onClick={onStartCommerce}
             type="button"
           >
@@ -156,7 +164,7 @@ export function ClassicHudPanel({
           </button>
           <button
             className={`ghost-button ${targetTile ? "classic-hud-action-primary" : ""}`}
-            disabled={targetTile == null || state.connection.status !== "connected" || isDead}
+            disabled={targetTile == null || connection.status !== "connected" || isDead}
             onClick={onStartBank}
             type="button"
           >
@@ -164,21 +172,21 @@ export function ClassicHudPanel({
           </button>
           <button
             className={`ghost-button ${
-              state.combat.safeMode ? "classic-hud-action-primary" : ""
+              combat.safeMode ? "classic-hud-action-primary" : ""
             }`}
-            disabled={state.connection.status !== "connected" || isDead}
+            disabled={connection.status !== "connected" || isDead}
             onClick={onToggleSafeMode}
             type="button"
           >
-            {state.combat.safeMode ? "Seguro ON" : "Seguro OFF"}
+            {combat.safeMode ? "Seguro ON" : "Seguro OFF"}
           </button>
         </div>
       </div>
 
       <div className="classic-hud-inventory-well">
         <div className="inventory-grid inventory-grid-compact classic-hud-inventory-grid">
-          {state.inventory.slots.map((slot, index) => {
-            const selectedSlot = state.inventory.selectedSlot === index;
+          {inventory.slots.map((slot, index) => {
+            const selectedSlot = inventory.selectedSlot === index;
             const itemName = slot ? getObjectName(assetCatalog, slot.itemId) : null;
             const itemIcon = slot ? getObjectIconFrame(assetCatalog, slot.itemId) : null;
             const tooltipLines = slot
@@ -287,11 +295,11 @@ export function ClassicHudPanel({
             className={`ghost-button ${
               selected != null && !selectedCanUse ? "classic-hud-action-primary" : ""
             }`}
-            disabled={state.inventory.selectedSlot == null || isDead}
+            disabled={inventory.selectedSlot == null || isDead}
             title={selected ? `Equip or unequip ${selectedName}` : "Select an item first"}
             onClick={() => {
-              if (state.inventory.selectedSlot != null && !isDead) {
-                onEquip(state.inventory.selectedSlot);
+              if (inventory.selectedSlot != null && !isDead) {
+                onEquip(inventory.selectedSlot);
               }
             }}
             type="button"
@@ -309,8 +317,8 @@ export function ClassicHudPanel({
                 : "Select an item first"
             }
             onClick={() => {
-              if (state.inventory.selectedSlot != null && !isDead) {
-                onUse(state.inventory.selectedSlot);
+              if (inventory.selectedSlot != null && !isDead) {
+                onUse(inventory.selectedSlot);
               }
             }}
             type="button"
@@ -322,8 +330,8 @@ export function ClassicHudPanel({
             disabled={!selectedCanDrop}
             title={selected ? `Drop one ${selectedName}` : "Select an item first"}
             onClick={() => {
-              if (state.inventory.selectedSlot != null && !isDead) {
-                onDrop(state.inventory.selectedSlot, 1);
+              if (inventory.selectedSlot != null && !isDead) {
+                onDrop(inventory.selectedSlot, 1);
               }
             }}
             type="button"
@@ -341,7 +349,7 @@ export function ClassicHudPanel({
           <h3>Estado</h3>
         </div>
         <span
-          className={`panel-tag classic-hud-status-tag classic-hud-status-${state.connection.status}`}
+          className={`panel-tag classic-hud-status-tag classic-hud-status-${connection.status}`}
         >
           {connectionLabel}
         </span>
@@ -351,48 +359,48 @@ export function ClassicHudPanel({
         <div className="classic-hud-vitals">
           <HudBar
             label="Energia"
-            current={state.stats.staminaCurrent}
-            max={state.stats.staminaMax}
+            current={stats.staminaCurrent}
+            max={stats.staminaMax}
             tone="energy"
           />
           <HudBar
             label="Mana"
-            current={state.stats.manaCurrent}
-            max={state.stats.manaMax}
+            current={stats.manaCurrent}
+            max={stats.manaMax}
             tone="mana"
           />
           <HudBar
             label="Salud"
-            current={state.stats.hpCurrent}
-            max={state.stats.hpMax}
+            current={stats.hpCurrent}
+            max={stats.hpMax}
             tone="health"
           />
-          <HudBar label="Hambre" current={state.stats.hunger} max={100} tone="hunger" />
-          <HudBar label="Sed" current={state.stats.thirst} max={100} tone="thirst" />
+          <HudBar label="Hambre" current={stats.hunger} max={100} tone="hunger" />
+          <HudBar label="Sed" current={stats.thirst} max={100} tone="thirst" />
         </div>
 
         <div className="classic-hud-meta-grid">
           <div className="meta-card">
             <span>Oro</span>
-            <strong>{state.stats.gold}</strong>
+            <strong>{stats.gold}</strong>
           </div>
           <div className="meta-card">
             <span>Vel</span>
-            <strong>{state.world.self.speed}</strong>
+            <strong>{world.self.speed}</strong>
           </div>
           <div className="meta-card">
             <span>Otros</span>
-            <strong>{Object.keys(state.world.others).length}</strong>
+            <strong>{Object.keys(world.others).length}</strong>
           </div>
           <div className="meta-card">
             <span>Pos</span>
             <strong>
-              {state.world.self.x ?? "--"},{state.world.self.y ?? "--"}
+              {world.self.x ?? "--"},{world.self.y ?? "--"}
             </strong>
           </div>
           <div className="meta-card">
             <span>Faccion</span>
-            <strong>{factionLabel(state.world.self.factionStatus)}</strong>
+            <strong>{factionLabel(world.self.factionStatus)}</strong>
           </div>
         </div>
       </div>
@@ -406,4 +414,6 @@ export function ClassicHudPanel({
       ) : null}
     </section>
   );
-}
+});
+
+ClassicHudPanel.displayName = "ClassicHudPanel";

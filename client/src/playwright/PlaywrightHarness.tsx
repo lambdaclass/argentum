@@ -248,7 +248,7 @@ function WeatherSmokePage() {
         </div>
       </section>
 
-      <WorldStatusPanel state={state} />
+      <WorldStatusPanel stats={state.stats} weather={state.weather} world={state.world} />
 
       <section className="panel">
         <div style={{ height: "420px" }}>
@@ -328,9 +328,10 @@ function SessionSpellbookSmoke() {
         assetError={null}
         assetStatus="ready"
         canConnect
-        state={state}
+        connection={state.connection}
         showTileDebug={false}
         title="Playwright Harbor"
+        world={state.world}
         onBootstrapPasswordChange={(bootstrapPassword) =>
           setState((current) => ({
             ...current,

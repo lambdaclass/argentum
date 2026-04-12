@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { ClientState } from "../app/types";
 import { getFactionStatusLabel, getLevelProgress } from "../data/gameData";
 import { drawMinimap } from "./minimap";
@@ -7,8 +7,10 @@ const SIDEBAR_COLLAPSE_STORAGE_KEY = "ao_sidebar_hero_collapsed";
 
 interface CharacterCardProps {
   canConnect: boolean;
+  connection: ClientState["connection"];
   dense?: boolean;
-  state: ClientState;
+  stats: ClientState["stats"];
+  world: ClientState["world"];
   onConnect: () => void;
   onDisconnect: () => void;
   onOpenMap: () => void;
@@ -40,10 +42,12 @@ function resolveDisplayName(worldName: string, sessionName: string) {
   return serverName;
 }
 
-export function CharacterCard({
+export const CharacterCard = memo(function CharacterCard({
   canConnect,
+  connection,
   dense = false,
-  state,
+  stats,
+  world,
   onConnect,
   onDisconnect,
   onOpenMap
@@ -71,38 +75,35 @@ export function CharacterCard({
 
     return window.innerHeight <= 900;
   });
-  const connected = state.connection.status === "connected";
-  const characterName = resolveDisplayName(
-    state.world.self.name,
-    state.connection.characterName
-  );
-  const badge = String(state.stats.level);
+  const connected = connection.status === "connected";
+  const characterName = resolveDisplayName(world.self.name, connection.characterName);
+  const badge = String(stats.level);
   const statusLabel =
-    state.connection.status === "connected"
+    connection.status === "connected"
       ? "Connected"
-      : state.connection.status === "connecting"
+      : connection.status === "connecting"
         ? "Connecting"
         : "Offline";
-  const mapLabel = state.world.map?.name ?? "Mundo";
-  const mapSummary = state.world.mapId == null ? "Map --" : `Map ${state.world.mapId}`;
+  const mapLabel = world.map?.name ?? "Mundo";
+  const mapSummary = world.mapId == null ? "Map --" : `Map ${world.mapId}`;
   const position =
-    state.world.self.x != null && state.world.self.y != null
-      ? `${state.world.self.x},${state.world.self.y}`
+    world.self.x != null && world.self.y != null
+      ? `${world.self.x},${world.self.y}`
       : "--,--";
   const progression = getLevelProgress(
-    state.stats.level,
-    state.stats.xpCurrent,
-    state.stats.xpNext
+    stats.level,
+    stats.xpCurrent,
+    stats.xpNext
   );
-  const factionLabel = getFactionStatusLabel(state.world.self.factionStatus);
-  const deathLabel = state.world.self.dead ? "Fantasma" : null;
+  const factionLabel = getFactionStatusLabel(world.self.factionStatus);
+  const deathLabel = world.self.dead ? "Fantasma" : null;
   const effectiveCollapsed = dense || collapsed || isShortViewport;
 
   useEffect(() => {
     if (minimapRef.current) {
-      drawMinimap(minimapRef.current, state, 108);
+      drawMinimap(minimapRef.current, world, 108);
     }
-  }, [state]);
+  }, [world]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -132,11 +133,11 @@ export function CharacterCard({
 
   if (dense) {
     return (
-      <section className={`character-hero character-hero-dense ${state.world.self.dead ? "character-hero-dead" : ""}`}>
+      <section className={`character-hero character-hero-dense ${world.self.dead ? "character-hero-dead" : ""}`}>
         <div className="character-hero-top">
           <div className="character-badge">{badge}</div>
           <div className="character-meta">
-            <p className="eyebrow">Nivel {state.stats.level}</p>
+            <p className="eyebrow">Nivel {stats.level}</p>
             <h2 title={characterName}>{characterName}</h2>
             <p className="character-subtitle">{mapLabel}</p>
           </div>
@@ -174,12 +175,12 @@ export function CharacterCard({
           </div>
         </div>
         <div className="hero-chip-row hero-chip-row-dense">
-          <span className="status-pill" data-state={state.connection.status}>
+          <span className="status-pill" data-state={connection.status}>
             {statusLabel}
           </span>
           {deathLabel ? <span className="hero-chip hero-chip-dead">{deathLabel}</span> : null}
           <span className="hero-chip">{factionLabel}</span>
-          {state.world.self.navigating ? <span className="hero-chip hero-chip-sailing">Navegando</span> : null}
+          {world.self.navigating ? <span className="hero-chip hero-chip-sailing">Navegando</span> : null}
         </div>
       </section>
     );
@@ -187,12 +188,12 @@ export function CharacterCard({
 
   return (
     <section
-      className={`character-hero ${effectiveCollapsed ? "character-hero-collapsed" : ""} ${state.world.self.dead ? "character-hero-dead" : ""}`}
+      className={`character-hero ${effectiveCollapsed ? "character-hero-collapsed" : ""} ${world.self.dead ? "character-hero-dead" : ""}`}
     >
       <div className="character-hero-top">
         <div className="character-badge">{badge}</div>
         <div className="character-meta">
-          <p className="eyebrow">Nivel {state.stats.level}</p>
+          <p className="eyebrow">Nivel {stats.level}</p>
           <h2 title={characterName}>{characterName}</h2>
           <p className="character-subtitle">{mapLabel}</p>
         </div>
@@ -268,7 +269,7 @@ export function CharacterCard({
                 <div className="character-progress-chip">
                   <span>Total</span>
                   <strong>
-                    {state.stats.xpCurrent}/{progression.levelCeilXp}
+                    {stats.xpCurrent}/{progression.levelCeilXp}
                   </strong>
                 </div>
               </div>
@@ -285,25 +286,25 @@ export function CharacterCard({
           </div>
 
           <div className="character-status-track">
-            <div
-              className={`character-status-fill character-status-fill-${state.connection.status}`}
-            />
+            <div className={`character-status-fill character-status-fill-${connection.status}`} />
           </div>
         </>
       )}
 
       {!dense ? (
         <div className="hero-chip-row">
-          <span className="status-pill" data-state={state.connection.status}>
+          <span className="status-pill" data-state={connection.status}>
             {statusLabel}
           </span>
           {deathLabel ? <span className="hero-chip hero-chip-dead">{deathLabel}</span> : null}
           <span className="hero-chip">{factionLabel}</span>
-          {state.world.self.navigating ? <span className="hero-chip hero-chip-sailing">Navegando</span> : null}
+          {world.self.navigating ? <span className="hero-chip hero-chip-sailing">Navegando</span> : null}
           <span className="hero-chip">{mapSummary}</span>
-          <span className="hero-chip">World {state.world.mapStatus}</span>
+          <span className="hero-chip">World {world.mapStatus}</span>
         </div>
       ) : null}
     </section>
   );
-}
+});
+
+CharacterCard.displayName = "CharacterCard";

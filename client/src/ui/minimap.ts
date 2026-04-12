@@ -1,6 +1,6 @@
-import type { ClientState } from "../app/types";
+import type { WorldState } from "../app/types";
 
-export function drawMinimap(canvas: HTMLCanvasElement, state: ClientState, size: number) {
+export function drawMinimap(canvas: HTMLCanvasElement, world: WorldState, size: number) {
   canvas.width = size;
   canvas.height = size;
 
@@ -12,7 +12,7 @@ export function drawMinimap(canvas: HTMLCanvasElement, state: ClientState, size:
   context.fillStyle = "#09111a";
   context.fillRect(0, 0, size, size);
 
-  const map = state.world.map;
+  const map = world.map;
   if (!map) {
     context.strokeStyle = "rgba(255, 220, 146, 0.22)";
     context.strokeRect(0.5, 0.5, size - 1, size - 1);
@@ -36,7 +36,7 @@ export function drawMinimap(canvas: HTMLCanvasElement, state: ClientState, size:
   }
 
   context.fillStyle = "#8fb9df";
-  for (const other of Object.values(state.world.others)) {
+  for (const other of Object.values(world.others)) {
     context.beginPath();
     context.arc((other.x - 0.5) * scaleX, (other.y - 0.5) * scaleY, Math.max(2, size / 60), 0, Math.PI * 2);
     context.fill();
@@ -49,12 +49,12 @@ export function drawMinimap(canvas: HTMLCanvasElement, state: ClientState, size:
     context.fill();
   }
 
-  if (state.world.self.x != null && state.world.self.y != null) {
+  if (world.self.x != null && world.self.y != null) {
     context.fillStyle = "#ff6a54";
     context.beginPath();
     context.arc(
-      (state.world.self.x - 0.5) * scaleX,
-      (state.world.self.y - 0.5) * scaleY,
+      (world.self.x - 0.5) * scaleX,
+      (world.self.y - 0.5) * scaleY,
       Math.max(3, size / 40),
       0,
       Math.PI * 2

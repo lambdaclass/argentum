@@ -717,19 +717,32 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
       };
 
     case "world/pruneTransient":
+      const chatBubbles = state.world.chatBubbles.filter(
+        (bubble) => action.now - bubble.createdAt < bubble.ttlMs
+      );
+      const combatTexts = state.world.combatTexts.filter(
+        (event) => action.now - event.createdAt < event.ttlMs
+      );
+      const fxEvents = state.world.fxEvents.filter(
+        (event) => action.now - event.createdAt < event.ttlMs
+      );
+
+      // Avoid rebuilding the world slice on the timer tick when nothing expired.
+      if (
+        chatBubbles.length === state.world.chatBubbles.length &&
+        combatTexts.length === state.world.combatTexts.length &&
+        fxEvents.length === state.world.fxEvents.length
+      ) {
+        return state;
+      }
+
       return {
         ...state,
         world: {
           ...state.world,
-          chatBubbles: state.world.chatBubbles.filter(
-            (bubble) => action.now - bubble.createdAt < bubble.ttlMs
-          ),
-          combatTexts: state.world.combatTexts.filter(
-            (event) => action.now - event.createdAt < event.ttlMs
-          ),
-          fxEvents: state.world.fxEvents.filter(
-            (event) => action.now - event.createdAt < event.ttlMs
-          )
+          chatBubbles,
+          combatTexts,
+          fxEvents
         }
       };
 

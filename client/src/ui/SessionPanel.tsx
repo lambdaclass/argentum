@@ -1,13 +1,14 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import type { ClientState } from "../app/types";
 
 interface SessionPanelProps {
   assetError: string | null;
   assetStatus: "loading" | "ready" | "error";
   canConnect: boolean;
-  state: ClientState;
+  connection: ClientState["connection"];
   title: string;
   showTileDebug: boolean;
+  world: ClientState["world"];
   onEndpointChange: (value: string) => void;
   onCharacterNameChange: (value: string) => void;
   onBootstrapPasswordChange: (value: string) => void;
@@ -110,13 +111,14 @@ function describeRecoveryPath(error: string, hasSavedSession: boolean) {
   };
 }
 
-export function SessionPanel({
+export const SessionPanel = memo(function SessionPanel({
   assetError,
   assetStatus,
   canConnect,
-  state,
+  connection,
   title,
   showTileDebug,
+  world,
   onEndpointChange,
   onCharacterNameChange,
   onBootstrapPasswordChange,
@@ -124,27 +126,27 @@ export function SessionPanel({
   onDisconnect,
   onForgetSession
 }: SessionPanelProps) {
-  const connected = state.connection.status === "connected";
-  const credentials = state.connection.credentials;
+  const connected = connection.status === "connected";
+  const credentials = connection.credentials;
   const reconnectReady = credentials != null && !connected;
   const [showAdvanced, setShowAdvanced] = useState(false);
   const advancedVisible = showAdvanced;
   const recovery =
-    state.connection.lastError == null
+    connection.lastError == null
       ? null
-      : describeRecoveryPath(state.connection.lastError, credentials != null);
+      : describeRecoveryPath(connection.lastError, credentials != null);
   const sessionLabel =
     connected
       ? "Connected"
       : reconnectReady
         ? "Saved reconnect ready"
         : "Manual sign in";
-  const accountLabel = state.connection.characterName.trim() || "No account name";
+  const accountLabel = connection.characterName.trim() || "No account name";
   const statusItems = [
     { label: "Status", value: sessionLabel },
     { label: "Account", value: accountLabel },
     { label: "Reconnect", value: credentials ? `char_id ${credentials.charId}` : "None saved" },
-    { label: "World", value: connected ? title : state.world.mapStatus },
+    { label: "World", value: connected ? title : world.mapStatus },
     { label: "Assets", value: assetStatus }
   ];
 
@@ -234,7 +236,7 @@ export function SessionPanel({
             <input
               disabled={reconnectReady}
               type="text"
-              value={state.connection.characterName}
+              value={connection.characterName}
               onChange={(event) => onCharacterNameChange(event.target.value)}
             />
           </label>
@@ -244,7 +246,7 @@ export function SessionPanel({
             <input
               disabled={reconnectReady}
               type="password"
-              value={state.connection.bootstrapPassword}
+              value={connection.bootstrapPassword}
               autoComplete="current-password"
               onChange={(event) => onBootstrapPasswordChange(event.target.value)}
             />
@@ -278,7 +280,7 @@ export function SessionPanel({
             <span>Endpoint</span>
             <input
               type="text"
-              value={state.connection.endpoint}
+              value={connection.endpoint}
               onChange={(event) => onEndpointChange(event.target.value)}
             />
           </label>
@@ -301,8 +303,8 @@ export function SessionPanel({
         </div>
       ) : null}
 
-      {state.connection.lastError ? (
-        <div className="error-banner">{state.connection.lastError}</div>
+      {connection.lastError ? (
+        <div className="error-banner">{connection.lastError}</div>
       ) : null}
 
       {assetError ? (
@@ -310,4 +312,6 @@ export function SessionPanel({
       ) : null}
     </section>
   );
-}
+});
+
+SessionPanel.displayName = "SessionPanel";

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { appReducer, createInitialState } from "./appReducer";
 import type { Direction } from "./types";
 import { SessionClient, type MovementDebugSnapshot } from "../net/SessionClient";
@@ -545,7 +545,16 @@ export function App({ uiDemoMode = false }: AppProps) {
     };
   }, [session, spellHotkeys]);
 
+  const hasTransientWorldState =
+    state.world.chatBubbles.length > 0 ||
+    state.world.combatTexts.length > 0 ||
+    state.world.fxEvents.length > 0;
+
   useEffect(() => {
+    if (!hasTransientWorldState) {
+      return;
+    }
+
     const intervalId = window.setInterval(() => {
       dispatch({ type: "world/pruneTransient", now: Date.now() });
     }, 250);
@@ -553,7 +562,7 @@ export function App({ uiDemoMode = false }: AppProps) {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, []);
+  }, [hasTransientWorldState]);
 
   useEffect(() => {
     session.setSoundPlayer((payload) => {
@@ -574,6 +583,12 @@ export function App({ uiDemoMode = false }: AppProps) {
   }, [music, session, sound]);
 
   useEffect(() => {
+    if (activeRightTab !== "debug" || !showMoveDebug) {
+      return;
+    }
+
+    setMovementDebug(session.getDebugSnapshot());
+
     const intervalId = window.setInterval(() => {
       setMovementDebug(session.getDebugSnapshot());
     }, 120);
@@ -581,7 +596,7 @@ export function App({ uiDemoMode = false }: AppProps) {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [session]);
+  }, [activeRightTab, session, showMoveDebug]);
 
   useEffect(() => {
     if (uiDemoMode) {
@@ -673,21 +688,22 @@ export function App({ uiDemoMode = false }: AppProps) {
     }
   }, [music, state.connection.status, state.world.map]);
 
-  const handleConnect = () => {
+  const handleConnect = useCallback(() => {
+    const current = stateRef.current;
     manualDisconnectRef.current = false;
     session.connect(
-      state.connection.endpoint,
-      state.connection.characterName,
-      state.connection.bootstrapPassword
+      current.connection.endpoint,
+      current.connection.characterName,
+      current.connection.bootstrapPassword
     );
-  };
+  }, [session]);
 
-  const handleDisconnect = () => {
+  const handleDisconnect = useCallback(() => {
     manualDisconnectRef.current = true;
     session.disconnect();
-  };
+  }, [session]);
 
-  const handleChatSend = (message: string) => {
+  const handleChatSend = useCallback((message: string) => {
     const trimmed = message.trim();
     if (!trimmed) {
       return;
@@ -741,7 +757,81 @@ export function App({ uiDemoMode = false }: AppProps) {
       default:
         session.sendChat(trimmed);
     }
-  };
+  }, [session]);
+
+  const handleOpenWorldMap = useCallback(() => {
+    setActiveRightTab("world");
+  }, []);
+
+  const handleWorldTileInteraction = useCallback(
+    ({ x, y, detail }: { x: number; y: number; detail: number }) => {
+      session.sendLeftClick(x, y);
+      if (detail < 2) {
+        return;
+      }
+
+      const currentWorld = stateRef.current.world;
+      const clickedCharacter =
+        Object.values(currentWorld.others).find((other) => other.x === x && other.y === y) ?? null;
+      const staticNpcOnTile = currentWorld.map?.npcs.some((npc) => npc.x === x && npc.y === y) ?? false;
+
+      if (clickedCharacter?.isNpc || staticNpcOnTile) {
+        session.sendDoubleClick(x, y);
+        return;
+      }
+
+      session.sendAttack();
+    },
+    [session]
+  );
+
+  const handleEndpointChange = useCallback((endpoint: string) => {
+    dispatch({ type: "connection/setEndpoint", endpoint });
+  }, [dispatch]);
+
+  const handleCharacterNameChange = useCallback((characterName: string) => {
+    dispatch({ type: "connection/setCharacterName", characterName });
+  }, [dispatch]);
+
+  const handleBootstrapPasswordChange = useCallback((bootstrapPassword: string) => {
+    dispatch({ type: "connection/setBootstrapPassword", bootstrapPassword });
+  }, [dispatch]);
+
+  const handleForgetSession = useCallback(() => {
+    dispatch({ type: "connection/setCredentials", credentials: null });
+  }, [dispatch]);
+
+  const handleSelectInventorySlot = useCallback((slotIndex: number | null) => {
+    dispatch({ type: "inventory/selectSlot", slotIndex });
+  }, [dispatch]);
+
+  const handleHudEquip = useCallback((slotIndex: number) => {
+    session.sendEquip(slotIndex);
+  }, [session]);
+
+  const handleHudUse = useCallback((slotIndex: number) => {
+    session.sendUse(slotIndex);
+  }, [session]);
+
+  const handleHudDrop = useCallback((slotIndex: number, amount: number) => {
+    session.sendDrop(slotIndex, amount);
+  }, [session]);
+
+  const handleAttack = useCallback(() => {
+    session.sendAttack();
+  }, [session]);
+
+  const handleStartCommerce = useCallback(() => {
+    session.sendCommerceStart();
+  }, [session]);
+
+  const handleStartBank = useCallback(() => {
+    session.sendBankStart();
+  }, [session]);
+
+  const handleToggleSafeMode = useCallback(() => {
+    session.sendSafeToggle();
+  }, [session]);
 
   const title = useMemo(() => {
     const position =
@@ -853,24 +943,7 @@ export function App({ uiDemoMode = false }: AppProps) {
                   raining={state.weather.raining}
                   snowing={state.weather.snowing}
                   session={session}
-                  onTileInteraction={({ x, y, detail }) => {
-                    session.sendLeftClick(x, y);
-                    if (detail >= 2) {
-                      const clickedCharacter =
-                        Object.values(state.world.others).find(
-                          (other) => other.x === x && other.y === y
-                        ) ?? null;
-                      const staticNpcOnTile =
-                        state.world.map?.npcs.some((npc) => npc.x === x && npc.y === y) ?? false;
-
-                      if (clickedCharacter?.isNpc || staticNpcOnTile) {
-                        session.sendDoubleClick(x, y);
-                        return;
-                      }
-
-                      session.sendAttack();
-                    }
-                  }}
+                  onTileInteraction={handleWorldTileInteraction}
                 />
                 {worldOverlay ? (
                   <div className="world-overlay-state" data-kind={worldOverlay.tone} data-testid="world-overlay-state">
@@ -925,11 +998,13 @@ export function App({ uiDemoMode = false }: AppProps) {
         <section className="panel ao-sidebar-shell" data-active-tab={activeRightTab}>
           <CharacterCard
             canConnect={assetStatus === "ready" && mapPackStatus === "ready"}
+            connection={state.connection}
             dense={activeRightTab === "hud"}
-            state={state}
+            stats={state.stats}
+            world={state.world}
             onConnect={handleConnect}
             onDisconnect={handleDisconnect}
-            onOpenMap={() => setActiveRightTab("world")}
+            onOpenMap={handleOpenWorldMap}
           />
 
           <div className="sidebar-tabs sidebar-tabs-top sidebar-tabs-ao">
@@ -951,42 +1026,39 @@ export function App({ uiDemoMode = false }: AppProps) {
                 assetError={assetError}
                 assetStatus={assetStatus}
                 canConnect={assetStatus === "ready" && mapPackStatus === "ready"}
-                state={state}
+                connection={state.connection}
                 title={title}
                 showTileDebug={showTileDebug}
-                onEndpointChange={(endpoint) =>
-                  dispatch({ type: "connection/setEndpoint", endpoint })
-                }
-                onCharacterNameChange={(characterName) =>
-                  dispatch({ type: "connection/setCharacterName", characterName })
-                }
-                onBootstrapPasswordChange={(bootstrapPassword) =>
-                  dispatch({ type: "connection/setBootstrapPassword", bootstrapPassword })
-                }
+                world={state.world}
+                onEndpointChange={handleEndpointChange}
+                onCharacterNameChange={handleCharacterNameChange}
+                onBootstrapPasswordChange={handleBootstrapPasswordChange}
                 onConnect={handleConnect}
                 onDisconnect={handleDisconnect}
-                onForgetSession={() =>
-                  dispatch({ type: "connection/setCredentials", credentials: null })
-                }
+                onForgetSession={handleForgetSession}
               />
             ) : null}
 
-            {activeRightTab === "world" ? <WorldStatusPanel state={state} /> : null}
+            {activeRightTab === "world" ? (
+              <WorldStatusPanel stats={state.stats} weather={state.weather} world={state.world} />
+            ) : null}
 
             {activeRightTab === "hud" ? (
               <ClassicHudPanel
                 assetCatalog={assetCatalog}
-                state={state}
-                onSelectSlot={(slotIndex) =>
-                  dispatch({ type: "inventory/selectSlot", slotIndex })
-                }
-                onEquip={(slotIndex) => session.sendEquip(slotIndex)}
-                onUse={(slotIndex) => session.sendUse(slotIndex)}
-                onDrop={(slotIndex, amount) => session.sendDrop(slotIndex, amount)}
-                onAttack={() => session.sendAttack()}
-                onStartCommerce={() => session.sendCommerceStart()}
-                onStartBank={() => session.sendBankStart()}
-                onToggleSafeMode={() => session.sendSafeToggle()}
+                combat={state.combat}
+                connection={state.connection}
+                inventory={state.inventory}
+                onSelectSlot={handleSelectInventorySlot}
+                onEquip={handleHudEquip}
+                onUse={handleHudUse}
+                onDrop={handleHudDrop}
+                onAttack={handleAttack}
+                onStartCommerce={handleStartCommerce}
+                onStartBank={handleStartBank}
+                stats={state.stats}
+                onToggleSafeMode={handleToggleSafeMode}
+                world={state.world}
               />
             ) : null}
 
