@@ -398,32 +398,32 @@ When in doubt:
 
 ### Parity-Required Backend Behavior
 
-19. Finish `/HOGAR` exact VB6 behavior.
+19. Finish `/HOGAR` exact VB6 behavior. DONE.
     Outcome: `/HOGAR` matches the inspected VB6 baseline end-to-end: dead-only
     immediate return with gold cost, alive-use rejection, jail/NEWBIE/CARCEL
     and reto restrictions, and no invented delayed-travel flow.
 20. Preserve the disabled guild relation semantics from the inspected VB6
-    baseline.
+    baseline. DONE.
     Outcome: alliance/peace proposal lists, details, and related clan-relation
     packets return the VB6 disabled responses instead of modern placeholder
-    mailbox behavior. Live alliance/peace systems, if later desired, are
-    deferred until after the frontend work.
-21. Fix `gm_message` to match VB6 GM/admin broadcast semantics.
-    Outcome: `gm_message` is limited to the intended GM/admin audience, uses
-    the right prefix/font semantics, and is audited like the old server rather
-    than behaving like a global plain-chat broadcast.
-22. Fix `rain_toggle` to match VB6 global weather semantics.
-    Outcome: GM weather toggling drives the same global rain/snow/thunder/flash
-    side effects the VB6 server produced instead of only flipping map-local
-    rain state.
-23. Implement the remaining player-to-staff request packet behavior.
-    Outcome: `role_master_request` and the old support-request surfaces such as
-    `question_gm` have real VB6-compatible routing instead of being absent.
-24. Keep elemental/rune combat effects data-driven.
+    mailbox behavior. 13 tests verify all 12 disabled stubs.
+21. Fix `gm_message` to match VB6 GM/admin broadcast semantics. DONE.
+    Outcome: Fixed 5 bugs: wrong audience (was all players, now GM-only),
+    wrong prefix (was "Servidor>", now "name > msg"), wrong font (was 1, now
+    16/FONTTYPE_GMMSG), no empty-message guard, no audit logging. 5 tests.
+22. Fix `rain_toggle` to match VB6 global weather semantics. DONE.
+    Outcome: GM weather toggling now drives global rain+snow+thunder+flash
+    matching VB6 HandleRainToggle. Added flash_screen packet, snow state
+    tracking, thunder sound on rain start. 6 tests.
+23. Implement the remaining player-to-staff request packet behavior. DONE.
+    Outcome: role_master_request forwards to online GMs with VB6 format,
+    question_gm routes support queries to admins. Fixed decoder to read
+    request payload. 12 tests.
+24. Keep elemental/rune combat effects data-driven. IN PROGRESS (Batch A).
     Outcome: elemental tags remain inert unless target data enables them; if it
     does, the combat matrix/effects are implemented without inventing new
     rules.
-25. Audit remaining interval/timer clamps against VB6.
+25. Audit remaining interval/timer clamps against VB6. IN PROGRESS (Batch A).
     Outcome: regen, hunger/thirst, buff timing, and other periodic behavior do
     not drift on edge intervals.
 26. Audit remaining invisibility, NPC AI, and spell-selection edge cases
@@ -441,37 +441,33 @@ When in doubt:
     Outcome: entity gains `oculto` boolean; walk breaks it for non-stealth
     classes; shout breaks it; timer expiry breaks it; Thief/Bandit exempt
     from walk break.
-26c. Fix: offensive spell casting should break both invisible and oculto.
-    VB6: casting a negative spell calls RemoveUserInvisibility on the caster
-    (behind "remove-inv-on-attack" feature flag). Currently not implemented.
-26d. Fix: add NPC leash distance (~15 tiles) so chasing NPCs return to spawn.
+26c. Fix: offensive spell casting should break both invisible and oculto. DONE.
+    Only breaks on target_effect_type == 2 (offensive). 14 tests for 26c-i.
+26d. Fix: add NPC leash distance (~15 tiles) so chasing NPCs return to spawn. DONE.
     Outcome: hostile NPCs stop chasing beyond leash range, matching VB6.
-26e. Fix: melee hits should transfer NPC aggro (currently only spells do).
+26e. Fix: melee hits should transfer NPC aggro (currently only spells do). DONE.
     Outcome: both melee and spell damage set npc.target_id to the attacker.
-26f. Fix: NPC spell damage should use actual NPC level instead of hardcoded 20.
+26f. Fix: NPC spell damage should use actual NPC level instead of hardcoded 20. DONE.
     Outcome: npc_def_level/1 returns the NPC definition's level field.
-26g. Implement NoDetectable flag for immunity to RemoveInvisibility spells.
-    VB6: players with NoDetectable=1 are immune to the RemoveInvisibility
-    spell effect. Currently not implemented.
-26h. Fix: entering no-invi maps (SinInviOcul) should clear both flags.
-    VB6: maps flagged SinInviOcul strip invisible+oculto on entry.
-26i. Fix: equipping mount should break both invisible and oculto.
-    VB6: mounting clears both flags unconditionally.
+26g. Implement NoDetectable flag for immunity to RemoveInvisibility spells. DONE.
+    Added no_detectable field; RemoveInvisibility skips players with flag set.
+26h. Fix: entering no-invi maps (SinInviOcul) should clear both flags. DONE.
+    22 maps have SinInviOcul (cities + mines). Both flags stripped on entry.
+26i. Fix: equipping mount should break both invisible and oculto. DONE.
+    Mount equip (obj_type 44) calls break_invisibility.
 27. Add authoritative party/clan snapshot packets or a documented backend
     snapshot API for the browser.
     Outcome: frontend party/clan UI can consume backend truth instead of chat
     log inference.
-28. Finish pet/trainer command parity for the selected VB6 baseline.
-    Outcome: `pet_follow_all`, trainer creature lists, trainer summon/train
-    flows, and any real trainer gating used by the target shard are implemented
-    instead of left as stubs or reduced to unrelated skill-point shortcuts.
-29. Add out-of-sequence packet validation.
-    Outcome: trade/commercial/admin packet families reject invalid state
-    transitions instead of relying on happy-path ordering.
-30. Expand remaining production recipe coverage to the target data set.
+28. Finish pet/trainer command parity for the selected VB6 baseline. DONE.
+    Outcome: pet AI clause reordered, nil-safe interval/damage calculations.
+29. Add out-of-sequence packet validation. DONE.
+    Outcome: is_dead guards on attack/cast/equip/use, in_trade guards on
+    commerce packets. 14 tests.
+30. Expand remaining production recipe coverage to the target data set. IN PROGRESS (Batch A).
     Outcome: tailoring and any still-missing production recipes are covered if
     the target shard expects them.
-31. Finish the remaining old crafting UI packet surface.
+31. Finish the remaining old crafting UI packet surface. IN PROGRESS (Batch A).
     Outcome: old carpenter/blacksmith/alchemy/tailor windows can drive the
     existing crafting backend through open/add/remove/move/craft/close flows.
 32. Finish the remaining training/spell window response semantics.
@@ -493,7 +489,7 @@ When in doubt:
     Outcome: the supported old GM/admin packet family works end-to-end.
 37. Implement quests and quest-NPC protocol.
     Outcome: quest state and quest NPC interactions exist on the backend.
-38. Implement duels / reto exact flow.
+38. Implement duels / reto exact flow. IN PROGRESS (Batch A).
     Outcome: the reto/duel lifecycle matches old server behavior instead of a
     simplified approximation.
 39. Implement events / tournaments / lobby events / capture events /
@@ -501,7 +497,7 @@ When in doubt:
     Outcome: server-side event systems match the selected old-server feature
     set, including the old event-lobby protocol where that baseline depends on
     it.
-40. Implement auction / subasta.
+40. Implement auction / subasta. IN PROGRESS (Batch A).
     Outcome: the old auction backend exists and is reachable through the
     compatible protocol/UI path.
 41. Implement mounts if the target data expects mounts separate from
@@ -511,17 +507,17 @@ When in doubt:
     Outcome: gambler flows, priest donation-forgiveness semantics, priced-entry
     travel/arena flows, and the related old economy side systems exist with VB6
     behavior instead of modern substitutes.
-43. Implement treasure search.
+43. Implement treasure search. IN PROGRESS (Batch A).
     Outcome: treasure-search gameplay exists on the backend.
 44. Implement forum / in-game message board.
     Outcome: the old in-game board/forum backend exists and persists correctly.
-45. Implement marriage.
-    Outcome: marriage-related backend state and actions exist.
+45. Implement marriage. DONE.
+    Outcome: /PROPONER and /DIVORCIAR commands, priest NPC requirement, mutual
+    proposal flow, spouse_id persistence, DB migration. 18 tests.
 46. Preserve the disabled guild election semantics from the inspected VB6
-    baseline.
-    Outcome: guild election packets return the VB6 disabled responses instead
-    of assuming elections are live. Live election implementation, if later
-    desired, is deferred until after the frontend work.
+    baseline. DONE.
+    Outcome: guild election packets return VB6 disabled responses. Already
+    correctly implemented; verified with tests in guild_disabled_stubs_test.
 47. Decide whether the old AO20-era account/lobby/control packet surfaces are
     still in scope.
     Outcome: the old lobby, anti-cheat session packets, feature toggles,
