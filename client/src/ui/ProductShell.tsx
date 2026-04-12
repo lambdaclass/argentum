@@ -179,7 +179,7 @@ export function ProductShell({
       return;
     }
 
-    if (options || optionsLoading) {
+    if (options) {
       return;
     }
 
@@ -209,7 +209,7 @@ export function ProductShell({
     return () => {
       cancelled = true;
     };
-  }, [account, currentRoute, options, optionsLoading]);
+  }, [account, currentRoute, options]);
 
   useEffect(() => {
     if (characters.length === 0) {

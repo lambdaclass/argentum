@@ -829,6 +829,12 @@ export function App({ uiDemoMode = false }: AppProps) {
     );
   }, [session]);
 
+  const handleExitToLobby = useCallback(() => {
+    manualDisconnectRef.current = true;
+    session.disconnect();
+    handleNavigate("/");
+  }, [handleNavigate, session]);
+
   const handleDisconnect = useCallback(() => {
     manualDisconnectRef.current = true;
     session.disconnect();
@@ -1250,7 +1256,7 @@ export function App({ uiDemoMode = false }: AppProps) {
             stats={state.stats}
             world={state.world}
             onConnect={handleConnect}
-            onDisconnect={handleDisconnect}
+            onDisconnect={handleExitToLobby}
             onOpenMap={handleOpenWorldMap}
           />
 
@@ -1285,7 +1291,7 @@ export function App({ uiDemoMode = false }: AppProps) {
                 onCharacterNameChange={handleCharacterNameChange}
                 onBootstrapPasswordChange={handleBootstrapPasswordChange}
                 onConnect={handleConnect}
-                onDisconnect={handleDisconnect}
+                onDisconnect={handleExitToLobby}
                 onForgetSession={handleForgetSession}
                 onReloadPage={handleReloadPage}
                 onResetKeyBindings={handleResetKeyBindings}

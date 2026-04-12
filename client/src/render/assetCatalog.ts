@@ -259,6 +259,15 @@ export function getObjectGrh(catalog: AssetCatalog | null, objectId: number) {
   return catalog?.objects[objectId]?.grh ?? null;
 }
 
+export function getObjectFrameDef(catalog: AssetCatalog | null, objectId: number) {
+  const grhId = getObjectGrh(catalog, objectId);
+  if (!catalog || !grhId) {
+    return null;
+  }
+
+  return getGrhFrameDef(catalog, grhId);
+}
+
 export function getObjectIconFrame(catalog: AssetCatalog | null, objectId: number) {
   if (!catalog) {
     return null;

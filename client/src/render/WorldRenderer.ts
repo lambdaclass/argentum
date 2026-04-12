@@ -21,6 +21,7 @@ import type {
 import {
   bodyGrhForDirection,
   getGrhAnimation,
+  getObjectFrameDef,
   getNpcDef,
   getGrhTexture,
   getObjectGrh,
@@ -457,6 +458,15 @@ function createObjectNode(catalog: AssetCatalog | null, object: GroundObject) {
   return container;
 }
 
+function shouldRenderObjectAboveCharacters(catalog: AssetCatalog | null, object: GroundObject) {
+  const frame = getObjectFrameDef(catalog, object.id);
+  if (!frame) {
+    return false;
+  }
+
+  return frame.width > TILE_SIZE || frame.height > TILE_SIZE;
+}
+
 function walkIntervalForSpeed(baseInterval: number, speed: number) {
   return Math.max(40, baseInterval / Math.max(speed, 1));
 }
@@ -671,6 +681,7 @@ export class WorldRenderer {
   private staticEntityLayer: Container | null = null;
   private dynamicObjectLayer: Container | null = null;
   private charactersLayer: Container | null = null;
+  private dynamicOverlayObjectLayer: Container | null = null;
   private overlayLayer: Container | null = null;
   private effectsLayer: Container | null = null;
   private chatLayer: Container | null = null;
@@ -838,6 +849,7 @@ export class WorldRenderer {
     this.staticEntityLayer = new Container();
     this.dynamicObjectLayer = new Container();
     this.charactersLayer = new Container();
+    this.dynamicOverlayObjectLayer = new Container();
     this.overlayLayer = new Container();
     this.effectsLayer = new Container();
     this.chatLayer = new Container();
@@ -846,6 +858,7 @@ export class WorldRenderer {
     this.worldLayer.addChild(this.staticEntityLayer);
     this.worldLayer.addChild(this.dynamicObjectLayer);
     this.worldLayer.addChild(this.charactersLayer);
+    this.worldLayer.addChild(this.dynamicOverlayObjectLayer);
     this.worldLayer.addChild(this.overlayLayer);
     this.worldLayer.addChild(this.effectsLayer);
     this.worldLayer.addChild(this.chatLayer);
@@ -961,6 +974,7 @@ export class WorldRenderer {
       !this.staticEntityLayer ||
       !this.dynamicObjectLayer ||
       !this.charactersLayer ||
+      !this.dynamicOverlayObjectLayer ||
       !this.overlayLayer ||
       !this.effectsLayer ||
       !this.chatLayer ||
@@ -1213,14 +1227,19 @@ export class WorldRenderer {
   }
 
   private rebuildGroundObjects(world: WorldState, assetCatalog: AssetCatalog | null) {
-    if (!this.dynamicObjectLayer) {
+    if (!this.dynamicObjectLayer || !this.dynamicOverlayObjectLayer) {
       return;
     }
 
     this.dynamicObjectLayer.removeChildren();
+    this.dynamicOverlayObjectLayer.removeChildren();
 
     for (const object of Object.values(world.groundObjects)) {
       this.dynamicObjectLayer.addChild(createObjectNode(assetCatalog, object));
+
+      if (shouldRenderObjectAboveCharacters(assetCatalog, object)) {
+        this.dynamicOverlayObjectLayer.addChild(createObjectNode(assetCatalog, object));
+      }
     }
   }
 
