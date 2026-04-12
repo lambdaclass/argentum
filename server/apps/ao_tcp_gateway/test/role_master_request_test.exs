@@ -6,7 +6,7 @@ defmodule AoTcpGateway.RoleMasterRequestTest do
   to open the GM panel ("Maestro de Roles"). The server responds with
   ShowGMPanelForm. Non-GM users are denied access.
   """
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   alias AoTcpGateway.SessionLogic
 
