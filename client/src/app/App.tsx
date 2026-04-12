@@ -489,8 +489,8 @@ export function App({ uiDemoMode = false }: AppProps) {
       if (
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
-        target instanceof HTMLButtonElement ||
-        target instanceof HTMLSelectElement
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
       ) {
         return;
       }

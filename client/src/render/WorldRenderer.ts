@@ -411,13 +411,15 @@ function createLayerSprite(
   grhId: number,
   tileX: number,
   tileY: number,
-  useCharIndex = false
+  useCharIndex = false,
+  watchTexture?: (texture: Texture) => void
 ) {
   const texture = getGrhTexture(catalog, grhId, useCharIndex);
   if (!texture) {
     return null;
   }
 
+  watchTexture?.(texture);
   const sprite = new Sprite(texture);
   applyAoAnchor(sprite);
   sprite.x = worldX(tileX);
@@ -425,12 +427,16 @@ function createLayerSprite(
   return sprite;
 }
 
-function createObjectNode(catalog: AssetCatalog | null, object: GroundObject) {
+function createObjectNode(
+  catalog: AssetCatalog | null,
+  object: GroundObject,
+  watchTexture?: (texture: Texture) => void
+) {
   const container = new Container();
   const grhId = getObjectGrh(catalog, object.id);
 
   if (catalog && grhId) {
-    const sprite = createLayerSprite(catalog, grhId, object.x, object.y);
+    const sprite = createLayerSprite(catalog, grhId, object.x, object.y, false, watchTexture);
     if (sprite) {
       container.addChild(sprite);
     }
@@ -485,7 +491,8 @@ function createCharacterVisual(
   effectLoops: number,
   heading: number,
   kind: "self" | "other" | "npc",
-  dead = false
+  dead = false,
+  watchTexture?: (texture: Texture) => void
 ): CharacterVisual {
   const effectiveBodyId = dead ? GHOST_BODY_ID : bodyId;
   const effectiveHeadId = dead ? GHOST_HEAD_ID : headId;
@@ -511,6 +518,7 @@ function createCharacterVisual(
       return;
     }
 
+    watchTexture?.(texture);
     const sprite = new Sprite(texture);
     applyAoAnchor(sprite);
     sprite.x = offsetX;
@@ -572,6 +580,7 @@ function createCharacterVisual(
           rawNpcBody.height
         )
       );
+      bodyFrames.forEach((texture) => watchTexture?.(texture));
       frameVelocity = rawDirection.velocity;
       bodyTexture = bodyFrames[0] ?? null;
     }
@@ -584,7 +593,9 @@ function createCharacterVisual(
   }
 
   let bodySprite: Sprite | null = null;
+  bodyFrames?.forEach((texture) => watchTexture?.(texture));
   if (bodyTexture) {
+    watchTexture?.(bodyTexture);
     bodySprite = new Sprite(bodyTexture);
   }
 
@@ -605,6 +616,7 @@ function createCharacterVisual(
   if (headGrhId) {
     const headTexture = getGrhTexture(catalog, headGrhId, true);
     if (headTexture) {
+      watchTexture?.(headTexture);
       const headSprite = new Sprite(headTexture);
       applyAoAnchor(headSprite);
       headSprite.x = headOffsetX;
@@ -709,6 +721,7 @@ export class WorldRenderer {
   private snowLayer: Container | null = null;
   private snowFlakes: Graphics[] = [];
   private snowActive = false;
+  private watchedPendingTextures = new WeakSet<BaseTexture>();
   /**
    * Imperative fast path: immediately start a motion animation for the self
    * character without waiting for React to commit state and trigger render().
@@ -923,6 +936,33 @@ export class WorldRenderer {
     this.renderLoopActive = false;
   }
 
+  private renderOnce() {
+    if (!this.app) {
+      return;
+    }
+
+    this.app.render();
+  }
+
+  private watchTexture = (texture: Texture) => {
+    const { baseTexture } = texture;
+    if (baseTexture.valid || this.watchedPendingTextures.has(baseTexture)) {
+      return;
+    }
+
+    this.watchedPendingTextures.add(baseTexture);
+
+    const redraw = () => {
+      baseTexture.off("loaded", redraw);
+      baseTexture.off("update", redraw);
+      this.watchedPendingTextures.delete(baseTexture);
+      this.renderOnce();
+    };
+
+    baseTexture.on("loaded", redraw);
+    baseTexture.on("update", redraw);
+  };
+
   private fitCanvas() {
     if (!this.mountNode || !this.canvas) {
       return;
@@ -1025,6 +1065,9 @@ export class WorldRenderer {
     this.syncCharacters(world, assetCatalog);
     this.rebuildChatBubbles(world.chatBubbles);
     this.rebuildEffects(world);
+    this.updateCamera(world);
+    this.updateHud(world);
+    this.renderOnce();
     this.ensureRenderLoop();
   }
 
@@ -1157,28 +1200,56 @@ export class WorldRenderer {
 
     if (assetCatalog) {
       for (const tile of map.layers[0] ?? []) {
-        const sprite = createLayerSprite(assetCatalog, tile.grhIndex, tile.x, tile.y);
+        const sprite = createLayerSprite(
+          assetCatalog,
+          tile.grhIndex,
+          tile.x,
+          tile.y,
+          false,
+          this.watchTexture
+        );
         if (sprite) {
           nextBelowCharactersLayer.addChild(sprite);
         }
       }
 
       for (const tile of map.layers[1] ?? []) {
-        const sprite = createLayerSprite(assetCatalog, tile.grhIndex, tile.x, tile.y);
+        const sprite = createLayerSprite(
+          assetCatalog,
+          tile.grhIndex,
+          tile.x,
+          tile.y,
+          false,
+          this.watchTexture
+        );
         if (sprite) {
           nextBelowCharactersLayer.addChild(sprite);
         }
       }
 
       for (const tile of map.layers[2] ?? []) {
-        const sprite = createLayerSprite(assetCatalog, tile.grhIndex, tile.x, tile.y);
+        const sprite = createLayerSprite(
+          assetCatalog,
+          tile.grhIndex,
+          tile.x,
+          tile.y,
+          false,
+          this.watchTexture
+        );
         if (sprite) {
           nextOverlayLayer.addChild(sprite);
         }
       }
 
       for (const tile of map.layers[3] ?? []) {
-        const sprite = createLayerSprite(assetCatalog, tile.grhIndex, tile.x, tile.y);
+        const sprite = createLayerSprite(
+          assetCatalog,
+          tile.grhIndex,
+          tile.x,
+          tile.y,
+          false,
+          this.watchTexture
+        );
         if (sprite) {
           nextOverlayLayer.addChild(sprite);
         }
@@ -1235,10 +1306,12 @@ export class WorldRenderer {
     this.dynamicOverlayObjectLayer.removeChildren();
 
     for (const object of Object.values(world.groundObjects)) {
-      this.dynamicObjectLayer.addChild(createObjectNode(assetCatalog, object));
+      this.dynamicObjectLayer.addChild(createObjectNode(assetCatalog, object, this.watchTexture));
 
       if (shouldRenderObjectAboveCharacters(assetCatalog, object)) {
-        this.dynamicOverlayObjectLayer.addChild(createObjectNode(assetCatalog, object));
+        this.dynamicOverlayObjectLayer.addChild(
+          createObjectNode(assetCatalog, object, this.watchTexture)
+        );
       }
     }
   }
@@ -1416,7 +1489,8 @@ export class WorldRenderer {
         effectLoops,
         heading,
         kind,
-        dead
+        dead,
+        this.watchTexture
       );
       const motion = current?.motion ?? createMotionState();
 
@@ -1516,7 +1590,8 @@ export class WorldRenderer {
       current.effectLoops,
       heading,
       current.kind,
-      current.dead
+      current.dead,
+      this.watchTexture
     );
     const next: CharacterNode = {
       ...current,

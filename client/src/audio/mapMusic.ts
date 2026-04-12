@@ -85,6 +85,8 @@ export class MapMusicController {
   private currentMusicId: number | null = null;
   private enabled = true;
   private volume = 0.6;
+  private destroyed = false;
+  private playRequestId = 0;
   private readonly resumeAudio = () => {
     void this.context?.resume();
   };
@@ -102,6 +104,10 @@ export class MapMusicController {
   }
 
   async ensureReady() {
+    if (this.destroyed) {
+      return;
+    }
+
     if (this.player && this.instrument && this.context) {
       return;
     }
@@ -114,6 +120,8 @@ export class MapMusicController {
   }
 
   async playMapMusic(endpoint: string, musicId: number) {
+    const requestId = ++this.playRequestId;
+
     if (!this.enabled || !musicId || musicId <= 0) {
       this.stop();
       return;
@@ -121,7 +129,7 @@ export class MapMusicController {
 
     await this.ensureReady();
 
-    if (!this.player) {
+    if (this.destroyed || requestId !== this.playRequestId || !this.player) {
       return;
     }
 
@@ -133,6 +141,9 @@ export class MapMusicController {
 
     for (const url of buildAssetUrlCandidates(endpoint, `/midi/${musicId}.mid`)) {
       const candidate = await fetch(url);
+      if (this.destroyed || requestId !== this.playRequestId) {
+        return;
+      }
       if (candidate.ok) {
         response = candidate;
         break;
@@ -144,6 +155,9 @@ export class MapMusicController {
     }
 
     const buffer = new Uint8Array(await response.arrayBuffer());
+    if (this.destroyed || requestId !== this.playRequestId || !this.player) {
+      return;
+    }
     this.currentMusicId = musicId;
     this.player.stop();
     this.player.loadArrayBuffer(buffer);
@@ -151,21 +165,36 @@ export class MapMusicController {
   }
 
   stop() {
+    this.playRequestId += 1;
     this.currentMusicId = null;
     this.player?.stop();
   }
 
   destroy() {
+    this.destroyed = true;
     this.stop();
 
     if (typeof window !== "undefined") {
       window.removeEventListener("pointerdown", this.resumeAudio);
       window.removeEventListener("keydown", this.resumeAudio);
     }
+
+    if (this.context) {
+      void this.context.close().catch(() => undefined);
+    }
+
+    this.context = null;
+    this.instrument = null;
+    this.player = null;
+    this.initPromise = null;
   }
 
   private async initialize() {
     await Promise.all([loadScript(MIDI_PLAYER_URL), loadScript(SOUNDFONT_PLAYER_URL)]);
+
+    if (this.destroyed) {
+      return;
+    }
 
     const AudioCtor = window.AudioContext ?? window.webkitAudioContext;
     if (!AudioCtor) {
@@ -181,6 +210,14 @@ export class MapMusicController {
       this.context,
       "acoustic_grand_piano"
     );
+
+    if (this.destroyed || !this.context) {
+      void this.context?.close().catch(() => undefined);
+      this.context = null;
+      this.instrument = null;
+      return;
+    }
+
     const instrument = this.instrument;
     const context = this.context;
 
@@ -205,8 +242,8 @@ export class MapMusicController {
     window.addEventListener("pointerdown", this.resumeAudio, { passive: true });
     window.addEventListener("keydown", this.resumeAudio);
 
-    if (this.context.state === "suspended") {
-      void this.context.resume();
+    if (context.state === "suspended") {
+      void context.resume();
     }
   }
 }
