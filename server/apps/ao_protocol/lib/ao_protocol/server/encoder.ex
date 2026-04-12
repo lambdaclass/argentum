@@ -720,6 +720,65 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.show_gm_panel_form(), <<>>)
   end
 
+  # ---- Crafting window packets ----
+
+  # eShowBlacksmithForm (ID 14) — no payload
+  def encode({:show_blacksmith_form, _params}) do
+    Writer.build_packet(PacketIds.Server.show_blacksmith_form(), <<>>)
+  end
+
+  # eShowCarpenterForm (ID 15) — no payload
+  def encode({:show_carpenter_form, _params}) do
+    Writer.build_packet(PacketIds.Server.show_carpenter_form(), <<>>)
+  end
+
+  # eShowAlquimiaForm (ID 131) — no payload
+  def encode({:show_alchemy_form, _params}) do
+    Writer.build_packet(PacketIds.Server.show_alchemy_form(), <<>>)
+  end
+
+  # eShowSastreForm (ID 133) — no payload
+  def encode({:show_tailor_form, _params}) do
+    Writer.build_packet(PacketIds.Server.show_tailor_form(), <<>>)
+  end
+
+  # eBlacksmithWeapons (ID 68) — count(I16) + items(I16 each)
+  def encode({:blacksmith_weapons, %{items: items}}) do
+    payload = Writer.write_int16(length(items)) <> Enum.map_join(items, &Writer.write_int16/1)
+    Writer.build_packet(PacketIds.Server.blacksmith_weapons(), payload)
+  end
+
+  # eBlacksmithArmors (ID 69) — count(I16) + items(I16 each)
+  def encode({:blacksmith_armors, %{items: items}}) do
+    payload = Writer.write_int16(length(items)) <> Enum.map_join(items, &Writer.write_int16/1)
+    Writer.build_packet(PacketIds.Server.blacksmith_armors(), payload)
+  end
+
+  # eBlacksmithExtraObjects (ID 70) — count(I16) + items(I16 each)
+  def encode({:blacksmith_extra_objects, %{items: items}}) do
+    payload = Writer.write_int16(length(items)) <> Enum.map_join(items, &Writer.write_int16/1)
+    Writer.build_packet(PacketIds.Server.blacksmith_extra_objects(), payload)
+  end
+
+  # eCarpenterObjects (ID 71) — count(I8) + items(I16 each)
+  # Note: VB6 uses I8 for count here (unlike blacksmith which uses I16)
+  def encode({:carpenter_objects, %{items: items}}) do
+    payload = Writer.write_int8(length(items)) <> Enum.map_join(items, &Writer.write_int16/1)
+    Writer.build_packet(PacketIds.Server.carpenter_objects(), payload)
+  end
+
+  # eAlquimistaObj (ID 130) — count(I16) + items(I16 each)
+  def encode({:alquimista_objects, %{items: items}}) do
+    payload = Writer.write_int16(length(items)) <> Enum.map_join(items, &Writer.write_int16/1)
+    Writer.build_packet(PacketIds.Server.alquimista_objects(), payload)
+  end
+
+  # eSastreObj (ID 132) — count(I16) + items(I16 each)
+  def encode({:sastre_objects, %{items: items}}) do
+    payload = Writer.write_int16(length(items)) <> Enum.map_join(items, &Writer.write_int16/1)
+    Writer.build_packet(PacketIds.Server.sastre_objects(), payload)
+  end
+
   # ---- Helpers ----
 
   defp encode_char_flags(params) do

@@ -34,7 +34,8 @@ defmodule Arena.Data.NpcDef do
     loot_table: [],
     comercia: false,
     shop_items: [],
-    faccion: 0
+    faccion: 0,
+    elemental_tags: 0
   ]
 
   @doc "Build an NpcDef from a parsed INI section (downcased keys)."
@@ -70,7 +71,8 @@ defmodule Arena.Data.NpcDef do
       loot_table: parse_loot_table(section),
       comercia: parse_bool(section["comercia"]),
       shop_items: parse_shop_items(section),
-      faccion: parse_int(section["faccion"])
+      faccion: parse_int(section["faccion"]),
+      elemental_tags: parse_int(section["elementaltags"])
     }
   end
 

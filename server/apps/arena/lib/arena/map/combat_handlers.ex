@@ -26,7 +26,8 @@ defmodule Arena.Map.CombatHandlers do
   @req_on_land 0x200
   @req_on_water 0x400
 
-  @poison_tick_interval 2000
+  # VB6: IntervaloVeneno = 90 counter ticks at 40ms (MaybeRunGameEvents) = 3600ms
+  @poison_tick_interval 3600
 
   # VB6 faction PvP maps — used when elemental/faction combat is wired
   @faction_pvp_maps [58, 59, 60, 195, 196]
@@ -247,6 +248,9 @@ defmodule Arena.Map.CombatHandlers do
             npc_defense = if npc_def, do: npc_def.def, else: 0
             final_damage = max(raw_damage - npc_defense, 0)
 
+            # VB6: CalculateElementalTagsModifiers — apply elemental matrix
+            final_damage = apply_elemental_modifiers_for_weapon(final_damage, entity, npc_def)
+
             new_hp = max(npc.hp - final_damage, 0)
             npc = %{npc | hp: new_hp}
 
@@ -358,8 +362,29 @@ defmodule Arena.Map.CombatHandlers do
         %{state | players: players}
 
       defender ->
+        # VB6: EnReto — in-duel restriction: can only attack duel opponent
+        in_duel_attacking_wrong_target =
+          entity.in_duel and entity.duel_opponent_id != defender_id
+
+        # VB6: Duel bypasses safe-zone restriction when attacking opponent
+        duel_pvp_exception =
+          entity.in_duel and entity.duel_opponent_id == defender_id
+
         cond do
-          entity.safe_mode ->
+          in_duel_attacking_wrong_target ->
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw,
+               Encoder.encode(
+                 {:console_msg, %{message: "Solo puedes atacar a tu oponente de reto.", font_index: 0}}
+               )}
+            )
+
+            players = Map.put(state.players, char_id, entity)
+            %{state | players: players}
+
+          entity.safe_mode and not duel_pvp_exception ->
             Helpers.send_to_session(
               state.sessions,
               char_id,
@@ -369,7 +394,7 @@ defmodule Arena.Map.CombatHandlers do
             players = Map.put(state.players, char_id, entity)
             %{state | players: players}
 
-          same_faction?(entity, defender) ->
+          same_faction?(entity, defender) and not duel_pvp_exception ->
             Helpers.send_to_session(
               state.sessions,
               char_id,
@@ -380,7 +405,7 @@ defmodule Arena.Map.CombatHandlers do
             players = Map.put(state.players, char_id, entity)
             %{state | players: players}
 
-          party_safe_block?(char_id, defender) ->
+          party_safe_block?(char_id, defender) and not duel_pvp_exception ->
             Helpers.send_to_session(
               state.sessions,
               char_id,
@@ -391,7 +416,8 @@ defmodule Arena.Map.CombatHandlers do
             players = Map.put(state.players, char_id, entity)
             %{state | players: players}
 
-          state.meta.safe_zone and not faction_pvp_exception?(state.map_id, entity, defender) ->
+          state.meta.safe_zone and not faction_pvp_exception?(state.map_id, entity, defender) and
+              not duel_pvp_exception ->
             Helpers.send_to_session(
               state.sessions,
               char_id,
@@ -1244,7 +1270,7 @@ defmodule Arena.Map.CombatHandlers do
               %{target_entity | paralyzed: true, buffs: buffs}
 
             spell_def.envenena ->
-              buff = %{type: :poisoned, expires_at: now + duration_ms, next_tick: now + 2000}
+              buff = %{type: :poisoned, expires_at: now + duration_ms, next_tick: now + @poison_tick_interval}
               buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :poisoned))]
               %{target_entity | poisoned: true, buffs: buffs}
 
@@ -1802,7 +1828,24 @@ defmodule Arena.Map.CombatHandlers do
       )
     end
 
+    # VB6: MuereEnReto — notify DuelServer when a dueling player dies
+    if player.in_duel do
+      notify_duel_death(char_id)
+    end
+
     {player, state}
+  end
+
+  # Asynchronously notify DuelServer about a duel participant's death.
+  # Uses spawn to avoid blocking the MapServer process.
+  defp notify_duel_death(char_id) do
+    spawn(fn ->
+      try do
+        Arena.DuelServer.player_died(char_id)
+      catch
+        :exit, _ -> :ok
+      end
+    end)
   end
 
   # Unequip all equipped items. Returns {updated_player, list_of_changed_slot_indices}.
@@ -2039,24 +2082,48 @@ defmodule Arena.Map.CombatHandlers do
   # Regen tick (rest + meditate)
   # ==================================================================
 
-  # VB6 parity:
-  # - Hunger/thirst drain every 10th regen tick (~30s), not every tick.
-  # - At 0 hunger OR 0 thirst: stamina regen blocked, stamina drains by 1/tick.
-  # - HP/mana regen also blocked when starving or dehydrated.
-  # - HP damage only when stamina reaches 0 AND (hunger == 0 OR thirst == 0).
+  # VB6 parity (intervalos.ini + PasarSegundo at 1s + MaybeRunGameEvents at 40ms):
+  #
+  # Hunger/thirst: HambreYSed called from PasarSegundo (1s timer).
+  #   IntervaloSed   = 4000 / 25 = 160 counter ticks at 1s = 160 seconds between drains.
+  #   IntervaloHambre = 4500 / 25 = 180 counter ticks at 1s = 180 seconds between drains.
+  #   Each drain subtracts 10 from the respective stat.
+  #   Regen tick = 3s, so:
+  #     thirst_drain_interval = ceil(160 / 3) = 54 regen ticks (~162s)
+  #     hunger_drain_interval = ceil(180 / 3) = 60 regen ticks (~180s)
+  #   VB6 uses SEPARATE counters for hunger vs thirst; Elixir mirrors that.
+  #
+  # Poison: EfectoVeneno called from MaybeRunGameEvents (40ms timer).
+  #   IntervaloVeneno = 90 counter ticks at 40ms = 3600ms between damage ticks.
+  #
+  # At 0 hunger OR 0 thirst: stamina regen blocked, stamina drains by 1/tick.
+  # HP/mana regen also blocked when starving or dehydrated.
+  # HP damage only when stamina reaches 0 AND (hunger == 0 OR thirst == 0).
   @hunger_thirst_damage 5
-  @hunger_thirst_drain_interval 10
+  # VB6: IntervaloSed = 4000/25 = 160s; at 3s regen tick = 54 ticks
+  @thirst_drain_interval 54
+  # VB6: IntervaloHambre = 4500/25 = 180s; at 3s regen tick = 60 ticks
+  @hunger_drain_interval 60
   # VB6 drains hunger/thirst by 10 per interval (not 1)
   @hunger_thirst_drain_amount 10
   # VB6: penalty (jail) decrements by 1 per minute. Tick = 3s, so 20 ticks = 1 min.
   @penalty_decrement_interval 20
 
   def process_regen_tick(state) do
-    # Increment the map-wide hunger/thirst tick counter.
-    counter = Map.get(state, :hunger_thirst_tick_counter, 0) + 1
-    drain_vitals? = counter >= @hunger_thirst_drain_interval
-    counter = if drain_vitals?, do: 0, else: counter
-    state = Map.put(state, :hunger_thirst_tick_counter, counter)
+    # Separate counters for hunger and thirst (VB6 has AGUACounter / COMCounter).
+    thirst_counter = Map.get(state, :thirst_tick_counter, 0) + 1
+    drain_thirst? = thirst_counter >= @thirst_drain_interval
+    thirst_counter = if drain_thirst?, do: 0, else: thirst_counter
+    state = Map.put(state, :thirst_tick_counter, thirst_counter)
+
+    hunger_counter = Map.get(state, :hunger_tick_counter, 0) + 1
+    drain_hunger? = hunger_counter >= @hunger_drain_interval
+    hunger_counter = if drain_hunger?, do: 0, else: hunger_counter
+    state = Map.put(state, :hunger_tick_counter, hunger_counter)
+
+    # Legacy key: keep hunger_thirst_tick_counter in sync for backward compat
+    # (uses thirst counter as the "primary" counter)
+    state = Map.put(state, :hunger_thirst_tick_counter, thirst_counter)
 
     # VB6: penalty (jail timer) decrements by 1 per minute
     penalty_counter = Map.get(state, :penalty_tick_counter, 0) + 1
@@ -2078,13 +2145,24 @@ defmodule Arena.Map.CombatHandlers do
             entity
           end
 
-        # Drain hunger/thirst only every Nth tick (~30s)
-        {entity, vitals_changed} =
-          if drain_vitals? do
-            drain_hunger_thirst(entity)
+        # Drain thirst and hunger on their own VB6-matched intervals.
+        {entity, thirst_changed} =
+          if drain_thirst? and entity.thirst > 0 do
+            new_thirst = max(entity.thirst - @hunger_thirst_drain_amount, 0)
+            {%{entity | thirst: new_thirst}, new_thirst != entity.thirst}
           else
             {entity, false}
           end
+
+        {entity, hunger_changed} =
+          if drain_hunger? and entity.hunger > 0 do
+            new_hunger = max(entity.hunger - @hunger_thirst_drain_amount, 0)
+            {%{entity | hunger: new_hunger}, new_hunger != entity.hunger}
+          else
+            {entity, false}
+          end
+
+        vitals_changed = thirst_changed or hunger_changed
 
         starving = entity.hunger == 0
         dehydrated = entity.thirst == 0
@@ -2255,11 +2333,42 @@ defmodule Arena.Map.CombatHandlers do
     end)
   end
 
-  defp drain_hunger_thirst(entity) do
-    new_hunger = max(entity.hunger - @hunger_thirst_drain_amount, 0)
-    new_thirst = max(entity.thirst - @hunger_thirst_drain_amount, 0)
-    changed = new_hunger != entity.hunger or new_thirst != entity.thirst
-    {%{entity | hunger: new_hunger, thirst: new_thirst}, changed}
+  # ------------------------------------------------------------------
+  # Elemental combat helpers
+  # ------------------------------------------------------------------
+
+  # VB6: attackerElementMask = ObjData(WeaponObjIndex).ElementalTags OR InventorySlot.ElementalTags
+  # Combines the weapon definition's base tags with per-instance enchantment tags.
+  defp attacker_weapon_elemental_tags(entity) do
+    weapon_id = entity.equipment[:weapon]
+
+    if weapon_id == nil do
+      0
+    else
+      base_tags =
+        case GameData.get_item(weapon_id) do
+          nil -> 0
+          item_def -> item_def.elemental_tags
+        end
+
+      # Find equipped weapon slot's per-instance elemental tags
+      instance_tags =
+        case Enum.find(entity.inventory || [], fn
+               %{item_id: ^weapon_id, equipped: true} -> true
+               _ -> false
+             end) do
+          nil -> 0
+          item -> Map.get(item, :elemental_tags, 0)
+        end
+
+      bor(base_tags, instance_tags)
+    end
+  end
+
+  defp apply_elemental_modifiers_for_weapon(damage, entity, npc_def) do
+    attacker_tags = attacker_weapon_elemental_tags(entity)
+    defender_tags = if npc_def, do: npc_def.elemental_tags, else: 0
+    Combat.apply_elemental_modifiers(damage, attacker_tags, defender_tags)
   end
 
   # Handle pet NPC death: remove from npcs_live and owner's pet_ids

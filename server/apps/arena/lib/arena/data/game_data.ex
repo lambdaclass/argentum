@@ -243,6 +243,36 @@ defmodule Arena.Data.GameData do
     end
   end
 
+  @doc """
+  Get elemental damage matrix value.
+  Rows = attacker element index (1-based), Cols = defender element index (1-based).
+  Returns float multiplier, defaults to 1.0 if not loaded.
+
+  VB6: ElementalMatrixForNpcs(attackerIndex + 1, defenderIndex + 1)
+  """
+  def elemental_matrix(row, col) when is_integer(row) and is_integer(col) do
+    case :ets.lookup(@table, {:elemental_matrix, row, col}) do
+      [{_, value}] -> value
+      [] -> 1.0
+    end
+  end
+
+  @doc "Get the max element tags count (number of supported elements)."
+  def max_element_tags do
+    case :ets.lookup(@table, :max_element_tags) do
+      [{_, value}] -> value
+      [] -> 4
+    end
+  end
+
+  @doc "Get treasure event configuration loaded from Tesoros.dat."
+  def get_treasure_config do
+    case :ets.lookup(@table, :treasure_config) do
+      [{_, config}] -> config
+      [] -> %{treasure_maps: [], treasure_items: [], gift_maps: [], gift_items: [], npc_ids: [], npc_maps: []}
+    end
+  end
+
   @doc "Get faction ranks for :royal_army or :chaos_legion. Returns sorted list of rank maps."
   def faction_ranks(faction) when faction in [:royal_army, :chaos_legion] do
     case :ets.lookup(@table, {:faction_ranks, faction}) do
@@ -279,6 +309,7 @@ defmodule Arena.Data.GameData do
     load_hechizos_dat()
     load_npcs_dat()
     load_faction_data()
+    load_tesoros_dat()
 
     Logger.info("GameData loaded into ETS (#{:ets.info(table, :size)} entries)")
     {:ok, %{}}
@@ -294,6 +325,7 @@ defmodule Arena.Data.GameData do
         load_race_modifiers(sections)
         load_class_stats(sections)
         load_exp_table(sections)
+        load_elemental_matrix(sections)
 
       {:error, reason} ->
         Logger.warning("Could not load Balance.dat: #{inspect(reason)}. Using defaults.")
@@ -491,6 +523,114 @@ defmodule Arena.Data.GameData do
     :ets.insert(@table, {{:faction_ranks, :chaos_legion}, chaos_ranks})
     :ets.insert(@table, {{:faction_rewards, :royal_army}, armada_rewards})
     :ets.insert(@table, {{:faction_rewards, :chaos_legion}, chaos_rewards})
+  end
+
+  # VB6: [ElementalMatrixForNpcs] section in Balance.dat
+  # Row1=1.0 1.5 0.5 1.0
+  # Row2=0.5 1.0 1.0 1.5
+  # ...
+  # MAX_ELEMENT_TAGS rows, each with MAX_ELEMENT_TAGS space-separated floats.
+  @max_element_tags 4
+  defp load_elemental_matrix(sections) do
+    section = Map.get(sections, "ELEMENTALMATRIXFORNPCS", %{})
+    :ets.insert(@table, {:max_element_tags, @max_element_tags})
+
+    for row <- 1..@max_element_tags do
+      key = "row#{row}"
+      row_str = Map.get(section, key, "")
+
+      if row_str != "" do
+        vals =
+          row_str
+          |> String.split(~r/\s+/, trim: true)
+          |> Enum.map(&parse_float/1)
+
+        for {val, col_idx} <- Enum.with_index(vals, 1) do
+          :ets.insert(@table, {{:elemental_matrix, row, col_idx}, val})
+        end
+      else
+        # Default: identity (1.0) on diagonal
+        for col <- 1..@max_element_tags do
+          :ets.insert(@table, {{:elemental_matrix, row, col}, 1.0})
+        end
+      end
+    end
+  end
+
+  defp load_tesoros_dat do
+    path = Path.join(dat_dir(), "Tesoros.dat")
+
+    case IniParser.parse_file(path) do
+      {:ok, sections} ->
+        tesoros = Map.get(sections, "Tesoros", %{})
+        regalos = Map.get(sections, "Regalos", %{})
+        criatura = Map.get(sections, "Criatura", %{})
+
+        treasure_maps = parse_map_list(tesoros)
+        treasure_items = parse_item_list(tesoros, "tiposdetesoros", "tesoro")
+        gift_maps = parse_map_list(regalos)
+        gift_items = parse_item_list(regalos, "tiposderegalos", "regalo")
+        npc_ids = parse_npc_list(criatura)
+        npc_maps = parse_map_list(criatura)
+
+        config = %{
+          treasure_maps: treasure_maps,
+          treasure_items: treasure_items,
+          gift_maps: gift_maps,
+          gift_items: gift_items,
+          npc_ids: npc_ids,
+          npc_maps: npc_maps
+        }
+
+        :ets.insert(@table, {:treasure_config, config})
+
+        Logger.info(
+          "Loaded treasure config: #{length(treasure_maps)} treasure maps, " <>
+            "#{length(treasure_items)} treasure items, #{length(gift_maps)} gift maps, " <>
+            "#{length(gift_items)} gift items, #{length(npc_ids)} NPCs, #{length(npc_maps)} NPC maps"
+        )
+
+      {:error, reason} ->
+        Logger.warning("Could not load Tesoros.dat: #{inspect(reason)}. Treasure events disabled.")
+
+        :ets.insert(
+          @table,
+          {:treasure_config,
+           %{treasure_maps: [], treasure_items: [], gift_maps: [], gift_items: [], npc_ids: [], npc_maps: []}}
+        )
+    end
+  end
+
+  defp parse_map_list(section) do
+    count = parse_int(Map.get(section, "cantidadmapas", "0"))
+
+    for i <- 1..max(count, 0),
+        val = Map.get(section, "mapa#{i}"),
+        val != nil do
+      parse_int(val)
+    end
+  end
+
+  defp parse_item_list(section, count_key, item_prefix) do
+    count = parse_int(Map.get(section, count_key, "0"))
+
+    for i <- 1..max(count, 0),
+        val = Map.get(section, "#{item_prefix}#{i}"),
+        val != nil,
+        [id_str, amount_str] <- [String.split(val, "-", parts: 2)],
+        id_str != "" do
+      {parse_int(id_str), parse_int(amount_str)}
+    end
+  end
+
+  defp parse_npc_list(section) do
+    count = parse_int(Map.get(section, "npcs", "0"))
+
+    for i <- 1..max(count, 0),
+        val = Map.get(section, "npc#{i}"),
+        val != nil do
+      parse_int(val)
+    end
   end
 
   defp parse_int_or_float(str) do

@@ -424,4 +424,183 @@ defmodule Arena.Map.Crafting do
       {:send_raw, Encoder.encode({:send_skills, %{skills: entity.skills}})}
     )
   end
+
+  # ==================================================================
+  # Crafting UI: open window (send recipe list) and craft specific item
+  # ==================================================================
+
+  @doc """
+  Send the crafting window for a given skill to the player.
+  Sends the recipe list followed by the show-form packet.
+  VB6 flow: NPC interaction → server sends item list + show form → client opens window.
+  """
+  def open_crafting_window(state, char_id, skill_atom) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        skill_value = Map.get(entity.skills, skill_atom, 0)
+        items = CraftingRecipes.craftable_item_ids(skill_atom, skill_value)
+
+        send_recipe_list(state, char_id, skill_atom, items)
+        send_show_form(state, char_id, skill_atom)
+        {:noreply, state}
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  @doc """
+  Handle a craft request for a specific item from the crafting UI.
+  The client sends the item_id (result) that the player selected in the window.
+  """
+  def handle_craft_item(state, char_id, skill_atom, item_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        cost = effective_stamina_cost(entity)
+
+        cond do
+          entity.dead ->
+            send_msg(state, char_id, "No puedes trabajar estando muerto.")
+            {:noreply, state}
+
+          entity.stamina < cost ->
+            send_msg(state, char_id, "Estás muy cansado para trabajar.")
+            {:noreply, state}
+
+          true ->
+            do_craft_item(state, char_id, entity, skill_atom, item_id)
+        end
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  defp do_craft_item(state, char_id, entity, skill_atom, item_id) do
+    skill_value = Map.get(entity.skills, skill_atom, 0)
+
+    case CraftingRecipes.find_recipe_by_item(skill_atom, item_id) do
+      nil ->
+        send_msg(state, char_id, "No puedes construir ese objeto.")
+        {:noreply, state}
+
+      recipe ->
+        cond do
+          skill_value < recipe.min_skill ->
+            send_msg(state, char_id, "No tienes suficiente habilidad.")
+            {:noreply, state}
+
+          not has_ingredients_for?(entity.inventory, recipe.ingredients) ->
+            send_msg(state, char_id, "No tienes los materiales necesarios.")
+            {:noreply, state}
+
+          true ->
+            {entity, state} = consume_stamina(state, char_id, entity)
+
+            case consume_ingredients(entity.inventory, recipe.ingredients) do
+              {:ok, new_inventory, consumed_slots} ->
+                case Inventory.add_item(new_inventory, recipe.result_id, recipe.result_amount) do
+                  {:ok, final_inventory, result_slot} ->
+                    entity = try_skill_up(entity, skill_atom, skill_value)
+                    entity = %{entity | inventory: final_inventory}
+                    state = update_player(state, char_id, entity)
+
+                    for slot <- consumed_slots do
+                      Helpers.send_inventory_slot(state.sessions, char_id, final_inventory, slot)
+                    end
+
+                    Helpers.send_inventory_slot(state.sessions, char_id, final_inventory, result_slot)
+                    send_skills(state, char_id, entity)
+
+                    item_def = GameData.get_item(recipe.result_id)
+                    name = if item_def, do: item_def.name, else: "un objeto"
+                    send_msg(state, char_id, "Has creado #{name}.")
+                    {:noreply, state}
+
+                  {:error, :inventory_full} ->
+                    send_msg(state, char_id, "No tienes espacio en el inventario.")
+                    {:noreply, state}
+
+                  {:gold, _} ->
+                    {:noreply, state}
+                end
+
+              {:error, :missing_ingredients} ->
+                send_msg(state, char_id, "No tienes los materiales necesarios.")
+                {:noreply, state}
+            end
+        end
+    end
+  end
+
+  defp has_ingredients_for?(inventory, ingredients) do
+    Enum.all?(ingredients, fn {item_id, amount} ->
+      count = inventory |> Enum.filter(& &1) |> Enum.filter(&(&1.item_id == item_id)) |> Enum.map(& &1.amount) |> Enum.sum()
+      count >= amount
+    end)
+  end
+
+  defp send_recipe_list(state, char_id, :blacksmithing, items) do
+    Helpers.send_to_session(
+      state.sessions,
+      char_id,
+      {:send_raw, Encoder.encode({:blacksmith_weapons, %{items: items}})}
+    )
+  end
+
+  defp send_recipe_list(state, char_id, :carpentry, items) do
+    Helpers.send_to_session(
+      state.sessions,
+      char_id,
+      {:send_raw, Encoder.encode({:carpenter_objects, %{items: items}})}
+    )
+  end
+
+  defp send_recipe_list(state, char_id, :alchemy, items) do
+    Helpers.send_to_session(
+      state.sessions,
+      char_id,
+      {:send_raw, Encoder.encode({:alquimista_objects, %{items: items}})}
+    )
+  end
+
+  defp send_recipe_list(state, char_id, :tailoring, items) do
+    Helpers.send_to_session(
+      state.sessions,
+      char_id,
+      {:send_raw, Encoder.encode({:sastre_objects, %{items: items}})}
+    )
+  end
+
+  defp send_show_form(state, char_id, :blacksmithing) do
+    Helpers.send_to_session(
+      state.sessions,
+      char_id,
+      {:send_raw, Encoder.encode({:show_blacksmith_form, %{}})}
+    )
+  end
+
+  defp send_show_form(state, char_id, :carpentry) do
+    Helpers.send_to_session(
+      state.sessions,
+      char_id,
+      {:send_raw, Encoder.encode({:show_carpenter_form, %{}})}
+    )
+  end
+
+  defp send_show_form(state, char_id, :alchemy) do
+    Helpers.send_to_session(
+      state.sessions,
+      char_id,
+      {:send_raw, Encoder.encode({:show_alchemy_form, %{}})}
+    )
+  end
+
+  defp send_show_form(state, char_id, :tailoring) do
+    Helpers.send_to_session(
+      state.sessions,
+      char_id,
+      {:send_raw, Encoder.encode({:show_tailor_form, %{}})}
+    )
+  end
 end

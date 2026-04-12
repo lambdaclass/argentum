@@ -155,6 +155,12 @@ defmodule Arena.Entity.PlayerEntity do
     # Marriage: VB6 SpouseId (persisted char_id, 0 = not married)
     spouse_id: 0,
     # Transient: char_id of the player we proposed to (VB6: Candidato)
-    marriage_proposal_target: nil
+    marriage_proposal_target: nil,
+
+    # Duel (reto) state — VB6: flags.EnReto, flags.SalaReto, etc.
+    # in_duel: whether player is in an active duel
+    in_duel: false,
+    # duel_opponent_id: char_id of current duel opponent (nil when not dueling)
+    duel_opponent_id: nil
   ]
 end

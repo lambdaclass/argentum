@@ -167,5 +167,49 @@ defmodule Arena.Combat do
     {max(min_hit, 1), max(max_hit, 2)}
   end
 
+  import Bitwise
+
+  @doc """
+  Apply elemental damage modifiers (VB6: CalculateElementalTagsModifiers).
+
+  Both attacker_tags and defender_tags are integer bitmasks where bit 0 = Fire,
+  bit 1 = Water, bit 2 = Earth, bit 3 = Wind.  When both are non-zero, every
+  set attacker-element / defender-element pair multiplies the accumulated damage
+  by the corresponding entry in `ElementalMatrixForNpcs`.
+
+  Returns the (possibly modified) damage as an integer >= 0.
+  Inert (returns damage unchanged) when either mask is 0.
+  """
+  def apply_elemental_modifiers(damage, attacker_tags, defender_tags)
+      when attacker_tags == 0 or defender_tags == 0 do
+    damage
+  end
+
+  def apply_elemental_modifiers(damage, attacker_tags, defender_tags) do
+    max_tags = GameData.max_element_tags()
+
+    result =
+      Enum.reduce(0..(max_tags - 1), damage / 1, fn atk_idx, acc ->
+        atk_bit = 1 <<< atk_idx
+
+        if (attacker_tags &&& atk_bit) != 0 do
+          Enum.reduce(0..(max_tags - 1), acc, fn def_idx, inner_acc ->
+            def_bit = 1 <<< def_idx
+
+            if (defender_tags &&& def_bit) != 0 do
+              # Matrix is 1-based
+              inner_acc * GameData.elemental_matrix(atk_idx + 1, def_idx + 1)
+            else
+              inner_acc
+            end
+          end)
+        else
+          acc
+        end
+      end)
+
+    max(round(result), 0)
+  end
+
   defp clamp(val, min_val, max_val), do: min(max(val, min_val), max_val)
 end

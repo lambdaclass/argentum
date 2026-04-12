@@ -412,11 +412,26 @@ defmodule AoTcpGateway.SessionLogic do
                         {state, [{:console_msg, %{message: "Denuncia registrada.", font_index: 0}}]}
 
                       :not_report_command ->
-                        if String.upcase(String.trim(message)) == "/HOGAR" do
-                          handle_hogar(state)
-                        else
-                          Arena.Map.MapServer.chat(state.map_id, state.character_id, message)
-                          {state, []}
+                        case parse_duel_command(message) do
+                          {:retar, target_name, bet} ->
+                            handle_duel_challenge(state, target_name, bet)
+
+                          {:aceptar, challenger_name} ->
+                            handle_duel_accept(state, challenger_name)
+
+                          :cancelar_reto ->
+                            handle_duel_cancel(state)
+
+                          :abandonar_reto ->
+                            handle_duel_abandon(state)
+
+                          :not_duel_command ->
+                            if String.upcase(String.trim(message)) == "/HOGAR" do
+                              handle_hogar(state)
+                            else
+                              Arena.Map.MapServer.chat(state.map_id, state.character_id, message)
+                              {state, []}
+                            end
                         end
                     end
                 end
@@ -622,6 +637,91 @@ defmodule AoTcpGateway.SessionLogic do
   def handle_command(state, {:bank_end, _}) when state.character_id != nil do
     Arena.Map.MapServer.bank_end(state.map_id, state.character_id)
     {%{state | in_bank: false}, []}
+  end
+
+  # ---- Auction ----
+
+  def handle_command(state, {:oferta_inicial, %{amount: amount}}) when state.character_id != nil do
+    case Arena.Auction.set_initial_offer(state.character_id, amount) do
+      :ok ->
+        {state, []}
+
+      {:error, :not_initiating} ->
+        {state,
+         [{:console_msg,
+           %{message: "Primero tenes que hacer click sobre el subastador.", font_index: 0}}]}
+
+      {:error, :not_seller} ->
+        {state,
+         [{:console_msg,
+           %{
+             message: "Oye amigo, tu no podes decirme cual es la oferta inicial.",
+             font_index: 0
+           }}]}
+
+      {:error, :auction_in_progress} ->
+        {state,
+         [{:console_msg, %{message: "Ya hay una subasta en curso.", font_index: 0}}]}
+
+      {:error, _reason} ->
+        {state,
+         [{:console_msg, %{message: "No se pudo iniciar la subasta.", font_index: 0}}]}
+    end
+  end
+
+  def handle_command(state, {:oferta_de_subasta, %{amount: amount}})
+      when state.character_id != nil do
+    case Arena.Auction.place_bid(state.character_id, amount) do
+      {:ok, _result} ->
+        {state, []}
+
+      {:error, :no_auction} ->
+        {state,
+         [{:console_msg, %{message: "No hay ninguna subasta en curso.", font_index: 0}}]}
+
+      {:error, :self_bid} ->
+        {state,
+         [{:console_msg,
+           %{message: "No podes auto ofertar en tus subastas.", font_index: 0}}]}
+
+      {:error, :bid_too_low, _min} ->
+        {state,
+         [{:console_msg,
+           %{
+             message:
+               "Debe haber almenos una diferencia de 100 monedas a la ultima oferta!",
+             font_index: 0
+           }}]}
+
+      {:error, :bid_too_low} ->
+        {state,
+         [{:console_msg,
+           %{
+             message:
+               "Debe haber almenos una diferencia de 100 monedas a la ultima oferta!",
+             font_index: 0
+           }}]}
+
+      {:error, _reason} ->
+        {state,
+         [{:console_msg, %{message: "No se pudo realizar la oferta.", font_index: 0}}]}
+    end
+  end
+
+  def handle_command(state, {:subasta_info, _}) when state.character_id != nil do
+    case Arena.Auction.get_info(state.character_id) do
+      {:ok, info} ->
+        msgs = build_auction_info_messages(info)
+        {state, msgs}
+
+      {:error, :no_auction} ->
+        {state,
+         [{:console_msg,
+           %{
+             message: "No hay ninguna subasta activa en este momento.",
+             font_index: 0
+           }}]}
+    end
   end
 
   def handle_command(state, {:yell, %{message: message}}) when state.character_id != nil do
@@ -1119,15 +1219,27 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
-  # CraftBlacksmith (ID 100) — old UI crafting, route to work system
-  def handle_command(state, {:craft_blacksmith, _}) when state.character_id != nil do
-    Arena.Map.MapServer.train_skill(state.map_id, state.character_id, 20)  # 20 = blacksmithing index
+  # CraftBlacksmith (ID 100) — old UI crafting, craft specific item
+  def handle_command(state, {:craft_blacksmith, %{item: item}}) when state.character_id != nil do
+    Arena.Map.MapServer.craft_item(state.map_id, state.character_id, :blacksmithing, item)
     {state, []}
   end
 
-  # CraftCarpenter (ID 1) — old UI crafting, route to work system
-  def handle_command(state, {:craft_carpenter, _}) when state.character_id != nil do
-    Arena.Map.MapServer.train_skill(state.map_id, state.character_id, 21)  # 21 = carpentry index
+  # CraftCarpenter (ID 1) — old UI crafting, craft specific item
+  def handle_command(state, {:craft_carpenter, %{item: item}}) when state.character_id != nil do
+    Arena.Map.MapServer.craft_item(state.map_id, state.character_id, :carpentry, item)
+    {state, []}
+  end
+
+  # CraftAlchemy (ID 228) — old UI crafting, craft specific item
+  def handle_command(state, {:craft_alchemy, %{item: item}}) when state.character_id != nil do
+    Arena.Map.MapServer.craft_item(state.map_id, state.character_id, :alchemy, item)
+    {state, []}
+  end
+
+  # CraftTailor (ID 230) — old UI crafting, craft specific item
+  def handle_command(state, {:craft_tailor, %{item: item}}) when state.character_id != nil do
+    Arena.Map.MapServer.craft_item(state.map_id, state.character_id, :tailoring, item)
     {state, []}
   end
 
@@ -1410,6 +1522,53 @@ defmodule AoTcpGateway.SessionLogic do
   def handle_command(state, {command_type, _}) do
     Logger.debug("Unhandled command: #{command_type}")
     {state, []}
+  end
+
+  # ---- Auction info helper (must be after all handle_command clauses) ----
+
+  defp build_auction_info_messages(info) do
+    seller_name =
+      case AoSession.OnlineDirectory.lookup_by_id(info.seller_id) do
+        {:ok, s} -> s.name
+        _ -> "?"
+      end
+
+    base = [
+      {:console_msg, %{message: "Subastador: #{seller_name}", font_index: 0}},
+      {:console_msg,
+       %{message: "Objeto: item ##{info.item_id} (x#{info.item_amount})", font_index: 0}}
+    ]
+
+    offer_msgs =
+      if info.had_bid do
+        min_next = info.best_offer + 100
+
+        [
+          {:console_msg, %{message: "Mejor oferta: #{info.best_offer}", font_index: 0}},
+          {:console_msg,
+           %{
+             message: "Podes realizar una oferta escribiendo /OFERTAR #{min_next}",
+             font_index: 0
+           }}
+        ]
+      else
+        min_next = info.initial_offer + 100
+
+        [
+          {:console_msg, %{message: "Oferta inicial: #{info.initial_offer}", font_index: 0}},
+          {:console_msg,
+           %{
+             message: "Podes realizar una oferta escribiendo /OFERTAR #{min_next}",
+             font_index: 0
+           }}
+        ]
+      end
+
+    time_msg =
+      {:console_msg,
+       %{message: "Tiempo restante de subasta: #{info.time_remaining}s", font_index: 0}}
+
+    base ++ offer_msgs ++ [time_msg]
   end
 
   # ---- /HOGAR — VB6 home travel (dead-only, delayed with timer bar) ----
@@ -1886,6 +2045,249 @@ defmodule AoTcpGateway.SessionLogic do
           _ -> :not_report_command
         end
       true -> :not_report_command
+    end
+  end
+
+  # ── Duel (reto) command parser ─────────────────────────────────────────
+
+  @doc false
+  def parse_duel_command(message) do
+    upper = String.upcase(String.trim(message))
+
+    cond do
+      String.starts_with?(upper, "/RETAR ") ->
+        rest = String.trim(String.slice(message, 7..-1//1))
+
+        case String.split(rest, ~r/\s+/, parts: 2) do
+          [target_name, bet_str] ->
+            case Integer.parse(bet_str) do
+              {bet, _} when bet > 0 -> {:retar, target_name, bet}
+              _ -> :not_duel_command
+            end
+
+          _ ->
+            :not_duel_command
+        end
+
+      String.starts_with?(upper, "/ACEPTAR ") ->
+        name = String.trim(String.slice(message, 9..-1//1))
+        if String.length(name) > 0, do: {:aceptar, name}, else: :not_duel_command
+
+      upper == "/CANCELAR" ->
+        :cancelar_reto
+
+      upper == "/ABANDONAR" ->
+        :abandonar_reto
+
+      true ->
+        :not_duel_command
+    end
+  end
+
+  defp handle_duel_challenge(state, target_name, bet) do
+    case AoSession.OnlineDirectory.lookup_by_name(target_name) do
+      {:ok, target_id, _info} ->
+        case Arena.DuelServer.create_challenge(state.character_id, target_id, bet) do
+          :ok ->
+            # Notify target
+            notify_duel_target(target_id, state.character_id, bet)
+            send_console(state, "Has enviado una solicitud de reto a #{target_name}. Apuesta: #{bet} monedas de oro.")
+            send_console(state, "Escribe /CANCELAR para anular la solicitud.")
+
+          {:error, :cannot_challenge_self} ->
+            send_console(state, "No puedes retarte a ti mismo.")
+
+          {:error, :invalid_bet} ->
+            send_console(state, "La apuesta debe ser mayor a 0.")
+
+          {:error, :already_in_duel} ->
+            send_console(state, "Ya te encuentras en un reto.")
+
+          {:error, :target_in_duel} ->
+            send_console(state, "El jugador ya se encuentra en un reto.")
+
+          {:error, :already_has_challenge} ->
+            send_console(state, "Ya tienes una solicitud de reto pendiente. Escribe /CANCELAR para cancelarla.")
+
+          {:error, _} ->
+            send_console(state, "No se pudo crear el reto.")
+        end
+
+        {state, []}
+
+      :not_found ->
+        send_console(state, "Jugador no encontrado.")
+        {state, []}
+    end
+  end
+
+  defp handle_duel_accept(state, challenger_name) do
+    case Arena.DuelServer.accept_challenge(state.character_id, challenger_name) do
+      {:ok, duel} ->
+        # Notify both players and set duel flags on their entities
+        start_duel_on_map(state, duel)
+        {state, []}
+
+      {:error, :no_pending_challenge} ->
+        send_console(state, "No tienes ninguna invitacion de reto pendiente.")
+        {state, []}
+
+      {:error, :already_in_duel} ->
+        send_console(state, "Ya te encuentras en un reto.")
+        {state, []}
+
+      {:error, _} ->
+        send_console(state, "No se pudo aceptar el reto.")
+        {state, []}
+    end
+  end
+
+  defp handle_duel_cancel(state) do
+    case Arena.DuelServer.cancel_challenge(state.character_id) do
+      :ok ->
+        send_console(state, "Has cancelado la solicitud de reto.")
+
+      {:error, :no_challenge} ->
+        send_console(state, "No tienes ninguna solicitud de reto.")
+    end
+
+    {state, []}
+  end
+
+  defp handle_duel_abandon(state) do
+    case Arena.DuelServer.abandon_duel(state.character_id) do
+      {:ok, result} ->
+        handle_duel_result(state, result)
+
+      {:error, :not_in_duel} ->
+        send_console(state, "No te encuentras en un reto.")
+    end
+
+    {state, []}
+  end
+
+  defp notify_duel_target(target_id, challenger_id, bet) do
+    challenger_name =
+      case AoSession.OnlineDirectory.lookup_by_id(challenger_id) do
+        {:ok, info} -> info.name
+        _ -> "Unknown"
+      end
+
+    msg =
+      AoProtocol.Server.Encoder.encode(
+        {:console_msg,
+         %{
+           message:
+             "#{challenger_name} te invita a un reto. Apuesta: #{bet} monedas de oro. " <>
+               "Escribe /ACEPTAR #{challenger_name} para participar.",
+           font_index: 0
+         }}
+      )
+
+    case AoSession.OnlineDirectory.lookup_by_id(target_id) do
+      {:ok, info} -> send(info.session_pid, {:send_raw, msg})
+      _ -> :ok
+    end
+  end
+
+  defp start_duel_on_map(state, duel) do
+    # Set duel flags on both players' entities via their map servers
+    # Player A
+    set_duel_flags(duel.player_a, duel.player_b)
+    # Player B
+    set_duel_flags(duel.player_b, duel.player_a)
+
+    # Notify both
+    player_a_name = resolve_char_name(duel.player_a)
+    player_b_name = resolve_char_name(duel.player_b)
+
+    notify_duel_start(duel.player_a, player_b_name, duel.bet)
+    notify_duel_start(duel.player_b, player_a_name, duel.bet)
+    _ = state
+  end
+
+  defp set_duel_flags(char_id, opponent_id) do
+    case AoSession.OnlineDirectory.lookup_by_id(char_id) do
+      {:ok, info} ->
+        Arena.Map.MapServer.set_duel_state(info.map_id, char_id, true, opponent_id)
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp clear_duel_flags(char_id) do
+    case AoSession.OnlineDirectory.lookup_by_id(char_id) do
+      {:ok, info} ->
+        Arena.Map.MapServer.set_duel_state(info.map_id, char_id, false, nil)
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp notify_duel_start(char_id, opponent_name, bet) do
+    msg =
+      AoProtocol.Server.Encoder.encode(
+        {:console_msg,
+         %{
+           message:
+             "Ha comenzado el reto contra #{opponent_name}! Apuesta: #{bet} monedas de oro. " <>
+               "Escribe /ABANDONAR para admitir la derrota.",
+           font_index: 5
+         }}
+      )
+
+    case AoSession.OnlineDirectory.lookup_by_id(char_id) do
+      {:ok, info} -> send(info.session_pid, {:send_raw, msg})
+      _ -> :ok
+    end
+  end
+
+  defp handle_duel_result(_state, %{type: :winner, winner: winner_id, loser: loser_id, prize: prize}) do
+    winner_name = resolve_char_name(winner_id)
+    loser_name = resolve_char_name(loser_id)
+
+    # Award gold to winner via map server
+    case AoSession.OnlineDirectory.lookup_by_id(winner_id) do
+      {:ok, info} ->
+        Arena.Map.MapServer.modify_gold(info.map_id, winner_id, prize)
+
+      _ ->
+        :ok
+    end
+
+    # Notify winner
+    notify_duel_end(winner_id, "Has ganado el reto contra #{loser_name}! Ganas #{prize} monedas de oro.")
+    # Notify loser
+    notify_duel_end(loser_id, "Has perdido el reto contra #{winner_name}.")
+    # Clear duel flags
+    clear_duel_flags(winner_id)
+    clear_duel_flags(loser_id)
+  end
+
+  defp handle_duel_result(_state, %{type: :tie, player_a: a, player_b: b, refund: refund}) do
+    # Refund both
+    for id <- [a, b] do
+      case AoSession.OnlineDirectory.lookup_by_id(id) do
+        {:ok, info} -> Arena.Map.MapServer.modify_gold(info.map_id, id, refund)
+        _ -> :ok
+      end
+
+      notify_duel_end(id, "El reto ha terminado en empate. Se devuelven #{refund} monedas de oro.")
+      clear_duel_flags(id)
+    end
+  end
+
+  defp notify_duel_end(char_id, message) do
+    msg =
+      AoProtocol.Server.Encoder.encode(
+        {:console_msg, %{message: message, font_index: 5}}
+      )
+
+    case AoSession.OnlineDirectory.lookup_by_id(char_id) do
+      {:ok, info} -> send(info.session_pid, {:send_raw, msg})
+      _ -> :ok
     end
   end
 

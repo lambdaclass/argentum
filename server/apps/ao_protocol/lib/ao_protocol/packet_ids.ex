@@ -69,6 +69,17 @@ defmodule AoProtocol.PacketIds do
     def bank_extract_gold, do: 70
     def bank_deposit_gold, do: 71
 
+    # Crafting
+    def craft_carpenter, do: 1
+    def craft_blacksmith, do: 100
+    def craft_alchemy, do: 228
+    def craft_tailor, do: 230
+
+    # Auction (VB6: eOfertaInicial=213, eOfertaDeSubasta=214, eSubastaInfo=240)
+    def oferta_inicial, do: 213
+    def oferta_de_subasta, do: 214
+    def subasta_info, do: 240
+
     # Other
     def quit, do: 39
     def rest, do: 47
@@ -196,6 +207,18 @@ defmodule AoProtocol.PacketIds do
     def bank_end, do: 9
     def change_bank_slot, do: 65
     def update_bank_gold, do: 175
+
+    # Crafting windows / recipe lists
+    def show_blacksmith_form, do: 14
+    def show_carpenter_form, do: 15
+    def blacksmith_weapons, do: 68
+    def blacksmith_armors, do: 69
+    def blacksmith_extra_objects, do: 70
+    def carpenter_objects, do: 71
+    def alquimista_objects, do: 130
+    def show_alchemy_form, do: 131
+    def sastre_objects, do: 132
+    def show_tailor_form, do: 133
 
     # session_token (200) — WS-only extension, not in VB6 protocol.
     # Sent by WsHandler after login so the web client can reconnect.

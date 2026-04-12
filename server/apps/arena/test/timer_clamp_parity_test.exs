@@ -404,11 +404,12 @@ defmodule Arena.TimerClampParityTest do
   end
 
   # ═══════════════════════════════════════════════════════════════════════
-  # 6. Hunger/thirst drain — VB6: 10 per drain, every 10th regen tick
+  # 6. Hunger/thirst drain — VB6: 10 per drain
+  #    Thirst: every 54 regen ticks (~162s), Hunger: every 60 ticks (~180s)
   # ═══════════════════════════════════════════════════════════════════════
 
-  describe "hunger/thirst drain (VB6: 10 per 10 ticks)" do
-    test "drain triggers on 10th tick" do
+  describe "hunger/thirst drain (VB6: thirst@54 ticks, hunger@60 ticks)" do
+    test "thirst drains on 54th tick, hunger drains on 60th tick" do
       entity = %PlayerEntity{char_id: 10, hunger: 100, thirst: 100}
 
       state = %{
@@ -417,7 +418,8 @@ defmodule Arena.TimerClampParityTest do
         npcs_live: %{},
         meta: %{safe_zone: false},
         visibility_mode: :global,
-        hunger_thirst_tick_counter: 9,
+        thirst_tick_counter: 53,
+        hunger_tick_counter: 59,
         penalty_tick_counter: 0
       }
 
@@ -436,7 +438,8 @@ defmodule Arena.TimerClampParityTest do
         npcs_live: %{},
         meta: %{safe_zone: false},
         visibility_mode: :global,
-        hunger_thirst_tick_counter: 0,
+        thirst_tick_counter: 0,
+        hunger_tick_counter: 0,
         penalty_tick_counter: 0
       }
 
@@ -446,7 +449,7 @@ defmodule Arena.TimerClampParityTest do
       assert p.thirst == 100
     end
 
-    test "100 ticks fully deplete hunger and thirst" do
+    test "540 thirst ticks and 600 hunger ticks fully deplete" do
       entity = %PlayerEntity{char_id: 12, hunger: 100, thirst: 100}
 
       init = %{
@@ -455,11 +458,14 @@ defmodule Arena.TimerClampParityTest do
         npcs_live: %{},
         meta: %{safe_zone: false},
         visibility_mode: :global,
-        hunger_thirst_tick_counter: 0,
+        thirst_tick_counter: 0,
+        hunger_tick_counter: 0,
         penalty_tick_counter: 0
       }
 
-      final = Enum.reduce(0..99, init, fn _i, st -> CombatHandlers.process_regen_tick(st) end)
+      # 600 ticks: thirst drains 11 times (floor(600/54)=11 → 110 drained → clamped to 0)
+      # hunger drains 10 times (floor(600/60)=10 → 100 drained → exactly 0)
+      final = Enum.reduce(1..600, init, fn _i, st -> CombatHandlers.process_regen_tick(st) end)
       p = final.players[12]
       assert p.hunger == 0
       assert p.thirst == 0
@@ -474,7 +480,8 @@ defmodule Arena.TimerClampParityTest do
         npcs_live: %{},
         meta: %{safe_zone: false},
         visibility_mode: :global,
-        hunger_thirst_tick_counter: 9,
+        thirst_tick_counter: 53,
+        hunger_tick_counter: 59,
         penalty_tick_counter: 0
       }
 

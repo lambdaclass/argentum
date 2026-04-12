@@ -23,8 +23,8 @@ defmodule Arena.HungerThirstTest do
     :ok
   end
 
-  # Counter at 9 so the next process_regen_tick triggers hunger/thirst drain
-  # (drain happens every @hunger_thirst_drain_interval = 10 ticks)
+  # VB6: IntervaloSed = 54 regen ticks, IntervaloHambre = 60 regen ticks.
+  # Set counters to interval-1 so the next tick triggers the drain.
   defp make_state(players, opts \\ []) do
     %{
       players: players,
@@ -32,7 +32,8 @@ defmodule Arena.HungerThirstTest do
       npcs_live: %{},
       meta: %{safe_zone: false},
       visibility_mode: :global,
-      hunger_thirst_tick_counter: Keyword.get(opts, :counter, 9)
+      thirst_tick_counter: Keyword.get(opts, :thirst_counter, 53),
+      hunger_tick_counter: Keyword.get(opts, :hunger_counter, 59)
     }
   end
 

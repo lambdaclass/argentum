@@ -51,7 +51,8 @@ defmodule Arena.Data.SpellDef do
     requirement_mask: 0,
     require_weapon_type: 0,
     target_effect_type: 0,
-    remove_invisibility: false
+    remove_invisibility: false,
+    is_elemental_tags_only: false
   ]
 
   @doc "Build a SpellDef from a parsed INI section (downcased keys)."
@@ -102,7 +103,8 @@ defmodule Arena.Data.SpellDef do
       requirement_mask: parse_int(section["req"]),
       require_weapon_type: parse_int(section["requireweapontype"]),
       target_effect_type: parse_int(section["targeteffecttype"]),
-      remove_invisibility: band(parse_int(section["effects"]), 32768) != 0
+      remove_invisibility: band(parse_int(section["effects"]), 32768) != 0,
+      is_elemental_tags_only: parse_int(section["iselementaltagsonly"]) > 0
     }
   end
 

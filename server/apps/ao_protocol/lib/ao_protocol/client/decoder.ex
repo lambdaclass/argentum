@@ -697,6 +697,20 @@ defmodule AoProtocol.Client.Decoder do
     end
   end
 
+  # CraftAlquimista (ID 228) — item(I16)
+  defp decode_packet(228, rest) do
+    with {:ok, item, rest} <- Reader.read_int16(rest) do
+      {:ok, {:craft_alchemy, %{item: item}}, rest}
+    end
+  end
+
+  # CraftSastre (ID 230) — item(I16)
+  defp decode_packet(230, rest) do
+    with {:ok, item, rest} <- Reader.read_int16(rest) do
+      {:ok, {:craft_tailor, %{item: item}}, rest}
+    end
+  end
+
   # ---- GM packets (core subset) ----
 
   # GMMessage (ID 101) — message(S8)
@@ -847,6 +861,25 @@ defmodule AoProtocol.Client.Decoder do
       {:ok, {:question_gm, %{consulta: consulta, tipo: tipo}}, rest}
     end
   end
+
+  # --- Auction packets ---
+
+  # eOfertaInicial (ID 213) — Int32 amount
+  defp decode_packet(213, rest) do
+    with {:ok, amount, rest} <- Reader.read_int32(rest) do
+      {:ok, {:oferta_inicial, %{amount: amount}}, rest}
+    end
+  end
+
+  # eOfertaDeSubasta (ID 214) — Int32 amount
+  defp decode_packet(214, rest) do
+    with {:ok, amount, rest} <- Reader.read_int32(rest) do
+      {:ok, {:oferta_de_subasta, %{amount: amount}}, rest}
+    end
+  end
+
+  # eSubastaInfo (ID 240) — no payload
+  defp decode_packet(240, rest), do: {:ok, {:subasta_info, %{}}, rest}
 
   # Unknown packet
   defp decode_packet(id, _rest), do: {:error, {:unknown_packet, id}}

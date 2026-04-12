@@ -43,6 +43,9 @@ defmodule Arena.Map.InventoryHandlers do
 
                 Helpers.broadcast_object_delete(state, entity.x, entity.y)
 
+                # VB6: Check if this pickup completes a treasure event
+                check_treasure_event(state.map_id, entity.x, entity.y, entity.name)
+
                 {:reply, :ok, state}
 
               {:ok, new_inventory, slot} ->
@@ -53,6 +56,9 @@ defmodule Arena.Map.InventoryHandlers do
 
                 Helpers.send_inventory_slot(state.sessions, char_id, new_inventory, slot)
                 Helpers.broadcast_object_delete(state, entity.x, entity.y)
+
+                # VB6: Check if this pickup completes a treasure event
+                check_treasure_event(state.map_id, entity.x, entity.y, entity.name)
 
                 {:reply, :ok, state}
 
@@ -442,5 +448,17 @@ defmodule Arena.Map.InventoryHandlers do
     suffix = if gender == "female" or gender == :female, do: "_f", else: "_m"
     race_str = to_string(race)
     String.to_atom(race_str <> suffix)
+  end
+
+  # VB6: After picking up an item, check if it completes a treasure event.
+  # This is a fire-and-forget check; errors are silently ignored.
+  defp check_treasure_event(map_id, x, y, player_name) do
+    try do
+      Arena.TreasureEvent.check_pickup(map_id, x, y, player_name)
+    rescue
+      _ -> :ok
+    catch
+      :exit, _ -> :ok
+    end
   end
 end

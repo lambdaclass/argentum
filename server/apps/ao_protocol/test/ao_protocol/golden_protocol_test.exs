@@ -1563,4 +1563,106 @@ defmodule AoProtocol.GoldenProtocolTest do
       assert {:ok, {:talk, %{message: "Hi"}}, <<>>} = Decoder.decode(remaining)
     end
   end
+
+  # ============================================================
+  # Crafting UI packets
+  # ============================================================
+
+  describe "crafting decoder golden bytes" do
+    test "CraftAlquimista (228) decodes item I16" do
+      buffer = <<228::little-signed-16, 37::little-signed-16>>
+      assert {:ok, {:craft_alchemy, %{item: 37}}, <<>>} = Decoder.decode(buffer)
+    end
+
+    test "CraftSastre (230) decodes item I16" do
+      buffer = <<230::little-signed-16, 3578::little-signed-16>>
+      assert {:ok, {:craft_tailor, %{item: 3578}}, <<>>} = Decoder.decode(buffer)
+    end
+
+    test "CraftBlacksmith (100) decodes item I16" do
+      buffer = <<100::little-signed-16, 386::little-signed-16>>
+      assert {:ok, {:craft_blacksmith, %{item: 386}}, <<>>} = Decoder.decode(buffer)
+    end
+
+    test "CraftCarpenter (1) decodes item I16 + amount I32" do
+      buffer = <<1::little-signed-16, 480::little-signed-16, 5::little-signed-32>>
+      assert {:ok, {:craft_carpenter, %{item: 480, amount: 5}}, <<>>} = Decoder.decode(buffer)
+    end
+  end
+
+  describe "crafting encoder golden bytes" do
+    test "show_blacksmith_form encodes as no-payload ID 14" do
+      result = Encoder.encode({:show_blacksmith_form, %{}})
+      assert result == <<14::little-signed-16>>
+    end
+
+    test "show_carpenter_form encodes as no-payload ID 15" do
+      result = Encoder.encode({:show_carpenter_form, %{}})
+      assert result == <<15::little-signed-16>>
+    end
+
+    test "show_alchemy_form encodes as no-payload ID 131" do
+      result = Encoder.encode({:show_alchemy_form, %{}})
+      assert result == <<131::little-signed-16>>
+    end
+
+    test "show_tailor_form encodes as no-payload ID 133" do
+      result = Encoder.encode({:show_tailor_form, %{}})
+      assert result == <<133::little-signed-16>>
+    end
+
+    test "blacksmith_weapons encodes count(I16) + items(I16 each)" do
+      result = Encoder.encode({:blacksmith_weapons, %{items: [386, 15]}})
+      expected =
+        <<68::little-signed-16>> <>
+        <<2::little-signed-16>> <>
+        <<386::little-signed-16>> <>
+        <<15::little-signed-16>>
+      assert result == expected
+    end
+
+    test "blacksmith_armors encodes count(I16) + items(I16 each)" do
+      result = Encoder.encode({:blacksmith_armors, %{items: [1912]}})
+      expected =
+        <<69::little-signed-16>> <>
+        <<1::little-signed-16>> <>
+        <<1912::little-signed-16>>
+      assert result == expected
+    end
+
+    test "carpenter_objects encodes count(I8) + items(I16 each)" do
+      result = Encoder.encode({:carpenter_objects, %{items: [480, 163]}})
+      expected =
+        <<71::little-signed-16>> <>
+        <<2::unsigned-integer-8>> <>
+        <<480::little-signed-16>> <>
+        <<163::little-signed-16>>
+      assert result == expected
+    end
+
+    test "alquimista_objects encodes count(I16) + items(I16 each)" do
+      result = Encoder.encode({:alquimista_objects, %{items: [37]}})
+      expected =
+        <<130::little-signed-16>> <>
+        <<1::little-signed-16>> <>
+        <<37::little-signed-16>>
+      assert result == expected
+    end
+
+    test "sastre_objects encodes count(I16) + items(I16 each)" do
+      result = Encoder.encode({:sastre_objects, %{items: [3578, 32]}})
+      expected =
+        <<132::little-signed-16>> <>
+        <<2::little-signed-16>> <>
+        <<3578::little-signed-16>> <>
+        <<32::little-signed-16>>
+      assert result == expected
+    end
+
+    test "empty item list encodes zero count" do
+      result = Encoder.encode({:blacksmith_weapons, %{items: []}})
+      expected = <<68::little-signed-16>> <> <<0::little-signed-16>>
+      assert result == expected
+    end
+  end
 end

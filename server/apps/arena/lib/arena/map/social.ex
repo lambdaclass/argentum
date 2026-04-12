@@ -13,6 +13,7 @@ defmodule Arena.Map.Social do
   @npc_type_banquero 4
   @npc_type_enlistador 5
   @npc_type_resucitador_newbie 9
+  @npc_type_subastador 16
   @npc_type_entrega_pesca 20
   @yell_range_x Application.compile_env(:arena, :aoi_range_x, 11) * 2
   @yell_range_y Application.compile_env(:arena, :aoi_range_y, 9) * 2
@@ -1378,6 +1379,10 @@ defmodule Arena.Map.Social do
           npc_def.npc_type == @npc_type_entrega_pesca ->
             handle_fish_delivery(state, char_id, entity, npc_def)
 
+          # Subastador — auction NPC (VB6: npc_type 16)
+          npc_def.npc_type == @npc_type_subastador ->
+            handle_subastador_click(state, char_id, entity, npc_def)
+
           # Default: show NPC name
           true ->
             Helpers.send_to_session(
@@ -1815,6 +1820,62 @@ defmodule Arena.Map.Social do
         msg(state, char_id, "Has entregado peces. Puntos: +#{total_points}, Oro: +#{total_gold}.")
         {:noreply, state}
       end
+    end
+  end
+
+  # ==================================================================
+  # Subastador -- Auction NPC (VB6: npc_type 16)
+  # ==================================================================
+
+  defp handle_subastador_click(state, char_id, entity, npc_def) do
+    # VB6: The player must drop an item at their feet, then click the NPC.
+    # The item on the ground at the player's position is picked up for auction.
+    tile_key = {entity.x, entity.y}
+    item_on_ground = Map.get(state.ground_items || %{}, tile_key)
+
+    case Arena.Auction.initiate(char_id, item_on_ground) do
+      :ok ->
+        # Remove item from ground if present
+        new_ground = Map.delete(state.ground_items || %{}, tile_key)
+        state = %{state | ground_items: new_ground}
+
+        # Notify clients the object was picked up
+        Helpers.broadcast_object_delete(state, entity.x, entity.y)
+
+        msg(
+          state,
+          char_id,
+          "#{npc_def.name} dice: Escribe /OFERTAINICIAL (cantidad) para comenzar la subasta. Tienes 15 segundos!"
+        )
+
+        {:noreply, state}
+
+      {:error, :auction_in_progress} ->
+        msg(
+          state,
+          char_id,
+          "#{npc_def.name} dice: Oye amigo, espera tu turno, estoy subastando en este momento."
+        )
+
+        {:noreply, state}
+
+      {:error, :already_initiating} ->
+        msg(
+          state,
+          char_id,
+          "#{npc_def.name} dice: Ya estas preparando una subasta. Escribe /OFERTAINICIAL (cantidad)."
+        )
+
+        {:noreply, state}
+
+      {:error, :no_item} ->
+        msg(
+          state,
+          char_id,
+          "#{npc_def.name} dice: Pues acaso el aire esta en venta ahora? Bribon!"
+        )
+
+        {:noreply, state}
     end
   end
 

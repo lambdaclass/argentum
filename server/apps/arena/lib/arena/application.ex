@@ -12,8 +12,11 @@ defmodule Arena.Application do
       {Phoenix.PubSub, name: Arena.PubSub},
       Arena.Data.GameData,
       Arena.WorldWeather,
+      Arena.TreasureEvent,
       Arena.PartyServer,
       Arena.GuildServer,
+      Arena.DuelServer,
+      Arena.Auction,
       Supervisor.child_spec(Arena.Map.MapSupervisor, shutdown: 30_000),
       ArenaWeb.Endpoint
     ]

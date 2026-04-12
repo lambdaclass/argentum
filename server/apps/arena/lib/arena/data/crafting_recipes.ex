@@ -5,7 +5,13 @@ defmodule Arena.Data.CraftingRecipes do
   Gathering skills produce items from the environment (tile/water).
   Production skills consume ingredients near a workstation NPC.
 
-  Product IDs verified against:
+  All product IDs, skill requirements, and ingredient amounts are sourced
+  directly from the VB6 obj.dat fields (SkHerreria, LingH/LingP/LingO,
+  SkCarpinteria, Madera/MaderaElfica, SkSastreria, PielLobo/PielOsoPardo/
+  PielOsoPolar/PielLoboNegro/PielTigreBengala, SkPociones, Mortero/
+  FrascoAlq/FlorRoja/FlorOceano/HongoDeLuz/ColaDeZorro/Tuna).
+
+  Recipe lists verified against:
   - ArmasHerrero.dat (26 weapons)
   - ArmadurasHerrero.dat (22 armors/shields/helmets/rings)
   - ObjCarpintero.dat (30 items)
@@ -13,17 +19,48 @@ defmodule Arena.Data.CraftingRecipes do
   - ObjAlquimista.dat (6 potions)
   """
 
+  # ---- Material item IDs (from VB6 Declares.bas) ----
+  # Blacksmithing minerals
+  @hierro_crudo 192
+  @plata_cruda 193
+  @oro_crudo 194
+  @lingote_hierro 386
+  @lingote_plata 387
+  @lingote_oro 388
+  @coal 3391
+
+  # Carpentry wood
+  @wood 58
+  @elven_wood 2781
+  # @pino_wood 3788  # Reserved — no current recipes use pine
+
+  # Tailoring pelts
+  @piel_lobo 414
+  @piel_oso_pardo 415
+  @piel_oso_polar 416
+  @piel_lobo_negro 1146
+  @piel_tigre_bengala 1145
+
+  # Alchemy reagents
+  @mortero 4997
+  @frasco_alq 3075
+  @flor_roja 4316
+  @flor_oceano 4315
+  @hongo_de_luz 4310
+  @cola_de_zorro 4314
+  @tuna 4312
+
   # ---- Gathering recipes: {min_skill, item_id} ----
   # Player gets the highest-tier product they qualify for.
 
   def gathering_products(:mining) do
     [
       # Mineral de Hierro
-      {0, 192},
+      {0, @hierro_crudo},
       # Mineral de Plata
-      {30, 193},
+      {30, @plata_cruda},
       # Mineral de Oro
-      {60, 194},
+      {60, @oro_crudo},
       # Mineral de Blodium
       {85, 3787}
     ]
@@ -47,9 +84,9 @@ defmodule Arena.Data.CraftingRecipes do
   def gathering_products(:woodcutting) do
     [
       # Leña
-      {0, 58},
+      {0, @wood},
       # Leña Élfica
-      {80, 2781}
+      {80, @elven_wood}
     ]
   end
 
@@ -71,296 +108,456 @@ defmodule Arena.Data.CraftingRecipes do
   # ---- Production recipes: require ingredients ----
   # %{min_skill, result_id, result_amount, ingredients: [{item_id, amount}]}
   #
-  # Intermediate materials:
-  #   192 = Mineral de Hierro,  386 = Lingote de Hierro
-  #   193 = Mineral de Plata,   387 = Lingote de Plata
-  #   194 = Mineral de Oro,     388 = Lingote de Oro
-  #   58  = Leña,              2781 = Leña Élfica
-  #   2719 = Listón de Madera, 3742 = Tablones, 3743 = Tablones Élficos
-  #   568 = Tela,  473 = Cuero de Lobo,  474 = Cuero de Oso,  886 = Hilo
-  #   38  = Flor,  691 = Mandrágora,     529 = Frasco
+  # All skill requirements and ingredient amounts match VB6 obj.dat exactly.
+  # Ingredients reference the real item IDs from Declares.bas e_Minerales,
+  # Wood/ElvenWood, PieldeLobo/PieldeOsoPardo/PieldeOsoPolar/PielLoboNegro/
+  # PielTigreBengala, Mortero/FrascoAlq/etc.
 
   def production_recipes(:blacksmithing) do
     [
       # --- Smelting (ore → ingot) ---
       # 2x Hierro ore → Lingote Hierro
-      %{min_skill: 0, result_id: 386, result_amount: 1, ingredients: [{192, 2}]},
+      %{min_skill: 0, result_id: @lingote_hierro, result_amount: 1, ingredients: [{@hierro_crudo, 2}]},
       # 2x Plata ore → Lingote Plata
-      %{min_skill: 30, result_id: 387, result_amount: 1, ingredients: [{193, 2}]},
+      %{min_skill: 30, result_id: @lingote_plata, result_amount: 1, ingredients: [{@plata_cruda, 2}]},
       # 2x Oro ore → Lingote Oro
-      %{min_skill: 60, result_id: 388, result_amount: 1, ingredients: [{194, 2}]},
+      %{min_skill: 60, result_id: @lingote_oro, result_amount: 1, ingredients: [{@oro_crudo, 2}]},
 
-      # --- Weapons (ArmasHerrero.dat) ---
-      # Bala de piedra x5
-      %{min_skill: 4, result_id: 3980, result_amount: 5, ingredients: [{386, 1}]},
-      # Daga
-      %{min_skill: 8, result_id: 15, result_amount: 1, ingredients: [{386, 1}]},
-      # Caja de balas de piedra
-      %{min_skill: 10, result_id: 4299, result_amount: 1, ingredients: [{386, 2}]},
-      # Daga +1
-      %{min_skill: 14, result_id: 165, result_amount: 1, ingredients: [{386, 2}]},
-      # Espada corta
-      %{min_skill: 18, result_id: 164, result_amount: 1, ingredients: [{386, 3}]},
-      # Daga +2
-      %{min_skill: 30, result_id: 365, result_amount: 1, ingredients: [{386, 3}, {387, 1}]},
-      # Trabuco
-      %{min_skill: 35, result_id: 3175, result_amount: 1, ingredients: [{386, 4}]},
-      # Bala de Hierro x5
-      %{min_skill: 38, result_id: 3540, result_amount: 5, ingredients: [{386, 2}]},
-      # Espada larga
-      %{min_skill: 40, result_id: 2, result_amount: 1, ingredients: [{386, 4}, {387, 1}]},
-      # Sable
-      %{min_skill: 45, result_id: 1792, result_amount: 1, ingredients: [{386, 4}, {387, 2}]},
-      # Daga +3
-      %{min_skill: 50, result_id: 366, result_amount: 1, ingredients: [{387, 3}]},
-      # Espada Dos Manos
-      %{min_skill: 55, result_id: 1817, result_amount: 1, ingredients: [{386, 5}, {387, 3}]},
-      # Maza de Dos Manos
-      %{min_skill: 58, result_id: 401, result_amount: 1, ingredients: [{386, 6}, {387, 2}]},
-      # Cimitarra
-      %{min_skill: 60, result_id: 399, result_amount: 1, ingredients: [{387, 4}]},
-      # Hacha de Bárbaro
-      %{min_skill: 62, result_id: 159, result_amount: 1, ingredients: [{386, 5}, {387, 3}]},
-      # Daga +4
-      %{min_skill: 65, result_id: 367, result_amount: 1, ingredients: [{387, 4}]},
-      # Espada Vikinga
-      %{min_skill: 68, result_id: 123, result_amount: 1, ingredients: [{387, 4}, {388, 1}]},
-      # Katana
-      %{min_skill: 72, result_id: 124, result_amount: 1, ingredients: [{387, 4}, {388, 2}]},
-      # Caja de balas de hierro
-      %{min_skill: 75, result_id: 3805, result_amount: 1, ingredients: [{386, 3}, {387, 2}]},
-      # Hacha de Guerra Dos filos
-      %{min_skill: 78, result_id: 1246, result_amount: 1, ingredients: [{387, 5}, {388, 2}]},
-      # Espada de Plata
-      %{min_skill: 80, result_id: 126, result_amount: 1, ingredients: [{387, 5}, {388, 3}]},
-      # Caja de balas de plata
-      %{min_skill: 83, result_id: 3982, result_amount: 1, ingredients: [{387, 3}, {388, 1}]},
-      # Guantes de Lucha
-      %{min_skill: 85, result_id: 2598, result_amount: 1, ingredients: [{388, 3}]},
-      # Espada de Héroes
-      %{min_skill: 88, result_id: 403, result_amount: 1, ingredients: [{387, 5}, {388, 4}]},
-      # Espada Matadragones
-      %{min_skill: 90, result_id: 402, result_amount: 1, ingredients: [{388, 5}]},
-      # Espada Celta
-      %{min_skill: 93, result_id: 3988, result_amount: 1, ingredients: [{387, 5}, {388, 5}]},
+      # --- Weapons (ArmasHerrero.dat, VB6 obj.dat fields) ---
+      # Bala de piedra — Coal=1
+      %{min_skill: 0, result_id: 3980, result_amount: 1, ingredients: [{@coal, 1}]},
+      # Daga — LingH=3
+      %{min_skill: 0, result_id: 15, result_amount: 1, ingredients: [{@lingote_hierro, 3}]},
+      # Caja de balas de piedra — Coal=1000
+      %{min_skill: 10, result_id: 4299, result_amount: 1, ingredients: [{@coal, 1000}]},
+      # Bala de Hierro — LingH=1
+      %{min_skill: 5, result_id: 3540, result_amount: 1, ingredients: [{@lingote_hierro, 1}]},
+      # Daga +1 — LingH=10
+      %{min_skill: 15, result_id: 165, result_amount: 1, ingredients: [{@lingote_hierro, 10}]},
+      # Espada corta — LingH=50
+      %{min_skill: 25, result_id: 164, result_amount: 1, ingredients: [{@lingote_hierro, 50}]},
+      # Espada larga — LingH=20
+      %{min_skill: 25, result_id: 2, result_amount: 1, ingredients: [{@lingote_hierro, 20}]},
+      # Sable — LingH=30
+      %{min_skill: 30, result_id: 1792, result_amount: 1, ingredients: [{@lingote_hierro, 30}]},
+      # Espada Celta — LingH=80
+      %{min_skill: 30, result_id: 3988, result_amount: 1, ingredients: [{@lingote_hierro, 80}]},
+      # Maza de Guerra — LingH=40
+      %{min_skill: 30, result_id: 401, result_amount: 1, ingredients: [{@lingote_hierro, 40}]},
+      # Daga +2 — LingH=50
+      %{min_skill: 35, result_id: 365, result_amount: 1, ingredients: [{@lingote_hierro, 50}]},
+      # Mandoble (Espada Dos Manos) — LingH=35
+      %{min_skill: 35, result_id: 1817, result_amount: 1, ingredients: [{@lingote_hierro, 35}]},
+      # Caja de balas de hierro — LingH=100
+      %{min_skill: 35, result_id: 3805, result_amount: 1, ingredients: [{@lingote_hierro, 100}]},
+      # Cimitarra — LingH=100
+      %{min_skill: 55, result_id: 399, result_amount: 1, ingredients: [{@lingote_hierro, 100}]},
+      # Daga +3 — LingH=100
+      %{min_skill: 60, result_id: 366, result_amount: 1, ingredients: [{@lingote_hierro, 100}]},
+      # Hacha de Bárbaro — LingH=55
+      %{min_skill: 70, result_id: 159, result_amount: 1, ingredients: [{@lingote_hierro, 55}]},
+      # Espada Vikinga — LingH=50
+      %{min_skill: 70, result_id: 123, result_amount: 1, ingredients: [{@lingote_hierro, 50}]},
+      # Trabuco — LingH=75, LingP=50
+      %{
+        min_skill: 75,
+        result_id: 3175,
+        result_amount: 1,
+        ingredients: [{@lingote_hierro, 75}, {@lingote_plata, 50}]
+      },
+      # Katana — LingH=90
+      %{min_skill: 75, result_id: 124, result_amount: 1, ingredients: [{@lingote_hierro, 90}]},
+      # Hacha de Guerra Dos filos — LingH=105
+      %{min_skill: 80, result_id: 1246, result_amount: 1, ingredients: [{@lingote_hierro, 105}]},
+      # Guantes de Lucha — LingH=105
+      %{min_skill: 80, result_id: 2598, result_amount: 1, ingredients: [{@lingote_hierro, 105}]},
+      # Caja de balas de plata — LingP=100
+      %{min_skill: 80, result_id: 3982, result_amount: 1, ingredients: [{@lingote_plata, 100}]},
+      # Espada de Plata — LingP=105
+      %{min_skill: 90, result_id: 126, result_amount: 1, ingredients: [{@lingote_plata, 105}]},
+      # Daga +4 — LingH=100, LingP=100
+      %{
+        min_skill: 100,
+        result_id: 367,
+        result_amount: 1,
+        ingredients: [{@lingote_hierro, 100}, {@lingote_plata, 100}]
+      },
+      # Espada de Héroes — LingH=85, LingP=210
+      %{
+        min_skill: 100,
+        result_id: 403,
+        result_amount: 1,
+        ingredients: [{@lingote_hierro, 85}, {@lingote_plata, 210}]
+      },
+      # Espada Matadragones — LingH=500, LingP=400, LingO=300
+      %{
+        min_skill: 100,
+        result_id: 402,
+        result_amount: 1,
+        ingredients: [{@lingote_hierro, 500}, {@lingote_plata, 400}, {@lingote_oro, 300}]
+      },
 
       # --- Armors, Shields, Helmets, Rings (ArmadurasHerrero.dat) ---
-      # Armadura de Herrero
-      %{min_skill: 15, result_id: 1912, result_amount: 1, ingredients: [{386, 4}]},
-      # Escudo de Hierro
-      %{min_skill: 25, result_id: 1715, result_amount: 1, ingredients: [{386, 3}]},
-      # Casco Vikingo
-      %{min_skill: 30, result_id: 1079, result_amount: 1, ingredients: [{386, 3}]},
-      # Casco de Hierro Completo
-      %{min_skill: 35, result_id: 132, result_amount: 1, ingredients: [{386, 4}]},
-      # Escudo de Bronce
-      %{min_skill: 40, result_id: 2933, result_amount: 1, ingredients: [{386, 3}, {387, 1}]},
-      # Armadura de Placas Completas
-      %{min_skill: 45, result_id: 1987, result_amount: 1, ingredients: [{386, 5}, {387, 2}]},
-      # Armadura de Placas Completas (alt)
-      %{min_skill: 50, result_id: 243, result_amount: 1, ingredients: [{386, 5}, {387, 3}]},
-      # Armadura de las Sombras (Bajos)
-      %{min_skill: 55, result_id: 1634, result_amount: 1, ingredients: [{387, 4}]},
-      # Armadura de las Sombras
-      %{min_skill: 58, result_id: 1929, result_amount: 1, ingredients: [{387, 5}]},
-      # Casco de Cazador
-      %{min_skill: 60, result_id: 1767, result_amount: 1, ingredients: [{387, 3}]},
-      # Cota del Gran Cazador (Bajos)
-      %{min_skill: 62, result_id: 1908, result_amount: 1, ingredients: [{387, 4}]},
-      # Cota del Gran Cazador
-      %{min_skill: 65, result_id: 1907, result_amount: 1, ingredients: [{387, 5}]},
-      # Escudo Imperial
-      %{min_skill: 70, result_id: 1702, result_amount: 1, ingredients: [{387, 4}, {388, 1}]},
-      # Armadura de la Ciénaga
-      %{min_skill: 72, result_id: 1941, result_amount: 1, ingredients: [{387, 4}, {388, 2}]},
-      # Casco de Plata
-      %{min_skill: 75, result_id: 601, result_amount: 1, ingredients: [{387, 3}, {388, 2}]},
-      # Armadura Bruñida (Bajos)
-      %{min_skill: 78, result_id: 500, result_amount: 1, ingredients: [{387, 4}, {388, 2}]},
-      # Armadura Escarlata
-      %{min_skill: 80, result_id: 495, result_amount: 1, ingredients: [{387, 5}, {388, 3}]},
-      # Dama de las Tinieblas
-      %{min_skill: 83, result_id: 487, result_amount: 1, ingredients: [{387, 5}, {388, 4}]},
-      # Anillo de Disolución Mágica
-      %{min_skill: 85, result_id: 2323, result_amount: 1, ingredients: [{388, 2}]},
-      # Anillo del Silencio
-      %{min_skill: 88, result_id: 755, result_amount: 1, ingredients: [{388, 3}]},
-      # Hebilla Mochila
-      %{min_skill: 90, result_id: 3461, result_amount: 1, ingredients: [{387, 3}, {388, 2}]},
-      # Relicario
-      %{min_skill: 95, result_id: 3769, result_amount: 1, ingredients: [{388, 5}]}
+      # Escudo de Hierro — LingH=30
+      %{min_skill: 55, result_id: 1715, result_amount: 1, ingredients: [{@lingote_hierro, 30}]},
+      # Armadura de Herrero — LingH=75
+      %{min_skill: 58, result_id: 1912, result_amount: 1, ingredients: [{@lingote_hierro, 75}]},
+      # Casco Vikingo — LingH=70
+      %{min_skill: 60, result_id: 1079, result_amount: 1, ingredients: [{@lingote_hierro, 70}]},
+      # Casco de Hierro Completo — LingH=105
+      %{min_skill: 65, result_id: 132, result_amount: 1, ingredients: [{@lingote_hierro, 105}]},
+      # Escudo de Bronce — LingH=70, LingP=15
+      %{
+        min_skill: 75,
+        result_id: 2933,
+        result_amount: 1,
+        ingredients: [{@lingote_hierro, 70}, {@lingote_plata, 15}]
+      },
+      # Anillo de Disolución Mágica — LingP=75
+      %{min_skill: 75, result_id: 2323, result_amount: 1, ingredients: [{@lingote_plata, 75}]},
+      # Casco de Cazador — LingH=105
+      %{min_skill: 75, result_id: 1767, result_amount: 1, ingredients: [{@lingote_hierro, 105}]},
+      # Casco de Plata — LingH=180, LingP=210, LingO=60
+      %{
+        min_skill: 75,
+        result_id: 601,
+        result_amount: 1,
+        ingredients: [{@lingote_hierro, 180}, {@lingote_plata, 210}, {@lingote_oro, 60}]
+      },
+      # Armadura de Placas Completas (1987) — LingH=210
+      %{min_skill: 76, result_id: 1987, result_amount: 1, ingredients: [{@lingote_hierro, 210}]},
+      # Armadura de Placas Completas (243) — LingH=210
+      %{min_skill: 76, result_id: 243, result_amount: 1, ingredients: [{@lingote_hierro, 210}]},
+      # Escudo Imperial — LingP=100
+      %{min_skill: 90, result_id: 1702, result_amount: 1, ingredients: [{@lingote_plata, 100}]},
+      # Armadura de las Sombras (Bajos) — LingH=300, LingP=200, LingO=30
+      %{
+        min_skill: 100,
+        result_id: 1634,
+        result_amount: 1,
+        ingredients: [{@lingote_hierro, 300}, {@lingote_plata, 200}, {@lingote_oro, 30}]
+      },
+      # Armadura de las Sombras — LingH=300, LingP=200, LingO=30
+      %{
+        min_skill: 100,
+        result_id: 1929,
+        result_amount: 1,
+        ingredients: [{@lingote_hierro, 300}, {@lingote_plata, 200}, {@lingote_oro, 30}]
+      },
+      # Cota del Gran Cazador (Bajos) — LingH=350, LingP=250, LingO=50
+      %{
+        min_skill: 100,
+        result_id: 1908,
+        result_amount: 1,
+        ingredients: [{@lingote_hierro, 350}, {@lingote_plata, 250}, {@lingote_oro, 50}]
+      },
+      # Cota del Gran Cazador — LingH=350, LingP=250, LingO=50
+      %{
+        min_skill: 100,
+        result_id: 1907,
+        result_amount: 1,
+        ingredients: [{@lingote_hierro, 350}, {@lingote_plata, 250}, {@lingote_oro, 50}]
+      },
+      # Armadura de la Ciénaga — LingH=550, LingP=350, LingO=150
+      %{
+        min_skill: 100,
+        result_id: 1941,
+        result_amount: 1,
+        ingredients: [{@lingote_hierro, 550}, {@lingote_plata, 350}, {@lingote_oro, 150}]
+      },
+      # Armadura Escarlata — LingH=550, LingP=350, LingO=150
+      %{
+        min_skill: 100,
+        result_id: 495,
+        result_amount: 1,
+        ingredients: [{@lingote_hierro, 550}, {@lingote_plata, 350}, {@lingote_oro, 150}]
+      },
+      # Dama de las Tinieblas — LingH=550, LingP=350, LingO=150
+      %{
+        min_skill: 100,
+        result_id: 487,
+        result_amount: 1,
+        ingredients: [{@lingote_hierro, 550}, {@lingote_plata, 350}, {@lingote_oro, 150}]
+      },
+      # Armadura Bruñida (Bajos) — LingH=550, LingP=350, LingO=150
+      %{
+        min_skill: 100,
+        result_id: 500,
+        result_amount: 1,
+        ingredients: [{@lingote_hierro, 550}, {@lingote_plata, 350}, {@lingote_oro, 150}]
+      },
+      # Anillo del Silencio — LingH=45, LingP=30, LingO=15
+      %{
+        min_skill: 100,
+        result_id: 755,
+        result_amount: 1,
+        ingredients: [{@lingote_hierro, 45}, {@lingote_plata, 30}, {@lingote_oro, 15}]
+      },
+      # Hebilla Mochila — LingH=500, LingP=400, LingO=300
+      %{
+        min_skill: 100,
+        result_id: 3461,
+        result_amount: 1,
+        ingredients: [{@lingote_hierro, 500}, {@lingote_plata, 400}, {@lingote_oro, 300}]
+      },
+      # Relicario — LingH=5, LingP=5
+      %{
+        min_skill: 100,
+        result_id: 3769,
+        result_amount: 1,
+        ingredients: [{@lingote_hierro, 5}, {@lingote_plata, 5}]
+      }
     ]
   end
 
   def production_recipes(:carpentry) do
     [
-      # --- Intermediate: wood → planks ---
-      # 2x Leña → 3x Listón de Madera
-      %{min_skill: 0, result_id: 2719, result_amount: 3, ingredients: [{58, 2}]},
-      # 3x Listón → 2x Tablones
-      %{min_skill: 40, result_id: 3742, result_amount: 2, ingredients: [{2719, 3}]},
-      # 3x Leña Élfica → 2x Tablones Élficos
-      %{min_skill: 80, result_id: 3743, result_amount: 2, ingredients: [{2781, 3}]},
-
-      # --- Arrows & Ammunition (ObjCarpintero.dat) ---
-      # Flecha x20
-      %{min_skill: 3, result_id: 480, result_amount: 20, ingredients: [{2719, 1}]},
-      # Cuchara
-      %{min_skill: 5, result_id: 163, result_amount: 1, ingredients: [{2719, 1}]},
-      # Flecha +1 x20
-      %{min_skill: 30, result_id: 3550, result_amount: 20, ingredients: [{2719, 2}]},
-      # Flecha +2 x20
-      %{min_skill: 45, result_id: 551, result_amount: 20, ingredients: [{2719, 3}, {387, 1}]},
-      # Flecha +3 x20
-      %{min_skill: 60, result_id: 553, result_amount: 20, ingredients: [{3742, 1}, {388, 1}]},
-      # Flecha Élfica x20
-      %{min_skill: 80, result_id: 552, result_amount: 20, ingredients: [{3743, 1}]},
-      # Carcaj de Flechas
-      %{min_skill: 35, result_id: 3801, result_amount: 1, ingredients: [{480, 50}]},
-      # Carcaj de Flechas +1
-      %{min_skill: 45, result_id: 3806, result_amount: 1, ingredients: [{3550, 50}]},
-      # Carcaj de Flechas +2
-      %{min_skill: 55, result_id: 3802, result_amount: 1, ingredients: [{551, 50}]},
-      # Carcaj de Flechas +3
-      %{min_skill: 70, result_id: 3804, result_amount: 1, ingredients: [{553, 50}]},
-      # Carcaj de Flechas Élficas
-      %{min_skill: 85, result_id: 3803, result_amount: 1, ingredients: [{552, 50}]},
-
-      # --- Bows ---
-      # Arco Simple
-      %{min_skill: 10, result_id: 479, result_amount: 1, ingredients: [{2719, 3}]},
-      # Arco Simple Reforzado
-      %{min_skill: 25, result_id: 3466, result_amount: 1, ingredients: [{2719, 4}]},
-      # Arco Compuesto
-      %{min_skill: 40, result_id: 1867, result_amount: 1, ingredients: [{3742, 2}]},
-      # Arco de Roble
-      %{min_skill: 55, result_id: 1870, result_amount: 1, ingredients: [{3742, 3}]},
-      # Arco de Cazador
-      %{min_skill: 75, result_id: 1876, result_amount: 1, ingredients: [{3742, 3}, {3743, 1}]},
-
-      # --- Instruments ---
-      # Laúd
-      %{min_skill: 15, result_id: 469, result_amount: 1, ingredients: [{2719, 4}]},
-      # Flauta
-      %{min_skill: 35, result_id: 540, result_amount: 1, ingredients: [{2719, 3}]},
-      # Laúd Mágico
-      %{min_skill: 60, result_id: 41, result_amount: 1, ingredients: [{3742, 2}, {388, 1}]},
-      # Flauta Élfica
-      %{min_skill: 70, result_id: 40, result_amount: 1, ingredients: [{3743, 2}]},
-
-      # --- Staves & Shields ---
-      # Bastón Nudoso
-      %{min_skill: 20, result_id: 1797, result_amount: 1, ingredients: [{2719, 5}]},
-      # Báculo Engarzado
-      %{min_skill: 50, result_id: 1788, result_amount: 1, ingredients: [{3742, 3}]},
-      # Rodela
-      %{min_skill: 25, result_id: 1719, result_amount: 1, ingredients: [{2719, 4}]},
-      # Escudo de Roble
-      %{min_skill: 45, result_id: 1724, result_amount: 1, ingredients: [{3742, 2}]},
-
-      # --- Boats ---
-      # Barca
-      %{min_skill: 50, result_id: 474, result_amount: 1, ingredients: [{3742, 5}]},
-      # Galera
-      %{min_skill: 70, result_id: 475, result_amount: 1, ingredients: [{3742, 8}]},
-      # Galeón
-      %{min_skill: 90, result_id: 476, result_amount: 1, ingredients: [{3742, 5}, {3743, 5}]},
-
-      # --- Misc ---
-      # Rueda de carro
-      %{min_skill: 65, result_id: 2679, result_amount: 1, ingredients: [{3742, 2}]}
+      # --- ObjCarpintero.dat items (VB6 obj.dat Madera/MaderaElfica fields) ---
+      # Cuchara — Madera=3
+      %{min_skill: 0, result_id: 163, result_amount: 1, ingredients: [{@wood, 3}]},
+      # Flecha — Madera=1
+      %{min_skill: 5, result_id: 480, result_amount: 1, ingredients: [{@wood, 1}]},
+      # Arco Simple — Madera=200
+      %{min_skill: 10, result_id: 479, result_amount: 1, ingredients: [{@wood, 200}]},
+      # Arco Simple Reforzado — Madera=500
+      %{min_skill: 25, result_id: 3466, result_amount: 1, ingredients: [{@wood, 500}]},
+      # Tablones — Madera=9
+      %{min_skill: 37, result_id: 3742, result_amount: 1, ingredients: [{@wood, 9}]},
+      # Rueda de carro — Madera=100
+      %{min_skill: 37, result_id: 2679, result_amount: 1, ingredients: [{@wood, 100}]},
+      # Flecha +1 — Madera=2
+      %{min_skill: 45, result_id: 3550, result_amount: 1, ingredients: [{@wood, 2}]},
+      # Bastón Nudoso — Madera=1200
+      %{min_skill: 60, result_id: 1797, result_amount: 1, ingredients: [{@wood, 1200}]},
+      # Arco Compuesto — Madera=900
+      %{min_skill: 63, result_id: 1867, result_amount: 1, ingredients: [{@wood, 900}]},
+      # Flecha +2 — Madera=3
+      %{min_skill: 63, result_id: 551, result_amount: 1, ingredients: [{@wood, 3}]},
+      # Rodela — Madera=200
+      %{min_skill: 63, result_id: 1719, result_amount: 1, ingredients: [{@wood, 200}]},
+      # Arco de Roble — Madera=2000
+      %{min_skill: 70, result_id: 1870, result_amount: 1, ingredients: [{@wood, 2000}]},
+      # Barca — Madera=25000
+      %{min_skill: 75, result_id: 474, result_amount: 1, ingredients: [{@wood, 25000}]},
+      # Laúd Mágico — Madera=800
+      %{min_skill: 75, result_id: 469, result_amount: 1, ingredients: [{@wood, 800}]},
+      # Flauta Mágica — Madera=1200
+      %{min_skill: 75, result_id: 540, result_amount: 1, ingredients: [{@wood, 1200}]},
+      # Escudo de Roble — Madera=4200
+      %{min_skill: 75, result_id: 1724, result_amount: 1, ingredients: [{@wood, 4200}]},
+      # Tablones Élficos — MaderaElfica=9
+      %{min_skill: 75, result_id: 3743, result_amount: 1, ingredients: [{@elven_wood, 9}]},
+      # Flecha +3 — Madera=6
+      %{min_skill: 75, result_id: 553, result_amount: 1, ingredients: [{@wood, 6}]},
+      # Arco de Cazador — MaderaElfica=1000
+      %{min_skill: 100, result_id: 1876, result_amount: 1, ingredients: [{@elven_wood, 1000}]},
+      # Flecha Élfica — MaderaElfica=3
+      %{min_skill: 100, result_id: 552, result_amount: 1, ingredients: [{@elven_wood, 3}]},
+      # Laúd Élfico — MaderaElfica=600
+      %{min_skill: 100, result_id: 41, result_amount: 1, ingredients: [{@elven_wood, 600}]},
+      # Flauta Élfica — MaderaElfica=900
+      %{min_skill: 100, result_id: 40, result_amount: 1, ingredients: [{@elven_wood, 900}]},
+      # Báculo Engarzado — MaderaElfica=900
+      %{min_skill: 100, result_id: 1788, result_amount: 1, ingredients: [{@elven_wood, 900}]},
+      # Galera — Madera=30000, MaderaElfica=4000
+      %{
+        min_skill: 100,
+        result_id: 475,
+        result_amount: 1,
+        ingredients: [{@wood, 30_000}, {@elven_wood, 4000}]
+      },
+      # Galeón — MaderaElfica=30000
+      %{min_skill: 100, result_id: 476, result_amount: 1, ingredients: [{@elven_wood, 30_000}]},
+      # Carcaj de Flechas — Madera=525
+      %{min_skill: 100, result_id: 3801, result_amount: 1, ingredients: [{@wood, 525}]},
+      # Carcaj de Flechas +1 — Madera=1050
+      %{min_skill: 100, result_id: 3806, result_amount: 1, ingredients: [{@wood, 1050}]},
+      # Carcaj de Flechas +2 — Madera=1575
+      %{min_skill: 100, result_id: 3802, result_amount: 1, ingredients: [{@wood, 1575}]},
+      # Carcaj de Flechas +3 — Madera=3150
+      %{min_skill: 100, result_id: 3804, result_amount: 1, ingredients: [{@wood, 3150}]},
+      # Carcaj de Flechas Élficas — MaderaElfica=2625
+      %{min_skill: 100, result_id: 3803, result_amount: 1, ingredients: [{@elven_wood, 2625}]}
     ]
   end
 
   def production_recipes(:alchemy) do
     [
-      # --- Basic potions (existing) ---
-      # Poción HP roja: flor + frasco
-      %{min_skill: 0, result_id: 37, result_amount: 1, ingredients: [{38, 1}, {529, 1}]},
-      # Poción Mana azul: 2x frasco + mandrágora
-      %{min_skill: 30, result_id: 38, result_amount: 1, ingredients: [{529, 2}, {691, 1}]},
-      # Poción Envenenar: frasco + 2x mandrágora
-      %{min_skill: 50, result_id: 166, result_amount: 1, ingredients: [{529, 1}, {691, 2}]},
-
-      # --- Advanced potions (ObjAlquimista.dat) ---
-      # Pócima de Vida
-      %{min_skill: 60, result_id: 891, result_amount: 1, ingredients: [{529, 2}, {38, 2}, {691, 1}]},
-      # Pócima de Maná
-      %{min_skill: 65, result_id: 894, result_amount: 1, ingredients: [{529, 2}, {691, 2}]},
-      # Pócima de Antídoto
-      %{min_skill: 70, result_id: 890, result_amount: 1, ingredients: [{529, 2}, {38, 1}, {691, 2}]},
-      # Pócima de Agilidad
-      %{min_skill: 75, result_id: 889, result_amount: 1, ingredients: [{529, 3}, {691, 2}]},
-      # Pócima de Fuerza
-      %{min_skill: 80, result_id: 892, result_amount: 1, ingredients: [{529, 3}, {691, 3}]},
-      # Pócima de Energía
-      %{min_skill: 85, result_id: 1019, result_amount: 1, ingredients: [{529, 3}, {38, 2}, {691, 2}]}
+      # --- Potions (ObjAlquimista.dat, VB6 obj.dat fields) ---
+      # Pócima de Vida — FlorRoja=1, FrascoAlq=1, Mortero=1
+      %{
+        min_skill: 0,
+        result_id: 891,
+        result_amount: 1,
+        ingredients: [{@flor_roja, 1}, {@frasco_alq, 1}, {@mortero, 1}]
+      },
+      # Pócima de Maná — FlorOceano=1, FrascoAlq=1, Mortero=1
+      %{
+        min_skill: 15,
+        result_id: 894,
+        result_amount: 1,
+        ingredients: [{@flor_oceano, 1}, {@frasco_alq, 1}, {@mortero, 1}]
+      },
+      # Pócima de Antídoto — HongoDeLuz=1, FrascoAlq=1, Mortero=1
+      %{
+        min_skill: 20,
+        result_id: 890,
+        result_amount: 1,
+        ingredients: [{@hongo_de_luz, 1}, {@frasco_alq, 1}, {@mortero, 1}]
+      },
+      # Pócima de Energía — FrascoAlq=1, Mortero=1
+      %{
+        min_skill: 25,
+        result_id: 1019,
+        result_amount: 1,
+        ingredients: [{@frasco_alq, 1}, {@mortero, 1}]
+      },
+      # Pócima de Agilidad — ColaDeZorro=2, FrascoAlq=1, Mortero=1
+      %{
+        min_skill: 30,
+        result_id: 889,
+        result_amount: 1,
+        ingredients: [{@cola_de_zorro, 2}, {@frasco_alq, 1}, {@mortero, 1}]
+      },
+      # Pócima de Fuerza — Tuna=2, FrascoAlq=1, Mortero=1
+      %{
+        min_skill: 35,
+        result_id: 892,
+        result_amount: 1,
+        ingredients: [{@tuna, 2}, {@frasco_alq, 1}, {@mortero, 1}]
+      }
     ]
   end
 
   def production_recipes(:tailoring) do
     [
-      # --- Basic garments (existing + expanded) ---
-      # Tela trabajada
-      %{min_skill: 0, result_id: 3578, result_amount: 1, ingredients: [{568, 2}]},
-      # Vestimenta Común
-      %{min_skill: 5, result_id: 32, result_amount: 1, ingredients: [{568, 3}]},
-      # Ropa Común
-      %{min_skill: 10, result_id: 184, result_amount: 1, ingredients: [{568, 3}]},
-      # Vestimenta de Enano
-      %{min_skill: 15, result_id: 240, result_amount: 1, ingredients: [{568, 4}]},
-      # Túnica
-      %{min_skill: 20, result_id: 261, result_amount: 1, ingredients: [{568, 4}]},
-      # Ropa de Clan
-      %{min_skill: 25, result_id: 1975, result_amount: 1, ingredients: [{568, 4}, {473, 1}]},
-      # Ropa de Burgués Turquesa
-      %{min_skill: 30, result_id: 2911, result_amount: 1, ingredients: [{568, 5}]},
-      # Ropa Estuaria
-      %{min_skill: 35, result_id: 508, result_amount: 1, ingredients: [{568, 4}, {473, 2}]},
-      # Túnica de Mago
-      %{min_skill: 40, result_id: 196, result_amount: 1, ingredients: [{568, 5}, {473, 1}]},
-      # Túnica Aventurera (Bajos)
-      %{min_skill: 45, result_id: 1226, result_amount: 1, ingredients: [{568, 4}, {473, 2}]},
-      # Túnica Ocre
-      %{min_skill: 50, result_id: 1955, result_amount: 1, ingredients: [{568, 5}, {473, 2}]},
-      # Túnica de Nigromante
-      %{min_skill: 55, result_id: 1089, result_amount: 1, ingredients: [{568, 5}, {473, 3}]},
-      # Túnica Dorada de Gala
-      %{min_skill: 60, result_id: 2857, result_amount: 1, ingredients: [{568, 6}, {473, 2}]},
-      # Vestido Indulgente Rojo
-      %{min_skill: 63, result_id: 2932, result_amount: 1, ingredients: [{568, 5}, {473, 3}]},
-      # Manto de los Vientos
-      %{min_skill: 65, result_id: 2916, result_amount: 1, ingredients: [{568, 6}, {473, 3}]},
-      # Túnica Natural Mujer
-      %{min_skill: 68, result_id: 1961, result_amount: 1, ingredients: [{568, 5}, {473, 2}, {474, 1}]},
-      # Sotana de Gran Hechicero
-      %{min_skill: 72, result_id: 2854, result_amount: 1, ingredients: [{568, 6}, {473, 3}, {474, 1}]},
-      # Túnica Legendaria
-      %{min_skill: 78, result_id: 519, result_amount: 1, ingredients: [{568, 6}, {473, 4}, {474, 2}]},
-      # Túnica Legendaria (E/G)
-      %{min_skill: 80, result_id: 1957, result_amount: 1, ingredients: [{568, 6}, {473, 4}, {474, 2}]},
-
-      # --- Helmets ---
-      # Casco de Lobo
-      %{min_skill: 50, result_id: 1778, result_amount: 1, ingredients: [{473, 3}]},
-      # Casco de Tigre
-      %{min_skill: 60, result_id: 1758, result_amount: 1, ingredients: [{473, 4}]},
-      # Capucha de Elite
-      %{min_skill: 70, result_id: 1769, result_amount: 1, ingredients: [{473, 4}, {474, 1}]},
-      # Sombrero de Mago
-      %{min_skill: 55, result_id: 992, result_amount: 1, ingredients: [{568, 4}]},
-      # Sombrero de Mago Superior
-      %{min_skill: 85, result_id: 3990, result_amount: 1, ingredients: [{568, 5}, {473, 3}]},
-
-      # --- Misc ---
-      # Morral
-      %{min_skill: 40, result_id: 3462, result_amount: 1, ingredients: [{473, 3}, {886, 2}]},
-      # Cuerdas
-      %{min_skill: 45, result_id: 3822, result_amount: 1, ingredients: [{473, 2}, {886, 3}]}
+      # --- ObjSastre.dat items (VB6 obj.dat PielLobo/PielOsoPardo/PielOsoPolar/
+      #     PielLoboNegro/PielTigreBengala fields) ---
+      # Tela trabajada — PielLobo=1
+      %{min_skill: 0, result_id: 3578, result_amount: 1, ingredients: [{@piel_lobo, 1}]},
+      # Cuerdas — PielLobo=1
+      %{min_skill: 0, result_id: 3822, result_amount: 1, ingredients: [{@piel_lobo, 1}]},
+      # Vestimenta Común — PielLobo=1
+      %{min_skill: 2, result_id: 32, result_amount: 1, ingredients: [{@piel_lobo, 1}]},
+      # Vestimenta de Enano — PielLobo=7
+      %{min_skill: 0, result_id: 240, result_amount: 1, ingredients: [{@piel_lobo, 7}]},
+      # Ropa de Clan — PielLobo=20
+      %{min_skill: 10, result_id: 1975, result_amount: 1, ingredients: [{@piel_lobo, 20}]},
+      # Casco de Lobo — PielLobo=15
+      %{min_skill: 10, result_id: 1778, result_amount: 1, ingredients: [{@piel_lobo, 15}]},
+      # Ropa de Burgués Turquesa — PielLobo=20
+      %{min_skill: 10, result_id: 2911, result_amount: 1, ingredients: [{@piel_lobo, 20}]},
+      # Ropa Estuaria (M) — PielLobo=30
+      %{min_skill: 25, result_id: 508, result_amount: 1, ingredients: [{@piel_lobo, 30}]},
+      # Túnica de Mago — PielLobo=50
+      %{min_skill: 35, result_id: 196, result_amount: 1, ingredients: [{@piel_lobo, 50}]},
+      # Túnica Aventurera (Bajos) — PielLobo=50
+      %{min_skill: 35, result_id: 1226, result_amount: 1, ingredients: [{@piel_lobo, 50}]},
+      # Túnica Ocre — PielLobo=60, PielOsoPardo=5
+      %{
+        min_skill: 45,
+        result_id: 1955,
+        result_amount: 1,
+        ingredients: [{@piel_lobo, 60}, {@piel_oso_pardo, 5}]
+      },
+      # Túnica de Nigromante — PielLobo=70, PielOsoPardo=10
+      %{
+        min_skill: 55,
+        result_id: 1089,
+        result_amount: 1,
+        ingredients: [{@piel_lobo, 70}, {@piel_oso_pardo, 10}]
+      },
+      # Túnica Dorada de Gala — PielLobo=70, PielOsoPardo=10
+      %{
+        min_skill: 55,
+        result_id: 2857,
+        result_amount: 1,
+        ingredients: [{@piel_lobo, 70}, {@piel_oso_pardo, 10}]
+      },
+      # Vestido Indulgente Rojo — PielLobo=70, PielOsoPardo=10
+      %{
+        min_skill: 55,
+        result_id: 2932,
+        result_amount: 1,
+        ingredients: [{@piel_lobo, 70}, {@piel_oso_pardo, 10}]
+      },
+      # Capucha de Elite — PielTigreBengala=2, PielLoboNegro=10
+      %{
+        min_skill: 63,
+        result_id: 1769,
+        result_amount: 1,
+        ingredients: [{@piel_tigre_bengala, 2}, {@piel_lobo_negro, 10}]
+      },
+      # Manto de los Vientos — PielLobo=80, PielOsoPardo=15, PielOsoPolar=1
+      %{
+        min_skill: 65,
+        result_id: 2916,
+        result_amount: 1,
+        ingredients: [{@piel_lobo, 80}, {@piel_oso_pardo, 15}, {@piel_oso_polar, 1}]
+      },
+      # Túnica Natural Mujer — PielLobo=80, PielOsoPardo=15, PielOsoPolar=1
+      %{
+        min_skill: 65,
+        result_id: 1961,
+        result_amount: 1,
+        ingredients: [{@piel_lobo, 80}, {@piel_oso_pardo, 15}, {@piel_oso_polar, 1}]
+      },
+      # Sotana de Gran Hechicero — PielLobo=80, PielOsoPardo=15, PielOsoPolar=1
+      %{
+        min_skill: 65,
+        result_id: 2854,
+        result_amount: 1,
+        ingredients: [{@piel_lobo, 80}, {@piel_oso_pardo, 15}, {@piel_oso_polar, 1}]
+      },
+      # Sombrero de Mago — PielLoboNegro=28, PielTigreBengala=3
+      %{
+        min_skill: 65,
+        result_id: 992,
+        result_amount: 1,
+        ingredients: [{@piel_lobo_negro, 28}, {@piel_tigre_bengala, 3}]
+      },
+      # Sombrero de Mago Superior — PielOsoPolar=6
+      %{min_skill: 75, result_id: 3990, result_amount: 1, ingredients: [{@piel_oso_polar, 6}]},
+      # Túnica Legendaria — PielLobo=45, PielOsoPardo=25, PielOsoPolar=3
+      %{
+        min_skill: 100,
+        result_id: 519,
+        result_amount: 1,
+        ingredients: [{@piel_lobo, 45}, {@piel_oso_pardo, 25}, {@piel_oso_polar, 3}]
+      },
+      # Túnica Legendaria (E/G) — PielLobo=45, PielOsoPardo=25, PielOsoPolar=3
+      %{
+        min_skill: 100,
+        result_id: 1957,
+        result_amount: 1,
+        ingredients: [{@piel_lobo, 45}, {@piel_oso_pardo, 25}, {@piel_oso_polar, 3}]
+      },
+      # Casco de Tigre — PielTigreBengala=15
+      %{min_skill: 100, result_id: 1758, result_amount: 1, ingredients: [{@piel_tigre_bengala, 15}]},
+      # Morral — PielLobo=300, PielOsoPardo=150, PielOsoPolar=40
+      %{
+        min_skill: 100,
+        result_id: 3462,
+        result_amount: 1,
+        ingredients: [{@piel_lobo, 300}, {@piel_oso_pardo, 150}, {@piel_oso_polar, 40}]
+      }
     ]
   end
 
   def production_recipes(_), do: []
+
+  @doc "Return the list of result_ids that the player's skill level qualifies for."
+  def craftable_item_ids(skill_atom, skill_value) do
+    production_recipes(skill_atom)
+    |> Enum.filter(fn recipe -> skill_value >= recipe.min_skill end)
+    |> Enum.map(fn recipe -> recipe.result_id end)
+  end
+
+  @doc "Find a specific recipe by its result item_id."
+  def find_recipe_by_item(skill_atom, item_id) do
+    production_recipes(skill_atom)
+    |> Enum.find(fn recipe -> recipe.result_id == item_id end)
+  end
 
   @doc "Find the best recipe the player can craft with current skill and inventory."
   def find_craftable(skill_atom, skill_value, inventory) do

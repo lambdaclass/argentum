@@ -40,7 +40,8 @@ defmodule Arena.Data.ItemDef do
     puntos_pesca: 0,
     real: false,
     caos: false,
-    ropaje: nil
+    ropaje: nil,
+    elemental_tags: 0
   ]
 
   @stackable_types [1, 5, 11, 13, 32, 33, 34]
@@ -104,7 +105,8 @@ defmodule Arena.Data.ItemDef do
       puntos_pesca: parse_int(section["puntospesca"]),
       real: parse_int(section["real"]) == 1,
       caos: parse_int(section["caos"]) == 1,
-      ropaje: parse_ropaje(section)
+      ropaje: parse_ropaje(section),
+      elemental_tags: parse_int(section["elementaltags"])
     }
   end
 
