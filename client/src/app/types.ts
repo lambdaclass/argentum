@@ -1,6 +1,15 @@
 export type ConnectionStatus = "offline" | "connecting" | "connected";
 export type LogLevel = "info" | "warn" | "error" | "packet-in" | "packet-out";
 export type Direction = "north" | "east" | "south" | "west";
+export type KeyBindingAction =
+  | "openHud"
+  | "pickUp"
+  | "attack"
+  | "safeToggle"
+  | "commerce"
+  | "bank"
+  | "tileDebug"
+  | "moveDebug";
 
 export interface SessionCredentials {
   charId: number;
@@ -281,6 +290,17 @@ export interface ClientState {
     raining: boolean;
     snowing: boolean;
   };
+  settings: {
+    audio: {
+      musicEnabled: boolean;
+      musicVolume: number;
+      soundEnabled: boolean;
+      soundVolume: number;
+    };
+    controls: {
+      bindings: Record<KeyBindingAction, string | null>;
+    };
+  };
   log: PacketLogEntry[];
 }
 
@@ -516,6 +536,12 @@ export type ClientAction =
   | { type: "clan/clear" }
   | { type: "weather/rain"; raining: boolean }
   | { type: "weather/snow"; snowing: boolean }
+  | { type: "settings/setMusicEnabled"; enabled: boolean }
+  | { type: "settings/setMusicVolume"; volume: number }
+  | { type: "settings/setSoundEnabled"; enabled: boolean }
+  | { type: "settings/setSoundVolume"; volume: number }
+  | { type: "settings/setKeyBinding"; action: KeyBindingAction; key: string | null }
+  | { type: "settings/resetKeyBindings" }
   | { type: "log/add"; level: LogLevel; message: string }
   | { type: "log/clear" }
   | { type: "session/resetRuntime" };

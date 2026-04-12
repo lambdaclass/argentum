@@ -1,11 +1,21 @@
-import { memo, useEffect, useState } from "react";
-import type { ClientState } from "../app/types";
+import { memo, useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+  DEFAULT_KEY_BINDINGS,
+  KEY_BINDING_FIELDS,
+  formatBindingKey,
+  normalizeBindingKey
+} from "../app/settings";
+import type { ClientState, KeyBindingAction } from "../app/types";
 
 interface SessionPanelProps {
   assetError: string | null;
   assetStatus: "loading" | "ready" | "error";
   canConnect: boolean;
   connection: ClientState["connection"];
+  mapPackError: string | null;
+  mapPackProgressLabel: string;
+  mapPackStatus: "loading" | "ready" | "error";
+  settings: ClientState["settings"];
   title: string;
   showTileDebug: boolean;
   world: ClientState["world"];
@@ -15,6 +25,17 @@ interface SessionPanelProps {
   onConnect: () => void;
   onDisconnect: () => void;
   onForgetSession: () => void;
+  onReloadPage: () => void;
+  onResetKeyBindings: () => void;
+  onResetRuntime: () => void;
+  onRetryAssets: () => void;
+  onRetryBootstrap: () => void;
+  onRetryMapPack: () => void;
+  onSetKeyBinding: (action: KeyBindingAction, key: string | null) => void;
+  onSetMusicEnabled: (enabled: boolean) => void;
+  onSetMusicVolume: (volume: number) => void;
+  onSetSoundEnabled: (enabled: boolean) => void;
+  onSetSoundVolume: (volume: number) => void;
 }
 
 function describeRecoveryPath(error: string, hasSavedSession: boolean) {
@@ -111,11 +132,86 @@ function describeRecoveryPath(error: string, hasSavedSession: boolean) {
   };
 }
 
+function describeBootstrapRecovery(
+  assetStatus: SessionPanelProps["assetStatus"],
+  assetError: string | null,
+  mapPackStatus: SessionPanelProps["mapPackStatus"],
+  mapPackError: string | null,
+  mapPackProgressLabel: string
+) {
+  if (assetStatus === "error") {
+    const message = assetError ?? "The sprite index files could not be loaded.";
+    const normalized = message.toLowerCase();
+
+    if (normalized.includes("unexpected token") || normalized.includes("not valid json")) {
+      return {
+        tone: "danger" as const,
+        title: "Sprite indices returned HTML",
+        copy: "The client asked for JSON but received an HTML page instead. Retry the asset bootstrap first. If it repeats, reload the page or check the asset route/origin."
+      };
+    }
+
+    return {
+      tone: "danger" as const,
+      title: "Asset catalog failed",
+      copy: "The browser could not load the sprite/object/NPC index data. Retry assets first, then reload the page if the endpoint is correct."
+    };
+  }
+
+  if (mapPackStatus === "error") {
+    const message = mapPackError ?? "The map pack could not be loaded.";
+    const normalized = message.toLowerCase();
+
+    if (normalized.includes("unsupported map pack")) {
+      return {
+        tone: "warning" as const,
+        title: "World data version mismatch",
+        copy: "The browser world pack does not match the client build. Retry world data, and reload the page if a stale cache is serving an old pack."
+      };
+    }
+
+    if (normalized.includes("invalid map pack magic")) {
+      return {
+        tone: "danger" as const,
+        title: "World pack was not valid",
+        copy: "The browser downloaded something that is not a valid map pack. Retry world data, then reload the page if a stale cache or wrong route keeps responding."
+      };
+    }
+
+    return {
+      tone: "danger" as const,
+      title: "World data failed",
+      copy: "The browser could not finish the map bootstrap. Retry world data, or reload the page if the pack route changed."
+    };
+  }
+
+  if (assetStatus === "loading" || mapPackStatus === "loading") {
+    return {
+      tone: "neutral" as const,
+      title: "Preparing client data",
+      copy:
+        mapPackStatus === "loading"
+          ? mapPackProgressLabel
+          : "Loading the sprite and metadata indices used by the browser client."
+    };
+  }
+
+  return {
+    tone: "neutral" as const,
+    title: "Client ready",
+    copy: "Sprite indices and world data are loaded. You can connect or reconnect without touching the bootstrap."
+  };
+}
+
 export const SessionPanel = memo(function SessionPanel({
   assetError,
   assetStatus,
   canConnect,
   connection,
+  mapPackError,
+  mapPackProgressLabel,
+  mapPackStatus,
+  settings,
   title,
   showTileDebug,
   world,
@@ -124,17 +220,36 @@ export const SessionPanel = memo(function SessionPanel({
   onBootstrapPasswordChange,
   onConnect,
   onDisconnect,
-  onForgetSession
+  onForgetSession,
+  onReloadPage,
+  onResetKeyBindings,
+  onResetRuntime,
+  onRetryAssets,
+  onRetryBootstrap,
+  onRetryMapPack,
+  onSetKeyBinding,
+  onSetMusicEnabled,
+  onSetMusicVolume,
+  onSetSoundEnabled,
+  onSetSoundVolume
 }: SessionPanelProps) {
   const connected = connection.status === "connected";
   const credentials = connection.credentials;
   const reconnectReady = credentials != null && !connected;
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [capturingBinding, setCapturingBinding] = useState<KeyBindingAction | null>(null);
   const advancedVisible = showAdvanced;
   const recovery =
     connection.lastError == null
       ? null
       : describeRecoveryPath(connection.lastError, credentials != null);
+  const bootstrap = describeBootstrapRecovery(
+    assetStatus,
+    assetError,
+    mapPackStatus,
+    mapPackError,
+    mapPackProgressLabel
+  );
   const sessionLabel =
     connected
       ? "Connected"
@@ -147,14 +262,59 @@ export const SessionPanel = memo(function SessionPanel({
     { label: "Account", value: accountLabel },
     { label: "Reconnect", value: credentials ? `char_id ${credentials.charId}` : "None saved" },
     { label: "World", value: connected ? title : world.mapStatus },
-    { label: "Assets", value: assetStatus }
+    { label: "Assets", value: assetStatus },
+    { label: "World data", value: mapPackStatus === "loading" ? "Loading" : mapPackStatus }
   ];
+  const musicPercent = Math.round(settings.audio.musicVolume * 100);
+  const soundPercent = Math.round(settings.audio.soundVolume * 100);
+  const rawBootstrapError = assetStatus === "error" ? assetError : mapPackStatus === "error" ? mapPackError : null;
 
   useEffect(() => {
     if (connected) {
       setShowAdvanced(false);
     }
   }, [connected]);
+
+  useEffect(() => {
+    if (!advancedVisible) {
+      setCapturingBinding(null);
+    }
+  }, [advancedVisible]);
+
+  const handleBindingCapture = (
+    action: KeyBindingAction,
+    event: ReactKeyboardEvent<HTMLButtonElement>
+  ) => {
+    if (capturingBinding !== action) {
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setCapturingBinding(null);
+      return;
+    }
+
+    if (event.key === "Backspace" || event.key === "Delete") {
+      event.preventDefault();
+      onSetKeyBinding(action, null);
+      setCapturingBinding(null);
+      return;
+    }
+
+    if (event.key === "Tab") {
+      return;
+    }
+
+    const normalized = normalizeBindingKey(event.key);
+    if (!normalized) {
+      return;
+    }
+
+    event.preventDefault();
+    onSetKeyBinding(action, normalized);
+    setCapturingBinding(null);
+  };
 
   return (
     <section className="panel connection-panel">
@@ -171,7 +331,7 @@ export const SessionPanel = memo(function SessionPanel({
         >
           {connected
             ? "Salir"
-            : assetStatus === "loading"
+            : assetStatus === "loading" || mapPackStatus === "loading"
               ? "Cargando..."
               : reconnectReady
                 ? "Reconectar"
@@ -201,16 +361,25 @@ export const SessionPanel = memo(function SessionPanel({
           className={`session-card session-recovery-card session-recovery-card-${recovery.tone}`}
           data-testid="session-error-banner"
         >
-          <div className="session-recovery-pill">{recovery.tone === "danger" ? "Critical" : recovery.tone === "warning" ? "Warning" : "Info"}</div>
           <div>
+            <div className="session-recovery-pill">
+              {recovery.tone === "danger" ? "Critical" : recovery.tone === "warning" ? "Warning" : "Info"}
+            </div>
             <p className="session-card-title">{recovery.title}</p>
             <p>{recovery.copy}</p>
           </div>
-          {credentials ? (
-            <button className="ghost-button" onClick={onForgetSession} type="button">
-              Forget saved session
-            </button>
-          ) : null}
+          <div className="session-card-actions">
+            {credentials ? (
+              <button className="ghost-button" onClick={onForgetSession} type="button">
+                Forget saved session
+              </button>
+            ) : null}
+            {!connected ? (
+              <button className="ghost-button" disabled={!canConnect} onClick={onConnect} type="button">
+                Retry login
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
@@ -228,6 +397,36 @@ export const SessionPanel = memo(function SessionPanel({
           </button>
         </div>
       ) : null}
+
+      <div className={`session-card bootstrap-status-card bootstrap-status-card-${bootstrap.tone}`}>
+        <div>
+          <p className="session-card-title">Client Bootstrap</p>
+          <h3 className="selected-slot-name">{bootstrap.title}</h3>
+          <p>{bootstrap.copy}</p>
+          {rawBootstrapError ? <code className="session-error-detail">{rawBootstrapError}</code> : null}
+        </div>
+        <div className="session-card-actions">
+          {assetStatus === "error" ? (
+            <button className="ghost-button" onClick={onRetryAssets} type="button">
+              Retry assets
+            </button>
+          ) : null}
+          {mapPackStatus === "error" ? (
+            <button className="ghost-button" onClick={onRetryMapPack} type="button">
+              Retry world data
+            </button>
+          ) : null}
+          <button className="ghost-button" onClick={onRetryBootstrap} type="button">
+            Retry bootstrap
+          </button>
+          <button className="ghost-button" onClick={onReloadPage} type="button">
+            Reload page
+          </button>
+          <button className="ghost-button" onClick={onResetRuntime} type="button">
+            Reset runtime
+          </button>
+        </div>
+      </div>
 
       {!connected ? (
         <div className="session-auth-fields">
@@ -292,23 +491,120 @@ export const SessionPanel = memo(function SessionPanel({
             </div>
             <div className="session-note">
               <span>Debug</span>
-              <strong>F1 tile debug {showTileDebug ? "on" : "off"}</strong>
+              <strong>
+                {formatBindingKey(settings.controls.bindings.tileDebug)} tile debug{" "}
+                {showTileDebug ? "on" : "off"}
+              </strong>
             </div>
           </div>
 
+          <div className="session-preferences-grid">
+            <label className="session-setting-card">
+              <div className="session-setting-header">
+                <div>
+                  <p className="session-card-title">Map music</p>
+                  <strong>{settings.audio.musicEnabled ? `${musicPercent}%` : "Off"}</strong>
+                </div>
+                <input
+                  checked={settings.audio.musicEnabled}
+                  onChange={(event) => onSetMusicEnabled(event.target.checked)}
+                  type="checkbox"
+                />
+              </div>
+              <input
+                disabled={!settings.audio.musicEnabled}
+                max="100"
+                min="0"
+                onChange={(event) => onSetMusicVolume(Number(event.target.value) / 100)}
+                type="range"
+                value={musicPercent}
+              />
+              <small>Persisted locally for this browser client.</small>
+            </label>
+
+            <label className="session-setting-card">
+              <div className="session-setting-header">
+                <div>
+                  <p className="session-card-title">Sound effects</p>
+                  <strong>{settings.audio.soundEnabled ? `${soundPercent}%` : "Off"}</strong>
+                </div>
+                <input
+                  checked={settings.audio.soundEnabled}
+                  onChange={(event) => onSetSoundEnabled(event.target.checked)}
+                  type="checkbox"
+                />
+              </div>
+              <input
+                disabled={!settings.audio.soundEnabled}
+                max="100"
+                min="0"
+                onChange={(event) => onSetSoundVolume(Number(event.target.value) / 100)}
+                type="range"
+                value={soundPercent}
+              />
+              <small>Used for combat, UI, and world WAV effects.</small>
+            </label>
+          </div>
+
+          <div className="selected-slot-card session-keybind-card">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Controles</p>
+                <h3>Utility bindings</h3>
+              </div>
+              <button className="ghost-button" onClick={onResetKeyBindings} type="button">
+                Defaults
+              </button>
+            </div>
+            <div className="session-keybind-list">
+              {KEY_BINDING_FIELDS.map((field) => {
+                const currentBinding = settings.controls.bindings[field.action];
+                const captureArmed = capturingBinding === field.action;
+
+                return (
+                  <div className="session-keybind-row" key={field.action}>
+                    <div className="session-keybind-copy">
+                      <strong>{field.label}</strong>
+                      <small>{field.description}</small>
+                    </div>
+                    <div className="session-keybind-actions">
+                      <button
+                        className={`ghost-button session-keybind-trigger ${
+                          captureArmed ? "session-keybind-trigger-armed" : ""
+                        }`}
+                        onClick={() =>
+                          setCapturingBinding((current) =>
+                            current === field.action ? null : field.action
+                          )
+                        }
+                        onKeyDown={(event) => handleBindingCapture(field.action, event)}
+                        type="button"
+                      >
+                        {captureArmed ? "Press key..." : formatBindingKey(currentBinding)}
+                      </button>
+                      <button
+                        className="ghost-button"
+                        onClick={() => onSetKeyBinding(field.action, DEFAULT_KEY_BINDINGS[field.action])}
+                        type="button"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <small className="panel-copy compact">
+              Movement stays on arrows/WASD. Spell macros stay in Hechizos on keys 1-0. Click a
+              binding, then press a replacement key. Esc cancels. Delete clears the binding.
+            </small>
+          </div>
+
           <p className="field-hint session-help-text">
-            Change the endpoint only when you want to target a different gateway. The
-            normal path is account login first, then saved reconnect on later visits.
+            Change the endpoint only when you want to target a different gateway. The normal path
+            is account login first, then saved reconnect on later visits.
           </p>
         </div>
-      ) : null}
-
-      {connection.lastError ? (
-        <div className="error-banner">{connection.lastError}</div>
-      ) : null}
-
-      {assetError ? (
-        <div className="error-banner">{assetError}</div>
       ) : null}
     </section>
   );

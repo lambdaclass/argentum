@@ -18,9 +18,29 @@ function localePrefixes() {
 
 export class SoundEffectsController {
   private cancellableAudio: HTMLAudioElement | null = null;
+  private enabled = true;
+  private volume = 0.85;
+
+  setEnabled(enabled: boolean) {
+    this.enabled = enabled;
+
+    if (!enabled && this.cancellableAudio) {
+      this.cancellableAudio.pause();
+      this.cancellableAudio.currentTime = 0;
+      this.cancellableAudio = null;
+    }
+  }
+
+  setVolume(volume: number) {
+    this.volume = Math.max(0, Math.min(1, volume));
+
+    if (this.cancellableAudio) {
+      this.cancellableAudio.volume = this.volume;
+    }
+  }
 
   playWave(endpoint: string, payload: SoundEffectPayload) {
-    if (typeof window === "undefined" || payload.wav <= 0) {
+    if (typeof window === "undefined" || !this.enabled || payload.wav <= 0) {
       return;
     }
 
@@ -53,7 +73,7 @@ export class SoundEffectsController {
     for (const candidate of candidates) {
       const audio = new Audio(candidate);
       audio.preload = "auto";
-      audio.volume = 0.85;
+      audio.volume = this.volume;
 
       try {
         await audio.play();

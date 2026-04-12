@@ -1,5 +1,6 @@
 import { Suspense, lazy, useMemo, useState, type ReactNode } from "react";
 import { createInitialState } from "../app/appReducer";
+import { applyKeyBinding, createDefaultSettings } from "../app/settings";
 import type {
   ClientState,
   InventorySlot,
@@ -329,6 +330,10 @@ function SessionSpellbookSmoke() {
         assetStatus="ready"
         canConnect
         connection={state.connection}
+        mapPackError={null}
+        mapPackProgressLabel="World data ready"
+        mapPackStatus="ready"
+        settings={state.settings}
         showTileDebug={false}
         title="Playwright Harbor"
         world={state.world}
@@ -381,6 +386,92 @@ function SessionSpellbookSmoke() {
           }));
           pushTranscript("Forgot the stored reconnect session");
         }}
+        onReloadPage={() => {
+          pushTranscript("Reload page requested");
+        }}
+        onResetKeyBindings={() => {
+          setState((current) => ({
+            ...current,
+            settings: {
+              ...current.settings,
+              controls: createDefaultSettings().controls
+            }
+          }));
+          pushTranscript("Restored default utility bindings");
+        }}
+        onResetRuntime={() => {
+          const next = cloneInitialState();
+          setState((current) => ({
+            ...next,
+            connection: {
+              ...next.connection,
+              endpoint: current.connection.endpoint,
+              characterName: current.connection.characterName,
+              bootstrapPassword: current.connection.bootstrapPassword,
+              credentials: current.connection.credentials
+            },
+            settings: current.settings
+          }));
+          pushTranscript("Reset runtime state");
+        }}
+        onRetryAssets={() => {
+          pushTranscript("Retried asset bootstrap");
+        }}
+        onRetryBootstrap={() => {
+          pushTranscript("Retried full bootstrap");
+        }}
+        onRetryMapPack={() => {
+          pushTranscript("Retried map pack bootstrap");
+        }}
+        onSetKeyBinding={(action, key) => {
+          setState((current) => ({
+            ...current,
+            settings: {
+              ...current.settings,
+              controls: {
+                ...current.settings.controls,
+                bindings: applyKeyBinding(current.settings.controls.bindings, action, key)
+              }
+            }
+          }));
+          pushTranscript(`${action} binding changed to ${key ?? "unbound"}`);
+        }}
+        onSetMusicEnabled={(enabled) =>
+          setState((current) => ({
+            ...current,
+            settings: {
+              ...current.settings,
+              audio: { ...current.settings.audio, musicEnabled: enabled }
+            }
+          }))
+        }
+        onSetMusicVolume={(volume) =>
+          setState((current) => ({
+            ...current,
+            settings: {
+              ...current.settings,
+              audio: { ...current.settings.audio, musicVolume: volume }
+            }
+          }))
+        }
+        onSetSoundEnabled={(enabled) =>
+          setState((current) => ({
+            ...current,
+            settings: {
+              ...current.settings,
+              audio: { ...current.settings.audio, soundEnabled: enabled }
+            }
+          }))
+        }
+        onSetSoundVolume={(volume) =>
+          setState((current) => ({
+            ...current,
+            settings: {
+              ...current.settings,
+              audio: { ...current.settings.audio, soundVolume: volume }
+            }
+          }))
+        }
       />
 
       <HechizosPanel

@@ -33,8 +33,9 @@ This is the only roadmap. `CHANGELOG.md` tracks completed work.
   - party/clan UI exists, but it is not yet fully authoritative: the browser
     still needs richer backend truth for online state, roles/ranks,
     permissions, safe-state, alignment, and cleaner snapshots
-  - user settings remain thin: browser music/SFX toggles, renderer-quality
-    settings, keybind settings, and persistence are still missing or incomplete
+  - user settings remain incomplete: browser music/SFX and utility-keybind
+    persistence are landed, but broader browser preference coverage and polish
+    are still thin
   - audio polish remains incomplete: MIDI/music exists, but combat/UI/world
     sound effects are still open
   - browser-side proof remains incomplete: reducer tests, visual fixture tests,
@@ -108,7 +109,7 @@ Why first:
 - dead/ghost cues
 - loading/reconnect/error overlays
 - responsive layout
-- sound/settings
+- sound/settings polish
 
 Why second:
 
@@ -603,8 +604,10 @@ When in doubt:
 89. Add browser SFX settings.
      Outcome: sound effects can be enabled, disabled, and persisted
      intentionally.
-90. Add browser renderer-quality settings.
-     Outcome: users can trade fidelity for performance explicitly.
+90. Do not add a browser graphics-quality menu by default; only add optional
+    visual preferences if profiling later proves a real need.
+     Outcome: the 2D client stays fast by design instead of outsourcing
+     performance to a quality menu.
 91. Add browser keybind settings.
      Outcome: controls can be configured instead of hardcoded.
 92. Add a minimap if it remains part of the web UX target.

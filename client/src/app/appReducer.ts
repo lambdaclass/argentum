@@ -6,6 +6,13 @@ import type {
   PacketLogEntry,
   SessionCredentials
 } from "./types";
+import {
+  applyKeyBinding,
+  clampVolume,
+  createDefaultSettings,
+  loadStoredSettings,
+  persistSettings as persistClientSettings
+} from "./settings";
 
 const DEFAULT_ENDPOINT = "ws://127.0.0.1:7667/ao";
 const DEFAULT_CHARACTER_NAME = "Player_Web";
@@ -261,6 +268,7 @@ export function createInitialState(): ClientState {
       raining: false,
       snowing: false
     },
+    settings: loadStoredSettings(),
     log: [createLogEntry("info", "Client initialized.")]
   };
 }
@@ -1209,6 +1217,75 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
         }
       };
 
+    case "settings/setMusicEnabled": {
+      const settings = {
+        ...state.settings,
+        audio: {
+          ...state.settings.audio,
+          musicEnabled: action.enabled
+        }
+      };
+      persistClientSettings(settings);
+      return { ...state, settings };
+    }
+
+    case "settings/setMusicVolume": {
+      const settings = {
+        ...state.settings,
+        audio: {
+          ...state.settings.audio,
+          musicVolume: clampVolume(action.volume, state.settings.audio.musicVolume)
+        }
+      };
+      persistClientSettings(settings);
+      return { ...state, settings };
+    }
+
+    case "settings/setSoundEnabled": {
+      const settings = {
+        ...state.settings,
+        audio: {
+          ...state.settings.audio,
+          soundEnabled: action.enabled
+        }
+      };
+      persistClientSettings(settings);
+      return { ...state, settings };
+    }
+
+    case "settings/setSoundVolume": {
+      const settings = {
+        ...state.settings,
+        audio: {
+          ...state.settings.audio,
+          soundVolume: clampVolume(action.volume, state.settings.audio.soundVolume)
+        }
+      };
+      persistClientSettings(settings);
+      return { ...state, settings };
+    }
+
+    case "settings/setKeyBinding": {
+      const settings = {
+        ...state.settings,
+        controls: {
+          ...state.settings.controls,
+          bindings: applyKeyBinding(state.settings.controls.bindings, action.action, action.key)
+        }
+      };
+      persistClientSettings(settings);
+      return { ...state, settings };
+    }
+
+    case "settings/resetKeyBindings": {
+      const settings = {
+        ...state.settings,
+        controls: createDefaultSettings().controls
+      };
+      persistClientSettings(settings);
+      return { ...state, settings };
+    }
+
     case "log/add":
       return {
         ...state,
@@ -1300,7 +1377,8 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
         weather: {
           raining: false,
           snowing: false
-        }
+        },
+        settings: state.settings
       };
 
     case "party/toggle":

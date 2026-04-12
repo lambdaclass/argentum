@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { appReducer, createInitialState } from "./appReducer";
-import type { Direction } from "./types";
+import { bindingMatches } from "./settings";
+import type { Direction, KeyBindingAction } from "./types";
 import { SessionClient, type MovementDebugSnapshot } from "../net/SessionClient";
 import { MapMusicController } from "../audio/mapMusic";
 import { SoundEffectsController } from "../audio/soundEffects";
@@ -157,6 +158,8 @@ export function App({ uiDemoMode = false }: AppProps) {
     loadedBytes: 0,
     totalBytes: null
   });
+  const [assetReloadNonce, setAssetReloadNonce] = useState(0);
+  const [mapPackReloadNonce, setMapPackReloadNonce] = useState(0);
   const [activeRightTab, setActiveRightTab] = useState<
     "hud" | "trade" | "bank" | "commerce" | "skills" | "spells" | "world" | "session" | "chat" | "debug"
   >("hud");
@@ -297,6 +300,16 @@ export function App({ uiDemoMode = false }: AppProps) {
   const sound = soundRef.current;
 
   useEffect(() => {
+    music.setEnabled(state.settings.audio.musicEnabled);
+    music.setVolume(state.settings.audio.musicVolume);
+  }, [music, state.settings.audio.musicEnabled, state.settings.audio.musicVolume]);
+
+  useEffect(() => {
+    sound.setEnabled(state.settings.audio.soundEnabled);
+    sound.setVolume(state.settings.audio.soundVolume);
+  }, [sound, state.settings.audio.soundEnabled, state.settings.audio.soundVolume]);
+
+  useEffect(() => {
     if (uiDemoMode) {
       setAssetCatalog(null);
       setAssetStatus("ready");
@@ -333,7 +346,7 @@ export function App({ uiDemoMode = false }: AppProps) {
     return () => {
       cancelled = true;
     };
-  }, [state.connection.endpoint]);
+  }, [assetReloadNonce, state.connection.endpoint]);
 
   useEffect(() => {
     if (uiDemoMode) {
@@ -383,7 +396,7 @@ export function App({ uiDemoMode = false }: AppProps) {
     return () => {
       cancelled = true;
     };
-  }, [state.connection.endpoint]);
+  }, [mapPackReloadNonce, state.connection.endpoint]);
 
   const mapPackProgressLabel = useMemo(() => {
     const { loadedBytes, totalBytes, phase } = mapPackProgress;
@@ -423,56 +436,63 @@ export function App({ uiDemoMode = false }: AppProps) {
     return null;
   }, [mapPackProgress]);
 
+  const controlBindings = state.settings.controls.bindings;
+
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       const target = event.target;
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLButtonElement ||
+        target instanceof HTMLSelectElement
+      ) {
         return;
       }
 
-      if (event.key === "F1") {
+      if (bindingMatches(event.key, controlBindings.tileDebug)) {
         event.preventDefault();
         setShowTileDebug((value) => !value);
         return;
       }
 
-      if (event.key === "F2") {
+      if (bindingMatches(event.key, controlBindings.moveDebug)) {
         event.preventDefault();
         setShowMoveDebug((value) => !value);
         return;
       }
 
-      if (event.key === "i" || event.key === "I") {
+      if (bindingMatches(event.key, controlBindings.openHud)) {
         event.preventDefault();
         setActiveRightTab("hud");
         return;
       }
 
-      if (event.key === "p" || event.key === "P") {
+      if (bindingMatches(event.key, controlBindings.pickUp)) {
         event.preventDefault();
         session.sendPickUp();
         return;
       }
 
-      if (event.key === "f" || event.key === "F") {
+      if (bindingMatches(event.key, controlBindings.attack)) {
         event.preventDefault();
         session.sendAttack();
         return;
       }
 
-      if (event.key === "g" || event.key === "G") {
+      if (bindingMatches(event.key, controlBindings.safeToggle)) {
         event.preventDefault();
         session.sendSafeToggle();
         return;
       }
 
-      if (event.key === "e" || event.key === "E") {
+      if (bindingMatches(event.key, controlBindings.commerce)) {
         event.preventDefault();
         session.sendCommerceStart();
         return;
       }
 
-      if (event.key === "b" || event.key === "B") {
+      if (bindingMatches(event.key, controlBindings.bank)) {
         event.preventDefault();
         session.sendBankStart();
         return;
@@ -543,7 +563,7 @@ export function App({ uiDemoMode = false }: AppProps) {
       window.removeEventListener("keyup", releaseHandler);
       window.removeEventListener("blur", blurHandler);
     };
-  }, [session, spellHotkeys]);
+  }, [controlBindings, session, spellHotkeys]);
 
   const hasTransientWorldState =
     state.world.chatBubbles.length > 0 ||
@@ -659,6 +679,11 @@ export function App({ uiDemoMode = false }: AppProps) {
       return;
     }
 
+    if (!state.settings.audio.musicEnabled) {
+      music.stop();
+      return;
+    }
+
     void music.ensureReady().catch((error) => {
       dispatch({
         type: "log/add",
@@ -666,10 +691,15 @@ export function App({ uiDemoMode = false }: AppProps) {
         message: error instanceof Error ? error.message : "Music initialization failed."
       });
     });
-  }, [assetStatus, dispatch, music]);
+  }, [assetStatus, dispatch, music, state.settings.audio.musicEnabled]);
 
   useEffect(() => {
     if (state.world.mapStatus !== "ready" || !state.world.map) {
+      return;
+    }
+
+    if (!state.settings.audio.musicEnabled) {
+      music.stop();
       return;
     }
 
@@ -680,7 +710,14 @@ export function App({ uiDemoMode = false }: AppProps) {
         message: error instanceof Error ? error.message : "Map music failed."
       });
     });
-  }, [dispatch, music, state.connection.endpoint, state.world.map, state.world.mapStatus]);
+  }, [
+    dispatch,
+    music,
+    state.connection.endpoint,
+    state.settings.audio.musicEnabled,
+    state.world.map,
+    state.world.mapStatus
+  ]);
 
   useEffect(() => {
     if (state.connection.status === "offline" && state.world.map == null) {
@@ -702,6 +739,34 @@ export function App({ uiDemoMode = false }: AppProps) {
     manualDisconnectRef.current = true;
     session.disconnect();
   }, [session]);
+
+  const handleRetryAssets = useCallback(() => {
+    setAssetReloadNonce((current) => current + 1);
+  }, []);
+
+  const handleRetryMapPack = useCallback(() => {
+    setMapPackReloadNonce((current) => current + 1);
+  }, []);
+
+  const handleRetryBootstrap = useCallback(() => {
+    setAssetReloadNonce((current) => current + 1);
+    setMapPackReloadNonce((current) => current + 1);
+  }, []);
+
+  const handleResetRuntime = useCallback(() => {
+    manualDisconnectRef.current = true;
+    enteredWorldRef.current = false;
+    setBootConnectAttempts(0);
+    session.disconnect();
+    dispatch({ type: "session/resetRuntime" });
+    setActiveRightTab("session");
+  }, [dispatch, session]);
+
+  const handleReloadPage = useCallback(() => {
+    if (typeof window !== "undefined") {
+      window.location.reload();
+    }
+  }, []);
 
   const handleChatSend = useCallback((message: string) => {
     const trimmed = message.trim();
@@ -801,6 +866,30 @@ export function App({ uiDemoMode = false }: AppProps) {
     dispatch({ type: "connection/setCredentials", credentials: null });
   }, [dispatch]);
 
+  const handleSetMusicEnabled = useCallback((enabled: boolean) => {
+    dispatch({ type: "settings/setMusicEnabled", enabled });
+  }, [dispatch]);
+
+  const handleSetMusicVolume = useCallback((volume: number) => {
+    dispatch({ type: "settings/setMusicVolume", volume });
+  }, [dispatch]);
+
+  const handleSetSoundEnabled = useCallback((enabled: boolean) => {
+    dispatch({ type: "settings/setSoundEnabled", enabled });
+  }, [dispatch]);
+
+  const handleSetSoundVolume = useCallback((volume: number) => {
+    dispatch({ type: "settings/setSoundVolume", volume });
+  }, [dispatch]);
+
+  const handleSetKeyBinding = useCallback((action: KeyBindingAction, key: string | null) => {
+    dispatch({ type: "settings/setKeyBinding", action, key });
+  }, [dispatch]);
+
+  const handleResetKeyBindings = useCallback(() => {
+    dispatch({ type: "settings/resetKeyBindings" });
+  }, [dispatch]);
+
   const handleSelectInventorySlot = useCallback((slotIndex: number | null) => {
     dispatch({ type: "inventory/selectSlot", slotIndex });
   }, [dispatch]);
@@ -832,6 +921,8 @@ export function App({ uiDemoMode = false }: AppProps) {
   const handleToggleSafeMode = useCallback(() => {
     session.sendSafeToggle();
   }, [session]);
+
+  const canConnect = assetStatus === "ready" && mapPackStatus === "ready";
 
   const title = useMemo(() => {
     const position =
@@ -974,6 +1065,26 @@ export function App({ uiDemoMode = false }: AppProps) {
                         ? mapPackProgressLabel
                         : "Waiting for the same sprite/index catalog used by the historical clients before entering the world."}
                 </p>
+                {assetStatus === "error" || mapPackStatus === "error" ? (
+                  <div className="world-loading-actions">
+                    {assetStatus === "error" ? (
+                      <button className="ghost-button" onClick={handleRetryAssets} type="button">
+                        Retry Assets
+                      </button>
+                    ) : null}
+                    {mapPackStatus === "error" ? (
+                      <button className="ghost-button" onClick={handleRetryMapPack} type="button">
+                        Retry World Data
+                      </button>
+                    ) : null}
+                    <button className="ghost-button" onClick={handleRetryBootstrap} type="button">
+                      Retry Bootstrap
+                    </button>
+                    <button className="ghost-button" onClick={handleReloadPage} type="button">
+                      Reload Page
+                    </button>
+                  </div>
+                ) : null}
                 {assetStatus !== "error" && mapPackStatus !== "error" && mapPackStatus !== "ready" ? (
                   <div className="world-loading-progress" aria-hidden="true">
                     <div
@@ -997,7 +1108,7 @@ export function App({ uiDemoMode = false }: AppProps) {
       <aside className="side-panel side-panel-right game-sidebar">
         <section className="panel ao-sidebar-shell" data-active-tab={activeRightTab}>
           <CharacterCard
-            canConnect={assetStatus === "ready" && mapPackStatus === "ready"}
+            canConnect={canConnect}
             connection={state.connection}
             dense={activeRightTab === "hud"}
             stats={state.stats}
@@ -1025,8 +1136,12 @@ export function App({ uiDemoMode = false }: AppProps) {
               <SessionPanel
                 assetError={assetError}
                 assetStatus={assetStatus}
-                canConnect={assetStatus === "ready" && mapPackStatus === "ready"}
+                canConnect={canConnect}
                 connection={state.connection}
+                mapPackError={mapPackError}
+                mapPackProgressLabel={mapPackProgressLabel}
+                mapPackStatus={mapPackStatus}
+                settings={state.settings}
                 title={title}
                 showTileDebug={showTileDebug}
                 world={state.world}
@@ -1036,6 +1151,17 @@ export function App({ uiDemoMode = false }: AppProps) {
                 onConnect={handleConnect}
                 onDisconnect={handleDisconnect}
                 onForgetSession={handleForgetSession}
+                onReloadPage={handleReloadPage}
+                onResetKeyBindings={handleResetKeyBindings}
+                onResetRuntime={handleResetRuntime}
+                onRetryAssets={handleRetryAssets}
+                onRetryBootstrap={handleRetryBootstrap}
+                onRetryMapPack={handleRetryMapPack}
+                onSetKeyBinding={handleSetKeyBinding}
+                onSetMusicEnabled={handleSetMusicEnabled}
+                onSetMusicVolume={handleSetMusicVolume}
+                onSetSoundEnabled={handleSetSoundEnabled}
+                onSetSoundVolume={handleSetSoundVolume}
               />
             ) : null}
 

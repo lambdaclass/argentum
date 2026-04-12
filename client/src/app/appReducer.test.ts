@@ -72,4 +72,39 @@ describe("appReducer", () => {
     expect(afterDeath.world.self.dead).toBe(true);
     expect(afterDeath.weather).toEqual({ raining: true, snowing: true });
   });
+
+  it("clamps persisted audio settings through reducer updates", () => {
+    const state = createInitialState();
+    const next = appReducer(
+      appReducer(state, { type: "settings/setMusicVolume", volume: 2 }),
+      { type: "settings/setSoundVolume", volume: -1 }
+    );
+
+    expect(next.settings.audio.musicVolume).toBe(1);
+    expect(next.settings.audio.soundVolume).toBe(0);
+  });
+
+  it("deduplicates utility key bindings when the same key is reassigned", () => {
+    const state = createInitialState();
+    const next = appReducer(state, {
+      type: "settings/setKeyBinding",
+      action: "pickUp",
+      key: "f"
+    });
+
+    expect(next.settings.controls.bindings.pickUp).toBe("f");
+    expect(next.settings.controls.bindings.attack).toBeNull();
+  });
+
+  it("keeps settings intact when runtime state resets", () => {
+    const state = appReducer(createInitialState(), {
+      type: "settings/setMusicEnabled",
+      enabled: false
+    });
+    const next = appReducer(state, { type: "session/resetRuntime" });
+
+    expect(next.settings.audio.musicEnabled).toBe(false);
+    expect(next.connection.status).toBe("offline");
+    expect(next.world.map).toBeNull();
+  });
 });

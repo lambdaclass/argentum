@@ -83,9 +83,23 @@ export class MapMusicController {
   private player: MidiPlayerInstance | null = null;
   private initPromise: Promise<void> | null = null;
   private currentMusicId: number | null = null;
+  private enabled = true;
+  private volume = 0.6;
   private readonly resumeAudio = () => {
     void this.context?.resume();
   };
+
+  setEnabled(enabled: boolean) {
+    this.enabled = enabled;
+
+    if (!enabled) {
+      this.stop();
+    }
+  }
+
+  setVolume(volume: number) {
+    this.volume = Math.max(0, Math.min(1, volume));
+  }
 
   async ensureReady() {
     if (this.player && this.instrument && this.context) {
@@ -100,7 +114,8 @@ export class MapMusicController {
   }
 
   async playMapMusic(endpoint: string, musicId: number) {
-    if (!musicId || musicId <= 0) {
+    if (!this.enabled || !musicId || musicId <= 0) {
+      this.stop();
       return;
     }
 
@@ -170,9 +185,13 @@ export class MapMusicController {
     const context = this.context;
 
     this.player = new window.MidiPlayer.Player((event: MidiPlayerEvent) => {
+      if (!this.enabled) {
+        return;
+      }
+
       if (event.name === "Note on" && event.velocity > 0) {
         instrument.play(event.noteName, context.currentTime, {
-          gain: (event.velocity / 127) * 0.5
+          gain: (event.velocity / 127) * this.volume
         });
       }
     });
