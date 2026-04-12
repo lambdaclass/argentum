@@ -2,8 +2,14 @@ defmodule AoTcpGateway.HogarTest do
   @moduledoc """
   Tests for VB6 /HOGAR (home travel) behavior.
 
-  Exercises both the dead-instant and alive-delayed paths through
-  SessionLogic, verifying restrictions, cancellation, and arrival.
+  VB6 HandleHome exact rules (Protocol.bas):
+    1. Jail restricted area → reject
+    2. Must be dead (Muerto=1) → alive rejected
+    3. NEWBIE zone → reject
+    4. Penalty > 0 → reject (prison sentence)
+    5. Already traveling → cancel current travel
+    6. Not on home map → charge gold, start delayed travel
+    7. Already on home map → "Ya te encuentras en tu hogar"
   """
   use ExUnit.Case, async: true
 
@@ -25,7 +31,7 @@ defmodule AoTcpGateway.HogarTest do
         y: 50,
         level: 10,
         gold: 10_000,
-        dead: false,
+        dead: true,
         home_city: :ullathorpe,
         penalty: 0,
         map_id: 300
@@ -50,31 +56,65 @@ defmodule AoTcpGateway.HogarTest do
     )
   end
 
-  # ---- Dead player: instant teleport (existing behavior) ----
+  # ---- VB6 step 1: Jail map restriction ----
 
-  describe "dead player /HOGAR (instant teleport)" do
-    test "dead player on foreign map pays gold and gets transfer packets" do
-      # We can't fully test transfer without MapServer, but we can test
-      # the logic flow returns the right console messages.
-      # This is a smoke test of the routing — dead players use the instant path.
-      entity = base_entity(%{dead: true, gold: 10_000})
-      _state = base_state()
+  describe "jail map restriction (VB6 step 1)" do
+    test "dead player on jail map is rejected" do
+      entity = base_entity(%{dead: true, map_id: @jail_map_id})
+      state = base_state(%{map_id: @jail_map_id})
 
-      # The actual handle_hogar calls MapServer.snapshot_entity, which requires
-      # a running MapServer. We test the pure-logic cancel/arrive helpers instead.
-      # Dead path is integration-tested in ao_smoke_bot_test.exs.
-      assert entity.dead == true
+      {new_state, packets} = SessionLogic.handle_hogar_check(state, entity, "CAMPO")
+
+      assert new_state.hogar_timer_ref == nil
+      assert Enum.any?(packets, fn
+        {:console_msg, %{message: msg}} -> msg =~ "cárcel"
+        _ -> false
+      end)
     end
   end
 
-  # ---- Alive player: delayed travel ----
+  # ---- VB6 step 2: Must be dead ----
 
-  describe "alive player /HOGAR restrictions" do
-    test "cannot use while in jail (penalty > 0)" do
-      entity = base_entity(%{penalty: 5})
+  describe "alive player rejection (VB6 step 2)" do
+    test "alive player is rejected with must-be-dead message" do
+      entity = base_entity(%{dead: false})
       state = base_state()
 
-      {new_state, packets} = SessionLogic.handle_hogar_check(state, entity)
+      {new_state, packets} = SessionLogic.handle_hogar_check(state, entity, "CAMPO")
+
+      assert new_state.hogar_timer_ref == nil
+      assert Enum.any?(packets, fn
+        {:console_msg, %{message: msg}} -> msg =~ "muerto"
+        _ -> false
+      end)
+    end
+  end
+
+  # ---- VB6 step 3: NEWBIE zone restriction ----
+
+  describe "NEWBIE zone restriction (VB6 step 3)" do
+    test "dead player on NEWBIE map is rejected" do
+      entity = base_entity(%{dead: true})
+      state = base_state()
+
+      {new_state, packets} = SessionLogic.handle_hogar_check(state, entity, "NEWBIE")
+
+      assert new_state.hogar_timer_ref == nil
+      assert Enum.any?(packets, fn
+        {:console_msg, %{message: msg}} -> msg =~ "No puedes viajar"
+        _ -> false
+      end)
+    end
+  end
+
+  # ---- VB6 step 4: Penalty (prison sentence) ----
+
+  describe "prison penalty restriction (VB6 step 4)" do
+    test "dead player with penalty > 0 is rejected" do
+      entity = base_entity(%{dead: true, penalty: 5})
+      state = base_state()
+
+      {new_state, packets} = SessionLogic.handle_hogar_check(state, entity, "CAMPO")
 
       assert new_state.hogar_timer_ref == nil
       assert Enum.any?(packets, fn
@@ -82,40 +122,36 @@ defmodule AoTcpGateway.HogarTest do
         _ -> false
       end)
     end
+  end
 
-    test "cannot use while on jail map" do
-      entity = base_entity(%{map_id: @jail_map_id})
-      state = base_state(%{map_id: @jail_map_id})
+  # ---- VB6 step 5: Already traveling → cancel ----
 
-      {new_state, packets} = SessionLogic.handle_hogar_check(state, entity)
+  describe "already traveling (VB6 step 7)" do
+    test "already traveling cancels the current travel" do
+      ref = make_ref()
+      entity = base_entity(%{dead: true})
+      state = base_state(%{hogar_timer_ref: ref})
 
+      {new_state, packets} = SessionLogic.handle_hogar_check(state, entity, "CAMPO")
+
+      # Timer ref should be cleared
       assert new_state.hogar_timer_ref == nil
       assert Enum.any?(packets, fn
-        {:console_msg, %{message: msg}} -> msg =~ "prisión"
+        {:console_msg, %{message: msg}} -> msg =~ "viaje en curso"
         _ -> false
       end)
     end
+  end
 
-    test "cannot use while already traveling home" do
-      entity = base_entity()
-      state = base_state(%{hogar_timer_ref: make_ref()})
+  # ---- VB6 step 6: Already on home map ----
 
-      {new_state, packets} = SessionLogic.handle_hogar_check(state, entity)
-
-      # Timer ref should be unchanged (not overwritten)
-      assert new_state.hogar_timer_ref != nil
-      assert Enum.any?(packets, fn
-        {:console_msg, %{message: msg}} -> msg =~ "viajando"
-        _ -> false
-      end)
-    end
-
-    test "alive player on home map gets already-home message" do
+  describe "already on home map (VB6 step 6)" do
+    test "dead player already on home map gets already-home message" do
       # Ullathorpe spawns on map 1 (fallback)
-      entity = base_entity(%{map_id: 1})
+      entity = base_entity(%{dead: true, map_id: 1})
       state = base_state(%{map_id: 1})
 
-      {new_state, packets} = SessionLogic.handle_hogar_check(state, entity)
+      {new_state, packets} = SessionLogic.handle_hogar_check(state, entity, "CAMPO")
 
       assert new_state.hogar_timer_ref == nil
       assert Enum.any?(packets, fn
@@ -123,21 +159,45 @@ defmodule AoTcpGateway.HogarTest do
         _ -> false
       end)
     end
+  end
 
-    test "alive player starts travel — sets timer and sends console message" do
-      entity = base_entity()
+  # ---- VB6 step 6: Insufficient gold ----
+
+  describe "insufficient gold (VB6 step 6)" do
+    test "dead player with insufficient gold is rejected" do
+      # Level 10: cost = 10*15 + trunc(10^1.5) = 150 + 31 = 181
+      entity = base_entity(%{dead: true, gold: 0})
       state = base_state()
 
-      {new_state, packets} = SessionLogic.handle_hogar_check(state, entity)
+      {new_state, packets} = SessionLogic.handle_hogar_check(state, entity, "CAMPO")
 
-      # Timer should be set
-      assert new_state.hogar_timer_ref != nil
+      assert new_state.hogar_timer_ref == nil
       assert Enum.any?(packets, fn
-        {:console_msg, %{message: msg}} -> msg =~ "viaje" or msg =~ "viajando" or msg =~ "Recuerda"
+        {:console_msg, %{message: msg}} -> msg =~ "monedas de oro"
         _ -> false
       end)
     end
   end
+
+  # ---- VB6 step 6: Successful delayed travel start ----
+
+  describe "successful delayed travel (VB6 step 6)" do
+    test "dead player on foreign map starts delayed travel" do
+      entity = base_entity(%{dead: true, gold: 10_000})
+      state = base_state()
+
+      {new_state, packets} = SessionLogic.handle_hogar_check(state, entity, "CAMPO")
+
+      # Timer should be set (delayed travel started)
+      assert new_state.hogar_timer_ref != nil
+      assert Enum.any?(packets, fn
+        {:console_msg, %{message: msg}} -> msg =~ "hogar"
+        _ -> false
+      end)
+    end
+  end
+
+  # ---- Travel cancellation ----
 
   describe "travel cancellation" do
     test "cancel_hogar clears the timer ref" do
@@ -148,7 +208,7 @@ defmodule AoTcpGateway.HogarTest do
 
       assert new_state.hogar_timer_ref == nil
       assert Enum.any?(packets, fn
-        {:console_msg, %{message: msg}} -> msg =~ "cancelado" or msg =~ "interrumpido"
+        {:console_msg, %{message: msg}} -> msg =~ "cancelado"
         _ -> false
       end)
     end
@@ -172,6 +232,8 @@ defmodule AoTcpGateway.HogarTest do
       assert new_state.hogar_timer_ref == nil
     end
   end
+
+  # ---- Hogar arrival ----
 
   describe "hogar arrival" do
     test "handle_hogar_arrive returns transfer data when still traveling" do
@@ -202,6 +264,38 @@ defmodule AoTcpGateway.HogarTest do
       result = SessionLogic.handle_hogar_arrive(state, entity)
 
       assert result == {state, []}
+    end
+  end
+
+  # ---- Gold cost formula parity ----
+
+  describe "gold cost formula (VB6 parity)" do
+    test "level <= 24: cost = level*15 + trunc(level^1.5)" do
+      # Level 10: 150 + 31 = 181
+      entity = base_entity(%{dead: true, gold: 180, level: 10})
+      state = base_state()
+
+      {_state, packets} = SessionLogic.handle_hogar_check(state, entity, "CAMPO")
+
+      # 180 < 181, should be rejected
+      assert Enum.any?(packets, fn
+        {:console_msg, %{message: msg}} -> msg =~ "181 monedas"
+        _ -> false
+      end)
+    end
+
+    test "level > 24: cost = level^2" do
+      # Level 25: 625
+      entity = base_entity(%{dead: true, gold: 624, level: 25})
+      state = base_state()
+
+      {_state, packets} = SessionLogic.handle_hogar_check(state, entity, "CAMPO")
+
+      # 624 < 625, should be rejected
+      assert Enum.any?(packets, fn
+        {:console_msg, %{message: msg}} -> msg =~ "625 monedas"
+        _ -> false
+      end)
     end
   end
 end

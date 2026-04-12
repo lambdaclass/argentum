@@ -39,7 +39,9 @@ defmodule AoTcpGateway.WsHandler do
        target_y: nil,
        in_commerce: false,
        in_bank: false,
+       in_trade: false,
        is_gm: false,
+       is_dead: false,
        hogar_timer_ref: nil,
        flood_guard: FloodGuard.new()
      }}
@@ -61,6 +63,10 @@ defmodule AoTcpGateway.WsHandler do
   # Pre-encoded raw bytes from MapServer
   def websocket_info({:send_raw, binary}, state) do
     {:reply, {:binary, binary}, state}
+  end
+
+  def websocket_info(:trade_started, state) do
+    {:ok, %{state | in_trade: true}}
   end
 
   # Map transfer request from MapServer

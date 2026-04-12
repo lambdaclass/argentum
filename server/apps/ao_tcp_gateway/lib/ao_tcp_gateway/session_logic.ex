@@ -427,20 +427,57 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
+  # ---- Dead guards for equip/use/attack/cast ----
+
+  def handle_command(state, {:equip_item, _})
+      when state.character_id != nil and state.is_dead == true do
+    {state, [{:console_msg, %{message: "Estás muerto. No podés equipar objetos.", font_index: 0}}]}
+  end
+
   def handle_command(state, {:equip_item, %{slot: slot}}) when state.character_id != nil do
-    Arena.Map.MapServer.equip_item(state.map_id, state.character_id, slot)
-    {state, []}
+    case Arena.Map.MapServer.equip_item(state.map_id, state.character_id, slot) do
+      {:error, :dead} ->
+        {%{state | is_dead: true},
+         [{:console_msg, %{message: "Estás muerto. No podés equipar objetos.", font_index: 0}}]}
+
+      _ ->
+        {state, []}
+    end
+  end
+
+  def handle_command(state, {:use_item, _})
+      when state.character_id != nil and state.is_dead == true do
+    {state, [{:console_msg, %{message: "Estás muerto. No podés usar objetos.", font_index: 0}}]}
   end
 
   def handle_command(state, {:use_item, %{slot: slot}}) when state.character_id != nil do
-    Arena.Map.MapServer.use_item(state.map_id, state.character_id, slot)
-    {state, []}
+    case Arena.Map.MapServer.use_item(state.map_id, state.character_id, slot) do
+      {:error, :dead} ->
+        {%{state | is_dead: true},
+         [{:console_msg, %{message: "Estás muerto. No podés usar objetos.", font_index: 0}}]}
+
+      _ ->
+        {state, []}
+    end
+  end
+
+  def handle_command(state, {:attack, _})
+      when state.character_id != nil and state.is_dead == true do
+    {state, [{:console_msg, %{message: "Estás muerto. No podés atacar.", font_index: 0}}]}
   end
 
   def handle_command(state, {:attack, _}) when state.character_id != nil do
     {state, cancel_packets} = maybe_cancel_hogar(state)
-    Arena.Map.MapServer.attack(state.map_id, state.character_id, state.target_x, state.target_y)
-    {state, cancel_packets}
+
+    case Arena.Map.MapServer.attack(state.map_id, state.character_id, state.target_x, state.target_y) do
+      {:error, :dead} ->
+        {%{state | is_dead: true},
+         cancel_packets ++
+           [{:console_msg, %{message: "Estás muerto. No podés atacar.", font_index: 0}}]}
+
+      _ ->
+        {state, cancel_packets}
+    end
   end
 
   def handle_command(state, {:request_position_update, _})
@@ -453,10 +490,23 @@ defmodule AoTcpGateway.SessionLogic do
 
   def handle_command(state, {:request_position_update, _}), do: {state, []}
 
+  def handle_command(state, {:cast_spell, _})
+      when state.character_id != nil and state.is_dead == true do
+    {state, [{:console_msg, %{message: "Estás muerto. No podés lanzar hechizos.", font_index: 0}}]}
+  end
+
   def handle_command(state, {:cast_spell, %{spell_slot: slot}}) when state.character_id != nil do
     {state, cancel_packets} = maybe_cancel_hogar(state)
-    Arena.Map.MapServer.cast_spell(state.map_id, state.character_id, slot, state.target_x, state.target_y)
-    {state, cancel_packets}
+
+    case Arena.Map.MapServer.cast_spell(state.map_id, state.character_id, slot, state.target_x, state.target_y) do
+      {:error, :dead} ->
+        {%{state | is_dead: true},
+         cancel_packets ++
+           [{:console_msg, %{message: "Estás muerto. No podés lanzar hechizos.", font_index: 0}}]}
+
+      _ ->
+        {state, cancel_packets}
+    end
   end
 
   def handle_command(state, {:left_click, %{x: x, y: y}}) when state.character_id != nil do
@@ -601,7 +651,7 @@ defmodule AoTcpGateway.SessionLogic do
 
   def handle_command(state, {:resucitate, _}) when state.character_id != nil do
     Arena.Map.MapServer.resucitate(state.map_id, state.character_id)
-    {state, []}
+    {%{state | is_dead: false}, []}
   end
 
   def handle_command(state, {:request_atributes, _}) when state.character_id != nil do
@@ -631,28 +681,50 @@ defmodule AoTcpGateway.SessionLogic do
 
   # ---- User-to-user trade ----
 
+  @trade_not_active_msg {:console_msg, %{message: "No estas en un comercio con otro jugador.", font_index: 0}}
+
+  def handle_command(state, {:user_commerce_offer, _})
+      when state.character_id != nil and state.in_trade == false do
+    {state, [@trade_not_active_msg]}
+  end
+
   def handle_command(state, {:user_commerce_offer, %{obj_index: obj_index, amount: amount}})
       when state.character_id != nil do
     case Arena.Map.MapServer.user_trade_offer(state.map_id, state.character_id, obj_index, amount) do
       {:error, :not_trading} ->
-        {state, [{:console_msg, %{message: "No estas en un comercio con otro jugador.", font_index: 0}}]}
+        {%{state | in_trade: false}, [@trade_not_active_msg]}
       _ ->
         {state, []}
     end
+  end
+
+  def handle_command(state, {:user_commerce_ok, _})
+      when state.character_id != nil and state.in_trade == false do
+    {state, [@trade_not_active_msg]}
   end
 
   def handle_command(state, {:user_commerce_ok, _}) when state.character_id != nil do
     case Arena.Map.MapServer.user_trade_accept(state.map_id, state.character_id) do
       {:error, :not_trading} ->
-        {state, [{:console_msg, %{message: "No estas en un comercio con otro jugador.", font_index: 0}}]}
+        {%{state | in_trade: false}, [@trade_not_active_msg]}
       _ ->
         {state, []}
     end
   end
 
+  def handle_command(state, {:user_commerce_reject, _})
+      when state.character_id != nil and state.in_trade == false do
+    {state, [@trade_not_active_msg]}
+  end
+
   def handle_command(state, {:user_commerce_reject, _}) when state.character_id != nil do
     Arena.Map.MapServer.user_trade_reject(state.map_id, state.character_id)
     {state, []}
+  end
+
+  def handle_command(state, {:user_commerce_end, _})
+      when state.character_id != nil and state.in_trade == false do
+    {state, [@trade_not_active_msg]}
   end
 
   def handle_command(state, {:user_commerce_end, _}) when state.character_id != nil do
@@ -1275,7 +1347,20 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
-  # ---- /HOGAR — VB6 home travel (dead=instant, alive=delayed ~10s) ----
+  # ---- /HOGAR — VB6 home travel (dead-only, delayed with timer bar) ----
+  #
+  # VB6 Protocol.bas HandleHome exact flow:
+  #   1. IsInMapCarcelRestrictedArea → reject
+  #   2. Alive (Muerto=0) → reject "Debes estar muerto"
+  #   3. NEWBIE zone or CARCEL trigger → reject "No puedes viajar a tu hogar desde este mapa"
+  #   4. Penalty > 0 → reject "No puedes usar este comando en prisión"
+  #   5. EnReto → reject "No podés regresar desde un reto"
+  #   6. If not traveling:
+  #      - If not on home map: charge gold, start delayed timer (goHome)
+  #      - If on home map: "Ya te encuentras en tu hogar"
+  #   7. If already traveling: cancel, "Ya hay un viaje en curso"
+  #
+  # goHome sets a timer bar; when it expires, HomeArrival teleports the player.
 
   # VB6 e_Ciudad enum order (reverse of character_creation @home_city_atom)
   @home_city_ids %{
@@ -1289,23 +1374,51 @@ defmodule AoTcpGateway.SessionLogic do
   defp handle_hogar(state) do
     case Arena.Map.MapServer.snapshot_entity(state.map_id, state.character_id) do
       {:ok, entity} ->
-        if entity.dead do
-          handle_hogar_dead(state, entity)
-        else
-          handle_hogar_check(state, entity)
-        end
+        handle_hogar_check(state, entity)
 
       _ ->
         {state, []}
     end
   end
 
-  # Dead player: instant teleport with gold cost (original VB6 behavior)
-  defp handle_hogar_dead(state, entity) do
+  # Pure-logic /HOGAR handler, public for unit testing without MapServer.
+  # Matches VB6 HandleHome exactly: dead-only, delayed travel with timer bar.
+  @doc false
+  def handle_hogar_check(state, entity) do
+    handle_hogar_check(state, entity, nil)
+  end
+
+  @doc false
+  def handle_hogar_check(state, entity, map_zone) do
+    hogar_ref = Map.get(state, :hogar_timer_ref)
+
+    # Resolve zone lazily — only call MapServer when not passed explicitly (tests pass it)
+    zone = map_zone || try_get_map_zone(state.map_id)
+
     cond do
+      # VB6 step 1: IsInMapCarcelRestrictedArea — jail map blocked
+      state.map_id == @jail_map_id ->
+        {state, [{:console_msg, %{message: "No puedes usar /HOGAR en la cárcel.", font_index: 0}}]}
+
+      # VB6 step 2: must be dead
+      not entity.dead ->
+        {state, [{:console_msg, %{message: "Debes estar muerto para poder utilizar este comando.", font_index: 0}}]}
+
+      # VB6 step 3: NEWBIE zone restriction
+      zone == "NEWBIE" ->
+        {state, [{:console_msg, %{message: "No puedes viajar a tu hogar desde este mapa.", font_index: 0}}]}
+
+      # VB6 step 4: penalty (prison sentence)
       (entity.penalty || 0) > 0 ->
         {state, [{:console_msg, %{message: "No puedes usar este comando en prisión.", font_index: 0}}]}
 
+      # VB6 step 7: already traveling — cancel the travel
+      hogar_ref != nil ->
+        Process.cancel_timer(hogar_ref)
+        state = Map.put(state, :hogar_timer_ref, nil)
+        {state, [{:console_msg, %{message: "Ya hay un viaje en curso.", font_index: 0}}]}
+
+      # VB6 step 6: not traveling — check home map then start
       true ->
         city_id = Map.get(@home_city_ids, entity.home_city, 1)
         spawn = Arena.Data.GameData.city_spawn(city_id)
@@ -1318,54 +1431,16 @@ defmodule AoTcpGateway.SessionLogic do
           if entity.gold < cost do
             {state, [{:console_msg, %{message: "Para utilizar este comando necesitas #{cost} monedas de oro.", font_index: 0}}]}
           else
-            new_gold = entity.gold - cost
-            corpse = %{entity | gold: new_gold}
+            # Deduct gold (async cast — also sends :update_gold packet to client)
+            Arena.Map.MapServer.modify_gold(state.map_id, state.character_id, -cost)
 
-            {state, packets} = transfer(state, spawn.map, spawn.x, spawn.y, corpse)
-            packets = packets ++ [
-              {:update_gold, %{gold: new_gold}},
-              {:console_msg, %{message: "Has regresado a tu ciudad de origen.", font_index: 0}}
-            ]
-            {state, packets}
+            ref = Process.send_after(self(), :hogar_arrive, @hogar_travel_delay_ms)
+            state = Map.put(state, :hogar_timer_ref, ref)
+
+            {state, [
+              {:console_msg, %{message: "Volverás a tu hogar en unos segundos.", font_index: 0}}
+            ]}
           end
-        end
-    end
-  end
-
-  # Alive player: delayed travel with cancellation.
-  # Public so it can be tested directly without MapServer.
-  @doc false
-  def handle_hogar_check(state, entity) do
-    hogar_ref = Map.get(state, :hogar_timer_ref)
-
-    cond do
-      # Cannot use in prison (penalty counter > 0)
-      (entity.penalty || 0) > 0 ->
-        {state, [{:console_msg, %{message: "No puedes usar este comando en prisión.", font_index: 0}}]}
-
-      # Cannot use on jail map
-      state.map_id == @jail_map_id ->
-        {state, [{:console_msg, %{message: "No puedes usar este comando en prisión.", font_index: 0}}]}
-
-      # Already traveling
-      hogar_ref != nil ->
-        {state, [{:console_msg, %{message: "Ya estás viajando a tu hogar.", font_index: 0}}]}
-
-      # Already on home map
-      true ->
-        city_id = Map.get(@home_city_ids, entity.home_city, 1)
-        spawn = Arena.Data.GameData.city_spawn(city_id)
-
-        if state.map_id == spawn.map do
-          {state, [{:console_msg, %{message: "Ya te encuentras en tu hogar.", font_index: 0}}]}
-        else
-          # Start delayed travel
-          ref = Process.send_after(self(), :hogar_arrive, @hogar_travel_delay_ms)
-          state = Map.put(state, :hogar_timer_ref, ref)
-
-          {state, [
-            {:console_msg, %{message: "Comienza tu viaje a tu hogar. Recuerda que si te mueves, el viaje se cancelará.", font_index: 0}}
-          ]}
         end
     end
   end
@@ -1382,7 +1457,7 @@ defmodule AoTcpGateway.SessionLogic do
       ref ->
         Process.cancel_timer(ref)
         state = Map.put(state, :hogar_timer_ref, nil)
-        {state, [{:console_msg, %{message: "Viaje a tu hogar cancelado.", font_index: 0}}]}
+        {state, [{:console_msg, %{message: "Has cancelado el viaje a casa.", font_index: 0}}]}
     end
   end
 
@@ -1416,6 +1491,14 @@ defmodule AoTcpGateway.SessionLogic do
 
   defp hogar_gold_cost(level) when level > 24, do: level * level
   defp hogar_gold_cost(level), do: level * 15 + trunc(:math.pow(level, 1.5))
+
+  defp try_get_map_zone(map_id) do
+    Arena.Map.MapServer.map_zone(map_id)
+  rescue
+    _ -> nil
+  catch
+    :exit, _ -> nil
+  end
 
   # ---- Cleanup & autosave ----
 

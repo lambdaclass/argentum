@@ -341,7 +341,9 @@ defmodule Arena.Map.CombatHandlers do
               %{state | players: players}
             end
           else
-            # Miss
+            # Miss — NPC still acquires aggro on the attacker (VB6 parity)
+            npc = %{npc | target_id: char_id}
+            state = put_in(state.npcs_live[instance_id], npc)
             players = Map.put(state.players, char_id, entity)
             %{state | players: players}
           end

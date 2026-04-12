@@ -38,7 +38,9 @@ defmodule AoTcpGateway.ClientHandler do
       target_y: nil,
       in_commerce: false,
       in_bank: false,
+      in_trade: false,
       is_gm: false,
+      is_dead: false,
       hogar_timer_ref: nil,
       flood_guard: FloodGuard.new()
     })
@@ -66,6 +68,9 @@ defmodule AoTcpGateway.ClientHandler do
       {:send_raw, binary} ->
         state.transport.send(state.socket, binary)
         loop(state)
+
+      :trade_started ->
+        loop(%{state | in_trade: true})
 
       {:transfer, dest_map, dest_x, dest_y, entity} ->
         {state, packets} = SessionLogic.transfer(state, dest_map, dest_x, dest_y, entity)

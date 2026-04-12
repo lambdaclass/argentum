@@ -12,6 +12,7 @@ defmodule Arena.NpcAi do
   alias AoProtocol.Server.Encoder
 
   @aggro_range 10
+  @leash_distance 15
 
   @doc "Process one AI tick for all NPCs on this map."
   def tick(state) do
@@ -64,6 +65,7 @@ defmodule Arena.NpcAi do
           respawn_at: nil,
           next_attack_at: -1_000_000_000_000,
           next_move_at: -1_000_000_000_000,
+          returning_to_spawn: false,
           exp_count: if(npc_def, do: npc_def.give_exp || 0, else: 0)
       }
 
@@ -97,33 +99,93 @@ defmodule Arena.NpcAi do
     end)
   end
 
-  defp process_single_npc(state, _instance_id, _npc, nil, _now), do: state
-
-  # Pet AI — owner_id is set
+  # Pet AI — owner_id is set (must match before nil npc_def catch-all)
   defp process_single_npc(state, instance_id, %{owner_id: owner_id} = npc, npc_def, now) when owner_id != nil do
     process_pet_npc(state, instance_id, npc, npc_def, now)
   end
 
+  defp process_single_npc(state, _instance_id, _npc, nil, _now), do: state
+
   defp process_single_npc(state, instance_id, npc, npc_def, now) do
     # Skip static/non-hostile NPCs with no target
-    if npc_def.movement == 1 and not npc_def.hostile and npc.target_id == nil do
+    if npc_def.movement == 1 and not npc_def.hostile and npc.target_id == nil and
+         not npc.returning_to_spawn do
       state
     else
-      # Acquire or validate target
-      npc = acquire_target(state, npc, npc_def)
+      # Check leash: if NPC is returning to spawn, continue returning
+      # If NPC is beyond leash distance from spawn, start returning
+      {state, npc} = check_leash(state, instance_id, npc, npc_def, now)
 
-      # Move toward target or random walk
-      {state, npc} = maybe_move_npc(state, instance_id, npc, npc_def, now)
+      if npc.returning_to_spawn do
+        # NPC is returning to spawn — just walk toward spawn, no combat
+        state = put_in(state.npcs_live[instance_id], npc)
+        state
+      else
+        # Acquire or validate target
+        npc = acquire_target(state, npc, npc_def)
 
-      # Cast spell if available (before melee)
-      {state, npc} = maybe_cast_spell(state, instance_id, npc, npc_def, now)
+        # Move toward target or random walk
+        {state, npc} = maybe_move_npc(state, instance_id, npc, npc_def, now)
 
-      # Persist npc updates (target_id, spell cooldowns) before attack
-      # so maybe_attack's re-read from state sees the current npc
-      state = put_in(state.npcs_live[instance_id], npc)
+        # Cast spell if available (before melee)
+        {state, npc} = maybe_cast_spell(state, instance_id, npc, npc_def, now)
 
-      # Attack if adjacent to target
-      maybe_attack(state, instance_id, npc, npc_def, now)
+        # Persist npc updates (target_id, spell cooldowns) before attack
+        # so maybe_attack's re-read from state sees the current npc
+        state = put_in(state.npcs_live[instance_id], npc)
+
+        # Attack if adjacent to target
+        maybe_attack(state, instance_id, npc, npc_def, now)
+      end
+    end
+  end
+
+  # --- Leash logic ---
+
+  # Chebyshev distance from NPC to its spawn point
+  defp spawn_distance(npc) do
+    max(abs(npc.x - npc.spawn_x), abs(npc.y - npc.spawn_y))
+  end
+
+  defp check_leash(state, instance_id, npc, npc_def, now) do
+    cond do
+      # Already returning — check if we've reached spawn
+      npc.returning_to_spawn ->
+        if npc.x == npc.spawn_x and npc.y == npc.spawn_y do
+          # Arrived at spawn: heal to full, stop returning
+          npc = %{npc | hp: npc.max_hp, returning_to_spawn: false}
+          state = put_in(state.npcs_live[instance_id], npc)
+          {state, npc}
+        else
+          # Keep walking toward spawn
+          interval = max(npc_def.intervalo_movimiento, 200)
+
+          if now >= npc.next_move_at do
+            {dx, dy} = direction_toward(npc.x, npc.y, npc.spawn_x, npc.spawn_y)
+            {state, npc} = move_npc_to(state, instance_id, npc, npc.x + dx, npc.y + dy, now + interval)
+            {state, npc}
+          else
+            {state, npc}
+          end
+        end
+
+      # Beyond leash distance — start returning
+      spawn_distance(npc) > @leash_distance ->
+        npc = %{npc | target_id: nil, returning_to_spawn: true}
+        interval = max(npc_def.intervalo_movimiento, 200)
+
+        if now >= npc.next_move_at do
+          {dx, dy} = direction_toward(npc.x, npc.y, npc.spawn_x, npc.spawn_y)
+          {state, npc} = move_npc_to(state, instance_id, npc, npc.x + dx, npc.y + dy, now + interval)
+          {state, npc}
+        else
+          state = put_in(state.npcs_live[instance_id], npc)
+          {state, npc}
+        end
+
+      # Within leash distance — normal behavior
+      true ->
+        {state, npc}
     end
   end
 
@@ -146,7 +208,7 @@ defmodule Arena.NpcAi do
         else
           dist_x = abs(npc.x - owner.x)
           dist_y = abs(npc.y - owner.y)
-          interval = max(npc_def.intervalo_movimiento, 200)
+          interval = if npc_def, do: max(npc_def.intervalo_movimiento, 200), else: 500
 
           cond do
             # Owner is far away — follow
@@ -213,7 +275,8 @@ defmodule Arena.NpcAi do
     end)
     |> Enum.filter(fn {_id, n} ->
       npc_def = GameData.get_npc(n.npc_id)
-      npc_def != nil and npc_def.hostile
+      # If def is missing, assume hostile (wild NPC without def is anomalous but safe default)
+      npc_def == nil or npc_def.hostile
     end)
     |> Enum.min_by(fn {_id, n} -> abs(n.x - pet.x) + abs(n.y - pet.y) end, fn -> nil end)
   end
@@ -222,7 +285,7 @@ defmodule Arena.NpcAi do
     if now < npc.next_attack_at do
       state
     else
-      interval = max(npc_def.intervalo_ataque, 500)
+      interval = if npc_def, do: max(npc_def.intervalo_ataque, 500), else: 1500
       npc = %{npc | next_attack_at: now + interval}
       state = put_in(state.npcs_live[instance_id], npc)
 
@@ -232,10 +295,10 @@ defmodule Arena.NpcAi do
 
       # Damage calc: use NPC min/max hit from def
       raw_damage =
-        if npc_def.max_hit > npc_def.min_hit do
+        if npc_def && npc_def.max_hit > npc_def.min_hit do
           Enum.random(npc_def.min_hit..npc_def.max_hit)
         else
-          max(npc_def.min_hit, 1)
+          if npc_def, do: max(npc_def.min_hit, 1), else: 1
         end
 
       target_def = GameData.get_npc(target_npc.npc_id)
@@ -412,7 +475,7 @@ defmodule Arena.NpcAi do
           cooldown = max(npc_def.intervalo_ataque, 2000)
           npc = %{npc | next_spell_at: now + cooldown}
           state = put_in(state.npcs_live[instance_id], npc)
-          state = apply_npc_spell(state, npc, spell_def, spell_target)
+          state = apply_npc_spell(state, npc, npc_def, spell_def, spell_target)
           {state, npc}
       end
     end
@@ -455,7 +518,7 @@ defmodule Arena.NpcAi do
     {:found, spell_def, target} -> {spell_def, target}
   end
 
-  defp apply_npc_spell(state, npc, spell_def, target) do
+  defp apply_npc_spell(state, npc, npc_def, spell_def, target) do
     # Broadcast FX
     if spell_def.fx_grh > 0 do
       fx_char =
@@ -523,7 +586,7 @@ defmodule Arena.NpcAi do
 
               # Damage spell
               spell_def.sube_hp == 2 ->
-                damage = Combat.spell_damage(spell_def.min_hp, spell_def.max_hp, npc_def_level(spell_def), false)
+                damage = Combat.spell_damage(spell_def.min_hp, spell_def.max_hp, npc_def_level(npc_def), false)
                 new_hp = max(player.hp - damage, 0)
                 player = %{player | hp: new_hp}
                 pid = Map.get(state.sessions, target_id)
@@ -557,9 +620,10 @@ defmodule Arena.NpcAi do
     end
   end
 
-  # NPC spells use npc_level from the npc_def, but we don't have it here.
-  # Use a constant effective level for NPC spell damage scaling.
-  defp npc_def_level(_spell_def), do: 20
+  # NPC spells use the actual npc_level from the NPC definition for damage scaling.
+  # Falls back to 1 if the level is 0 or nil.
+  defp npc_def_level(%{npc_level: level}) when is_integer(level) and level > 0, do: level
+  defp npc_def_level(_npc_def), do: 1
 
   # --- Attack ---
 

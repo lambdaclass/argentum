@@ -165,11 +165,15 @@ defmodule Arena.Map.Trade do
             {:send_raw, Encoder.encode({:user_commerce_init, %{name: target.name}})}
           )
 
+          Helpers.send_to_session(state.sessions, char_id, :trade_started)
+
           Helpers.send_to_session(
             state.sessions,
             target_id,
             {:send_raw, Encoder.encode({:user_commerce_init, %{name: entity.name}})}
           )
+
+          Helpers.send_to_session(state.sessions, target_id, :trade_started)
 
           players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, target)
           {:reply, :ok, %{state | players: players}}

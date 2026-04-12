@@ -149,6 +149,9 @@ defmodule Arena.Map.MapServer do
     do: GenServer.call(via(map_id), {:inject_test_npc, instance_id, npc_entity})
 
   def player_count(map_id), do: GenServer.call(via(map_id), :player_count)
+
+  @doc "Return the zone string for the given map (e.g. \"NEWBIE\", \"CAMPO\", etc.)."
+  def map_zone(map_id), do: GenServer.call(via(map_id), :map_zone)
   def enlist_faction(map_id, char_id, faction), do: GenServer.cast(via(map_id), {:enlist_faction, char_id, faction})
   def leave_faction(map_id, char_id), do: GenServer.cast(via(map_id), {:leave_faction, char_id})
   def faction_chat(map_id, char_id, message), do: GenServer.cast(via(map_id), {:faction_chat, char_id, message})
@@ -433,6 +436,9 @@ defmodule Arena.Map.MapServer do
 
   @impl true
   def handle_call(:player_count, _from, state), do: {:reply, map_size(state.players), state}
+
+  @impl true
+  def handle_call(:map_zone, _from, state), do: {:reply, state.meta.zone, state}
 
   @impl true
   def handle_call(:get_info, _from, state) do

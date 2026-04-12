@@ -26,7 +26,9 @@ defmodule Arena.Entity.NpcEntity do
     # Pet behavior mode: :follow (default) or :stand (idle)
     pet_mode: :follow,
     # VB6 ExpCount pool: total XP available to award, decremented per hit
-    exp_count: 0
+    exp_count: 0,
+    # Leash: true when NPC is walking back to spawn after exceeding leash distance
+    returning_to_spawn: false
   ]
 
   @doc "Create an NpcEntity from a definition, placing it at the given coordinates."

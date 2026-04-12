@@ -28,7 +28,9 @@ defmodule AoTcpGateway.OutOfSequenceUnitTest do
         target_y: nil,
         in_commerce: false,
         in_bank: false,
+        in_trade: false,
         is_gm: false,
+        is_dead: false,
         hogar_timer_ref: nil
       },
       overrides
@@ -281,6 +283,191 @@ defmodule AoTcpGateway.OutOfSequenceUnitTest do
 
       assert new_state.is_gm == false
       assert new_state.character_id == state.character_id
+    end
+  end
+
+  # ============================================================
+  # Trade packets without active trade session
+  # ============================================================
+
+  describe "user_commerce_offer without active trade session" do
+    test "returns rejection message when in_trade is false" do
+      state = base_state(%{in_trade: false})
+
+      {new_state, packets} =
+        SessionLogic.handle_command(
+          state,
+          {:user_commerce_offer, %{obj_index: 1, amount: 1}}
+        )
+
+      assert new_state.in_trade == false
+      assert [{:console_msg, %{message: msg}}] = packets
+      assert msg =~ ~r/comercio.*jugador/i
+    end
+  end
+
+  describe "user_commerce_ok without active trade session" do
+    test "returns rejection message when in_trade is false" do
+      state = base_state(%{in_trade: false})
+
+      {new_state, packets} =
+        SessionLogic.handle_command(state, {:user_commerce_ok, %{}})
+
+      assert new_state.in_trade == false
+      assert [{:console_msg, %{message: msg}}] = packets
+      assert msg =~ ~r/comercio.*jugador/i
+    end
+  end
+
+  describe "user_commerce_reject without active trade session" do
+    test "returns rejection message when in_trade is false" do
+      state = base_state(%{in_trade: false})
+
+      {new_state, packets} =
+        SessionLogic.handle_command(state, {:user_commerce_reject, %{}})
+
+      assert new_state.in_trade == false
+      assert [{:console_msg, %{message: msg}}] = packets
+      assert msg =~ ~r/comercio.*jugador/i
+    end
+  end
+
+  describe "user_commerce_end without active trade session" do
+    test "returns rejection message when in_trade is false" do
+      state = base_state(%{in_trade: false})
+
+      {new_state, packets} =
+        SessionLogic.handle_command(state, {:user_commerce_end, %{}})
+
+      assert new_state.in_trade == false
+      assert [{:console_msg, %{message: msg}}] = packets
+      assert msg =~ ~r/comercio.*jugador/i
+    end
+  end
+
+  # ============================================================
+  # Combat packets while dead
+  # ============================================================
+
+  describe "attack while dead" do
+    test "returns rejection message when is_dead is true" do
+      state = base_state(%{is_dead: true})
+
+      {new_state, packets} =
+        SessionLogic.handle_command(state, {:attack, %{}})
+
+      assert new_state.is_dead == true
+      assert [{:console_msg, %{message: msg}}] = packets
+      assert msg =~ ~r/muerto/i
+    end
+  end
+
+  describe "cast_spell while dead" do
+    test "returns rejection message when is_dead is true" do
+      state = base_state(%{is_dead: true})
+
+      {new_state, packets} =
+        SessionLogic.handle_command(state, {:cast_spell, %{spell_slot: 1}})
+
+      assert new_state.is_dead == true
+      assert [{:console_msg, %{message: msg}}] = packets
+      assert msg =~ ~r/muerto/i
+    end
+  end
+
+  # ============================================================
+  # Item use/equip while dead
+  # ============================================================
+
+  describe "equip_item while dead" do
+    test "returns rejection message when is_dead is true" do
+      state = base_state(%{is_dead: true})
+
+      {new_state, packets} =
+        SessionLogic.handle_command(state, {:equip_item, %{slot: 1}})
+
+      assert new_state.is_dead == true
+      assert [{:console_msg, %{message: msg}}] = packets
+      assert msg =~ ~r/muerto/i
+    end
+  end
+
+  describe "use_item while dead" do
+    test "returns rejection message when is_dead is true" do
+      state = base_state(%{is_dead: true})
+
+      {new_state, packets} =
+        SessionLogic.handle_command(state, {:use_item, %{slot: 1}})
+
+      assert new_state.is_dead == true
+      assert [{:console_msg, %{message: msg}}] = packets
+      assert msg =~ ~r/muerto/i
+    end
+  end
+
+  # ============================================================
+  # Dead state does not mutate on rejection
+  # ============================================================
+
+  describe "dead state preserved on rejection" do
+    test "attack rejection preserves is_dead=true" do
+      state = base_state(%{is_dead: true})
+
+      {new_state, _packets} =
+        SessionLogic.handle_command(state, {:attack, %{}})
+
+      assert new_state.is_dead == true
+      assert new_state.character_id == state.character_id
+    end
+
+    test "equip_item rejection preserves is_dead=true" do
+      state = base_state(%{is_dead: true})
+
+      {new_state, _packets} =
+        SessionLogic.handle_command(state, {:equip_item, %{slot: 1}})
+
+      assert new_state.is_dead == true
+      assert new_state.character_id == state.character_id
+    end
+
+    test "trade offer rejection preserves in_trade=false" do
+      state = base_state(%{in_trade: false})
+
+      {new_state, _packets} =
+        SessionLogic.handle_command(
+          state,
+          {:user_commerce_offer, %{obj_index: 1, amount: 1}}
+        )
+
+      assert new_state.in_trade == false
+      assert new_state.character_id == state.character_id
+    end
+  end
+
+  # ============================================================
+  # Commands without character_id with new state fields
+  # ============================================================
+
+  describe "new guarded commands without being logged in" do
+    test "user_commerce_offer without character_id is silently ignored" do
+      state = base_state(%{character_id: nil})
+
+      {_new_state, packets} =
+        SessionLogic.handle_command(
+          state,
+          {:user_commerce_offer, %{obj_index: 1, amount: 1}}
+        )
+
+      assert packets == []
+    end
+
+    test "attack without character_id is silently ignored" do
+      state = base_state(%{character_id: nil})
+
+      {_new_state, packets} =
+        SessionLogic.handle_command(state, {:attack, %{}})
+
+      assert packets == []
     end
   end
 end
