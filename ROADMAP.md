@@ -77,17 +77,146 @@ This is the only roadmap. `CHANGELOG.md` tracks completed work.
     but it must not own per-frame drawing, animation loops, or fast-path
     canvas mutations
 - **Recommended frontend priority:**
-  1. HTTP auth/lobby/character selection.
-  2. Authoritative party/clan data.
-  3. Settings + audio polish.
-  4. Broader browser test coverage.
+  1. Fast tests and build gates.
+  2. Frontend-only parity and UX.
+  3. Protocol/reducer/visual test depth.
+  4. Measured rendering/state performance work.
+  5. Backend-authoritative social/UI.
+  6. Account/lobby/i18n/multi-realm product work.
+
+## Frontend Execution Order
+
+Execute frontend work in these six passes, in this order:
+
+### Pass 1. Keep the fast correctness lane green
+
+- run and keep green:
+  - typecheck
+  - build
+  - Vitest protocol/reducer/state tests
+  - Playwright as a thin smoke + visual layer, not the only test layer
+
+Why first:
+
+- it makes every later frontend change cheaper and safer
+
+### Pass 2. Finish frontend-only parity surfaces that are not backend-blocked
+
+- weather parity such as `snow_toggle`
+- trade metadata
+- spell hints, cooldowns, requirements, and AoE cues
+- dead/ghost cues
+- loading/reconnect/error overlays
+- responsive layout
+- sound/settings
+
+Why second:
+
+- these are high-value, low-dependency UI wins
+
+### Pass 3. Add real client correctness coverage
+
+- packet fixture tests
+- decoder fuzz tests
+- reducer tests for inventory, bank, trade, party, clan, weather, and death
+- curated visual regression tests for sprites, body overlays, and NPC mappings
+
+Why third:
+
+- once this exists, frontend regressions stop slipping through UI-only testing
+
+### Pass 4. Improve runtime performance where it actually matters
+
+- reduce hidden panel rerenders
+- batch noisy packet/log/chat updates
+- lazy-load non-core routes and harness code
+- keep Pixi/rendering off the React churn path
+- cache repeated sprite/metadata lookups
+- profile boot, map load, map transfer, and panel open
+
+Why fourth:
+
+- optimize from measurements, not guesses
+
+### Pass 5. Finish the backend-dependent frontend
+
+- authoritative party/clan UI
+- distinct party/guild/faction chat streams after protocol/UX investigation
+- real gameplay E2E once backend contracts are stable
+
+Why fifth:
+
+- this depends on backend truth, so doing it too early creates rework
+
+### Pass 6. Do the product layer last
+
+- account/auth/lobby
+- `login_existing_char(char_id, session_token)` flow
+- i18n
+- multi-realm
+
+Why sixth:
+
+- this is product work, not core gameplay-client parity
+
+## Easy-To-Miss Frontend Concerns
+
+### Frontend
+
+- explicit browser support policy and minimum versions
+- asset-failure UX: missing sprites, bad map pack, partial downloads, stale cache
+- save/restore rules: which settings persist and which session state must not
+  persist
+- keyboard/accessibility pass: focus order, labels, escape paths, and
+  non-mouse flows
+- screenshot baseline discipline: who updates Playwright snapshots and when
+- error taxonomy that distinguishes auth failure, protocol failure, map fetch
+  failure, and render failure
+
+### Client correctness
+
+- contract tests against `ao_protocol`, so packet-shape drift is caught
+  immediately
+- replay/fixture sharing between server and client instead of two separate
+  fixture worlds
+- deterministic demo/harness states for every important UI surface
+- recovery behavior after reconnect or partial bootstrap, not just happy-path
+  login
+
+### Performance / reliability
+
+- explicit perf budgets for boot, first map render, reconnect, and map transfer
+- cache invalidation/versioning for map packs and generated assets
+- background-tab behavior: pause or reduce expensive loops when hidden
+- memory growth checks for long sessions, especially logs, particles, and chat
+
+### Product / scope
+
+- an exact definition of "frontend parity done"
+- which old-client quirks remain visible in the browser and which are
+  intentionally modernized
+- which features are backend-blocked versus frontend-owned, so the browser does
+  not grow placeholders that later fight the real API
+
+### Ops / release
+
+- CI split: fast frontend gate versus slower Playwright/visual gate
+- one release checklist for browser assets, snapshots, generated data, and
+  cache-busting
+- basic client-side telemetry for crashes and decode/render failures
+
+### Most commonly forgotten
+
+1. Shared protocol contract tests.
+2. Asset/cache failure handling.
+3. Explicit "frontend parity done" criteria.
 
 ## Linear Task List
 
-Tasks `1-49` are the backend parity path. Tasks `50-145` are post-parity
-browser/product work. Tasks `146-167` are backend modernization and
+Tasks `1-49` are the backend parity path. Tasks `50-159` are post-parity
+browser/product work. Tasks `160-181` are backend modernization and
 operations that should not block parity signoff unless explicitly pulled into
-scope. Tasks `168-169` are optional legacy features that the inspected VB6
+scope. Tasks `182-183` are optional legacy features that the inspected VB6
 baseline kept disabled and should only be revisited after backend
 modernization unless a target shard explicitly re-enables them.
 
@@ -117,6 +246,33 @@ Call backend parity done only when:
 - all in-scope parity-required backend tasks below are done
 - any out-of-scope legacy systems are explicitly listed as excluded
 
+## Frontend Parity Finish Line
+
+Call frontend parity done only when:
+
+- the supported browser matrix and minimum versions are explicit and verified
+- fast frontend unit/protocol/reducer gates and slower browser/visual gates are
+  both explicit and green
+- browser protocol contract, fixture, reducer/state, and visual-regression
+  suites are green
+- deterministic harness/demo routes exist for the critical browser UI states
+- asset/map-pack/cache/bootstrap/reconnect failure paths have explicit browser
+  UX and test coverage
+- asset, map-pack, and browser-cache versioning/invalidation rules are explicit
+- accessibility and keyboard paths for the core browser panels are explicit and
+  covered
+- authoritative backend-driven browser surfaces are used where the UI depends
+  on backend truth
+- the client-side rule for authoritative vs inferred browser state is explicit
+  enough that the browser does not invent gameplay semantics
+- the visual snapshot workflow is explicit enough to update safely during real
+  rendering changes
+- frontend performance budgets for boot, first map render, reconnect, and map
+  transfer are defined and checked
+- long-session browser memory-growth checks are green
+- any intentionally deferred browser product work is explicitly listed instead
+  of being hand-waved as “later”
+
 ## Execution Rules
 
 Keep the roadmap linear, but execute it with these constraints:
@@ -137,12 +293,12 @@ Keep the roadmap linear, but execute it with these constraints:
   marriage.
 - **Tasks 47-49:** do serially. These are scope decisions and final drift
   cleanup.
-- **Tasks 50-145:** highly parallelizable once started. Split by browser
+- **Tasks 50-159:** highly parallelizable once started. Split by browser
   surface: protocol tests, reducer/state tests, UI polish, account/lobby,
   i18n, multi-realm.
-- **Tasks 146-167:** parallelize by subsystem. These are modernization tasks
+- **Tasks 160-181:** parallelize by subsystem. These are modernization tasks
   and should not block parity signoff unless explicitly promoted.
-- **Tasks 168-169:** do only after backend modernization unless the target
+- **Tasks 182-183:** do only after backend modernization unless the target
   shard explicitly promotes them back into the parity path.
 
 When in doubt:
@@ -579,77 +735,132 @@ When in doubt:
      scope.
      Outcome: players can move characters across regions through a supported
      flow instead of ad hoc manual intervention.
+146. Define the supported browser matrix and minimum versions.
+     Outcome: browser support is explicit instead of accidental and frontend
+     parity is measured against a real compatibility target.
+147. Add shared client-vs-`ao_protocol` contract tests for browser packet
+     shapes.
+     Outcome: protocol drift between the browser client and `ao_protocol` is
+     caught immediately instead of surfacing later as runtime decode bugs.
+148. Add deterministic harness/demo routes or fixtures for the critical
+     browser UI states.
+     Outcome: loading, reconnect, dead/ghost, social, trade, weather, and
+     other key browser states stay reproducible without depending on ad hoc
+     manual setup.
+149. Add asset/map-pack/cache failure handling and explicit fallback UI.
+     Outcome: stale cache, missing assets, map-pack download failures, and
+     similar browser-side breakages degrade visibly and recoverably instead of
+     collapsing into opaque errors.
+150. Expand reconnect and partial-bootstrap recovery behavior and browser
+     tests.
+     Outcome: the browser can recover cleanly from mid-bootstrap disconnects,
+     reconnect paths, and partial session initialization without poisoning
+     client state.
+151. Add an explicit Playwright snapshot/update discipline and release check
+     for visual baselines.
+     Outcome: screenshot regressions stay reviewable and snapshot updates stop
+     becoming an ad hoc side effect of unrelated UI changes.
+152. Add client-side telemetry for decode, render, bootstrap, and asset-load
+     failures.
+     Outcome: real browser failures become observable instead of disappearing
+     into user bug reports and local console logs only.
+153. Define frontend performance budgets for boot, first map render, reconnect,
+     and map transfer.
+     Outcome: browser performance work is measured against explicit targets
+     instead of vague “feels fast enough” claims.
+154. Add long-session browser memory-growth checks.
+     Outcome: long-lived play sessions, noisy logs, particle effects, and UI
+     history surfaces do not accumulate memory without detection.
+155. Define the fast frontend unit-test lane and keep it separate from browser
+     smoke and visual checks.
+     Outcome: protocol, reducer, and small UI-state regressions are caught in a
+     fast local and CI lane instead of relying on Playwright for everything.
+156. Add accessibility and keyboard coverage for the core browser panels.
+     Outcome: spellbook, trade, bank, party, clan, overlays, and the main
+     product-shell states remain usable without a mouse and regressions are
+     caught automatically.
+157. Define asset/map-pack/browser-cache versioning and invalidation rules.
+     Outcome: browser assets and map packs can be rolled forward safely without
+     stale-cache drift, invisible partial upgrades, or ad hoc cache clears.
+158. Split frontend CI into a fast unit/protocol lane and a slower browser/
+     visual-regression lane.
+     Outcome: developers get quick feedback for most browser changes while
+     still keeping real-browser and snapshot checks in the release path.
+159. Make the authoritative-vs-inferred browser UI rule explicit and test it.
+     Outcome: the browser stops inventing gameplay state where backend truth is
+     required, and the remaining intentional inferences are documented and
+     covered.
 
 ### Backend Modernization
 
-146. Replace NPC aggro full scans with spatial-grid queries.
+160. Replace NPC aggro full scans with spatial-grid queries.
      Outcome: hostile NPC target acquisition scales with local visibility, not
      full player count.
-147. Replace pet target full scans with bounded or indexed lookup.
+161. Replace pet target full scans with bounded or indexed lookup.
      Outcome: pets do not scale linearly with all NPCs on the map.
-148. Add outbound backpressure for lagging sessions.
+162. Add outbound backpressure for lagging sessions.
      Outcome: a slow client cannot grow process memory without bound.
-149. Add per-MapServer hotspot telemetry.
+163. Add per-MapServer hotspot telemetry.
      Outcome: player count, NPC count, tick duration, mailbox length, and
      broadcast rates are visible per map.
-150. Add batch persistence / write-queue strategy for scattered DB writes.
+164. Add batch persistence / write-queue strategy for scattered DB writes.
      Outcome: autosave, logout, bank, and guild writes can be hardened and
      scaled without ad hoc call patterns.
-151. Pre-resolve `.dat` references at load time where hot-path lookups still
+165. Pre-resolve `.dat` references at load time where hot-path lookups still
      repeat.
      Outcome: gameplay avoids repeated definition lookups that can be resolved
      once at startup.
-152. Unify interest management for players, NPCs, and ground items.
+166. Unify interest management for players, NPCs, and ground items.
      Outcome: create/remove boundary behavior is consistent across visible world
      entities.
-153. Add runtime admin tools for map/process inspection and control.
+167. Add runtime admin tools for map/process inspection and control.
      Outcome: operators can inspect mailboxes, player counts, force save, and
      restart maps cleanly.
-154. Add admin lookup for accounts, characters, and online players.
+168. Add admin lookup for accounts, characters, and online players.
      Outcome: operators can inspect live and persisted entities.
-155. Add admin moderation actions: kick, ban, mute, jail.
+169. Add admin moderation actions: kick, ban, mute, jail.
      Outcome: basic live moderation exists outside raw gameplay commands.
-156. Add admin world actions: item/NPC spawn, teleport, locate.
+170. Add admin world actions: item/NPC spawn, teleport, locate.
      Outcome: operator world control exists in one supported surface.
-157. Add admin logs and health views.
+171. Add admin logs and health views.
      Outcome: operators can inspect recent actions and system state quickly.
-158. Add metrics and dashboards.
+172. Add metrics and dashboards.
      Outcome: runtime health can be observed without log scraping.
-159. Add alerts and release artifacts.
+173. Add alerts and release artifacts.
      Outcome: the project is releaseable and operationally monitorable.
-160. Add deployment pipeline and backup/restore runbook.
+174. Add deployment pipeline and backup/restore runbook.
      Outcome: releases and recovery have a documented path.
-161. Add TLS for HTTPS and WSS.
+175. Add TLS for HTTPS and WSS.
      Outcome: production browser/session traffic is encrypted.
-162. Add asset CDN/delivery strategy for static resources.
+176. Add asset CDN/delivery strategy for static resources.
      Outcome: heavy client assets do not depend on the gameplay server path.
-163. Add automated backups and database connection-pool tuning.
+177. Add automated backups and database connection-pool tuning.
      Outcome: the database operational path is production-safe.
-164. Add runtime-tunable settings for intervals, rates, and formula constants.
+178. Add runtime-tunable settings for intervals, rates, and formula constants.
      Outcome: live tuning does not require a recompile for every server constant.
-165. Verify graceful host shutdown.
+179. Verify graceful host shutdown.
      Outcome: shutdown does not lose player state or corrupt runtime processes.
-166. Add pre-public scripted load/soak runs.
+180. Add pre-public scripted load/soak runs.
      Outcome: operational confidence exists before open testing.
-167. Add post-parity anti-cheat hardening: movement anomaly scoring, rate
+181. Add post-parity anti-cheat hardening: movement anomaly scoring, rate
      validation, state-machine validation, economy invariants, structured
      anti-cheat events, and operator visibility.
+     Outcome: speed hacking, packet abuse, duping, and botting signals are
+     detected, logged, and acted on systematically without changing legal
+     gameplay behavior.
 
 ### Legacy Features Disabled In The Inspected VB6 Baseline
 
-168. If the selected shard explicitly re-enables clan relations, implement the
+182. If the selected shard explicitly re-enables clan relations, implement the
      live guild alliance/peace proposal, detail, and mailbox flows after the
      frontend and backend-modernization tracks are complete.
      Outcome: the re-enabled shard gets real alliance/peace UI and backend
      behavior without delaying parity for the inspected disabled baseline.
-169. If the selected shard explicitly re-enables guild elections, implement the
+183. If the selected shard explicitly re-enables guild elections, implement the
      live election and democratic succession system after the frontend and
      backend-modernization tracks are complete.
      Outcome: the re-enabled shard gets real election flows without delaying
      parity for the inspected disabled baseline.
-     Outcome: speed hacking, packet abuse, duping, and botting signals are
-     detected, logged, and acted on systematically without changing legal
-     gameplay behavior.
 
 ## Checks To Run
 
