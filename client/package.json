@@ -9,7 +9,7 @@
     "prebuild": "npm run maps:build",
     "prepreview": "npm run maps:build",
     "dev": "vite",
-    "dev:ui": "vite --host 127.0.0.1 --port 4173 --strictPort",
+    "dev:ui": "vite --mode test-ui --host 127.0.0.1 --port 4173 --strictPort",
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",

@@ -19,6 +19,7 @@ Rewrite of the Argentum Online VB6 MMORPG in Elixir (server) and TypeScript (web
 
 - **Runs in a browser.** TypeScript + React + Pixi.js replaces the VB6 desktop client. No install, no Wine, no compatibility hacks. Supports both desktop and mobile viewports.
 - **Imperative fast path for movement.** Predicted movement updates Pixi sprites directly on the same frame as the keypress, before React state catches up. The Pixi ticker is the sole animation loop — no duplicate requestAnimationFrame.
+- **React is not the render loop.** React owns panels, forms, overlays, and product-shell state. Frame-critical canvas/Pixi work stays on the imperative renderer path; React may host the canvas node, but it must not own per-frame drawing, animation, camera updates, or other fast-path rendering.
 - **Client-side prediction with server reconciliation.** The client predicts walk outcomes using the local tile blockmap, sends the intent to the server, and tracks pending steps. Server corrections snap the sprite back. This eliminates the perceived input lag that the VB6 client had over network.
 - **WebSocket + TCP dual transport.** The web client connects via WebSocket; legacy clients can still use raw TCP. Both speak the same AO20 binary protocol.
 - **Asset pipeline from VB6 resources.** A build script converts the original VB6 .grh/.ind/.csm assets into sprite sheets and map packs served as static files. The 1.3GB raw asset repo is a git submodule — the client downloads only the processed data it needs.
@@ -88,7 +89,7 @@ Start with [ROADMAP.md](ROADMAP.md) for the linear plan. See [SERVER_ROADMAP.md]
 **Main remaining gaps:**
 - Build and run the automated parity gate: VB6 packet replay, formula fixtures, property/fuzz, AO smoke bot, browser E2E, load/soak.
 - Close the backend compatibility tail: real per-instance item `elemental_tags`, faction-exclusive item flags/strip, recipe data expansion, operations/deploy.
-- Close the web client tail: account/login/Google + character lobby, snow rendering, authoritative party/clan state, trade metadata display, UX/error polish.
+- Close the web client tail: account/login/Google + character lobby, authoritative party/clan state, settings/audio polish, browser-side proof, and UX/error polish.
 - Keep the original VB6 client as the release smoke oracle until compatibility is formally closed.
 
 ## Scaling

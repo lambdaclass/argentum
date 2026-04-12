@@ -12,14 +12,75 @@ This is the only roadmap. `CHANGELOG.md` tracks completed work.
   sessions instead of synthetic fixtures alone.
 - **Backend environment:** the supported `server/` Nix/dev shell compiles and
   tests cleanly, and recent migrations were verified on clean Postgres.
-- **Web client:** playable development client. Remaining work is weather/social
-  polish, authoritative party/clan state, trade metadata display, browser-side
-  parity tests, and session/auth UX polish.
+- **Web client:** playable development client. The big remaining frontend gap
+  is no longer the in-game HUD; it is the browser product shell around it:
+  account/lobby flow, authoritative party/clan state, settings/audio polish,
+  browser-side proof, and session/auth UX.
 - **Post-compat account flow:** not built. Target is username/password or Google
   account login over HTTP, character selection in the browser, then unchanged
   AO socket login with `login_existing_char(char_id, session_token)`.
 - **Code size now:** backend runtime code is ~21k Elixir LOC, backend tests are
   ~17k Elixir LOC, and the web client source is ~15k TypeScript/React/CSS LOC.
+
+## Frontend Product Snapshot
+
+- **Big missing frontend work:** the browser product shell around the gameplay
+  client, not the in-game HUD.
+- **Actual gaps:**
+  - proper browser account/lobby flow is still missing: HTTP auth, session
+    restore, character list/create/select, then unchanged AO socket login via
+    `login_existing_char(char_id, session_token)`
+  - party/clan UI exists, but it is not yet fully authoritative: the browser
+    still needs richer backend truth for online state, roles/ranks,
+    permissions, safe-state, alignment, and cleaner snapshots
+  - user settings remain thin: browser music/SFX toggles, renderer-quality
+    settings, keybind settings, and persistence are still missing or incomplete
+  - audio polish remains incomplete: MIDI/music exists, but combat/UI/world
+    sound effects are still open
+  - browser-side proof remains incomplete: reducer tests, visual fixture tests,
+    and broader E2E coverage are still required
+  - localization and multi-realm remain future product work, not shipped
+    frontend features
+- **Already present / not the main gap:**
+  - snow already exists in the client path: packet decode, reducer state, and
+    renderer hooks are landed
+  - minimap already exists in the current browser client
+  - trade metadata and spell hints already exist at least partially and should
+    be treated as completeness/polish work, not net-new surfaces
+  - ghost/dead UX and explicit banned/muted/server-full/maintenance/
+    token-expired states already exist in the client
+- **Secondary gaps / investigation items:**
+  - responsive layout still needs explicit desktop/laptop/common-zoom polish;
+    the current client is playable, but not yet fully hardened across tighter
+    browser sizes
+  - social chat surfaces need careful investigation before implementation:
+    faction/guild/party chat should likely become distinct browser streams, but
+    the packet mapping, UX shape, and scope should be validated first so the
+    client does not invent a social model the protocol or target product does
+    not actually support
+  - session/auth isolation should remain explicit: account/lobby flows must
+    stay separate from gameplay packet semantics and must not leak product-shell
+    concerns into the AO session protocol
+  - map markers remain optional product scope: the minimap exists, but markers
+    should be added only if the target web UX still wants them
+  - performance discipline should remain an explicit frontend rule:
+    non-gameplay/dev-only surfaces should stay lazy-loaded, bundle growth should
+    be watched, and render-loop work must remain off the React path
+  - visual regression proof for bodies, equipment overlays, and NPC sprite
+    mappings is important enough to treat as a named frontend concern, not just
+    a generic testing afterthought
+- **Frontend architecture guardrail:**
+  - React/DOM UI owns panels, forms, overlays, and product-shell state
+  - frame-critical rendering, sprite movement, camera, and any other hot-path
+    canvas/Pixi work must stay outside React on the imperative renderer path
+  - React may mount host nodes and pass coarse-grained state into the renderer,
+    but it must not own per-frame drawing, animation loops, or fast-path
+    canvas mutations
+- **Recommended frontend priority:**
+  1. HTTP auth/lobby/character selection.
+  2. Authoritative party/clan data.
+  3. Settings + audio polish.
+  4. Broader browser test coverage.
 
 ## Linear Task List
 
