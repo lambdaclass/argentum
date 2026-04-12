@@ -41,7 +41,8 @@ defmodule Arena.Data.ItemDef do
     real: false,
     caos: false,
     ropaje: nil,
-    elemental_tags: 0
+    elemental_tags: 0,
+    forum_id: 0
   ]
 
   @stackable_types [1, 5, 11, 13, 32, 33, 34]
@@ -52,7 +53,8 @@ defmodule Arena.Data.ItemDef do
     11 => :municion,
     16 => :shield,
     17 => :helmet,
-    35 => :ring
+    35 => :ring,
+    44 => :saddle
   }
 
   @race_key_map %{
@@ -106,7 +108,8 @@ defmodule Arena.Data.ItemDef do
       real: parse_int(section["real"]) == 1,
       caos: parse_int(section["caos"]) == 1,
       ropaje: parse_ropaje(section),
-      elemental_tags: parse_int(section["elementaltags"])
+      elemental_tags: parse_int(section["elementaltags"]),
+      forum_id: parse_int(section["foroid"])
     }
   end
 

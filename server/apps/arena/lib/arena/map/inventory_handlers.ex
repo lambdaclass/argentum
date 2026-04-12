@@ -229,7 +229,24 @@ defmodule Arena.Map.InventoryHandlers do
 
             entity =
               if item_def && item_def.obj_type == 44 do
-                Helpers.break_invisibility(entity, state, char_id)
+                entity = Helpers.break_invisibility(entity, state, char_id)
+
+                # Toggle mount state based on whether saddle is now equipped
+                saddle_equipped = new_equipment[:saddle] != nil
+
+                if saddle_equipped do
+                  # Block mounting while navigating
+                  if entity.navigating do
+                    entity
+                  else
+                    %{entity |
+                      mounted: true,
+                      saddle_obj_index: item.item_id,
+                      saddle_slot: slot}
+                  end
+                else
+                  %{entity | mounted: false, saddle_obj_index: 0, saddle_slot: 0}
+                end
               else
                 entity
               end
@@ -461,4 +478,14 @@ defmodule Arena.Map.InventoryHandlers do
       :exit, _ -> :ok
     end
   end
+
+  @doc "Speed bonus from mount tier (VB6: 10 tiers of saddle quality)."
+  def mount_speed_bonus(saddle_obj_index) when saddle_obj_index > 0 do
+    item_def = GameData.get_item(saddle_obj_index)
+    tier = if item_def, do: max(item_def.min_hit, 1), else: 1
+    # 10 tiers: 0.05 per tier up to 0.5
+    min(tier * 0.05, 0.5)
+  end
+
+  def mount_speed_bonus(_), do: 0.0
 end

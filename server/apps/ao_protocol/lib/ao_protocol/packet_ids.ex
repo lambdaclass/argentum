@@ -80,6 +80,19 @@ defmodule AoProtocol.PacketIds do
     def oferta_de_subasta, do: 214
     def subasta_info, do: 240
 
+    # Faction online queries
+    def online_royal_army, do: 132
+    def online_chaos_legion, do: 133
+
+    # Council
+    def council_message, do: 61
+
+    # Forgive (VB6: ePerdonar = 68)
+    def forgive, do: 68
+
+    # Arena entry (VB6: eArenaEntry = 259)
+    def arena_entry, do: 259
+
     # Other
     def quit, do: 39
     def rest, do: 47
@@ -186,6 +199,9 @@ defmodule AoProtocol.PacketIds do
     def party_safe_mode_on, do: 22
     def party_safe_mode_off, do: 23
 
+    # Party snapshot (VB6: eDatosGrupo = 143)
+    def datos_grupo, do: 143
+
     # Effects
     def flash_screen, do: 129
 
@@ -220,9 +236,22 @@ defmodule AoProtocol.PacketIds do
     def sastre_objects, do: 132
     def show_tailor_form, do: 133
 
+    # Trainer creature list (VB6: eTrainerCreatureList = 104)
+    def trainer_creature_list, do: 104
+
+    # Spell info (VB6: eSpellInfo = 105)
+    def spell_info, do: 105
+
+    # Show forum form (VB6: eShowForumForm = 202)
+    def show_forum_form, do: 202
+
     # session_token (200) — WS-only extension, not in VB6 protocol.
     # Sent by WsHandler after login so the web client can reconnect.
     # TCP handler never sends this. See encoder.ex and ws_handler.ex.
     def session_token, do: 200
+
+    # world_pack_signature (203) — WS-only extension carrying the expected
+    # browser world-pack version/hash for this login/bootstrap.
+    def world_pack_signature, do: 203
   end
 end

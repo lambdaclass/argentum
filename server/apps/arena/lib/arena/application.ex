@@ -17,6 +17,7 @@ defmodule Arena.Application do
       Arena.GuildServer,
       Arena.DuelServer,
       Arena.Auction,
+      Arena.Forum,
       Supervisor.child_spec(Arena.Map.MapSupervisor, shutdown: 30_000),
       ArenaWeb.Endpoint
     ]
@@ -26,6 +27,7 @@ defmodule Arena.Application do
     case Supervisor.start_link(children, opts) do
       {:ok, pid} ->
         Arena.Map.MapSupervisor.boot_maps()
+        Arena.ClientMapPack.manifest()
         {:ok, pid}
 
       error ->

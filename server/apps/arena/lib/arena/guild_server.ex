@@ -906,6 +906,94 @@ defmodule Arena.GuildServer do
     for mid <- member_ids, do: notify(mid, message)
   end
 
+  @doc """
+  Send a guild_details snapshot packet to a specific player.
+  Used when a player requests guild details or logs in while in a guild.
+  """
+  def send_guild_details(char_id, guild) do
+    leader_name =
+      case OnlineDirectory.lookup_by_id(guild.leader) do
+        {:ok, info} -> info.name
+        :not_found -> "ID:#{guild.leader}"
+      end
+
+    founder_name =
+      case OnlineDirectory.lookup_by_id(guild.founder_id) do
+        {:ok, info} -> info.name
+        :not_found -> "ID:#{guild.founder_id}"
+      end
+
+    date =
+      case guild[:created_at] do
+        %DateTime{} = dt -> Calendar.strftime(dt, "%Y-%m-%d")
+        %NaiveDateTime{} = dt -> Calendar.strftime(dt, "%Y-%m-%d")
+        nil -> ""
+        other -> to_string(other)
+      end
+
+    alignment_name = GuildAlignment.name(guild.alignment)
+
+    raw =
+      AoProtocol.Server.Encoder.encode(
+        {:guild_details,
+         %{
+           name: guild.name,
+           founder: founder_name,
+           date: date,
+           leader: leader_name,
+           member_count: length(guild.members),
+           alignment: alignment_name,
+           description: guild.description,
+           level: guild.level
+         }}
+      )
+
+    case OnlineDirectory.lookup_by_id(char_id) do
+      {:ok, %{session_pid: pid}} -> send(pid, {:send_raw, raw})
+      _ -> :ok
+    end
+  end
+
+  @doc """
+  Send a guild_news snapshot packet to a specific player.
+  Used when a player requests guild news or logs in while in a guild.
+  """
+  def send_guild_news(char_id, guild) do
+    member_names =
+      guild.members
+      |> Enum.map(fn mid ->
+        case OnlineDirectory.lookup_by_id(mid) do
+          {:ok, info} -> info.name
+          :not_found -> "ID:#{mid}"
+        end
+      end)
+      |> Enum.join(",")
+
+    required =
+      case GuildConstants.required_exp(guild.level) do
+        :max -> 0
+        req -> req
+      end
+
+    raw =
+      AoProtocol.Server.Encoder.encode(
+        {:guild_news,
+         %{
+           news: guild.news,
+           guild_list: guild.name,
+           member_list: member_names,
+           level: guild.level,
+           current_exp: guild.current_exp,
+           needed_exp: required
+         }}
+      )
+
+    case OnlineDirectory.lookup_by_id(char_id) do
+      {:ok, %{session_pid: pid}} -> send(pid, {:send_raw, raw})
+      _ -> :ok
+    end
+  end
+
   # Load all guilds from DB into ETS. Returns the next available guild_id.
   # Gracefully handles missing DB (e.g. test environment without Repo).
   defp load_guilds_from_db do

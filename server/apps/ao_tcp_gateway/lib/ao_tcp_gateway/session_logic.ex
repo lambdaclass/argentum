@@ -175,9 +175,32 @@ defmodule AoTcpGateway.SessionLogic do
           [{:console_msg, %{message: "Welcome to Argentum Online!", font_index: 0}}]
 
       AoSession.OnlineDirectory.register(entity.char_id, entity.name, map_id, self(),
-        is_gm: state.is_gm
+        is_gm: state.is_gm,
+        faction: entity.faction
       )
-      {state, packets}
+
+      # Send party snapshot if player is in a party
+      party_snapshot_packets =
+        case Arena.PartyServer.get_party(entity.char_id) do
+          {:ok, party} ->
+            leader_id = party.leader
+            ordered = [leader_id | Enum.filter(party.members, &(&1 != leader_id))]
+
+            names =
+              Enum.map(ordered, fn mid ->
+                case AoSession.OnlineDirectory.lookup_by_id(mid) do
+                  {:ok, info} -> info.name
+                  :not_found -> "ID:#{mid}"
+                end
+              end)
+
+            [{:datos_grupo, %{en_grupo: true, members: names, leader_index: 0}}]
+
+          :not_in_party ->
+            [{:datos_grupo, %{en_grupo: false, members: []}}]
+        end
+
+      {state, packets ++ party_snapshot_packets}
     else
       {:error, reason} ->
         Logger.error("Failed to enter map #{map_id}: #{inspect(reason)}")
@@ -316,9 +339,8 @@ defmodule AoTcpGateway.SessionLogic do
           :guild_news_read ->
             case Arena.GuildServer.get_guild(state.character_id) do
               {:ok, guild} ->
-                news = if guild.news == "", do: "Sin noticias.", else: guild.news
-                msg = AoProtocol.Server.Encoder.encode({:console_msg, %{message: "Noticias del clan: #{news}", font_index: 0}})
-                {state, [{:send_raw, msg}]}
+                Arena.GuildServer.send_guild_news(state.character_id, guild)
+                {state, []}
               :not_in_guild ->
                 {state, []}
             end
@@ -338,12 +360,9 @@ defmodule AoTcpGateway.SessionLogic do
 
           :guild_info ->
             case Arena.GuildServer.guild_info(state.character_id) do
-              {:ok, guild, required} ->
-                req_str = if required == :max, do: "MAX", else: "#{required}"
-                align_name = Arena.GuildAlignment.name(guild.alignment)
-                info = "Clan: #{guild.name} | Nivel: #{guild.level} | EXP: #{guild.current_exp}/#{req_str} | Alineacion: #{align_name} | Miembros: #{length(guild.members)}"
-                msg = AoProtocol.Server.Encoder.encode({:console_msg, %{message: info, font_index: 0}})
-                {state, [{:send_raw, msg}]}
+              {:ok, guild, _required} ->
+                Arena.GuildServer.send_guild_details(state.character_id, guild)
+                {state, []}
               :not_in_guild ->
                 {state, []}
             end
@@ -799,6 +818,32 @@ defmodule AoTcpGateway.SessionLogic do
     {state, [{:console_msg, %{message: "Jugadores en linea: #{count}", font_index: 0}}]}
   end
 
+  # ---- Faction online lists (VB6: HandleOnlineRoyalArmy / HandleOnlineChaosLegion) ----
+
+  def handle_command(state, {:online_royal_army, _}) when state.character_id != nil do
+    members = AoSession.OnlineDirectory.list_by_faction(:royal_army)
+    name_list = Enum.map_join(members, ", ", & &1.name)
+
+    msg =
+      if name_list == "",
+        do: "No hay miembros de la Armada Real en linea.",
+        else: "Armada Real en linea: #{name_list}"
+
+    {state, [{:console_msg, %{message: msg, font_index: 0}}]}
+  end
+
+  def handle_command(state, {:online_chaos_legion, _}) when state.character_id != nil do
+    members = AoSession.OnlineDirectory.list_by_faction(:chaos_legion)
+    name_list = Enum.map_join(members, ", ", & &1.name)
+
+    msg =
+      if name_list == "",
+        do: "No hay miembros de la Legion del Caos en linea.",
+        else: "Legion del Caos en linea: #{name_list}"
+
+    {state, [{:console_msg, %{message: msg, font_index: 0}}]}
+  end
+
   # ---- User-to-user trade ----
 
   @trade_not_active_msg {:console_msg, %{message: "No estas en un comercio con otro jugador.", font_index: 0}}
@@ -1145,9 +1190,10 @@ defmodule AoTcpGateway.SessionLogic do
     {state, [{:console_msg, %{message: "No hay recompensas disponibles.", font_index: 0}}]}
   end
 
-  # Train list — stub, client expects console response
+  # Train list — delegate to MapServer
   def handle_command(state, {:train_list, _}) when state.character_id != nil do
-    {state, [{:console_msg, %{message: "No hay criaturas disponibles para entrenar.", font_index: 0}}]}
+    Arena.Map.MapServer.train_list(state.map_id, state.character_id)
+    {state, []}
   end
 
   # Request account state/balance
@@ -1187,10 +1233,22 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
-  # Council message — same as faction chat (royal/chaos council)
+  # Council message — restricted to council members (VB6: eCouncilMessage).
+  # In VB6, council members are high-rank faction members. We check faction membership
+  # and delegate to faction_chat which broadcasts to same-faction players.
+  # Future: add explicit council rank threshold check (e.g. faction_rank >= max_rank).
   def handle_command(state, {:council_message, %{message: message}}) when state.character_id != nil do
-    Arena.Map.MapServer.faction_chat(state.map_id, state.character_id, message)
-    {state, []}
+    case Arena.Map.MapServer.snapshot_entity(state.map_id, state.character_id) do
+      {:ok, entity} when entity.faction != :none ->
+        Arena.Map.MapServer.faction_chat(state.map_id, state.character_id, message)
+        {state, []}
+
+      {:ok, _entity} ->
+        {state, [{:console_msg, %{message: "No perteneces a ninguna faccion.", font_index: 0}}]}
+
+      _ ->
+        {state, []}
+    end
   end
 
   # Train — interact with trainer NPC pet (stub for now)
@@ -1256,9 +1314,22 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
-  # ForumPost (ID 13) — no forum system, stub
-  def handle_command(state, {:forum_post, _}) when state.character_id != nil do
-    {state, [{:console_msg, %{message: "El foro no esta disponible.", font_index: 0}}]}
+  # ForumPost (ID 13) — post to currently viewed forum
+  def handle_command(state, {:forum_post, %{title: title, message: body}}) when state.character_id != nil do
+    forum_id = Map.get(state, :viewing_forum_id)
+
+    if forum_id != nil and forum_id > 0 do
+      author =
+        case AoSession.OnlineDirectory.lookup_by_id(state.character_id) do
+          {:ok, info} -> info.name
+          _ -> "Unknown"
+        end
+
+      Arena.Forum.post_message(forum_id, author, title, body)
+      {state, [{:console_msg, %{message: "Mensaje publicado.", font_index: 0}}]}
+    else
+      {state, [{:console_msg, %{message: "El foro no esta disponible.", font_index: 0}}]}
+    end
   end
 
   # Punishments (ID 66) — view player penalties
@@ -1266,9 +1337,22 @@ defmodule AoTcpGateway.SessionLogic do
     {state, [{:console_msg, %{message: "No hay penas registradas para #{name}.", font_index: 0}}]}
   end
 
-  # Gamble (ID 67) — gambling system not implemented
-  def handle_command(state, {:gamble, _}) when state.character_id != nil do
-    {state, [{:console_msg, %{message: "El sistema de apuestas no esta disponible.", font_index: 0}}]}
+  # Gamble (ID 67) — delegate to MapServer
+  def handle_command(state, {:gamble, %{amount: amount}}) when state.character_id != nil do
+    Arena.Map.MapServer.gamble(state.map_id, state.character_id, amount)
+    {state, []}
+  end
+
+  # Forgive (ID 68) — delegate to MapServer
+  def handle_command(state, {:forgive, _}) when state.character_id != nil do
+    Arena.Map.MapServer.forgive(state.map_id, state.character_id)
+    {state, []}
+  end
+
+  # Arena entry (ID 259) — delegate to MapServer
+  def handle_command(state, {:arena_entry, _}) when state.character_id != nil do
+    Arena.Map.MapServer.arena_entry(state.map_id, state.character_id)
+    {state, []}
   end
 
   # Denounce (ID 72) — report a player

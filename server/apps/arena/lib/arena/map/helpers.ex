@@ -255,7 +255,7 @@ defmodule Arena.Map.Helpers do
   def break_invisibility(entity, state, char_id) do
     if entity.invisible or entity.oculto do
       buffs = Enum.reject(entity.buffs, &(&1.type in [:invisible, :oculto]))
-      entity = %{entity | invisible: false, oculto: false, buffs: buffs}
+      entity = %{entity | invisible: false, oculto: false, oculto_timer: 0, buffs: buffs}
 
       send_to_session(
         state.sessions,

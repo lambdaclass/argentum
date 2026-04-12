@@ -34,8 +34,14 @@ defmodule Arena.Data.NpcDef do
     loot_table: [],
     comercia: false,
     shop_items: [],
+    creatures: [],
     faccion: 0,
-    elemental_tags: 0
+    elemental_tags: 0,
+    arena_enabled: false,
+    map_entry_price: 0,
+    map_target_entry: 0,
+    map_target_entry_x: 0,
+    map_target_entry_y: 0
   ]
 
   @doc "Build an NpcDef from a parsed INI section (downcased keys)."
@@ -71,9 +77,26 @@ defmodule Arena.Data.NpcDef do
       loot_table: parse_loot_table(section),
       comercia: parse_bool(section["comercia"]),
       shop_items: parse_shop_items(section),
+      creatures: parse_creatures(section),
       faccion: parse_int(section["faccion"]),
-      elemental_tags: parse_int(section["elementaltags"])
+      elemental_tags: parse_int(section["elementaltags"]),
+      arena_enabled: parse_bool(section["arenaenabled"]),
+      map_entry_price: parse_int(section["mapentryprice"]),
+      map_target_entry: parse_int(section["maptargetentry"]),
+      map_target_entry_x: parse_int(section["maptargetentryx"]),
+      map_target_entry_y: parse_int(section["maptargetentryy"])
     }
+  end
+
+  # CI1..CI5: list of creature names for trainers
+  defp parse_creatures(section) do
+    for i <- 1..5,
+        val = section["ci#{i}"],
+        val != nil,
+        name = String.trim(val),
+        name != "" do
+      name
+    end
   end
 
   # SP1..SP22: list of non-zero spell ids

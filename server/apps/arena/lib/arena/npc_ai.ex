@@ -356,7 +356,7 @@ defmodule Arena.NpcAi do
             %{npc | target_id: nil}
 
           player ->
-            if player.dead or player.invisible or abs(player.x - npc.x) > @aggro_range or
+            if player.dead or player.invisible or Map.get(player, :oculto, false) or abs(player.x - npc.x) > @aggro_range or
                  abs(player.y - npc.y) > @aggro_range do
               %{npc | target_id: nil}
             else
@@ -377,7 +377,7 @@ defmodule Arena.NpcAi do
   defp find_nearest_player(state, npc) do
     state.players
     |> Enum.filter(fn {_id, p} ->
-      not p.dead and not p.invisible and abs(p.x - npc.x) <= @aggro_range and abs(p.y - npc.y) <= @aggro_range
+      not p.dead and not p.invisible and not Map.get(p, :oculto, false) and abs(p.x - npc.x) <= @aggro_range and abs(p.y - npc.y) <= @aggro_range
     end)
     |> Enum.min_by(fn {_id, p} -> abs(p.x - npc.x) + abs(p.y - npc.y) end, fn -> nil end)
     |> case do

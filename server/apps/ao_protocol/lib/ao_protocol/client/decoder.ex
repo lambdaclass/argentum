@@ -675,6 +675,9 @@ defmodule AoProtocol.Client.Decoder do
     end
   end
 
+  # Forgive (ID 68) — no payload
+  defp decode_packet(68, rest), do: {:ok, {:forgive, %{}}, rest}
+
   # Gamble (ID 67) — amount(I32)
   defp decode_packet(67, rest) do
     with {:ok, amount, rest} <- Reader.read_int32(rest) do
@@ -784,6 +787,12 @@ defmodule AoProtocol.Client.Decoder do
   # OnlineGM (ID 131)
   defp decode_packet(131, rest), do: {:ok, {:online_gm, %{}}, rest}
 
+  # OnlineRoyalArmy (ID 132) — no payload
+  defp decode_packet(132, rest), do: {:ok, {:online_royal_army, %{}}, rest}
+
+  # OnlineChaosLegion (ID 133) — no payload
+  defp decode_packet(133, rest), do: {:ok, {:online_chaos_legion, %{}}, rest}
+
   # Kick (ID 134) — name(S8)
   defp decode_packet(134, rest) do
     with {:ok, name, rest} <- Reader.read_string8(rest) do
@@ -880,6 +889,9 @@ defmodule AoProtocol.Client.Decoder do
 
   # eSubastaInfo (ID 240) — no payload
   defp decode_packet(240, rest), do: {:ok, {:subasta_info, %{}}, rest}
+
+  # ArenaEntry (ID 259) — no payload
+  defp decode_packet(259, rest), do: {:ok, {:arena_entry, %{}}, rest}
 
   # Unknown packet
   defp decode_packet(id, _rest), do: {:error, {:unknown_packet, id}}

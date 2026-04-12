@@ -43,6 +43,7 @@ defmodule AoTcpGateway.WsHandler do
        is_gm: false,
        is_dead: false,
        hogar_timer_ref: nil,
+       viewing_forum_id: nil,
        flood_guard: FloodGuard.new()
      }}
   end
@@ -67,6 +68,10 @@ defmodule AoTcpGateway.WsHandler do
 
   def websocket_info(:trade_started, state) do
     {:ok, %{state | in_trade: true}}
+  end
+
+  def websocket_info({:set_viewing_forum, forum_id}, state) do
+    {:ok, %{state | viewing_forum_id: forum_id}}
   end
 
   # Map transfer request from MapServer
@@ -149,13 +154,13 @@ defmodule AoTcpGateway.WsHandler do
   defp dispatch_command(state, {:login_existing_char, %{char_id: char_id, session_token: token}}) do
     Logger.info("WS Login: char_id=#{char_id}")
     {state, packets} = SessionLogic.login_existing(state, char_id, token)
-    {state, encode_frames(packets) ++ session_token_frame(state)}
+    {state, bootstrap_frames(state) ++ encode_frames(packets) ++ session_token_frame(state)}
   end
 
   defp dispatch_command(state, {:login_new_char, params}) do
     Logger.info("WS new character: #{params.username}")
     {state, packets} = SessionLogic.login_new(state, params)
-    {state, encode_frames(packets) ++ session_token_frame(state)}
+    {state, bootstrap_frames(state) ++ encode_frames(packets) ++ session_token_frame(state)}
   end
 
   defp dispatch_command(state, {:quit, _}) do
@@ -174,6 +179,10 @@ defmodule AoTcpGateway.WsHandler do
     Enum.map(packets, fn cmd -> {:binary, Encoder.encode(cmd)} end)
   end
 
+  defp bootstrap_frames(state) do
+    world_pack_signature_frame(state)
+  end
+
   # After successful login, send session credentials so the web client can reconnect.
   # Only sent over WebSocket — VB6 TCP clients never see this packet.
   defp session_token_frame(%{character_id: char_id}) when is_integer(char_id) do
@@ -187,6 +196,19 @@ defmodule AoTcpGateway.WsHandler do
   end
 
   defp session_token_frame(_state), do: []
+
+  defp world_pack_signature_frame(%{character_id: char_id}) when is_integer(char_id) do
+    manifest = Arena.ClientMapPack.manifest()
+
+    [
+      {:binary,
+       Encoder.encode(
+         {:world_pack_signature, %{version: manifest.version, hash: manifest.hash}}
+       )}
+    ]
+  end
+
+  defp world_pack_signature_frame(_state), do: []
 
   # Combine binary frames for efficiency, pass through control frames (close).
   defp reply(state, []), do: {:ok, state}

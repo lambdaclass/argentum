@@ -68,6 +68,7 @@ defmodule Arena.InvisibilityEdgeCasesTest do
       criminal: false,
       invisible: false,
       oculto: false,
+      oculto_timer: 0,
       no_detectable: false,
       paralyzed: false,
       immobilized: false,

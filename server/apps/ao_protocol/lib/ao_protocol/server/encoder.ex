@@ -375,6 +375,17 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.session_token(), payload)
   end
 
+  # world_pack_signature (ID 203) — WS-only extension, not in VB6 protocol.
+  # Sent before gameplay bootstrap so the web client can verify its loaded
+  # world-pack hash matches the live server expectation.
+  def encode({:world_pack_signature, %{version: version, hash: hash}}) do
+    payload =
+      Writer.write_int16(version) <>
+        Writer.write_string8(hash)
+
+    Writer.build_packet(PacketIds.Server.world_pack_signature(), payload)
+  end
+
   # eCharSwing (ID 19) — charindex(Int16)
   def encode({:char_swing, %{char_index: char_index}}) do
     payload = Writer.write_int16(char_index)
@@ -619,6 +630,32 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.party_safe_mode_off(), <<>>)
   end
 
+  # eDatosGrupo (ID 143) — VB6 WriteDatosGrupo
+  # en_grupo(Bool) + [member_count(Int8) + member_names(String8 each)]
+  # First member (leader at index leader_index, default 0) gets "(Lider)" suffix.
+  def encode({:datos_grupo, %{en_grupo: false}}) do
+    Writer.build_packet(PacketIds.Server.datos_grupo(), Writer.write_bool(false))
+  end
+
+  def encode({:datos_grupo, %{en_grupo: true, members: members} = params}) do
+    leader_index = Map.get(params, :leader_index, 0)
+
+    names_payload =
+      members
+      |> Enum.with_index()
+      |> Enum.reduce(<<>>, fn {name, idx}, acc ->
+        display = if idx == leader_index, do: name <> "(Lider)", else: name
+        acc <> Writer.write_string8(display)
+      end)
+
+    payload =
+      Writer.write_bool(true) <>
+        Writer.write_int8(length(members)) <>
+        names_payload
+
+    Writer.build_packet(PacketIds.Server.datos_grupo(), payload)
+  end
+
   # eBlind (ID 74) — no payload
   def encode({:blind, _params}) do
     Writer.build_packet(PacketIds.Server.blind(), <<>>)
@@ -777,6 +814,41 @@ defmodule AoProtocol.Server.Encoder do
   def encode({:sastre_objects, %{items: items}}) do
     payload = Writer.write_int16(length(items)) <> Enum.map_join(items, &Writer.write_int16/1)
     Writer.build_packet(PacketIds.Server.sastre_objects(), payload)
+  end
+
+  # eTrainerCreatureList (ID 104) — comma-separated creature names
+  def encode({:trainer_creature_list, %{creature_names: names}}) do
+    payload = Writer.write_string8(Enum.join(names, ","))
+    Writer.build_packet(PacketIds.Server.trainer_creature_list(), payload)
+  end
+
+  # eSpellInfo (ID 105) — name(S8) + desc(S8) + skill_required(I16) + mana(I16)
+  def encode({:spell_info, %{name: name, desc: desc, skill_required: skill, mana: mana}}) do
+    payload =
+      Writer.write_string8(name) <>
+        Writer.write_string8(desc) <>
+        Writer.write_int16(skill) <>
+        Writer.write_int16(mana)
+
+    Writer.build_packet(PacketIds.Server.spell_info(), payload)
+  end
+
+  # eShowForumForm (ID 202) — forum_id(I16) + count(I16) + messages[author(S8) + title(S8) + body(S8)]
+  def encode({:show_forum_form, %{forum_id: forum_id, messages: msgs}}) do
+    msg_payload =
+      Enum.reduce(msgs, <<>>, fn m, acc ->
+        acc <>
+          Writer.write_string8(m[:author] || "") <>
+          Writer.write_string8(m[:title] || "") <>
+          Writer.write_string8(m[:body] || "")
+      end)
+
+    payload =
+      Writer.write_int16(forum_id) <>
+        Writer.write_int16(length(msgs)) <>
+        msg_payload
+
+    Writer.build_packet(PacketIds.Server.show_forum_form(), payload)
   end
 
   # ---- Helpers ----

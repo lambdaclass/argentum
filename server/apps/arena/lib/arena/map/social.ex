@@ -12,7 +12,9 @@ defmodule Arena.Map.Social do
   @npc_type_entrenador 3
   @npc_type_banquero 4
   @npc_type_enlistador 5
+  @npc_type_timbero 6
   @npc_type_resucitador_newbie 9
+  @npc_type_arena_guard 10
   @npc_type_subastador 16
   @npc_type_entrega_pesca 20
   @yell_range_x Application.compile_env(:arena, :aoi_range_x, 11) * 2
@@ -1285,7 +1287,20 @@ defmodule Arena.Map.Social do
                 handle_npc_double_click(state, char_id, entity, instance_id)
 
               _ ->
-                {:noreply, state}
+                # Check for forum object on ground
+                case Map.get(state.ground_items, {x, y}) do
+                  %{item_id: item_id} ->
+                    item_def = GameData.get_item(item_id)
+
+                    if item_def != nil and item_def.forum_id > 0 do
+                      handle_forum_open(state, char_id, item_def.forum_id)
+                    else
+                      {:noreply, state}
+                    end
+
+                  _ ->
+                    {:noreply, state}
+                end
             end
           else
             Helpers.send_to_session(
@@ -1379,6 +1394,16 @@ defmodule Arena.Map.Social do
           npc_def.npc_type == @npc_type_entrega_pesca ->
             handle_fish_delivery(state, char_id, entity, npc_def)
 
+          # Timbero — gambling NPC (VB6: npc_type 6)
+          npc_def.npc_type == @npc_type_timbero ->
+            msg(state, char_id, "#{npc_def.name} dice: Haz tu apuesta.")
+            {:noreply, state}
+
+          # Arena guard (VB6: npc_type 10)
+          npc_def.npc_type == @npc_type_arena_guard ->
+            msg(state, char_id, "#{npc_def.name} dice: Bienvenido a la arena.")
+            {:noreply, state}
+
           # Subastador — auction NPC (VB6: npc_type 16)
           npc_def.npc_type == @npc_type_subastador ->
             handle_subastador_click(state, char_id, entity, npc_def)
@@ -1457,6 +1482,9 @@ defmodule Arena.Map.Social do
             # Give rank 1 rewards
             {entity, state} = give_faction_rewards(entity, state, char_id, npc_faction, 0, 1)
             players = Map.put(state.players, char_id, entity)
+
+            # Update online directory with new faction
+            AoSession.OnlineDirectory.update_faction(char_id, npc_faction)
 
             faction_name = faction_display_name(npc_faction)
             msg(%{state | players: players}, char_id, "Te has enlistado en #{faction_name}.")
@@ -1584,6 +1612,9 @@ defmodule Arena.Map.Social do
           entity = strip_faction_items(entity)
           entity = %{entity | faction: :none, faction_reenlistadas: entity.faction_reenlistadas + 1}
           players = Map.put(state.players, char_id, entity)
+
+          # Update online directory
+          AoSession.OnlineDirectory.update_faction(char_id, :none)
 
           # Resend full inventory after stripping
           Enum.each(0..23, fn slot ->
@@ -2342,6 +2373,251 @@ defmodule Arena.Map.Social do
   VB6 uses a special potion, but we also support a /DIVORCIAR command.
   Both players must be on the same map. Sets spouse_id = 0 on both.
   """
+  # ==================================================================
+  # Ocultarse (hiding skill) — task 26b
+  # ==================================================================
+
+  def handle_ocultarse(state, char_id, skill_level) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        cond do
+          entity.dead ->
+            msg(state, char_id, "Estas muerto!")
+            {:noreply, state}
+
+          entity.oculto ->
+            msg(state, char_id, "Ya estas oculto.")
+            {:noreply, state}
+
+          skill_level < 1 ->
+            msg(state, char_id, "No tienes habilidad suficiente para ocultarte.")
+            {:noreply, state}
+
+          true ->
+            # VB6: hide timer = skill_level / 2 regen ticks
+            timer = max(div(skill_level, 2), 1)
+            entity = %{entity | oculto: true, oculto_timer: timer}
+            players = Map.put(state.players, char_id, entity)
+            state = %{state | players: players}
+
+            Helpers.broadcast_character_change(state, %{entity | invisible: true})
+            msg(state, char_id, "Te has ocultado entre las sombras.")
+            {:noreply, state}
+        end
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  # ==================================================================
+  # Trainer creature list — task 32
+  # ==================================================================
+
+  def handle_train_list(state, char_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        # Find nearby trainer NPC
+        trainer =
+          Enum.find_value(state.npcs_live, fn {_id, npc} ->
+            npc_def = GameData.get_npc(npc.npc_id)
+
+            if npc_def != nil and
+                 npc_def.npc_type == @npc_type_entrenador and
+                 abs(npc.x - entity.x) <= 5 and
+                 abs(npc.y - entity.y) <= 5 do
+              npc_def
+            end
+          end)
+
+        if trainer != nil and trainer.creatures != [] do
+          raw =
+            Encoder.encode({:trainer_creature_list, %{creature_names: trainer.creatures}})
+
+          Helpers.send_to_session(state.sessions, char_id, {:send_raw, raw})
+        else
+          msg(state, char_id, "No hay criaturas disponibles para entrenar.")
+        end
+
+        {:noreply, state}
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  # ==================================================================
+  # Gamble (timbero NPC) — task 42
+  # ==================================================================
+
+  def handle_gamble(state, char_id, amount, _npc_instance_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        cond do
+          entity.dead ->
+            msg(state, char_id, "Estas muerto!")
+            {:noreply, state}
+
+          amount <= 0 ->
+            msg(state, char_id, "La apuesta debe ser mayor a 0.")
+            {:noreply, state}
+
+          entity.gold < amount ->
+            msg(state, char_id, "No tienes suficiente oro.")
+            {:noreply, state}
+
+          true ->
+            # 50/50 chance
+            won = :rand.uniform(2) == 1
+
+            entity =
+              if won do
+                %{entity |
+                  gold: entity.gold + amount,
+                  gamble_wins: entity.gamble_wins + 1,
+                  gamble_plays: entity.gamble_plays + 1}
+              else
+                %{entity |
+                  gold: entity.gold - amount,
+                  gamble_losses: entity.gamble_losses + 1,
+                  gamble_plays: entity.gamble_plays + 1}
+              end
+
+            players = Map.put(state.players, char_id, entity)
+            state = %{state | players: players}
+
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
+            )
+
+            if won do
+              msg(state, char_id, "Has ganado #{amount} monedas de oro!")
+            else
+              msg(state, char_id, "Has perdido #{amount} monedas de oro.")
+            end
+
+            {:noreply, state}
+        end
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  # ==================================================================
+  # Forgive (priest NPC) — task 42
+  # ==================================================================
+
+  def handle_forgive(state, char_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        if entity.criminal do
+          entity = %{entity | criminal: false}
+          players = Map.put(state.players, char_id, entity)
+          state = %{state | players: players}
+          msg(state, char_id, "Has sido perdonado.")
+          {:noreply, state}
+        else
+          msg(state, char_id, "No eres un criminal.")
+          {:noreply, state}
+        end
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  # ==================================================================
+  # Arena entry — task 42
+  # ==================================================================
+
+  def handle_arena_entry(state, char_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        # Find nearby arena guard NPC
+        guard =
+          Enum.find_value(state.npcs_live, fn {_id, npc} ->
+            npc_def = GameData.get_npc(npc.npc_id)
+
+            if npc_def != nil and
+                 npc_def.npc_type == @npc_type_arena_guard and
+                 npc_def.arena_enabled and
+                 abs(npc.x - entity.x) <= 5 and
+                 abs(npc.y - entity.y) <= 5 do
+              npc_def
+            end
+          end)
+
+        cond do
+          guard == nil ->
+            msg(state, char_id, "No hay un guardia de arena cerca.")
+            {:noreply, state}
+
+          entity.dead ->
+            msg(state, char_id, "Estas muerto!")
+            {:noreply, state}
+
+          entity.gold < guard.map_entry_price ->
+            msg(state, char_id, "Necesitas #{guard.map_entry_price} monedas de oro para entrar.")
+            {:noreply, state}
+
+          true ->
+            entity = %{entity | gold: entity.gold - guard.map_entry_price}
+            players = Map.put(state.players, char_id, entity)
+            state = %{state | players: players}
+
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
+            )
+
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:transfer, guard.map_target_entry, guard.map_target_entry_x, guard.map_target_entry_y, entity}
+            )
+
+            {:noreply, state}
+        end
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  # ==================================================================
+  # Forum (double-click on forum object) — task 44
+  # ==================================================================
+
+  def handle_forum_open(state, char_id, forum_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, _entity} ->
+        messages = Arena.Forum.get_messages(forum_id)
+
+        raw =
+          Encoder.encode(
+            {:show_forum_form,
+             %{
+               forum_id: forum_id,
+               messages: messages
+             }}
+          )
+
+        Helpers.send_to_session(state.sessions, char_id, {:send_raw, raw})
+
+        # Tell the session handler which forum is open
+        Helpers.send_to_session(state.sessions, char_id, {:set_viewing_forum, forum_id})
+
+        {:noreply, state}
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
   def handle_divorce(state, char_id) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->

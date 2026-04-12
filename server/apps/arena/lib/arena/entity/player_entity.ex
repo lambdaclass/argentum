@@ -55,7 +55,7 @@ defmodule Arena.Entity.PlayerEntity do
     inventory: List.duplicate(nil, 24),
 
     # Equipment slots: %{weapon: item_id, armor: item_id, shield: item_id, helmet: item_id, ring: item_id}
-    equipment: %{weapon: nil, armor: nil, shield: nil, helmet: nil, ring: nil, municion: nil},
+    equipment: %{weapon: nil, armor: nil, shield: nil, helmet: nil, ring: nil, municion: nil, saddle: nil},
 
     # Skills: %{skill_id => value}
     skills: %{},
@@ -98,12 +98,16 @@ defmodule Arena.Entity.PlayerEntity do
     criminal: false,
     invisible: false,
     oculto: false,
+    oculto_timer: 0,
     no_detectable: false,
     paralyzed: false,
     immobilized: false,
     meditating: false,
     resting: false,
     safe_mode: false,
+    mounted: false,
+    saddle_obj_index: 0,
+    saddle_slot: 0,
     navigating: false,
     gm: false,
     faction: :none,
@@ -161,6 +165,11 @@ defmodule Arena.Entity.PlayerEntity do
     # in_duel: whether player is in an active duel
     in_duel: false,
     # duel_opponent_id: char_id of current duel opponent (nil when not dueling)
-    duel_opponent_id: nil
+    duel_opponent_id: nil,
+
+    # Gambling counters (persisted)
+    gamble_wins: 0,
+    gamble_losses: 0,
+    gamble_plays: 0
   ]
 end

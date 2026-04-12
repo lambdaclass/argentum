@@ -42,6 +42,7 @@ defmodule AoTcpGateway.ClientHandler do
       is_gm: false,
       is_dead: false,
       hogar_timer_ref: nil,
+      viewing_forum_id: nil,
       flood_guard: FloodGuard.new()
     })
   end
@@ -68,6 +69,9 @@ defmodule AoTcpGateway.ClientHandler do
       {:send_raw, binary} ->
         state.transport.send(state.socket, binary)
         loop(state)
+
+      {:set_viewing_forum, forum_id} ->
+        loop(%{state | viewing_forum_id: forum_id})
 
       :trade_started ->
         loop(%{state | in_trade: true})

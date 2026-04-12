@@ -166,9 +166,11 @@ defmodule Arena.PartyServer do
               {:reply, {:error, :full}, state}
             else
               new_members = party.members ++ [char_id]
-              :ets.insert(@table, {{:party, party_id}, %{party | members: new_members}})
+              updated_party = %{party | members: new_members}
+              :ets.insert(@table, {{:party, party_id}, updated_party})
               :ets.insert(@table, {{:member, char_id}, party_id})
               broadcast_party(new_members, "Un jugador se ha unido al grupo. Miembros: #{length(new_members)}")
+              broadcast_datos_grupo(updated_party)
               {:reply, :ok, state}
             end
 
@@ -231,10 +233,13 @@ defmodule Arena.PartyServer do
           [{_, %{leader: ^leader_id} = party}] ->
             if target_id in party.members and target_id != leader_id do
               new_members = List.delete(party.members, target_id)
-              :ets.insert(@table, {{:party, party_id}, %{party | members: new_members}})
+              updated_party = %{party | members: new_members}
+              :ets.insert(@table, {{:party, party_id}, updated_party})
               :ets.delete(@table, {:member, target_id})
               notify(target_id, "Has sido expulsado del grupo.")
+              send_not_in_party(target_id)
               broadcast_party(new_members, "Un jugador fue expulsado del grupo.")
+              broadcast_datos_grupo(updated_party)
             end
 
           _ ->
@@ -286,8 +291,10 @@ defmodule Arena.PartyServer do
             for mid <- party.members, mid != char_id do
               :ets.delete(@table, {:member, mid})
               notify(mid, "El grupo se ha disuelto.")
+              send_not_in_party(mid)
             end
 
+            send_not_in_party(char_id)
             :ets.delete(@table, {:party, party_id})
 
           [{_, party}] ->
@@ -296,9 +303,13 @@ defmodule Arena.PartyServer do
             if new_members == [] do
               :ets.delete(@table, {:party, party_id})
             else
-              :ets.insert(@table, {{:party, party_id}, %{party | members: new_members}})
+              updated_party = %{party | members: new_members}
+              :ets.insert(@table, {{:party, party_id}, updated_party})
               broadcast_party(new_members, "Un jugador abandono el grupo.")
+              broadcast_datos_grupo(updated_party)
             end
+
+            send_not_in_party(char_id)
 
           [] ->
             :ok
@@ -322,5 +333,43 @@ defmodule Arena.PartyServer do
 
   defp broadcast_party(member_ids, message) do
     for mid <- member_ids, do: notify(mid, message)
+  end
+
+  @doc false
+  def send_datos_grupo(char_id, party) do
+    # Resolve member names, with leader first (index 0) per VB6 convention
+    leader_id = party.leader
+    ordered = [leader_id | Enum.filter(party.members, &(&1 != leader_id))]
+
+    names =
+      Enum.map(ordered, fn mid ->
+        case OnlineDirectory.lookup_by_id(mid) do
+          {:ok, info} -> info.name
+          :not_found -> "ID:#{mid}"
+        end
+      end)
+
+    raw =
+      AoProtocol.Server.Encoder.encode(
+        {:datos_grupo, %{en_grupo: true, members: names, leader_index: 0}}
+      )
+
+    case OnlineDirectory.lookup_by_id(char_id) do
+      {:ok, %{session_pid: pid}} -> send(pid, {:send_raw, raw})
+      _ -> :ok
+    end
+  end
+
+  defp send_not_in_party(char_id) do
+    raw = AoProtocol.Server.Encoder.encode({:datos_grupo, %{en_grupo: false, members: []}})
+
+    case OnlineDirectory.lookup_by_id(char_id) do
+      {:ok, %{session_pid: pid}} -> send(pid, {:send_raw, raw})
+      _ -> :ok
+    end
+  end
+
+  defp broadcast_datos_grupo(party) do
+    for mid <- party.members, do: send_datos_grupo(mid, party)
   end
 end

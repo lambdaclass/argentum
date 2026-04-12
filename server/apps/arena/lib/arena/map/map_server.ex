@@ -180,6 +180,11 @@ defmodule Arena.Map.MapServer do
 
   def divorce(map_id, char_id), do: GenServer.cast(via(map_id), {:divorce, char_id})
 
+  def train_list(map_id, char_id), do: GenServer.cast(via(map_id), {:train_list, char_id})
+  def gamble(map_id, char_id, amount), do: GenServer.cast(via(map_id), {:gamble, char_id, amount})
+  def forgive(map_id, char_id), do: GenServer.cast(via(map_id), {:forgive, char_id})
+  def arena_entry(map_id, char_id), do: GenServer.cast(via(map_id), {:arena_entry, char_id})
+
   @doc "Place a ground item for a treasure event (VB6: MakeObj for events)."
   def place_event_item(map_id, x, y, item_id, amount) do
     GenServer.call(via(map_id), {:place_event_item, x, y, item_id, amount})
@@ -608,6 +613,16 @@ defmodule Arena.Map.MapServer do
 
   @impl true
   def handle_cast({:divorce, char_id}, state), do: Social.handle_divorce(state, char_id)
+
+  def handle_cast({:train_list, char_id}, state), do: Social.handle_train_list(state, char_id)
+
+  def handle_cast({:gamble, char_id, amount}, state) do
+    # Find nearby timbero NPC instance_id
+    Social.handle_gamble(state, char_id, amount, nil)
+  end
+
+  def handle_cast({:forgive, char_id}, state), do: Social.handle_forgive(state, char_id)
+  def handle_cast({:arena_entry, char_id}, state), do: Social.handle_arena_entry(state, char_id)
 
   def handle_cast({:set_duel_state, char_id, in_duel, opponent_id}, state) do
     case Map.fetch(state.players, char_id) do

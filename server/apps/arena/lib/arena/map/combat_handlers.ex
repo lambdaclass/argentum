@@ -55,6 +55,9 @@ defmodule Arena.Map.CombatHandlers do
           entity.paralyzed ->
             {:reply, {:error, :paralyzed}, state}
 
+          entity.mounted ->
+            {:reply, {:error, :mounted}, state}
+
           true ->
             entity = Helpers.break_invisibility(entity, state, char_id)
             weapon_id = entity.equipment[:weapon]
@@ -611,6 +614,9 @@ defmodule Arena.Map.CombatHandlers do
 
           entity.paralyzed ->
             {:reply, {:error, :paralyzed}, state}
+
+          entity.mounted ->
+            {:reply, {:error, :mounted}, state}
 
           true ->
             spell_idx = spell_slot - 1
@@ -1772,6 +1778,8 @@ defmodule Arena.Map.CombatHandlers do
         paralyzed: false,
         invisible: false,
         oculto: false,
+        oculto_timer: 0,
+        mounted: false,
         poisoned: false,
         meditating: false,
         resting: false,
@@ -2141,6 +2149,36 @@ defmodule Arena.Map.CombatHandlers do
         entity =
           if decrement_penalty? and entity.penalty > 0 do
             %{entity | penalty: entity.penalty - 1}
+          else
+            entity
+          end
+
+        # Decrement oculto timer; when it reaches 0, break oculto
+        # Exception: hunters with 100% hiding skill + camo armor stay hidden
+        entity =
+          if entity.oculto and entity.oculto_timer > 0 do
+            hiding_skill = Map.get(entity.skills, :hiding, 0)
+            armor_id = entity.equipment[:armor]
+            armor_def = if armor_id, do: GameData.get_item(armor_id)
+            has_camo = armor_def != nil and armor_def.obj_type == 43
+
+            if hiding_skill >= 100 and has_camo do
+              entity
+            else
+              new_timer = entity.oculto_timer - 1
+
+              if new_timer <= 0 do
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw, Encoder.encode({:console_msg, %{message: "Has vuelto a ser visible.", font_index: 0}})}
+                )
+
+                %{entity | oculto: false, oculto_timer: 0}
+              else
+                %{entity | oculto_timer: new_timer}
+              end
+            end
           else
             entity
           end

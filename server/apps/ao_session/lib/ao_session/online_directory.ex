@@ -19,14 +19,43 @@ defmodule AoSession.OnlineDirectory do
   def register(char_id, name, map_id, session_pid, opts \\ []) do
     normalized = String.downcase(String.trim(name))
     is_gm = Keyword.get(opts, :is_gm, false)
+    faction = Keyword.get(opts, :faction, :none)
 
     :ets.insert(
       @table,
-      {{:by_id, char_id}, %{name: name, map_id: map_id, session_pid: session_pid, is_gm: is_gm}}
+      {{:by_id, char_id},
+       %{name: name, map_id: map_id, session_pid: session_pid, is_gm: is_gm, faction: faction}}
     )
 
     :ets.insert(@table, {{:by_name, normalized}, char_id})
     :ok
+  end
+
+  @doc "Update the faction stored for a character."
+  def update_faction(char_id, faction) do
+    case :ets.lookup(@table, {:by_id, char_id}) do
+      [{key, info}] ->
+        :ets.insert(@table, {key, %{info | faction: faction}})
+        :ok
+
+      [] ->
+        :ok
+    end
+  end
+
+  @doc "Return a list of `%{name: name, is_gm: is_gm}` for every online player with the given faction."
+  def list_by_faction(faction) do
+    :ets.foldl(
+      fn
+        {{:by_id, _char_id}, %{faction: f} = info}, acc when f == faction ->
+          [%{name: info.name, is_gm: info.is_gm} | acc]
+
+        _other, acc ->
+          acc
+      end,
+      [],
+      @table
+    )
   end
 
   @doc "Update map_id after transfer."
