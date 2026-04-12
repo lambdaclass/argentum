@@ -1,0 +1,34 @@
+# PezX=A-B-C
+# A: Numero de objeto
+# B: Peso (peso 1000 tiene cien vecez más chances de salir que peso 1)
+# C: Nivel de caña (a las cañas les ponemos Power=X, y si no es mayor o igual que el pez, no lo pesca)
+# D: Pez especial( 1=especial, 0 = normal)
+[PECES]
+NumPeces=22
+Maxlvlcaña=6
+
+Pez1=2089-11523-1-0        'Pez Lisa
+Pez2=2101-5121-1-0        'Pez Salmón
+Pez3=2093-7682-1-0        'Pez Bagre de Mar
+Pez4=3321-256-1-1        'Pez Limon
+Pez5=2152-6-1-0        'Pez Mero de los Fondos
+Pez6=2094-19443-2-0        'Pez Roca
+Pez7=2163-8641-2-0        'Pez Corvina Rubia
+Pez8=3316-432-2-1        'Pez Espada
+Pez9=3304-1-2-0        'Botella Flotante
+Pez10=2102-27423-3-0        'Kelp
+Pez11=2100-12188-3-0        'Bluefin
+Pez12=3319-609-3-1        'Tiburón Martillo
+Pez13=3320-305-3-1        'Calamar Gigante
+Pez14=2153-33063-4-0        'Pez Globo
+Pez15=3317-1102-4-1        'Tiburón Tigre
+Pez16=3318-367-4-1        'Tiburón Blanco
+Pez17=2112-40923-5-0        'Cardumen
+Pez18=2092-18188-5-0        'Camaron
+Pez19=3300-455-5-0        'Almeja Misteriosa
+Pez20=2145-47823-6-0        'Calamar
+Pez21=2147-13284-6-0        'Pulpo
+Pez22=2108-5314-6-0        'Langosta Gigante
+
+#================================================
+
