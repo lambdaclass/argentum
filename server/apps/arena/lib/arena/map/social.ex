@@ -1365,16 +1365,13 @@ defmodule Arena.Map.Social do
           npc_def.npc_type == @npc_type_enlistador ->
             handle_enlistador_click(state, char_id, entity, npc_def)
 
-          # Banker
+          # Banker — open bank UI (VB6: NPC double-click on banker opens bóveda)
           npc_def.npc_type == @npc_type_banquero ->
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw,
-               Encoder.encode({:console_msg, %{message: "#{npc_def.name} dice: Bienvenido al banco.", font_index: 0}})}
-            )
-
-            {:noreply, state}
+            # Pass NPC position so Bank module can resolve the banker via occupancy
+            case Arena.Map.Bank.handle_open_bank(state, char_id, npc.x, npc.y) do
+              {:reply, _result, new_state} -> {:noreply, new_state}
+              _ -> {:noreply, state}
+            end
 
           # Trainer
           npc_def.npc_type == @npc_type_entrenador ->
@@ -1396,12 +1393,19 @@ defmodule Arena.Map.Social do
 
           # Timbero — gambling NPC (VB6: npc_type 6)
           npc_def.npc_type == @npc_type_timbero ->
-            msg(state, char_id, "#{npc_def.name} dice: Haz tu apuesta.")
+            msg(state, char_id, "#{npc_def.name} dice: Haz tu apuesta con /APOSTAR cantidad (1-5000 monedas).")
             {:noreply, state}
 
           # Arena guard (VB6: npc_type 10)
           npc_def.npc_type == @npc_type_arena_guard ->
-            msg(state, char_id, "#{npc_def.name} dice: Bienvenido a la arena.")
+            fee = Map.get(npc_def, :arena_price, 0)
+
+            if fee > 0 do
+              msg(state, char_id, "#{npc_def.name} dice: La entrada a la arena cuesta #{fee} monedas de oro.")
+            else
+              msg(state, char_id, "#{npc_def.name} dice: Bienvenido a la arena.")
+            end
+
             {:noreply, state}
 
           # Subastador — auction NPC (VB6: npc_type 16)
@@ -2648,6 +2652,102 @@ defmodule Arena.Map.Social do
               msg(state, char_id, "Te has divorciado.")
               {:noreply, state}
           end
+        end
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  # ==================================================================
+  # Account state — VB6: HandleRequestAccountState
+  # Banker shows bank gold, Timbero shows gambling stats.
+  # ==================================================================
+
+  def handle_request_account_state(state, char_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} when entity.dead ->
+        msg(state, char_id, "No puedes hacer eso estando muerto.")
+        {:noreply, state}
+
+      {:ok, entity} ->
+        # Find nearby banker or timbero NPC (within 3 tiles, like VB6)
+        nearby_npc =
+          Enum.find_value(state.npcs_live, fn {_id, npc} ->
+            npc_def = GameData.get_npc(npc.npc_id)
+
+            if npc_def != nil and
+                 npc_def.npc_type in [@npc_type_banquero, @npc_type_timbero] and
+                 abs(npc.x - entity.x) <= 3 and
+                 abs(npc.y - entity.y) <= 3 do
+              npc_def
+            end
+          end)
+
+        cond do
+          nearby_npc == nil ->
+            msg(state, char_id, "Primero debes seleccionar un personaje, haz click izquierdo sobre el.")
+            {:noreply, state}
+
+          nearby_npc.npc_type == @npc_type_banquero ->
+            bank_gold = Map.get(entity, :bank_gold, 0)
+            msg(state, char_id, "Tenes #{bank_gold} monedas de oro en tu cuenta.")
+            {:noreply, state}
+
+          nearby_npc.npc_type == @npc_type_timbero ->
+            wins = Map.get(entity, :gamble_wins, 0)
+            losses = Map.get(entity, :gamble_losses, 0)
+            earnings = wins - losses
+            msg(state, char_id, "Ganancias: #{earnings} monedas de oro.")
+            {:noreply, state}
+
+          true ->
+            {:noreply, state}
+        end
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  # ==================================================================
+  # Reward — VB6: HandleReward requires targeting enlistador NPC
+  # ==================================================================
+
+  def handle_request_reward(state, char_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} when entity.dead ->
+        msg(state, char_id, "No puedes hacer eso estando muerto.")
+        {:noreply, state}
+
+      {:ok, entity} ->
+        # Find nearby enlistador NPC (within 4 tiles, like VB6)
+        enlistador =
+          Enum.find_value(state.npcs_live, fn {_id, npc} ->
+            npc_def = GameData.get_npc(npc.npc_id)
+
+            if npc_def != nil and
+                 npc_def.npc_type == @npc_type_enlistador and
+                 abs(npc.x - entity.x) <= 4 and
+                 abs(npc.y - entity.y) <= 4 do
+              npc_def
+            end
+          end)
+
+        cond do
+          enlistador == nil ->
+            msg(state, char_id, "Primero debes seleccionar un personaje, haz click izquierdo sobre el.")
+            {:noreply, state}
+
+          entity.faction == :none ->
+            msg(state, char_id, "No perteneces a ninguna faccion.")
+            {:noreply, state}
+
+          true ->
+            # VB6: checks faction_score vs rank requirements, then awards items.
+            # TODO: Implement rank thresholds and reward items when faction data is loaded.
+            msg(state, char_id, "No hay recompensas disponibles en este momento.")
+            {:noreply, state}
         end
 
       :error ->

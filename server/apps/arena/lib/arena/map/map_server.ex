@@ -184,6 +184,8 @@ defmodule Arena.Map.MapServer do
   def gamble(map_id, char_id, amount), do: GenServer.cast(via(map_id), {:gamble, char_id, amount})
   def forgive(map_id, char_id), do: GenServer.cast(via(map_id), {:forgive, char_id})
   def arena_entry(map_id, char_id), do: GenServer.cast(via(map_id), {:arena_entry, char_id})
+  def request_account_state(map_id, char_id), do: GenServer.cast(via(map_id), {:request_account_state, char_id})
+  def request_reward(map_id, char_id), do: GenServer.cast(via(map_id), {:request_reward, char_id})
 
   @doc "Place a ground item for a treasure event (VB6: MakeObj for events)."
   def place_event_item(map_id, x, y, item_id, amount) do
@@ -623,6 +625,8 @@ defmodule Arena.Map.MapServer do
 
   def handle_cast({:forgive, char_id}, state), do: Social.handle_forgive(state, char_id)
   def handle_cast({:arena_entry, char_id}, state), do: Social.handle_arena_entry(state, char_id)
+  def handle_cast({:request_account_state, char_id}, state), do: Social.handle_request_account_state(state, char_id)
+  def handle_cast({:request_reward, char_id}, state), do: Social.handle_request_reward(state, char_id)
 
   def handle_cast({:set_duel_state, char_id, in_duel, opponent_id}, state) do
     case Map.fetch(state.players, char_id) do

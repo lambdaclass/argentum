@@ -1161,14 +1161,36 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
-  # Help — VB6 sends static help text
+  # Help — VB6 loads from Help.dat and sends each line (FONTTYPE_INFO = 0)
+  @help_lines [
+    "* Reglamento del juego: usa /REGLAMENTO para mas informacion.",
+    "* Si estas muerto, dirigete a una ciudad y busca un sacerdote, el te resucitara dandole click derecho. Tambien puedes tipear /Hogar.",
+    "* Para realizar una consulta a un GAME MASTER, debes utilizar el comando /GM y ellos acudiran a ti.",
+    "* Para denunciar insultos de otro usuario utiliza el comando /DENUNCIAR 'nombre'.",
+    "* Escribe /ONLINE para ver jugadores conectados. Usa /HOGAR para ir a tu ciudad."
+  ]
   def handle_command(state, {:help, _}) when state.character_id != nil do
-    {state, [{:console_msg, %{message: "Escribe /ONLINE para ver jugadores conectados. Usa /HOGAR para ir a tu ciudad.", font_index: 0}}]}
+    msgs = Enum.map(@help_lines, fn line -> {:console_msg, %{message: line, font_index: 0}} end)
+    {state, msgs}
   end
 
-  # Request MOTD — no server-wide MOTD system yet, return placeholder
+  # Request MOTD — VB6 loads from Motd.ini, sends each line (FONTTYPE_EXP),
+  # then appends server uptime. We use Application config for the lines.
   def handle_command(state, {:request_motd, _}) when state.character_id != nil do
-    {state, [{:console_msg, %{message: "Bienvenido a Argentum Online!", font_index: 0}}]}
+    motd_lines = Application.get_env(:ao_tcp_gateway, :motd_lines, ["Bienvenido a Argentum Online!"])
+
+    motd_msgs =
+      Enum.map(motd_lines, fn line ->
+        {:console_msg, %{message: line, font_index: 0}}
+      end)
+
+    # Append uptime like VB6's SendWelcomeUptime
+    {uptime_ms, _} = :erlang.statistics(:wall_clock)
+    hours = div(uptime_ms, 3_600_000)
+    minutes = div(rem(uptime_ms, 3_600_000), 60_000)
+    uptime_msg = {:console_msg, %{message: "Uptime del servidor: #{hours}h #{minutes}m", font_index: 0}}
+
+    {state, motd_msgs ++ [uptime_msg]}
   end
 
   # Uptime — compute from VM start
@@ -1185,9 +1207,11 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
-  # Reward — stub, NPC reward info not implemented
+  # Reward — VB6: requires targeting an enlistador NPC of matching faction.
+  # Checks faction score and level requirements for rank advancement.
   def handle_command(state, {:reward, _}) when state.character_id != nil do
-    {state, [{:console_msg, %{message: "No hay recompensas disponibles.", font_index: 0}}]}
+    Arena.Map.MapServer.request_reward(state.map_id, state.character_id)
+    {state, []}
   end
 
   # Train list — delegate to MapServer
@@ -1196,14 +1220,11 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
-  # Request account state/balance
+  # Request account state/balance — VB6: NPC-dependent.
+  # Banker shows bank gold, Timbero shows gambling stats.
   def handle_command(state, {:request_account_state, _}) when state.character_id != nil do
-    case Arena.Map.MapServer.snapshot_entity(state.map_id, state.character_id) do
-      {:ok, entity} ->
-        {state, [{:console_msg, %{message: "Oro: #{entity.gold}", font_index: 0}}]}
-      _ ->
-        {state, []}
-    end
+    Arena.Map.MapServer.request_account_state(state.map_id, state.character_id)
+    {state, []}
   end
 
   # Move spell — reorder spell slots in-memory
@@ -1332,9 +1353,22 @@ defmodule AoTcpGateway.SessionLogic do
     end
   end
 
-  # Punishments (ID 66) — view player penalties
+  # Punishments (ID 66) — VB6: players can only view their own record,
+  # GMs can view anyone's. No punishment DB table yet, so always "sin prontuario".
   def handle_command(state, {:punishments, %{name: name}}) when state.character_id != nil do
-    {state, [{:console_msg, %{message: "No hay penas registradas para #{name}.", font_index: 0}}]}
+    # VB6: non-GMs can only check their own name
+    case Arena.Map.MapServer.snapshot_entity(state.map_id, state.character_id) do
+      {:ok, entity} ->
+        if not entity.gm and entity.name != name do
+          {state, [{:console_msg, %{message: "Servidor: Comando deshabilitado para tu cargo.", font_index: 0}}]}
+        else
+          # TODO: Query punishment table when implemented
+          {state, [{:console_msg, %{message: "Sin prontuario.", font_index: 0}}]}
+        end
+
+      _ ->
+        {state, []}
+    end
   end
 
   # Gamble (ID 67) — delegate to MapServer
