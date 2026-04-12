@@ -16,6 +16,7 @@ defmodule Arena.MixProject do
       deps: deps(),
       xref: [
         exclude: [
+          AoTcpGateway.BrowserApi,
           AoSession.OnlineDirectory,
           GameBackend.Account,
           GameBackend.BankItems,

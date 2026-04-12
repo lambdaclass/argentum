@@ -136,9 +136,10 @@
 }
 
 .product-hero h1 {
-  max-width: 18ch;
-  font-size: clamp(2rem, 3vw, 2.8rem);
-  line-height: 1.05;
+  max-width: 16ch;
+  font-size: clamp(2.2rem, 3vw, 3rem);
+  line-height: 0.98;
+  margin-bottom: 16px;
 }
 
 .product-nav {
@@ -147,6 +148,7 @@
   justify-content: flex-end;
   gap: 10px;
   max-width: 360px;
+  align-content: flex-start;
 }
 
 .product-nav-button {
@@ -173,6 +175,7 @@
 .product-banner {
   padding: 14px 18px;
   border-radius: 18px;
+  font-size: 0.95rem;
 }
 
 .product-banner.success {
@@ -190,6 +193,25 @@
   display: grid;
   grid-template-columns: minmax(0, 1.3fr) minmax(260px, 0.7fr);
   gap: 18px;
+}
+
+.product-auth-layout {
+  display: grid;
+  gap: 14px;
+  max-width: 760px;
+}
+
+.product-auth-tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.product-side-card h3,
+.product-lobby-panel h2,
+.product-create-panel h2,
+.product-ranking-panel h2 {
+  margin-bottom: 10px;
 }
 
 .product-character-list,
@@ -364,6 +386,11 @@
   .product-hero {
     flex-direction: column;
     padding-top: 20px;
+  }
+
+  .product-nav {
+    justify-content: flex-start;
+    max-width: none;
   }
 
   .product-logo {

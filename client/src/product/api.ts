@@ -81,6 +81,14 @@ interface ApiErrorPayload {
   message?: string;
 }
 
+function describeUnexpectedApiBody(path: string, response: Response) {
+  if (path.startsWith("/api/auth/")) {
+    return "The browser auth API is not available on this server yet. Refresh after the web server reloads.";
+  }
+
+  return `Expected JSON from ${path}, but received ${response.headers.get("content-type") ?? "an unexpected response"}.`;
+}
+
 async function requestJson<T>(path: string, init?: RequestInit) {
   const response = await fetch(path, {
     credentials: "include",
@@ -92,7 +100,15 @@ async function requestJson<T>(path: string, init?: RequestInit) {
   });
 
   const text = await response.text();
-  const data = text.length > 0 ? (JSON.parse(text) as T | ApiErrorPayload) : null;
+  let data: T | ApiErrorPayload | null = null;
+
+  if (text.length > 0) {
+    try {
+      data = JSON.parse(text) as T | ApiErrorPayload;
+    } catch {
+      throw new Error(describeUnexpectedApiBody(path, response));
+    }
+  }
 
   if (!response.ok) {
     const message =

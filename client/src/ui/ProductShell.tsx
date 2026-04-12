@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { BrowserRoute } from "../app/browserRoutes";
-import type { AssetCatalog } from "../render/assetCatalog";
+import { loadAssetCatalog, type AssetCatalog } from "../render/assetCatalog";
 import {
   createBrowserCharacter,
   fetchBrowserCharacters,
@@ -20,9 +20,7 @@ import { CharacterSpritePreview } from "./CharacterSpritePreview";
 import productShellLogoUrl from "../assets/product-shell/logo.png";
 
 interface ProductShellProps {
-  assetCatalog: AssetCatalog | null;
-  assetStatus: "loading" | "ready" | "error";
-  assetError: string | null;
+  endpoint: string;
   currentRoute: BrowserRoute;
   onNavigate: (route: BrowserRoute) => void;
   onLaunchCharacter: (character: BrowserCharacter, credentials: { char_id: number; token: string }) => void;
@@ -57,14 +55,15 @@ function defaultCreateForm(options: CharacterCreationOptions): CreateFormState {
 }
 
 export function ProductShell({
-  assetCatalog,
-  assetStatus,
-  assetError,
+  endpoint,
   currentRoute,
   onNavigate,
   onLaunchCharacter,
   onClearGameplaySession
 }: ProductShellProps) {
+  const [assetCatalog, setAssetCatalog] = useState<AssetCatalog | null>(null);
+  const [assetStatus, setAssetStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [assetError, setAssetError] = useState<string | null>(null);
   const [account, setAccount] = useState<BrowserAccount | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
   const [sessionError, setSessionError] = useState<string | null>(null);
@@ -176,7 +175,7 @@ export function ProductShell({
   }, [currentRoute]);
 
   useEffect(() => {
-    if (currentRoute !== "/create-character" && account == null) {
+    if (currentRoute !== "/create-character" || account == null) {
       return;
     }
 
@@ -250,6 +249,43 @@ export function ProductShell({
 
   const createPreviewBodyId =
     createForm && options ? options.body_ids[`${createForm.race}:${createForm.gender}`] ?? 1 : 1;
+
+  const needsPreviewAssets =
+    currentRoute === "/ranking" ||
+    currentRoute === "/create-character" ||
+    (currentRoute === "/" && account != null);
+
+  useEffect(() => {
+    if (!needsPreviewAssets) {
+      setAssetCatalog(null);
+      setAssetStatus("idle");
+      setAssetError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setAssetCatalog(null);
+    setAssetStatus("loading");
+    setAssetError(null);
+
+    void loadAssetCatalog(endpoint)
+      .then((catalog) => {
+        if (!cancelled) {
+          setAssetCatalog(catalog);
+          setAssetStatus("ready");
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setAssetStatus("error");
+          setAssetError(error instanceof Error ? error.message : "Preview assets failed to load.");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [endpoint, needsPreviewAssets]);
 
   async function handleAuthSubmit() {
     setBusyAction("auth");
@@ -355,11 +391,11 @@ export function ProductShell({
         <section className="panel product-hero">
           <div className="product-hero-copy">
             <img alt="Argentum Online" className="product-logo" src={productShellLogoUrl} />
-            <p className="eyebrow">Argentum Browser</p>
-            <h1>Account, lobby, and world launch stay outside the render loop.</h1>
+            <p className="eyebrow">Argentum Online</p>
+            <h1>Entra, elige personaje y lanza el mundo desde el navegador.</h1>
             <p className="panel-copy">
-              Browser auth and character selection run over HTTP. Gameplay still starts with the
-              existing WebSocket client and renderer.
+              La cuenta y el lobby viven en la web. El cliente del mundo solo se inicia cuando
+              eliges un personaje y entras a jugar.
             </p>
           </div>
           <div className="product-nav">
@@ -383,11 +419,11 @@ export function ProductShell({
                 onClick={() => onNavigate("/create-character")}
                 type="button"
               >
-                Create Character
+                Crear Personaje
               </button>
             ) : null}
             <button className="ghost-button product-nav-button" onClick={() => onNavigate("/play")} type="button">
-              Advanced Game Client
+              Cliente Manual
             </button>
           </div>
         </section>
@@ -401,7 +437,7 @@ export function ProductShell({
             <div className="panel-header">
               <div>
                 <p className="eyebrow">General</p>
-                <h2>Ranking</h2>
+                <h2>Ranking General</h2>
               </div>
               <span className="panel-tag">{rankingLoading ? "Loading" : `${ranking.length} entries`}</span>
             </div>
@@ -439,22 +475,22 @@ export function ProductShell({
             <div className="panel-header">
               <div>
                 <p className="eyebrow">Creation</p>
-                <h2>Create Character</h2>
+                <h2>Crear Personaje</h2>
               </div>
               <button className="ghost-button" onClick={() => onNavigate("/")} type="button">
-                Back To Lobby
+                Volver al lobby
               </button>
             </div>
 
             {!account ? (
-              <p className="panel-copy">Sign in first. Character creation belongs to the account lobby flow.</p>
+              <p className="panel-copy">Primero entra con tu cuenta. La creacion de personajes vive dentro del lobby.</p>
             ) : !createForm || !options ? (
-              <p className="panel-copy">{optionsLoading ? "Loading character rules..." : "Character rules missing."}</p>
+              <p className="panel-copy">{optionsLoading ? "Cargando reglas del personaje..." : "Faltan las reglas de creacion."}</p>
             ) : (
               <div className="product-create-layout">
                 <div className="product-form-grid">
                   <label className="field">
-                    <span>Name</span>
+                    <span>Nombre</span>
                     <input
                       onChange={(event) =>
                         setCreateForm((current) => (current ? { ...current, name: event.target.value } : current))
@@ -465,7 +501,7 @@ export function ProductShell({
                   </label>
 
                   <label className="field">
-                    <span>Race</span>
+                    <span>Raza</span>
                     <select
                       onChange={(event) =>
                         setCreateForm((current) =>
@@ -483,7 +519,7 @@ export function ProductShell({
                   </label>
 
                   <label className="field">
-                    <span>Gender</span>
+                    <span>Genero</span>
                     <select
                       onChange={(event) =>
                         setCreateForm((current) =>
@@ -501,7 +537,7 @@ export function ProductShell({
                   </label>
 
                   <label className="field">
-                    <span>Class</span>
+                    <span>Clase</span>
                     <select
                       onChange={(event) =>
                         setCreateForm((current) =>
@@ -519,7 +555,7 @@ export function ProductShell({
                   </label>
 
                   <label className="field">
-                    <span>Home City</span>
+                    <span>Ciudad Inicial</span>
                     <select
                       onChange={(event) =>
                         setCreateForm((current) =>
@@ -537,7 +573,7 @@ export function ProductShell({
                   </label>
 
                   <div className="product-head-picker">
-                    <span>Head</span>
+                    <span>Cabeza</span>
                     <div className="product-head-picker-row">
                       <button
                         className="ghost-button"
@@ -554,7 +590,7 @@ export function ProductShell({
                         }
                         type="button"
                       >
-                        Prev
+                        Anterior
                       </button>
                       <strong>#{createForm.head}</strong>
                       <button
@@ -572,10 +608,10 @@ export function ProductShell({
                         }
                         type="button"
                       >
-                        Next
+                        Siguiente
                       </button>
                     </div>
-                    <small>{headChoices.length} valid heads for this race and gender.</small>
+                    <small>{headChoices.length} cabezas validas para esta raza y genero.</small>
                   </div>
 
                   <div className="product-form-actions">
@@ -585,7 +621,7 @@ export function ProductShell({
                       onClick={handleCreateCharacter}
                       type="button"
                     >
-                      {busyAction === "create-character" ? "Creating..." : "Create Character"}
+                      {busyAction === "create-character" ? "Creando..." : "Crear personaje"}
                     </button>
                   </div>
                 </div>
@@ -599,7 +635,7 @@ export function ProductShell({
                   />
                   <div>
                     <p className="eyebrow">Preview</p>
-                    <h3>{createForm.name || "New Character"}</h3>
+                    <h3>{createForm.name || "Nuevo personaje"}</h3>
                     <p className="panel-copy compact">
                       {options.races.find((race) => race.id === createForm.race)?.label} ·{" "}
                       {options.genders.find((gender) => gender.id === createForm.gender)?.label} ·{" "}
@@ -617,11 +653,11 @@ export function ProductShell({
             <div className="panel-header">
               <div>
                 <p className="eyebrow">{account ? "Lobby" : "Account"}</p>
-                <h2>{account ? "Character Selection" : "Sign In Or Register"}</h2>
+                <h2>{account ? "Seleccion de personaje" : "Entrar o registrarse"}</h2>
               </div>
               {account ? (
                 <button className="ghost-button" onClick={handleLogout} type="button">
-                  {busyAction === "logout" ? "Signing Out..." : "Sign Out"}
+                  {busyAction === "logout" ? "Saliendo..." : "Salir"}
                 </button>
               ) : null}
             </div>
@@ -634,22 +670,22 @@ export function ProductShell({
                     onClick={() => setAuthMode("login")}
                     type="button"
                   >
-                    Login
+                    Entrar
                   </button>
                   <button
                     className={`ghost-button ${authMode === "register" ? "tab-active" : ""}`}
                     onClick={() => setAuthMode("register")}
                     type="button"
                   >
-                    Register
+                    Registro
                   </button>
                 </div>
                 <label className="field">
-                  <span>Account Name</span>
+                  <span>Cuenta</span>
                   <input onChange={(event) => setAuthName(event.target.value)} type="text" value={authName} />
                 </label>
                 <label className="field">
-                  <span>Password</span>
+                  <span>Clave</span>
                   <input
                     onChange={(event) => setAuthPassword(event.target.value)}
                     type="password"
@@ -658,7 +694,7 @@ export function ProductShell({
                 </label>
                 {authMode === "register" ? (
                   <label className="field">
-                    <span>Confirm Password</span>
+                    <span>Confirmar clave</span>
                     <input
                       onChange={(event) => setAuthConfirm(event.target.value)}
                       type="password"
@@ -668,7 +704,7 @@ export function ProductShell({
                 ) : null}
                 <div className="product-form-actions">
                   <button className="ghost-button" disabled={busyAction === "auth"} onClick={handleAuthSubmit} type="button">
-                    {busyAction === "auth" ? "Working..." : authMode === "register" ? "Create Account" : "Sign In"}
+                    {busyAction === "auth" ? "Procesando..." : authMode === "register" ? "Crear cuenta" : "Entrar"}
                   </button>
                 </div>
               </div>
@@ -707,11 +743,11 @@ export function ProductShell({
                   {!charactersLoading && characters.length === 0 ? (
                     <div className="product-empty-state">
                       <p className="panel-copy compact">
-                        This account has no characters yet. Create one, then launch the gameplay
-                        client with `login_existing_char`.
+                        Esta cuenta todavia no tiene personajes. Crea uno y luego entra al mundo
+                        desde el lobby.
                       </p>
                       <button className="ghost-button" onClick={() => onNavigate("/create-character")} type="button">
-                        Create First Character
+                        Crear primer personaje
                       </button>
                     </div>
                   ) : null}
@@ -749,16 +785,16 @@ export function ProductShell({
                           onClick={handleLaunchSelectedCharacter}
                           type="button"
                         >
-                          {busyAction === "launch-character" ? "Launching..." : "Play Selected Character"}
+                          {busyAction === "launch-character" ? "Entrando..." : "Jugar con este personaje"}
                         </button>
                         <button className="ghost-button" onClick={() => onNavigate("/create-character")} type="button">
-                          Create Another
+                          Crear otro
                         </button>
                       </div>
                     </>
                   ) : (
                     <p className="panel-copy compact">
-                      {charactersLoading ? "Loading character list..." : "Select a character to launch the game client."}
+                      {charactersLoading ? "Cargando personajes..." : "Selecciona un personaje para entrar al mundo."}
                     </p>
                   )}
                 </div>
@@ -770,24 +806,26 @@ export function ProductShell({
 
       <aside className="product-side">
         <section className="panel product-side-card">
-          <p className="eyebrow">Bootstrap</p>
-          <h3>Asset State</h3>
+          <p className="eyebrow">Cliente</p>
+          <h3>Estado de recursos</h3>
           <p className="panel-copy compact">
             {assetStatus === "ready"
-              ? "Sprite and metadata indices are ready for lobby previews and gameplay launch."
+              ? "Los sprites y metadatos ya estan listos para las vistas previas del lobby y para entrar al juego."
               : assetStatus === "error"
-                ? assetError ?? "The browser client could not load the shared sprite metadata."
-                : "Loading the shared sprite and metadata indices used by the browser client."}
+                ? assetError ?? "El navegador no pudo cargar los metadatos compartidos."
+                : assetStatus === "idle"
+                  ? "La pantalla de cuenta no descarga recursos del mundo hasta que realmente hacen falta."
+                  : "Cargando los sprites y metadatos compartidos que usan las vistas previas del lobby."}
           </p>
         </section>
 
         <section className="panel product-side-card">
-          <p className="eyebrow">Session</p>
-          <h3>{sessionLoading ? "Checking account session..." : account ? account.username : "No account session"}</h3>
+          <p className="eyebrow">Cuenta</p>
+          <h3>{sessionLoading ? "Comprobando sesion..." : account ? account.username : "Sin sesion de cuenta"}</h3>
           <p className="panel-copy compact">
             {account
-              ? "HTTP account state lives here. Gameplay reconnect tokens only appear after you launch a specific character."
-              : "Sign in or register in the browser shell. The gameplay socket should not be the primary account entry point."}
+              ? "La sesion web vive aqui. El token de reconexion del juego solo aparece despues de lanzar un personaje."
+              : "Entra o crea una cuenta desde aqui. El cliente del mundo no deberia ser la puerta principal de acceso."}
           </p>
         </section>
       </aside>

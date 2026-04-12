@@ -9,7 +9,7 @@ import type { ClientState, KeyBindingAction } from "../app/types";
 
 interface SessionPanelProps {
   assetError: string | null;
-  assetStatus: "loading" | "ready" | "error";
+  assetStatus: "idle" | "loading" | "ready" | "error";
   canConnect: boolean;
   connection: ClientState["connection"];
   mapPackError: string | null;
@@ -185,14 +185,21 @@ function describeBootstrapRecovery(
     };
   }
 
-  if (assetStatus === "loading" || mapPackStatus === "loading" || mapPackStatus === "idle") {
+  if (
+    assetStatus === "idle" ||
+    assetStatus === "loading" ||
+    mapPackStatus === "loading" ||
+    mapPackStatus === "idle"
+  ) {
     return {
       tone: "neutral" as const,
       title: "Preparing client data",
       copy:
         mapPackStatus === "loading" || mapPackStatus === "idle"
           ? mapPackProgressLabel
-          : "Loading the sprite and metadata indices used by the browser client."
+          : assetStatus === "idle"
+            ? "Waiting to start the sprite and metadata bootstrap for gameplay."
+            : "Loading the sprite and metadata indices used by the browser client."
     };
   }
 
@@ -262,7 +269,7 @@ export const SessionPanel = memo(function SessionPanel({
     { label: "Account", value: accountLabel },
     { label: "Reconnect", value: credentials ? `char_id ${credentials.charId}` : "None saved" },
     { label: "World", value: connected ? title : world.mapStatus },
-    { label: "Assets", value: assetStatus },
+    { label: "Assets", value: assetStatus === "idle" ? "Pending" : assetStatus },
     {
       label: "World data",
       value:
@@ -335,7 +342,7 @@ export const SessionPanel = memo(function SessionPanel({
         >
           {connected
             ? "Salir"
-            : assetStatus === "loading" || mapPackStatus === "loading"
+            : assetStatus === "idle" || assetStatus === "loading" || mapPackStatus === "loading"
               ? "Cargando..."
               : reconnectReady
                 ? "Reconectar"

@@ -152,7 +152,7 @@ interface AppProps {
 export function App({ uiDemoMode = false }: AppProps) {
   const [state, dispatch] = useReducer(appReducer, undefined, createInitialState);
   const [assetCatalog, setAssetCatalog] = useState<AssetCatalog | null>(null);
-  const [assetStatus, setAssetStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [assetStatus, setAssetStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [assetError, setAssetError] = useState<string | null>(null);
   const [mapPackStatus, setMapPackStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [mapPackError, setMapPackError] = useState<string | null>(null);
@@ -340,6 +340,13 @@ export function App({ uiDemoMode = false }: AppProps) {
       return;
     }
 
+    if (!isGameplayRoute) {
+      setAssetCatalog(null);
+      setAssetStatus("idle");
+      setAssetError(null);
+      return;
+    }
+
     let cancelled = false;
     setAssetCatalog(null);
     setAssetStatus("loading");
@@ -369,7 +376,7 @@ export function App({ uiDemoMode = false }: AppProps) {
     return () => {
       cancelled = true;
     };
-  }, [assetReloadNonce, state.connection.endpoint]);
+  }, [assetReloadNonce, isGameplayRoute, state.connection.endpoint, uiDemoMode]);
 
   useEffect(() => {
     if (uiDemoMode) {
@@ -1140,10 +1147,8 @@ export function App({ uiDemoMode = false }: AppProps) {
   if (!isGameplayRoute) {
     return (
       <ProductShell
-        assetCatalog={assetCatalog}
-        assetError={assetError}
-        assetStatus={assetStatus}
         currentRoute={browserRoute}
+        endpoint={state.connection.endpoint}
         onClearGameplaySession={handleClearGameplaySession}
         onLaunchCharacter={handleLaunchBrowserCharacter}
         onNavigate={handleNavigate}

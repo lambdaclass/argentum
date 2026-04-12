@@ -18,8 +18,11 @@ defmodule ArenaWeb.StaticAssets do
       {"/midi", Path.join(root, "resources/raw/midi")},
       {"/sounds", Path.join(root, "resources/raw/SoundsOgg")},
       {"/assets", Path.join(root, "client/dist/assets")},
+      {"/client/assets", Path.join(root, "client/dist/assets")},
       {"/data/packs", Path.join(root, "client/dist/data/packs")},
-      {"/data", Path.join(root, "client/dist/data")}
+      {"/client/data/packs", Path.join(root, "client/dist/data/packs")},
+      {"/data", Path.join(root, "client/dist/data")},
+      {"/client/data", Path.join(root, "client/dist/data")}
     ]
 
     plugs =
