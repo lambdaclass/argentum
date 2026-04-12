@@ -3,7 +3,7 @@ import Config
 project_root =
   System.get_env("ARGENTUM_PROJECT_ROOT") ||
     case System.get_env("RELEASE_ROOT") do
-      nil -> Path.expand("..", File.cwd!())
+      nil -> Path.expand("../..", __DIR__)
       release_root -> Path.expand("..", release_root)
     end
 
