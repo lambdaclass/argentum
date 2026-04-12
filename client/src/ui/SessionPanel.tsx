@@ -73,6 +73,22 @@ function describeRecoveryPath(error: string, hasSavedSession: boolean) {
     };
   }
 
+  if (error.toLowerCase().includes("stale world pack detected")) {
+    return {
+      tone: "warning" as const,
+      title: "World pack is stale",
+      copy: "Your browser world data does not match the live server bootstrap. Rebuild and serve the client again, then reload the page."
+    };
+  }
+
+  if (error.toLowerCase().includes("world pack was not loaded before gameplay bootstrap")) {
+    return {
+      tone: "warning" as const,
+      title: "World pack missing at bootstrap",
+      copy: "The gameplay session started before the browser world pack was ready. Retry world data or reload the page."
+    };
+  }
+
   if (error.includes("Connection closed during bootstrap")) {
     return {
       tone: "warning" as const,

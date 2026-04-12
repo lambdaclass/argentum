@@ -11,6 +11,7 @@ defmodule AoTcpGateway.WsIntegrationTest do
   @pkt_user_index_in_server 46
   @pkt_change_map 30
   @pkt_session_token 200
+  @pkt_world_pack_signature 203
   # Packet IDs (client -> server)
   @pkt_login_new_char 74
   @pkt_walk 78
@@ -55,6 +56,9 @@ defmodule AoTcpGateway.WsIntegrationTest do
 
     assert @pkt_session_token in packet_ids,
            "Expected session_token (ID 200) in WS response, got: #{inspect(packet_ids)}"
+
+    assert @pkt_world_pack_signature in packet_ids,
+           "Expected world_pack_signature (ID 203) in WS response, got: #{inspect(packet_ids)}"
   end
 
   test "walk packet after login doesn't crash" do
@@ -341,11 +345,26 @@ defmodule AoTcpGateway.WsIntegrationTest do
   # intervals (158): 12 * Int32 (48 bytes)
   defp skip_packet_payload(158, <<_::binary-size(48), rest::binary>>), do: {:ok, rest}
 
+  # datos_grupo (143): Bool + [Int8 count + repeated String8]
+  defp skip_packet_payload(143, <<0, rest::binary>>), do: {:ok, rest}
+
+  defp skip_packet_payload(143, <<1, count::8, rest::binary>>) do
+    skip_string8_n(rest, count)
+  end
+
   # send_skills (87): 24 × Int8 (24 bytes)
   defp skip_packet_payload(87, <<_::binary-size(24), rest::binary>>), do: {:ok, rest}
 
   # session_token (200): WS-only — Int32 + String8
   defp skip_packet_payload(200, <<_char_id::little-signed-integer-32, rest::binary>>) do
+    case rest do
+      <<len::little-signed-integer-16, _str::binary-size(len), rest::binary>> -> {:ok, rest}
+      _ -> :unknown
+    end
+  end
+
+  # world_pack_signature (203): Int16 + String8
+  defp skip_packet_payload(203, <<_version::little-signed-integer-16, rest::binary>>) do
     case rest do
       <<len::little-signed-integer-16, _str::binary-size(len), rest::binary>> -> {:ok, rest}
       _ -> :unknown
@@ -410,6 +429,15 @@ defmodule AoTcpGateway.WsIntegrationTest do
 
   # Fallback: unknown packet
   defp skip_packet_payload(_id, _data), do: :unknown
+
+  defp skip_string8_n(rest, 0), do: {:ok, rest}
+
+  defp skip_string8_n(<<len::little-signed-integer-16, _str::binary-size(len), rest::binary>>, count)
+       when count > 0 do
+    skip_string8_n(rest, count - 1)
+  end
+
+  defp skip_string8_n(_rest, _count), do: :unknown
 
   defp skip_string8(<<len::little-signed-integer-16, _::binary-size(len), rest::binary>>),
     do: {:ok, rest}

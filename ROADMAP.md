@@ -433,13 +433,9 @@ When in doubt:
     VB6: only Oculto (stealth) breaks on walk for non-Thief/Bandit classes.
     Spell invisibility (`invisible` flag) is never cleared by movement.
     Removed incorrect break_invisibility call in movement.ex do_move/8.
-26b. Implement Oculto (stealth/hide skill) as a separate flag from spell invisibility.
-    VB6 has two distinct systems: `invisible` (spell-based, timed buff) and
-    `Oculto` (hide skill, breaks on walk for non-Thief/Bandit, breaks on
-    shout, has its own timer). Currently only spell invisibility exists.
-    Outcome: entity gains `oculto` boolean; walk breaks it for non-stealth
-    classes; shout breaks it; timer expiry breaks it; Thief/Bandit exempt
-    from walk break.
+26b. Implement Oculto (stealth/hide skill) as a separate flag from spell invisibility. DONE.
+    Oculto timer with regen-tick decrement, hunter+camo exemption, NPC AI
+    filtering, work skill activation, break on attack/death. 18 tests.
 26c. Fix: offensive spell casting should break both invisible and oculto. DONE.
     Only breaks on target_effect_type == 2 (offensive). 14 tests for 26c-i.
 26d. Fix: add NPC leash distance (~15 tiles) so chasing NPCs return to spawn. DONE.
@@ -454,10 +450,9 @@ When in doubt:
     22 maps have SinInviOcul (cities + mines). Both flags stripped on entry.
 26i. Fix: equipping mount should break both invisible and oculto. DONE.
     Mount equip (obj_type 44) calls break_invisibility.
-27. Add authoritative party/clan snapshot packets or a documented backend
-    snapshot API for the browser.
-    Outcome: frontend party/clan UI can consume backend truth instead of chat
-    log inference.
+27. Add authoritative party/clan snapshot packets. DONE.
+    datos_grupo (ID 143) sent on join/leave/kick/login, guild_details and
+    guild_news binary packets replace console text. 6 tests.
 28. Finish pet/trainer command parity for the selected VB6 baseline. DONE.
     Outcome: pet AI clause reordered, nil-safe interval/damage calculations.
 29. Add out-of-sequence packet validation. DONE.
@@ -470,18 +465,17 @@ When in doubt:
 31. Finish the remaining old crafting UI packet surface. DONE.
     All 4 crafting skills: open window sends recipe list, craft_item/4 validates
     skill + ingredients. Encoder/decoder for all crafting packets. 15+ tests.
-32. Finish the remaining training/spell window response semantics.
-    Outcome: the VB6 client gets the exact remaining responses it still expects
-    for spell info, spell movement, trainer lists, trainer summon responses,
-    and the missing `UpdateRM`/`UpdateDM` style spell-stat updates.
+32. Finish the remaining training/spell window response semantics. DONE.
+    Trainer creature list packet (ID 104) with CI1-CI5 NPC parsing, spell info
+    packet (ID 105). train_list routed through MapServer to social. 8 tests.
 33. Finish the remaining info/service/NPC-request window semantics.
     Outcome: help, MOTD, uptime, punishments, reward, account-state, banker,
     timbero, priest, enlistador, and related old request/response windows stop
     using placeholder text and match VB6 behavior.
-34. Finish the remaining faction/council old response behavior.
-    Outcome: the old faction/council UI and command surface, including
-    `online_royal_army`, `online_chaos_legion`, and council-management flows,
-    do not depend on slash-command-only replacements.
+34. Finish the remaining faction/council old response behavior. DONE.
+    OnlineDirectory tracks faction, list_by_faction/1 API, online_royal_army
+    and online_chaos_legion packets (132/133), council_message with faction
+    verification. 22 tests.
 35. Decide the old GM/admin binary packet target.
     Outcome: the exact packet compatibility target is explicit instead of
     implicit.
@@ -501,18 +495,20 @@ When in doubt:
 40. Implement auction / subasta. DONE.
     Auction GenServer: timed bidding, auto-cancel, 5% fee, Subastador NPC
     (type 16) handler. Encoder/decoder for auction packets. 10 tests.
-41. Implement mounts if the target data expects mounts separate from
-    boats/navigation.
-    Outcome: mount behavior is present where the target shard/data requires it.
-42. Implement gambling / priest-forgiveness / arena-payment side systems.
-    Outcome: gambler flows, priest donation-forgiveness semantics, priced-entry
-    travel/arena flows, and the related old economy side systems exist with VB6
-    behavior instead of modern substitutes.
+41. Implement land mounts (saddle system). DONE.
+    Saddle equipment slot (obj_type 44), mounted flag, Jinete skill speed
+    scaling (10 tiers, 1.1x-2.0x), attack/invisibility blocked while mounted,
+    navigation conflict check. 12 tests.
+42. Implement gambling / priest-forgiveness / arena-payment side systems. DONE.
+    Timbero NPC gambling (10% win, 1-5000 gold, stats tracking), priest
+    forgiveness (gold cost per citizen killed, Caos blocked), ArenaGuard
+    NPC entry fees with warp. 15 tests.
 43. Implement treasure search. DONE.
     TreasureEvent GenServer: treasure/gift/NPC GM events, place_event_item/5,
     check_treasure_event/4 on item pickup. Tesoros.dat loader. 8 tests.
-44. Implement forum / in-game message board.
-    Outcome: the old in-game board/forum backend exists and persists correctly.
+44. Implement forum / in-game message board. DONE.
+    Forum GenServer with per-forum_id message storage, 35-message cap, file
+    persistence, object-linked forums via forum_id field. 7 tests.
 45. Implement marriage. DONE.
     Outcome: /PROPONER and /DIVORCIAR commands, priest NPC requirement, mutual
     proposal flow, spouse_id persistence, DB migration. 18 tests.

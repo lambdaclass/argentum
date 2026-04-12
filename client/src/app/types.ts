@@ -388,6 +388,7 @@ export type ServerPacket =
   | { type: "intervals"; walk: number }
   | { type: "error_msg"; message: string }
   | { type: "session_token"; credentials: SessionCredentials }
+  | { type: "world_pack_signature"; version: number; hash: string }
   | { type: "change_spell_slot"; slotIndex: number; slot: SpellSlot | null }
   | { type: "commerce_init"; npcName: string }
   | { type: "bank_init" }

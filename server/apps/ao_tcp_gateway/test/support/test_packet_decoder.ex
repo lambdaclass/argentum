@@ -438,6 +438,26 @@ defmodule AoTcpGateway.TestPacketDecoder do
   # guild_config (201): string8
   defp decode_server_packet(201, data), do: decode_single_string(data)
 
+  # world_pack_signature (203): Int16 + string8
+  defp decode_server_packet(203, data) do
+    with {:ok, version, rest} <- Reader.read_int16(data),
+         {:ok, hash, rest} <- Reader.read_string8(rest) do
+      {:ok, %{version: version, hash: hash}, rest}
+    else
+      _ -> :incomplete
+    end
+  end
+
+  # datos_grupo (143): Bool + [Int8 count + repeated String8]
+  defp decode_server_packet(143, <<0, rest::binary>>), do: {:ok, %{en_grupo: false, members: []}, rest}
+
+  defp decode_server_packet(143, <<1, count::8, rest::binary>>) do
+    case decode_string_list(rest, count, []) do
+      {:ok, members, rest} -> {:ok, %{en_grupo: true, members: members}, rest}
+      :incomplete -> :incomplete
+    end
+  end
+
   # Catch-all: unknown packet — stop decoding
   defp decode_server_packet(_id, _rest), do: :incomplete
 
@@ -445,6 +465,16 @@ defmodule AoTcpGateway.TestPacketDecoder do
   defp decode_single_string(data) do
     with {:ok, msg, rest} <- Reader.read_string8(data) do
       {:ok, %{message: msg}, rest}
+    else
+      _ -> :incomplete
+    end
+  end
+
+  defp decode_string_list(rest, 0, acc), do: {:ok, Enum.reverse(acc), rest}
+
+  defp decode_string_list(data, count, acc) when count > 0 do
+    with {:ok, value, rest} <- Reader.read_string8(data) do
+      decode_string_list(rest, count - 1, [value | acc])
     else
       _ -> :incomplete
     end

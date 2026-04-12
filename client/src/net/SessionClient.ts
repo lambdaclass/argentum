@@ -2,7 +2,7 @@ import type { Dispatch } from "react";
 import type { ClientAction, ClientState, Direction, ServerPacket } from "../app/types";
 import type { WorldRenderer } from "../render/WorldRenderer";
 import { GameRuntime, type MovementDebugSnapshot } from "../runtime/GameRuntime";
-import { fetchMapData } from "./mapApi";
+import { fetchMapData, getLoadedMapPackManifest, loadedMapPackMatches } from "./mapApi";
 import {
   encodeAttack,
   encodeBankDeposit,
@@ -203,6 +203,10 @@ export class SessionClient {
 
       for (const packet of decodeServerPackets(event.data)) {
         this.handlePacket(packet);
+
+        if (this.ws && this.ws.readyState !== WebSocket.OPEN) {
+          break;
+        }
       }
     });
 
@@ -706,6 +710,31 @@ export class SessionClient {
 
   private handlePacket(packet: ServerPacket) {
     switch (packet.type) {
+      case "world_pack_signature": {
+        const manifest = getLoadedMapPackManifest();
+
+        if (!loadedMapPackMatches(packet.version, packet.hash)) {
+          this.closeReason =
+            manifest == null
+              ? "World pack was not loaded before gameplay bootstrap. Rebuild and reload the client."
+              : `Stale world pack detected: browser ${manifest.hash}, server ${packet.hash}. Run make client.build and reload the page.`;
+          this.dispatch({
+            type: "log/add",
+            level: "error",
+            message: this.closeReason
+          });
+          this.ws?.close();
+          return;
+        }
+
+        this.dispatch({
+          type: "log/add",
+          level: "packet-in",
+          message: `WORLD_PACK ${packet.hash}`
+        });
+        return;
+      }
+
       case "logged":
         this.dispatch({
           type: "log/add",

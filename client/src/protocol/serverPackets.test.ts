@@ -54,6 +54,18 @@ describe("decodeServerPackets", () => {
     ]);
   });
 
+  it("decodes world pack signature packets", () => {
+    const buffer = bufferFromBytes(packet(203, [...int16(1), ...string8("17afc00c9c7e0b4c")]));
+
+    expect(decodeServerPackets(buffer)).toEqual([
+      {
+        type: "world_pack_signature",
+        version: 1,
+        hash: "17afc00c9c7e0b4c"
+      }
+    ]);
+  });
+
   it("stops decoding after an unknown packet id", () => {
     const buffer = bufferFromBytes([
       ...packet(59, [1]),

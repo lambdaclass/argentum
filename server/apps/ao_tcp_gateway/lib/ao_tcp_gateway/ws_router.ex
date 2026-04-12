@@ -78,6 +78,10 @@ defmodule AoTcpGateway.WsRouter do
     AoTcpGateway.BrowserApi.character_options(conn)
   end
 
+  get "/api/meta/world-pack" do
+    AoTcpGateway.BrowserApi.world_pack(conn)
+  end
+
   get "/api/characters" do
     AoTcpGateway.BrowserApi.list_characters(conn)
   end

@@ -1,5 +1,9 @@
 import { BinaryReader } from "../protocol/BinaryReader";
-import { buildAssetOriginCandidates, buildAssetUrlFromOrigin, fetchJsonAtOrigin } from "./assetHost";
+import {
+  buildAssetOriginCandidates,
+  buildAssetUrlFromOrigin,
+  fetchJsonAtOrigin
+} from "./assetHost";
 import type {
   GroundObject,
   MapExit,
@@ -22,7 +26,7 @@ export interface MapPackProgress {
   totalBytes: number | null;
 }
 
-interface MapPackManifest {
+export interface MapPackManifest {
   filename: string;
   hash: string;
   bytes: number;
@@ -32,6 +36,7 @@ interface MapPackManifest {
 
 let mapPackPromise: Promise<Map<number, PackedMapRecord>> | null = null;
 let decodedMapCache: Map<number, PackedMapRecord> | null = null;
+let loadedManifest: MapPackManifest | null = null;
 
 function normalizeLayerTile(x: number, y: number, grhIndex: number): MapLayerTile {
   return { x, y, grhIndex };
@@ -118,6 +123,7 @@ async function loadManifest(endpoint: string) {
 
 async function fetchMapPack(endpoint: string, onProgress?: (progress: MapPackProgress) => void) {
   const { manifest, manifestUrl } = await loadManifest(endpoint);
+  loadedManifest = manifest;
   const packUrl = new URL(`packs/${manifest.filename}`, manifestUrl).toString();
   const response = await fetch(packUrl, { cache: "force-cache" });
 
@@ -322,8 +328,26 @@ export async function loadMapPack(endpoint: string, onProgress?: (progress: MapP
   return mapPackPromise;
 }
 
+export function resetMapPackCache() {
+  mapPackPromise = null;
+  decodedMapCache = null;
+  loadedManifest = null;
+}
+
+export function resetMapPackCacheForTests() {
+  resetMapPackCache();
+}
+
 export function getMapPackRecord(mapId: number) {
   return decodedMapCache?.get(mapId) ?? null;
+}
+
+export function getLoadedMapPackManifest() {
+  return loadedManifest;
+}
+
+export function loadedMapPackMatches(version: number, hash: string) {
+  return loadedManifest != null && loadedManifest.version === version && loadedManifest.hash === hash;
 }
 
 export async function fetchMapData(endpoint: string, mapId: number) {

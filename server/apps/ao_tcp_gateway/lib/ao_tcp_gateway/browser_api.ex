@@ -204,6 +204,10 @@ defmodule AoTcpGateway.BrowserApi do
     json(conn, 200, %{entries: entries})
   end
 
+  def world_pack(conn) do
+    json(conn, 200, Arena.ClientMapPack.manifest())
+  end
+
   def current_account(conn) do
     case get_session(conn, @session_key) do
       account_id when is_integer(account_id) -> Repo.get(Account, account_id)

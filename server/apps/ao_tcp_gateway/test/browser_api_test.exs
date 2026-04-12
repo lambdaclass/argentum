@@ -116,6 +116,20 @@ defmodule AoTcpGateway.BrowserApiTest do
     assert response_json(conn)["message"] == "Account session required."
   end
 
+  test "world pack endpoint exposes the live server manifest" do
+    conn = request(:get, "/api/meta/world-pack", nil)
+    payload = response_json(conn)
+
+    assert conn.status == 200
+    assert payload["version"] == 1
+    assert payload["maps"] > 800
+    assert payload["bytes"] > 1_000_000
+    assert is_binary(payload["hash"])
+    assert String.length(payload["hash"]) == 16
+    assert String.starts_with?(payload["filename"], "maps.")
+    assert String.ends_with?(payload["filename"], ".pack")
+  end
+
   defp register_account(name) do
     request(:post, "/api/auth/register", %{username: name, password: "secret-password"})
   end

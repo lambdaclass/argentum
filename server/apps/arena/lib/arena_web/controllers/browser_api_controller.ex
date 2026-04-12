@@ -21,6 +21,10 @@ defmodule ArenaWeb.BrowserApiController do
     AoTcpGateway.BrowserApi.character_options(conn)
   end
 
+  def world_pack(conn, _params) do
+    AoTcpGateway.BrowserApi.world_pack(conn)
+  end
+
   def list_characters(conn, _params) do
     AoTcpGateway.BrowserApi.list_characters(conn)
   end

@@ -532,6 +532,13 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
         }
       };
 
+    case 203:
+      return {
+        type: "world_pack_signature",
+        version: reader.readInt16(),
+        hash: reader.readString8()
+      };
+
     case 13:
       return { type: "user_commerce_end" };
 

@@ -8,7 +8,7 @@ import { MapMusicController } from "../audio/mapMusic";
 import { SoundEffectsController } from "../audio/soundEffects";
 import { WorldCanvas } from "../render/WorldCanvas";
 import { loadAssetCatalog, type AssetCatalog } from "../render/assetCatalog";
-import { loadMapPack, type MapPackProgress } from "../net/mapApi";
+import { loadMapPack, resetMapPackCache, type MapPackProgress } from "../net/mapApi";
 import { SessionPanel } from "../ui/SessionPanel";
 import { PacketLogPanel } from "../ui/PacketLogPanel";
 import { ChatPanel } from "../ui/ChatPanel";
@@ -852,10 +852,12 @@ export function App({ uiDemoMode = false }: AppProps) {
   }, []);
 
   const handleRetryMapPack = useCallback(() => {
+    resetMapPackCache();
     setMapPackReloadNonce((current) => current + 1);
   }, []);
 
   const handleRetryBootstrap = useCallback(() => {
+    resetMapPackCache();
     setAssetReloadNonce((current) => current + 1);
     setMapPackReloadNonce((current) => current + 1);
   }, []);
