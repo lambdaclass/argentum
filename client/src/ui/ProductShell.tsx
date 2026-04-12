@@ -17,6 +17,7 @@ import {
   type CharacterCreationOptions
 } from "../product/api";
 import { CharacterSpritePreview } from "./CharacterSpritePreview";
+import productShellLogoUrl from "../assets/product-shell/logo.png";
 
 interface ProductShellProps {
   assetCatalog: AssetCatalog | null;
@@ -352,7 +353,8 @@ export function ProductShell({
     <div className="product-shell">
       <main className="product-main">
         <section className="panel product-hero">
-          <div>
+          <div className="product-hero-copy">
+            <img alt="Argentum Online" className="product-logo" src={productShellLogoUrl} />
             <p className="eyebrow">Argentum Browser</p>
             <h1>Account, lobby, and world launch stay outside the render loop.</h1>
             <p className="panel-copy">
@@ -362,14 +364,14 @@ export function ProductShell({
           </div>
           <div className="product-nav">
             <button
-              className={`ghost-button ${currentRoute === "/" ? "tab-active" : ""}`}
+              className={`ghost-button product-nav-button ${currentRoute === "/" ? "tab-active" : ""}`}
               onClick={() => onNavigate("/")}
               type="button"
             >
               Lobby
             </button>
             <button
-              className={`ghost-button ${currentRoute === "/ranking" ? "tab-active" : ""}`}
+              className={`ghost-button product-nav-button ${currentRoute === "/ranking" ? "tab-active" : ""}`}
               onClick={() => onNavigate("/ranking")}
               type="button"
             >
@@ -377,14 +379,14 @@ export function ProductShell({
             </button>
             {account ? (
               <button
-                className={`ghost-button ${currentRoute === "/create-character" ? "tab-active" : ""}`}
+                className={`ghost-button product-nav-button ${currentRoute === "/create-character" ? "tab-active" : ""}`}
                 onClick={() => onNavigate("/create-character")}
                 type="button"
               >
                 Create Character
               </button>
             ) : null}
-            <button className="ghost-button" onClick={() => onNavigate("/play")} type="button">
+            <button className="ghost-button product-nav-button" onClick={() => onNavigate("/play")} type="button">
               Advanced Game Client
             </button>
           </div>

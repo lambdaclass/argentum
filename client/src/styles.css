@@ -18,6 +18,8 @@
 }
 
 .product-shell {
+  position: relative;
+  isolation: isolate;
   width: 100%;
   height: 100vh;
   min-height: 100vh;
@@ -26,6 +28,31 @@
   gap: 18px;
   padding: 18px;
   overflow: auto;
+  background:
+    radial-gradient(circle at top left, rgba(230, 180, 85, 0.08), transparent 26%),
+    radial-gradient(circle at bottom right, rgba(68, 94, 124, 0.12), transparent 30%),
+    linear-gradient(180deg, rgba(7, 11, 18, 0.92), rgba(6, 10, 16, 0.98)),
+    url("./assets/product-shell/background.png");
+  background-size:
+    auto,
+    auto,
+    auto,
+    366px 380px;
+}
+
+.product-shell::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(6, 10, 16, 0.1), rgba(6, 10, 16, 0.72)),
+    url("./assets/product-shell/borde.png");
+  background-repeat: no-repeat;
+  background-position: top right;
+  background-size: auto, 420px auto;
+  opacity: 0.22;
+  mix-blend-mode: screen;
 }
 
 .product-main,
@@ -37,10 +64,75 @@
 }
 
 .product-hero {
+  position: relative;
   display: flex;
   justify-content: space-between;
   gap: 18px;
   align-items: flex-start;
+  padding-top: 28px;
+  background:
+    linear-gradient(135deg, rgba(56, 34, 18, 0.18), transparent 54%),
+    linear-gradient(180deg, rgba(13, 17, 28, 0.88), rgba(9, 12, 20, 0.98)),
+    url("./assets/product-shell/background_heading.png");
+  background-repeat: no-repeat;
+  background-position: right top;
+  background-size: auto, auto, min(620px, 100%) auto;
+  overflow: hidden;
+}
+
+.product-hero::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  right: 14px;
+  width: min(220px, 38%);
+  height: 130px;
+  background: url("./assets/product-shell/borde_heading.png") center / contain no-repeat;
+  opacity: 0.28;
+  pointer-events: none;
+}
+
+.product-shell .panel {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(162, 136, 94, 0.42);
+  background:
+    linear-gradient(180deg, rgba(16, 22, 34, 0.9), rgba(11, 15, 24, 0.96)),
+    url("./assets/product-shell/background.png");
+  background-size: auto, 366px 380px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 238, 196, 0.06),
+    inset 0 0 0 1px rgba(255, 226, 174, 0.04),
+    var(--shadow);
+}
+
+.product-shell .panel::before {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border-radius: 18px;
+  background: url("./assets/product-shell/borde.png") center / cover no-repeat;
+  opacity: 0.16;
+  pointer-events: none;
+}
+
+.product-shell .panel > * {
+  position: relative;
+  z-index: 1;
+}
+
+.product-hero-copy {
+  min-width: 0;
+  max-width: 560px;
+}
+
+.product-logo {
+  width: min(340px, 70%);
+  max-width: 340px;
+  height: auto;
+  margin: 0 0 12px;
+  display: block;
+  filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.34));
 }
 
 .product-hero h1 {
@@ -54,6 +146,28 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 10px;
+  max-width: 360px;
+}
+
+.product-nav-button {
+  min-width: 136px;
+  background:
+    linear-gradient(180deg, rgba(43, 30, 18, 0.92), rgba(18, 24, 34, 0.96)),
+    url("./assets/product-shell/background_tab.png");
+  background-size: auto, 58px 58px;
+  border-color: rgba(191, 154, 94, 0.34);
+}
+
+.product-nav-button.tab-active {
+  color: #fff7dd;
+  border-color: rgba(242, 194, 97, 0.62);
+  background:
+    linear-gradient(180deg, rgba(75, 46, 24, 0.9), rgba(28, 32, 42, 0.92)),
+    url("./assets/product-shell/active_tab.png"),
+    url("./assets/product-shell/background_tab.png");
+  background-repeat: no-repeat, no-repeat, repeat;
+  background-position: center, center, center;
+  background-size: auto, 100% 30px, 58px 58px;
 }
 
 .product-banner {
@@ -136,6 +250,10 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.product-selected-card {
+  min-height: 100%;
 }
 
 .product-auth-layout,
@@ -245,6 +363,11 @@
 
   .product-hero {
     flex-direction: column;
+    padding-top: 20px;
+  }
+
+  .product-logo {
+    width: min(300px, 82%);
   }
 
   .product-character-row,
