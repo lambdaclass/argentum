@@ -33,6 +33,7 @@ const MIDI_PLAYER_URL =
   "https://cdn.jsdelivr.net/npm/midi-player-js@2.0.16/browser/midiplayer.min.js";
 const SOUNDFONT_PLAYER_URL =
   "https://cdn.jsdelivr.net/npm/soundfont-player@0.12.0/dist/soundfont-player.min.js";
+const ENCODED_TRACK_EXTENSIONS = ["ogg", "mp3", "webm"] as const;
 
 const loadedScripts = new Map<string, Promise<void>>();
 
@@ -77,10 +78,23 @@ function loadScript(url: string) {
   return promise;
 }
 
+function isRealAudioResponse(response: Response) {
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  return !contentType.includes("text/html");
+}
+
+function teardownAudioElement(audio: HTMLAudioElement) {
+  audio.pause();
+  audio.currentTime = 0;
+  audio.removeAttribute("src");
+  audio.load();
+}
+
 export class MapMusicController {
   private context: AudioContext | null = null;
   private instrument: SoundfontInstrument | null = null;
   private player: MidiPlayerInstance | null = null;
+  private audioElement: HTMLAudioElement | null = null;
   private initPromise: Promise<void> | null = null;
   private currentMusicId: number | null = null;
   private enabled = true;
@@ -101,6 +115,9 @@ export class MapMusicController {
 
   setVolume(volume: number) {
     this.volume = Math.max(0, Math.min(1, volume));
+    if (this.audioElement) {
+      this.audioElement.volume = this.volume;
+    }
   }
 
   async ensureReady() {
@@ -123,8 +140,37 @@ export class MapMusicController {
     const requestId = ++this.playRequestId;
 
     if (!this.enabled || !musicId || musicId <= 0) {
-      this.stop();
+      this.stopPlayback();
       return;
+    }
+
+    if (this.currentMusicId === musicId && (this.audioElement || this.player)) {
+      return;
+    }
+
+    this.stopPlayback();
+
+    const encodedTrackUrl = await this.findEncodedTrackUrl(endpoint, musicId, requestId);
+    if (encodedTrackUrl) {
+      const audio = new Audio(encodedTrackUrl);
+      audio.crossOrigin = "anonymous";
+      audio.loop = true;
+      audio.preload = "auto";
+      audio.volume = this.volume;
+
+      try {
+        await audio.play();
+        if (this.destroyed || requestId !== this.playRequestId) {
+          teardownAudioElement(audio);
+          return;
+        }
+
+        this.audioElement = audio;
+        this.currentMusicId = musicId;
+        return;
+      } catch {
+        teardownAudioElement(audio);
+      }
     }
 
     await this.ensureReady();
@@ -166,7 +212,15 @@ export class MapMusicController {
 
   stop() {
     this.playRequestId += 1;
+    this.stopPlayback();
+  }
+
+  private stopPlayback() {
     this.currentMusicId = null;
+    if (this.audioElement) {
+      teardownAudioElement(this.audioElement);
+      this.audioElement = null;
+    }
     this.player?.stop();
   }
 
@@ -186,7 +240,32 @@ export class MapMusicController {
     this.context = null;
     this.instrument = null;
     this.player = null;
+    this.audioElement = null;
     this.initPromise = null;
+  }
+
+  private async findEncodedTrackUrl(endpoint: string, musicId: number, requestId: number) {
+    for (const extension of ENCODED_TRACK_EXTENSIONS) {
+      for (const url of buildAssetUrlCandidates(endpoint, `/audio/musica/${musicId}.${extension}`)) {
+        let response: Response;
+
+        try {
+          response = await fetch(url, { method: "HEAD" });
+        } catch {
+          continue;
+        }
+
+        if (this.destroyed || requestId !== this.playRequestId) {
+          return null;
+        }
+
+        if (response.ok && isRealAudioResponse(response)) {
+          return url;
+        }
+      }
+    }
+
+    return null;
   }
 
   private async initialize() {

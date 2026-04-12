@@ -214,6 +214,23 @@ export class GameRuntime {
     return (map.tiles[this.tileIndex(x, y, map.width)] ?? 0) !== 0;
   }
 
+  private isTileOccupied(x: number, y: number) {
+    const world = this.ui.getState().world;
+
+    for (const other of Object.values(world.others)) {
+      if (!other.dead && other.x === x && other.y === y) {
+        return true;
+      }
+    }
+
+    const hasLiveNpc = Object.values(world.others).some((other) => other.isNpc && !other.dead);
+    if (!hasLiveNpc && world.map) {
+      return world.map.npcs.some((npc) => npc.x === x && npc.y === y);
+    }
+
+    return false;
+  }
+
   private predictedDestination(direction: Direction) {
     const self = this.ui.getState().world.self;
     if (self.x == null || self.y == null) {
@@ -293,7 +310,7 @@ export class GameRuntime {
       return false;
     }
 
-    if (this.isTileBlocked(destination.x, destination.y)) {
+    if (this.isTileBlocked(destination.x, destination.y) || this.isTileOccupied(destination.x, destination.y)) {
       if (state.world.self.heading !== destination.heading) {
         this.transport.sendHeading(direction);
         this.renderer?.setSelfHeading(destination.heading);
