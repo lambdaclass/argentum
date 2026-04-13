@@ -597,4 +597,902 @@ defmodule Arena.GmAdversarialTest do
       assert {:noreply, _new_state} = result
     end
   end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 7. GM commands that DO things when authorized (functional tests, Batches 4-7)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "Batch 5 - Map & Environment: GM /NIEVE toggles snow" do
+    test "toggles snow on in map state" do
+      entity = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: entity}, sessions: sessions)
+
+      # snow starts as nil/false
+      assert Map.get(state, :snow, false) == false
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/NIEVE")
+      assert Map.get(new_state, :snow) == true
+    end
+  end
+
+  describe "Batch 5 - Map & Environment: GM /NIEBLA toggles fog" do
+    test "toggles fog on in map state" do
+      entity = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: entity}, sessions: sessions)
+
+      assert Map.get(state, :fog, false) == false
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/NIEBLA")
+      assert Map.get(new_state, :fog) == true
+    end
+  end
+
+  describe "Batch 5 - Map & Environment: GM /MAPPK sets pk flag" do
+    test "sets pk flag to true" do
+      entity = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/MAPPK 1")
+      assert Map.get(new_state, :pk) == true
+    end
+
+    test "sets pk flag to false with 0" do
+      entity = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/MAPPK 0")
+      assert Map.get(new_state, :pk) == false
+    end
+  end
+
+  describe "Batch 5 - Map & Environment: GM /MAPNOMAGIC sets no_magic flag" do
+    test "sets no_magic flag to true" do
+      entity = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/MAPNOMAGIC 1")
+      assert Map.get(new_state, :no_magic) == true
+    end
+  end
+
+  describe "Batch 5 - Map & Environment: GM /MAPNOINVI sets no_invi flag" do
+    test "sets no_invi flag to true" do
+      entity = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/MAPNOINVI 1")
+      assert Map.get(new_state, :no_invi) == true
+    end
+  end
+
+  describe "Batch 5 - Map & Environment: GM /MAPNORESU sets no_resu flag" do
+    test "sets no_resu flag to true" do
+      entity = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/MAPNORESU 1")
+      assert Map.get(new_state, :no_resu) == true
+    end
+  end
+
+  describe "Batch 5 - Map & Environment: GM /SHOWNAME toggles name visibility" do
+    test "toggles show_name to false (hidden) when default is true" do
+      entity = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/SHOWNAME")
+      updated = new_state.players[:gm_player]
+      assert Map.get(updated, :show_name) == false
+    end
+  end
+
+  describe "Batch 6 - Utility: GM /SETDESC sets description" do
+    test "sets entity description" do
+      entity = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM", description: ""})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/SETDESC The mighty admin")
+      updated = new_state.players[:gm_player]
+      assert updated.description == "The mighty admin"
+    end
+  end
+
+  describe "Batch 6 - Utility: GM /SETSPEED sets speed modifier" do
+    test "sets speed modifier on entity" do
+      entity = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/SETSPEED 2.5")
+      updated = new_state.players[:gm_player]
+      assert Map.get(updated, :speed_mod) == 2.5
+    end
+  end
+
+  describe "Batch 5 - Map & Environment: GM /TILEBLOCK toggles tile block" do
+    test "blocks facing tile" do
+      entity = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM", x: 50, y: 50, heading: :south})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/TILEBLOCK")
+
+      blocked = Map.get(new_state, :gm_blocked_tiles, MapSet.new())
+      # facing south from (50, 50) = (50, 51)
+      assert MapSet.member?(blocked, {50, 51})
+    end
+  end
+
+  describe "Batch 5 - Map & Environment: GM /SETTRIGGER sets trigger" do
+    test "sets trigger at facing tile" do
+      entity = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM", x: 50, y: 50, heading: :south})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/SETTRIGGER 5")
+
+      triggers = Map.get(new_state, :triggers, %{})
+      assert Map.get(triggers, {50, 51}) == 5
+    end
+  end
+
+  describe "Batch 5 - Map & Environment: GM /ASKTRIGGER reads trigger" do
+    test "reads trigger at facing tile" do
+      entity = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM", x: 50, y: 50, heading: :south})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: entity}, sessions: sessions)
+      # Pre-set a trigger
+      state = Map.put(state, :triggers, %{{50, 51} => 42})
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/ASKTRIGGER")
+
+      # GM should receive a message about the trigger value
+      assert_receive {:send_raw, _raw}
+    end
+  end
+
+  describe "Batch 6 - Utility: GM /CLEANWORLD clears ground items" do
+    test "clears all ground items" do
+      entity = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: entity}, sessions: sessions)
+      state = Map.put(state, :ground_items, %{{10, 10} => %{item_id: 1, amount: 5}})
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/CLEANWORLD")
+      assert Map.get(new_state, :ground_items) == %{}
+    end
+  end
+
+  describe "Batch 7 - Faction/Council: GM /COUNCILKICK removes from council" do
+    test "sets council to false on target" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      victim = make_entity(%{char_id: :victim, gm: false, name: "Victim"})
+      victim = Map.put(victim, :council, :royal)
+      sessions = %{gm_player: self(), victim: self()}
+      state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/COUNCILKICK Victim")
+      assert Map.get(new_state.players[:victim], :council) == false
+    end
+  end
+
+  describe "Batch 7 - Faction/Council: GM /ROYALCOUNCIL adds to royal council" do
+    test "sets council to :royal on target" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      victim = make_entity(%{char_id: :victim, gm: false, name: "Victim"})
+      sessions = %{gm_player: self(), victim: self()}
+      state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/ROYALCOUNCIL Victim")
+      assert Map.get(new_state.players[:victim], :council) == :royal
+    end
+  end
+
+  describe "Batch 7 - Faction/Council: GM /CHAOSCOUNCIL adds to chaos council" do
+    test "sets council to :chaos on target" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      victim = make_entity(%{char_id: :victim, gm: false, name: "Victim"})
+      sessions = %{gm_player: self(), victim: self()}
+      state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/CHAOSCOUNCIL Victim")
+      assert Map.get(new_state.players[:victim], :council) == :chaos
+    end
+  end
+
+  describe "Batch 7 - Faction/Council: GM /ROYALKICK removes from faction" do
+    test "sets faction to :none on target" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      victim = make_entity(%{char_id: :victim, gm: false, name: "Victim", faction: :royal_army})
+      sessions = %{gm_player: self(), victim: self()}
+      state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/ROYALKICK Victim")
+      assert new_state.players[:victim].faction == :none
+    end
+  end
+
+  describe "Batch 7 - Faction/Council: GM /CHAOSKICK removes from faction" do
+    test "sets faction to :none on target" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      victim = make_entity(%{char_id: :victim, gm: false, name: "Victim", faction: :chaos_legion})
+      sessions = %{gm_player: self(), victim: self()}
+      state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/CHAOSKICK Victim")
+      assert new_state.players[:victim].faction == :none
+    end
+  end
+
+  describe "Batch 4 - Communication: GM /RMSG sends faction message" do
+    test "returns {:noreply, state} and GM receives confirmation" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      soldier = make_entity(%{char_id: :soldier, gm: false, name: "Soldier", faction: :royal_army})
+      sessions = %{gm_player: self(), soldier: self()}
+      state = make_map_state(%{gm_player: gm, soldier: soldier}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/RMSG Attention troops!")
+      # GM gets confirmation and faction player gets message
+      assert_receive {:send_raw, _raw}
+    end
+  end
+
+  describe "Batch 4 - Communication: GM /CMSG sends chaos faction message" do
+    test "returns {:noreply, state} and GM receives confirmation" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/CMSG Dark legion orders!")
+      assert_receive {:send_raw, _raw}
+    end
+  end
+
+  describe "Batch 4 - Punishment: GM /REMOVEPUNISHMENT" do
+    test "returns {:noreply, state} and sends confirmation" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      victim = make_entity(%{char_id: :victim, gm: false, name: "Victim"})
+      sessions = %{gm_player: self(), victim: self()}
+      state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/REMOVEPUNISHMENT Victim 1 reason")
+      assert_receive {:send_raw, _raw}
+    end
+  end
+
+  describe "Batch 6 - Audio: GM /FORCEMIDIMAP sends MIDI to map" do
+    test "sends MIDI packet to sessions" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/FORCEMIDIMAP 5 1")
+      # Receives MIDI packet + gm_console confirmation
+      assert_receive {:send_raw, _raw}
+    end
+  end
+
+  describe "Batch 6 - Audio: GM /FORCEWAVEMAP sends wave to map" do
+    test "sends wave packet to sessions" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/FORCEWAVEMAP 3 50 50 1")
+      assert_receive {:send_raw, _raw}
+    end
+  end
+
+  describe "Batch 6 - Utility: GM /ITEMSFLOOR counts floor items" do
+    test "sends floor item count" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/ITEMSFLOOR")
+      assert_receive {:send_raw, _raw}
+    end
+  end
+
+  describe "Batch 6 - Utility: GM /DESTROYITEMS destroys items at facing tile" do
+    test "removes items at facing tile" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM", x: 50, y: 50, heading: :south})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+      state = Map.put(state, :ground_items, %{{50, 51} => %{item_id: 1, amount: 3}})
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/DESTROYITEMS")
+      ground_items = Map.get(new_state, :ground_items, %{})
+      refute Map.has_key?(ground_items, {50, 51})
+    end
+  end
+
+  describe "Batch 6 - Utility: GM /DESTROYALLAREA destroys items in range" do
+    test "removes items in area around GM" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM", x: 50, y: 50, heading: :south})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      state =
+        Map.put(state, :ground_items, %{
+          {52, 52} => %{item_id: 1, amount: 1},
+          {90, 90} => %{item_id: 2, amount: 1}
+        })
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/DESTROYALLAREA")
+      ground_items = Map.get(new_state, :ground_items, %{})
+      # (52,52) is within range 10 of (50,50), should be removed
+      refute Map.has_key?(ground_items, {52, 52})
+      # (90,90) is far away, should remain
+      assert Map.has_key?(ground_items, {90, 90})
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 8. Edge cases: invalid parameters, non-existent targets, boundary values
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "edge cases: GM commands with invalid parameters" do
+    test "/SETSPEED with non-numeric value returns error" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/SETSPEED abc")
+      # speed_mod should not be set
+      refute Map.has_key?(new_state.players[:gm_player], :speed_mod)
+    end
+
+    test "/SETTRIGGER with non-numeric value returns error" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM", x: 50, y: 50, heading: :south})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/SETTRIGGER notanumber")
+      triggers = Map.get(new_state, :triggers, %{})
+      assert triggers == %{}
+    end
+
+    test "/TELEPORT with non-numeric coordinates returns usage message" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/TELEPORT abc def ghi")
+      # Should receive usage message
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/SPAWNITEM with non-numeric item_id returns usage" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/SPAWNITEM abc")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/SPAWNITEM with zero amount returns usage" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/SPAWNITEM 100 0")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/SPAWNITEM with negative amount returns usage" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/SPAWNITEM 100 -5")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/FORCEMIDIMAP with non-numeric midi returns usage" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/FORCEMIDIMAP abc def")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/CHECKSLOT with non-numeric slot returns error" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      victim = make_entity(%{char_id: :victim, gm: false, name: "Victim"})
+      sessions = %{gm_player: self(), victim: self()}
+      state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/CHECKSLOT Victim abc")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/BANTEMPORAL with non-numeric days returns error" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/BANTEMPORAL Victim abc reason")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/CREATURES with non-numeric map_id returns usage" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/CREATURES abc")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/GIVEITEM with bad amount returns usage" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      victim = make_entity(%{char_id: :victim, gm: false, name: "Victim"})
+      sessions = %{gm_player: self(), victim: self()}
+      state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/GIVEITEM Victim abc xyz")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/EDITCHAR with invalid option returns usage" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      victim = make_entity(%{char_id: :victim, gm: false, name: "Victim"})
+      sessions = %{gm_player: self(), victim: self()}
+      state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/EDITCHAR Victim 99 abc")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/BAN with non-numeric days returns usage" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/BAN Victim abc")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/MUTE with non-numeric minutes returns usage" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/MUTE Victim abc")
+      assert_receive {:send_raw, _raw}
+    end
+  end
+
+  describe "edge cases: GM commands targeting non-existent players" do
+    test "/GOTO targeting non-existent player returns not found" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/GOTO GhostPlayer")
+      # State unchanged (no player to teleport to)
+      assert new_state.players == state.players
+    end
+
+    test "/KILL targeting non-existent player returns not found" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/KILL GhostPlayer")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/INFO targeting non-existent player returns not found" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/INFO GhostPlayer")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/KICK targeting non-existent player returns not found" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/KICK GhostPlayer")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/REVIVE targeting non-existent player returns not found" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/REVIVE GhostPlayer")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/UNMUTE targeting non-existent player returns not found" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/UNMUTE GhostPlayer")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/COUNCILKICK targeting non-existent player returns not found" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/COUNCILKICK GhostPlayer")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/ROYALCOUNCIL targeting non-existent player returns not found" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/ROYALCOUNCIL GhostPlayer")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/CHAOSCOUNCIL targeting non-existent player returns not found" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/CHAOSCOUNCIL GhostPlayer")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/ROYALKICK targeting non-existent player returns not found" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/ROYALKICK GhostPlayer")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/CHAOSKICK targeting non-existent player returns not found" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/CHAOSKICK GhostPlayer")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/CHARSTATS targeting non-existent player returns not found" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/CHARSTATS GhostPlayer")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/CHARGOLD targeting non-existent player returns not found" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/CHARGOLD GhostPlayer")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/ALTERNAME targeting non-existent player returns not found" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/ALTERNAME GhostPlayer NewName")
+      assert_receive {:send_raw, _raw}
+    end
+  end
+
+  describe "edge cases: boundary values" do
+    test "/CHECKSLOT with slot 0 (below minimum) returns error" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      victim = make_entity(%{char_id: :victim, gm: false, name: "Victim"})
+      sessions = %{gm_player: self(), victim: self()}
+      state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/CHECKSLOT Victim 0")
+      # Slot 0 is < 1 so falls to invalid case
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/CHECKSLOT with negative slot returns error" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      victim = make_entity(%{char_id: :victim, gm: false, name: "Victim"})
+      sessions = %{gm_player: self(), victim: self()}
+      state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/CHECKSLOT Victim -1")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/BAN with zero days returns usage" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/BAN Victim 0")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/BAN with negative days returns usage" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/BAN Victim -5")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/MUTE with zero minutes returns usage" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/MUTE Victim 0")
+      assert_receive {:send_raw, _raw}
+    end
+
+    test "/SETDESC with only whitespace after command sets to trimmed remainder" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM", description: "old desc"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      # "/SETDESC " gets trimmed to "/SETDESC", then trim_leading("/SETDESC ") doesn't
+      # match the space, so description becomes "/SETDESC" (the full trimmed string).
+      # This exercises the edge case of sending the command with no real argument.
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/SETDESC ")
+      updated = new_state.players[:gm_player]
+      assert updated.description == "/SETDESC"
+    end
+
+    test "/SETSPEED with zero sets speed_mod to 0.0" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/SETSPEED 0")
+      updated = new_state.players[:gm_player]
+      assert Map.get(updated, :speed_mod) == 0.0
+    end
+
+    test "/SETSPEED with negative value still sets it" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/SETSPEED -1.0")
+      updated = new_state.players[:gm_player]
+      assert Map.get(updated, :speed_mod) == -1.0
+    end
+  end
+
+  describe "edge cases: dead GM using commands" do
+    test "dead GM can still use /NIEVE (GM commands bypass dead check)" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM", dead: true, hp: 0})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/NIEVE")
+      assert Map.get(new_state, :snow) == true
+    end
+
+    test "dead GM can still use /INVISIBLE" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM", dead: true, hp: 0, invisible: false})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/INVISIBLE")
+      assert new_state.players[:gm_player].invisible == true
+    end
+
+    test "dead GM can still use /SHOWNAME" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM", dead: true, hp: 0})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/SHOWNAME")
+      updated = new_state.players[:gm_player]
+      assert Map.get(updated, :show_name) == false
+    end
+
+    test "dead GM can still use /CLEANWORLD" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM", dead: true, hp: 0})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+      state = Map.put(state, :ground_items, %{{5, 5} => %{item_id: 1, amount: 1}})
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/CLEANWORLD")
+      assert Map.get(new_state, :ground_items) == %{}
+    end
+
+    test "dead GM can still use /MAPPK" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM", dead: true, hp: 0})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/MAPPK 1")
+      assert Map.get(new_state, :pk) == true
+    end
+
+    test "dead GM can still use /COUNCILKICK" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM", dead: true, hp: 0})
+      victim = make_entity(%{char_id: :victim, gm: false, name: "Victim"})
+      victim = Map.put(victim, :council, :royal)
+      sessions = %{gm_player: self(), victim: self()}
+      state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/COUNCILKICK Victim")
+      assert Map.get(new_state.players[:victim], :council) == false
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 9. Double-execution / toggle tests
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "double-execution: toggle commands return to original state" do
+    test "/NIEVE twice returns to no snow" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      assert Map.get(state, :snow, false) == false
+      {:noreply, state1} = Social.handle_chat(state, :gm_player, "/NIEVE")
+      assert Map.get(state1, :snow) == true
+      {:noreply, state2} = Social.handle_chat(state1, :gm_player, "/NIEVE")
+      assert Map.get(state2, :snow) == false
+    end
+
+    test "/NIEBLA twice returns to no fog" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      assert Map.get(state, :fog, false) == false
+      {:noreply, state1} = Social.handle_chat(state, :gm_player, "/NIEBLA")
+      assert Map.get(state1, :fog) == true
+      {:noreply, state2} = Social.handle_chat(state1, :gm_player, "/NIEBLA")
+      assert Map.get(state2, :fog) == false
+    end
+
+    test "/INVISIBLE twice returns to visible" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM", invisible: false})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, state1} = Social.handle_chat(state, :gm_player, "/INVISIBLE")
+      assert state1.players[:gm_player].invisible == true
+      {:noreply, state2} = Social.handle_chat(state1, :gm_player, "/INVISIBLE")
+      assert state2.players[:gm_player].invisible == false
+    end
+
+    test "/SHOWNAME twice returns to original state" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      # Default show_name is true (Map.get with default true)
+      {:noreply, state1} = Social.handle_chat(state, :gm_player, "/SHOWNAME")
+      assert Map.get(state1.players[:gm_player], :show_name) == false
+      {:noreply, state2} = Social.handle_chat(state1, :gm_player, "/SHOWNAME")
+      assert Map.get(state2.players[:gm_player], :show_name) == true
+    end
+
+    test "/TILEBLOCK twice returns tile to unblocked" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM", x: 50, y: 50, heading: :south})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, state1} = Social.handle_chat(state, :gm_player, "/TILEBLOCK")
+      blocked1 = Map.get(state1, :gm_blocked_tiles, MapSet.new())
+      assert MapSet.member?(blocked1, {50, 51})
+
+      {:noreply, state2} = Social.handle_chat(state1, :gm_player, "/TILEBLOCK")
+      blocked2 = Map.get(state2, :gm_blocked_tiles, MapSet.new())
+      refute MapSet.member?(blocked2, {50, 51})
+    end
+  end
+
+  describe "double-execution: non-toggle commands are idempotent" do
+    test "/SETDESC twice sets to second value" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM", description: ""})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, state1} = Social.handle_chat(state, :gm_player, "/SETDESC first")
+      assert state1.players[:gm_player].description == "first"
+      {:noreply, state2} = Social.handle_chat(state1, :gm_player, "/SETDESC second")
+      assert state2.players[:gm_player].description == "second"
+    end
+
+    test "/SETSPEED twice sets to second value" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, state1} = Social.handle_chat(state, :gm_player, "/SETSPEED 1.5")
+      assert Map.get(state1.players[:gm_player], :speed_mod) == 1.5
+      {:noreply, state2} = Social.handle_chat(state1, :gm_player, "/SETSPEED 3.0")
+      assert Map.get(state2.players[:gm_player], :speed_mod) == 3.0
+    end
+
+    test "/SETTRIGGER twice overwrites first value" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM", x: 50, y: 50, heading: :south})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, state1} = Social.handle_chat(state, :gm_player, "/SETTRIGGER 5")
+      assert Map.get(state1, :triggers, %{}) |> Map.get({50, 51}) == 5
+      {:noreply, state2} = Social.handle_chat(state1, :gm_player, "/SETTRIGGER 10")
+      assert Map.get(state2, :triggers, %{}) |> Map.get({50, 51}) == 10
+    end
+
+    test "/MAPPK setting same value twice is stable" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, state1} = Social.handle_chat(state, :gm_player, "/MAPPK 1")
+      assert Map.get(state1, :pk) == true
+      {:noreply, state2} = Social.handle_chat(state1, :gm_player, "/MAPPK 1")
+      assert Map.get(state2, :pk) == true
+    end
+
+    test "/ROYALCOUNCIL then /CHAOSCOUNCIL changes council affiliation" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      victim = make_entity(%{char_id: :victim, gm: false, name: "Victim"})
+      sessions = %{gm_player: self(), victim: self()}
+      state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
+
+      {:noreply, state1} = Social.handle_chat(state, :gm_player, "/ROYALCOUNCIL Victim")
+      assert Map.get(state1.players[:victim], :council) == :royal
+
+      {:noreply, state2} = Social.handle_chat(state1, :gm_player, "/CHAOSCOUNCIL Victim")
+      assert Map.get(state2.players[:victim], :council) == :chaos
+    end
+
+    test "/COUNCILKICK twice keeps council as false" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      victim = make_entity(%{char_id: :victim, gm: false, name: "Victim"})
+      victim = Map.put(victim, :council, :royal)
+      sessions = %{gm_player: self(), victim: self()}
+      state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
+
+      {:noreply, state1} = Social.handle_chat(state, :gm_player, "/COUNCILKICK Victim")
+      assert Map.get(state1.players[:victim], :council) == false
+      {:noreply, state2} = Social.handle_chat(state1, :gm_player, "/COUNCILKICK Victim")
+      assert Map.get(state2.players[:victim], :council) == false
+    end
+
+    test "/ROYALKICK on already factionless player keeps faction as :none" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      victim = make_entity(%{char_id: :victim, gm: false, name: "Victim", faction: :none})
+      sessions = %{gm_player: self(), victim: self()}
+      state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/ROYALKICK Victim")
+      assert new_state.players[:victim].faction == :none
+    end
+  end
 end
