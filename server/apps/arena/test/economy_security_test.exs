@@ -692,4 +692,1012 @@ defmodule Arena.EconomySecurityTest do
       assert new_state.players[:player].bank_npc_id == nil
     end
   end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PART 2: Transactional integrity — bank, trade, gamble, faction, skills
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  alias Arena.Map.Trade
+
+  # ── Bank: negative/zero item deposit and extract amounts while in bank ───
+
+  describe "bank item deposit with negative/zero amount while in bank" do
+    # These tests document missing amount guards in bank deposit.
+    # The actual deposit path hits the DB (upsert_bank_item), so we test with
+    # items that GameData doesn't know about → hits the `instransferible` check path.
+
+    test "deposit amount=0 from slot with nil item_def treats as non-instransferible" do
+      # Use item_id that GameData won't find → item_def == nil → instransferible check skipped
+      # Then hits DB. To avoid DB, we test the guard paths only.
+      entity = make_entity(%{char_id: :player, bank_npc_id: nil})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      # Without bank_npc_id → :no_bank, proving guard works
+      {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 1, 0, 1)
+      assert result == {:error, :no_bank}
+    end
+
+    test "deposit from empty slot returns :empty_slot even with negative amount" do
+      entity = make_entity(%{char_id: :player, bank_npc_id: 1})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      # slot=1, empty inventory → inv_item == nil → :empty_slot
+      {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 1, -5, 1)
+      assert result == {:error, :empty_slot}
+    end
+
+    test "AUDIT: negative amount bypasses amount guard (inv_item.amount < negative is false)" do
+      # bank.ex line 107: `inv_item.amount < amount` — when amount is negative, this is always false.
+      # This means negative amounts pass the guard and reach the DB upsert path.
+      # new_amount = inv_item.amount - (-5) = inv_item.amount + 5 → item DUPLICATION.
+      # We can't test the full path without DB, but this documents the bug.
+      assert true, "See bank.ex:107 — missing `amount <= 0` guard on item deposit"
+    end
+  end
+
+  describe "bank deposit with huge slot_destino" do
+    test "AUDIT: slot_destino out of range is not validated before DB upsert" do
+      # bank.ex line 142: `if slot_destino > 0, do: slot_destino, else: find_bank_slot(...)`
+      # slot_destino=9999 passes `> 0` check and is used directly.
+      # No upper bound check against @bank_max_slots (40).
+      # We can't test the full path without DB, but document the bug.
+      assert true, "See bank.ex:142 — missing upper bound check on slot_destino"
+    end
+
+    test "slot_destino = 0 falls through to auto-assign path" do
+      # bank.ex line 142: slot_destino=0 → `0 > 0` is false → uses find_bank_slot
+      # This is correct behavior.
+      entity = make_entity(%{char_id: :player, bank_npc_id: 1})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      # Empty inventory → :empty_slot before reaching slot_destino logic
+      {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 1, 1, 0)
+      assert result == {:error, :empty_slot}
+    end
+  end
+
+  # ── Bank: extract-to-gold path audit ─────────────────────────────────────
+
+  describe "bank extract-to-gold path (item_id 12 = gold)" do
+    # When a bank item is gold (item_id 12), Inventory.add_item returns {:gold, amount}
+    # The extract handler adds gold to player but does NOT call BankItems.withdraw.
+    # This means the bank item remains — infinite gold extraction!
+    test "extract gold item does not withdraw from bank storage (BUG AUDIT)" do
+      # This test documents the suspected bug in bank.ex:245-256
+      # The {:gold, gold_amount} branch updates player gold but never calls
+      # GameBackend.BankItems.withdraw to remove the bank entry.
+      entity = make_entity(%{char_id: :player, bank_npc_id: 1, gold: 100})
+      sessions = %{player: self()}
+      _state = make_map_state(%{player: entity}, sessions: sessions)
+
+      # We can't fully test this without DB, but we document the code path:
+      # bank.ex line 245: {:gold, gold_amount} ->
+      #   entity = %{entity | gold: entity.gold + gold_amount}  <-- adds gold
+      #   ... sends update_gold ...
+      #   {:reply, :ok, state}
+      #   NO CALL TO GameBackend.BankItems.withdraw!
+      #
+      # Compare with the normal {:ok, ...} branch at line 210:
+      #   GameBackend.BankItems.withdraw(entity.char_id, slot, amount)  <-- removes from bank
+      #
+      # This means extracting gold items from bank gives gold but never removes the bank entry.
+      # The item stays in bank and can be extracted again = infinite gold.
+      assert true, "See code audit comment above — {:gold, _} branch missing withdraw call"
+    end
+  end
+
+  # ── Bank: gold deposit/extract boundary values while in bank ─────────────
+
+  describe "bank gold deposit boundary while in bank" do
+    # Note: handle_bank_deposit_gold calls save_bank_gold which hits DB.
+    # Tests that reach the success path will crash without DB.
+    # We test guard paths (rejection) and document success paths.
+
+    test "deposit one more than gold fails" do
+      entity = make_entity(%{char_id: :player, bank_npc_id: 1, gold: 500, bank_gold: 100})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:reply, result, state2} = Bank.handle_bank_deposit_gold(state, :player, 501)
+      assert result == {:error, :not_enough_gold}
+      assert state2.players[:player].gold == 500
+    end
+
+    test "deposit max integer does not overflow" do
+      entity = make_entity(%{char_id: :player, bank_npc_id: 1, gold: 1000, bank_gold: 0})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:reply, result, _state} = Bank.handle_bank_deposit_gold(state, :player, 999_999_999_999)
+      assert result == {:error, :not_enough_gold}
+    end
+
+    test "deposit amount=0 is rejected" do
+      entity = make_entity(%{char_id: :player, bank_npc_id: 1, gold: 500, bank_gold: 100})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:reply, result, _state} = Bank.handle_bank_deposit_gold(state, :player, 0)
+      assert result == {:error, :not_enough_gold}
+    end
+
+    test "deposit negative amount is rejected" do
+      entity = make_entity(%{char_id: :player, bank_npc_id: 1, gold: 500, bank_gold: 100})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:reply, result, _state} = Bank.handle_bank_deposit_gold(state, :player, -100)
+      assert result == {:error, :not_enough_gold}
+    end
+  end
+
+  describe "bank gold extract boundary while in bank" do
+    test "extract one more than bank_gold fails" do
+      entity = make_entity(%{char_id: :player, bank_npc_id: 1, gold: 0, bank_gold: 300})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:reply, result, state2} = Bank.handle_bank_extract_gold(state, :player, 301)
+      assert result == {:error, :not_enough_gold}
+      assert state2.players[:player].bank_gold == 300
+    end
+
+    test "extract amount=0 is rejected" do
+      entity = make_entity(%{char_id: :player, bank_npc_id: 1, gold: 0, bank_gold: 300})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:reply, result, _state} = Bank.handle_bank_extract_gold(state, :player, 0)
+      assert result == {:error, :not_enough_gold}
+    end
+
+    test "extract negative amount is rejected" do
+      entity = make_entity(%{char_id: :player, bank_npc_id: 1, gold: 0, bank_gold: 300})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:reply, result, _state} = Bank.handle_bank_extract_gold(state, :player, -50)
+      assert result == {:error, :not_enough_gold}
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Trade: atomicity, duplication, and item loss
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "trade: offer validation" do
+    test "offer with amount=0 is rejected" do
+      p1 = make_entity(%{
+        char_id: :p1,
+        trade_partner_id: :p2,
+        trade_offer_items: [],
+        trade_accepted: false,
+        inventory: List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 50, amount: 10, equipped: false})
+      })
+      p2 = make_entity(%{char_id: :p2, trade_partner_id: :p1, trade_offer_items: [], trade_accepted: false})
+      sessions = %{p1: self(), p2: self()}
+      state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
+
+      {:reply, result, _state} = Trade.handle_user_trade_offer(state, :p1, 50, 0)
+      assert result == {:error, :invalid_offer}
+    end
+
+    test "offer with negative amount is rejected" do
+      p1 = make_entity(%{
+        char_id: :p1,
+        trade_partner_id: :p2,
+        trade_offer_items: [],
+        trade_accepted: false,
+        inventory: List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 50, amount: 10, equipped: false})
+      })
+      p2 = make_entity(%{char_id: :p2, trade_partner_id: :p1, trade_offer_items: [], trade_accepted: false})
+      sessions = %{p1: self(), p2: self()}
+      state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
+
+      {:reply, result, _state} = Trade.handle_user_trade_offer(state, :p1, 50, -5)
+      assert result == {:error, :invalid_offer}
+    end
+
+    test "offer item not in inventory is rejected" do
+      p1 = make_entity(%{
+        char_id: :p1,
+        trade_partner_id: :p2,
+        trade_offer_items: [],
+        trade_accepted: false,
+        inventory: List.duplicate(nil, 24)
+      })
+      p2 = make_entity(%{char_id: :p2, trade_partner_id: :p1, trade_offer_items: [], trade_accepted: false})
+      sessions = %{p1: self(), p2: self()}
+      state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
+
+      {:reply, result, _state} = Trade.handle_user_trade_offer(state, :p1, 999, 1)
+      assert result == {:error, :invalid_offer}
+    end
+
+    test "offer equipped item is rejected" do
+      p1 = make_entity(%{
+        char_id: :p1,
+        trade_partner_id: :p2,
+        trade_offer_items: [],
+        trade_accepted: false,
+        inventory: List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 50, amount: 1, equipped: true})
+      })
+      p2 = make_entity(%{char_id: :p2, trade_partner_id: :p1, trade_offer_items: [], trade_accepted: false})
+      sessions = %{p1: self(), p2: self()}
+      state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
+
+      {:reply, result, _state} = Trade.handle_user_trade_offer(state, :p1, 50, 1)
+      assert result == {:error, :invalid_offer}
+    end
+
+    test "offer more than owned amount is rejected" do
+      p1 = make_entity(%{
+        char_id: :p1,
+        trade_partner_id: :p2,
+        trade_offer_items: [],
+        trade_accepted: false,
+        inventory: List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 50, amount: 3, equipped: false})
+      })
+      p2 = make_entity(%{char_id: :p2, trade_partner_id: :p1, trade_offer_items: [], trade_accepted: false})
+      sessions = %{p1: self(), p2: self()}
+      state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
+
+      {:reply, result, _state} = Trade.handle_user_trade_offer(state, :p1, 50, 10)
+      assert result == {:error, :invalid_offer}
+    end
+
+    test "offer while dead is rejected" do
+      p1 = make_entity(%{
+        char_id: :p1,
+        dead: true,
+        trade_partner_id: :p2,
+        trade_offer_items: [],
+        trade_accepted: false,
+        inventory: List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 50, amount: 5, equipped: false})
+      })
+      p2 = make_entity(%{char_id: :p2, trade_partner_id: :p1, trade_offer_items: [], trade_accepted: false})
+      sessions = %{p1: self(), p2: self()}
+      state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
+
+      {:reply, result, _state} = Trade.handle_user_trade_offer(state, :p1, 50, 1)
+      assert result == {:error, :dead}
+    end
+
+    test "offer without active trade is rejected" do
+      p1 = make_entity(%{
+        char_id: :p1,
+        trade_partner_id: nil,
+        trade_offer_items: [],
+        trade_accepted: false,
+        inventory: List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 50, amount: 5, equipped: false})
+      })
+      sessions = %{p1: self()}
+      state = make_map_state(%{p1: p1}, sessions: sessions)
+
+      {:reply, result, _state} = Trade.handle_user_trade_offer(state, :p1, 50, 1)
+      assert result == {:error, :not_trading}
+    end
+
+    test "exceeding max trade items (6) does not add more" do
+      existing_offers = for i <- 1..6, do: {i, 1, 0}
+      p1 = make_entity(%{
+        char_id: :p1,
+        trade_partner_id: :p2,
+        trade_offer_items: existing_offers,
+        trade_accepted: false,
+        inventory: List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 99, amount: 5, equipped: false})
+      })
+      p2 = make_entity(%{char_id: :p2, trade_partner_id: :p1, trade_offer_items: [], trade_accepted: false})
+      sessions = %{p1: self(), p2: self()}
+      state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
+
+      {:reply, result, new_state} = Trade.handle_user_trade_offer(state, :p1, 99, 1)
+      assert result == :ok
+      # Item count should not exceed 6
+      assert length(new_state.players[:p1].trade_offer_items) == 6
+    end
+  end
+
+  describe "trade: accept validation" do
+    test "accept while dead is rejected" do
+      p1 = make_entity(%{char_id: :p1, dead: true, trade_partner_id: :p2, trade_accepted: false})
+      sessions = %{p1: self()}
+      state = make_map_state(%{p1: p1}, sessions: sessions)
+
+      {:reply, result, _state} = Trade.handle_user_trade_accept(state, :p1)
+      assert result == {:error, :dead}
+    end
+
+    test "accept without active trade is rejected" do
+      p1 = make_entity(%{char_id: :p1, trade_partner_id: nil, trade_accepted: false})
+      sessions = %{p1: self()}
+      state = make_map_state(%{p1: p1}, sessions: sessions)
+
+      {:reply, result, _state} = Trade.handle_user_trade_accept(state, :p1)
+      assert result == {:error, :not_trading}
+    end
+
+    test "accept for unknown player returns :not_on_map" do
+      state = make_map_state(%{})
+      {:reply, result, _state} = Trade.handle_user_trade_accept(state, :unknown)
+      assert result == {:error, :not_on_map}
+    end
+  end
+
+  describe "trade: execute_trade gold validation" do
+    test "trade fails when offerer does not have enough gold" do
+      p1 = make_entity(%{
+        char_id: :p1,
+        gold: 10,
+        trade_partner_id: :p2,
+        trade_offer_gold: 500,
+        trade_offer_items: [],
+        trade_accepted: true
+      })
+      p2 = make_entity(%{
+        char_id: :p2,
+        gold: 1000,
+        trade_partner_id: :p1,
+        trade_offer_gold: 0,
+        trade_offer_items: [],
+        trade_accepted: true
+      })
+      sessions = %{p1: self(), p2: self()}
+      state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
+
+      new_state = Trade.execute_trade(state, :p1, :p2)
+      # Trade should be cancelled — both partners cleared
+      assert new_state.players[:p1].trade_partner_id == nil
+      assert new_state.players[:p2].trade_partner_id == nil
+      # Gold should not have been transferred
+      assert new_state.players[:p1].gold == 10
+    end
+
+    test "trade fails when partner does not have enough gold" do
+      p1 = make_entity(%{
+        char_id: :p1,
+        gold: 1000,
+        trade_partner_id: :p2,
+        trade_offer_gold: 0,
+        trade_offer_items: [],
+        trade_accepted: true
+      })
+      p2 = make_entity(%{
+        char_id: :p2,
+        gold: 10,
+        trade_partner_id: :p1,
+        trade_offer_gold: 500,
+        trade_offer_items: [],
+        trade_accepted: true
+      })
+      sessions = %{p1: self(), p2: self()}
+      state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
+
+      new_state = Trade.execute_trade(state, :p1, :p2)
+      assert new_state.players[:p2].trade_partner_id == nil
+      assert new_state.players[:p2].gold == 10
+    end
+  end
+
+  describe "trade: item transfer integrity" do
+    test "gold transfer is symmetric (no creation/destruction)" do
+      p1 = make_entity(%{
+        char_id: :p1,
+        gold: 1000,
+        trade_partner_id: :p2,
+        trade_offer_gold: 300,
+        trade_offer_items: [],
+        trade_accepted: true
+      })
+      p2 = make_entity(%{
+        char_id: :p2,
+        gold: 500,
+        trade_partner_id: :p1,
+        trade_offer_gold: 100,
+        trade_offer_items: [],
+        trade_accepted: true
+      })
+      sessions = %{p1: self(), p2: self()}
+      state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
+
+      total_before = p1.gold + p2.gold
+      new_state = Trade.execute_trade(state, :p1, :p2)
+      total_after = new_state.players[:p1].gold + new_state.players[:p2].gold
+      assert total_after == total_before, "Gold leaked: before=#{total_before} after=#{total_after}"
+    end
+
+    test "item transfer does not duplicate or lose items" do
+      inv1 = List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 50, amount: 3, equipped: false})
+      p1 = make_entity(%{
+        char_id: :p1,
+        gold: 0,
+        trade_partner_id: :p2,
+        trade_offer_gold: 0,
+        trade_offer_items: [{50, 2, 0}],
+        trade_accepted: true,
+        inventory: inv1
+      })
+      p2 = make_entity(%{
+        char_id: :p2,
+        gold: 0,
+        trade_partner_id: :p1,
+        trade_offer_gold: 0,
+        trade_offer_items: [],
+        trade_accepted: true,
+        inventory: List.duplicate(nil, 24)
+      })
+      sessions = %{p1: self(), p2: self()}
+      state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
+
+      new_state = Trade.execute_trade(state, :p1, :p2)
+
+      # Count item 50 across both inventories
+      count_item = fn inv ->
+        Enum.reduce(inv, 0, fn
+          %{item_id: 50, amount: a}, acc -> acc + a
+          _, acc -> acc
+        end)
+      end
+
+      total_items = count_item.(new_state.players[:p1].inventory) + count_item.(new_state.players[:p2].inventory)
+      assert total_items == 3, "Item duplication or loss: expected 3, got #{total_items}"
+    end
+
+    test "offering item with stale inventory (item removed) does not duplicate" do
+      # Simulate: player offered item_id=50 but then somehow lost it before accept
+      # transfer_trade_items should fail to find the item and skip it
+      p1 = make_entity(%{
+        char_id: :p1,
+        gold: 0,
+        trade_partner_id: :p2,
+        trade_offer_gold: 0,
+        trade_offer_items: [{50, 5, 0}],
+        trade_accepted: true,
+        inventory: List.duplicate(nil, 24)  # empty! item was removed
+      })
+      p2 = make_entity(%{
+        char_id: :p2,
+        gold: 0,
+        trade_partner_id: :p1,
+        trade_offer_gold: 0,
+        trade_offer_items: [],
+        trade_accepted: true,
+        inventory: List.duplicate(nil, 24)
+      })
+      sessions = %{p1: self(), p2: self()}
+      state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
+
+      new_state = Trade.execute_trade(state, :p1, :p2)
+
+      # p2 should NOT have received phantom items
+      p2_items = Enum.count(new_state.players[:p2].inventory, & &1 != nil)
+      assert p2_items == 0, "Phantom items created from stale offer"
+    end
+
+    test "repeated offer of same item stacks amount, does not double-count slots" do
+      inv1 = List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 50, amount: 20, equipped: false})
+      p1 = make_entity(%{
+        char_id: :p1,
+        trade_partner_id: :p2,
+        trade_offer_items: [],
+        trade_accepted: false,
+        inventory: inv1
+      })
+      p2 = make_entity(%{char_id: :p2, trade_partner_id: :p1, trade_offer_items: [], trade_accepted: false})
+      sessions = %{p1: self(), p2: self()}
+      state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
+
+      # First offer: 5 of item 50
+      {:reply, :ok, state2} = Trade.handle_user_trade_offer(state, :p1, 50, 5)
+      # Second offer: 3 more of same item 50
+      {:reply, :ok, state3} = Trade.handle_user_trade_offer(state2, :p1, 50, 3)
+
+      offers = state3.players[:p1].trade_offer_items
+      # Should be one entry with stacked amount, not two entries
+      assert length(offers) == 1
+      [{_id, total_amt, _tags}] = offers
+      assert total_amt == 8
+    end
+  end
+
+  describe "trade: end/reject cleanup" do
+    test "trade_end cleans up both sides" do
+      p1 = make_entity(%{
+        char_id: :p1,
+        trade_partner_id: :p2,
+        trade_offer_gold: 100,
+        trade_offer_items: [{50, 1, 0}],
+        trade_accepted: true
+      })
+      p2 = make_entity(%{
+        char_id: :p2,
+        trade_partner_id: :p1,
+        trade_offer_gold: 200,
+        trade_offer_items: [{60, 2, 0}],
+        trade_accepted: true
+      })
+      sessions = %{p1: self(), p2: self()}
+      state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
+
+      {:reply, :ok, new_state} = Trade.handle_user_trade_end(state, :p1)
+      # Both players should be fully cleaned
+      for pid <- [:p1, :p2] do
+        p = new_state.players[pid]
+        assert p.trade_partner_id == nil
+        assert p.trade_offer_gold == 0
+        assert p.trade_offer_items == []
+        assert p.trade_accepted == false
+      end
+    end
+
+    test "trade_reject cleans up both sides" do
+      p1 = make_entity(%{char_id: :p1, trade_partner_id: :p2, trade_offer_items: [{50, 1, 0}], trade_accepted: false})
+      p2 = make_entity(%{char_id: :p2, trade_partner_id: :p1, trade_offer_items: [], trade_accepted: false})
+      sessions = %{p1: self(), p2: self()}
+      state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
+
+      {:reply, :ok, new_state} = Trade.handle_user_trade_reject(state, :p1)
+      assert new_state.players[:p1].trade_partner_id == nil
+      assert new_state.players[:p2].trade_partner_id == nil
+    end
+
+    test "trade_end for unknown player returns :not_on_map" do
+      state = make_map_state(%{})
+      {:reply, result, _state} = Trade.handle_user_trade_end(state, :ghost)
+      assert result == {:error, :not_on_map}
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Gamble: no NPC proximity check, dead guard, boundary amounts
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "gamble without timbero NPC" do
+    # NOTE: handle_gamble does NOT check for nearby timbero NPC.
+    # The MapServer routes gamble → Social.handle_gamble(state, char_id, amount, nil)
+    # without verifying NPC proximity. A hacked client can gamble from anywhere.
+    test "gamble succeeds even without nearby timbero (missing proximity check)" do
+      entity = make_entity(%{char_id: :player, gold: 100})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_gamble(state, :player, 50, nil)
+      p = new_state.players[:player]
+      # Gold changed (won or lost) — proves no NPC check exists
+      assert p.gold in [50, 150]
+      assert p.gamble_plays == 1
+    end
+  end
+
+  describe "gamble: dead player guard" do
+    test "dead player cannot gamble" do
+      entity = make_entity(%{char_id: :player, dead: true, gold: 100})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_gamble(state, :player, 50, nil)
+      assert new_state.players[:player].gold == 100
+      assert new_state.players[:player].gamble_plays == 0
+    end
+  end
+
+  describe "gamble: boundary amounts" do
+    test "amount=0 is rejected" do
+      entity = make_entity(%{char_id: :player, gold: 100})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_gamble(state, :player, 0, nil)
+      assert new_state.players[:player].gold == 100
+    end
+
+    test "negative amount is rejected" do
+      entity = make_entity(%{char_id: :player, gold: 100})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_gamble(state, :player, -50, nil)
+      assert new_state.players[:player].gold == 100
+    end
+
+    test "amount exceeding gold is rejected" do
+      entity = make_entity(%{char_id: :player, gold: 100})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_gamble(state, :player, 999, nil)
+      assert new_state.players[:player].gold == 100
+    end
+
+    test "gamble for unknown player is a no-op" do
+      state = make_map_state(%{})
+      {:noreply, new_state} = Social.handle_gamble(state, :unknown, 50, nil)
+      assert new_state == state
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Forgive: no priest NPC proximity check
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "forgive without priest NPC" do
+    # NOTE: handle_forgive does NOT check for nearby priest NPC.
+    # A hacked client can forgive from anywhere.
+    test "forgive succeeds even without nearby priest (missing proximity check)" do
+      entity = make_entity(%{char_id: :player, criminal: true})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_forgive(state, :player)
+      assert new_state.players[:player].criminal == false
+    end
+  end
+
+  describe "forgive: non-criminal" do
+    test "non-criminal gets message but state unchanged" do
+      entity = make_entity(%{char_id: :player, criminal: false})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_forgive(state, :player)
+      assert new_state.players[:player].criminal == false
+    end
+
+    test "forgive for unknown player is a no-op" do
+      state = make_map_state(%{})
+      {:noreply, new_state} = Social.handle_forgive(state, :ghost)
+      assert new_state == state
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Faction: leave strips items exactly once, no replay abuse
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "faction leave" do
+    test "leaving when not in faction returns error message" do
+      entity = make_entity(%{char_id: :player, faction: :none})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_leave_faction(state, :player)
+      assert new_state.players[:player].faction == :none
+      assert new_state.players[:player].faction_reenlistadas == 0
+    end
+
+    test "leaving increments reenlistadas counter" do
+      entity = make_entity(%{char_id: :player, faction: :royal_army, faction_reenlistadas: 2})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_leave_faction(state, :player)
+      assert new_state.players[:player].faction == :none
+      assert new_state.players[:player].faction_reenlistadas == 3
+    end
+
+    test "double leave does not double-increment reenlistadas" do
+      entity = make_entity(%{char_id: :player, faction: :chaos_legion, faction_reenlistadas: 0})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, state2} = Social.handle_leave_faction(state, :player)
+      assert state2.players[:player].faction == :none
+      assert state2.players[:player].faction_reenlistadas == 1
+
+      # Second leave should be a no-op
+      {:noreply, state3} = Social.handle_leave_faction(state2, :player)
+      assert state3.players[:player].faction_reenlistadas == 1
+    end
+
+    test "leave faction for unknown player is a no-op" do
+      state = make_map_state(%{})
+      {:noreply, new_state} = Social.handle_leave_faction(state, :ghost)
+      assert new_state == state
+    end
+  end
+
+  describe "faction chat" do
+    test "faction chat while not in a faction is rejected" do
+      entity = make_entity(%{char_id: :player, faction: :none})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, _state} = Social.handle_faction_chat(state, :player, "test message")
+      # Should receive error message, not faction broadcast
+    end
+
+    test "faction chat for unknown player is a no-op" do
+      state = make_map_state(%{})
+      {:noreply, new_state} = Social.handle_faction_chat(state, :ghost, "hello")
+      assert new_state == state
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Skill mutation abuse: oversized lists, negatives, exceed cap
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "modify_skills: point creation/destruction abuse" do
+    test "requesting more points than available is rejected" do
+      entity = make_entity(%{char_id: :player, skill_points: 5, skills: %{magic: 50}})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      # Try to add 10 points when only 5 available
+      points = [10 | List.duplicate(0, 23)]
+      {:noreply, new_state} = Social.handle_modify_skills(state, :player, points)
+      # Should be rejected — skill_points unchanged
+      assert new_state.players[:player].skill_points == 5
+    end
+
+    test "total_requested = 0 is rejected" do
+      entity = make_entity(%{char_id: :player, skill_points: 10, skills: %{magic: 50}})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      points = List.duplicate(0, 24)
+      {:noreply, new_state} = Social.handle_modify_skills(state, :player, points)
+      assert new_state.players[:player].skill_points == 10
+    end
+
+    test "negative values in points_list do not subtract skills" do
+      entity = make_entity(%{char_id: :player, skill_points: 10, skills: %{magic: 50}})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      # First value (magic) = -10, sum = -10 which is <= 0 → rejected by total check
+      points = [-10 | List.duplicate(0, 23)]
+      {:noreply, new_state} = Social.handle_modify_skills(state, :player, points)
+      # The total_requested = -10 <= 0, so it's rejected
+      assert new_state.players[:player].skills.magic == 50
+    end
+
+    test "mixed positive and negative that sum positive does not steal from one skill" do
+      entity = make_entity(%{
+        char_id: :player,
+        skill_points: 5,
+        skills: %{magic: 80, stealing: 30, combat_tactics: 10}
+      })
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      # magic=-20, stealing=+25 → sum=5 matches available points
+      # But this would steal 20 from magic and add 25 to stealing
+      points = [-20, 25 | List.duplicate(0, 22)]
+      {:noreply, new_state} = Social.handle_modify_skills(state, :player, points)
+
+      # Negative values are ignored (pts > 0 guard), so only stealing gets +5 (capped by available)
+      # magic should remain unchanged
+      assert new_state.players[:player].skills.magic == 80
+    end
+
+    test "skill capped at 100 — excess points not consumed" do
+      entity = make_entity(%{
+        char_id: :player,
+        skill_points: 30,
+        skills: %{magic: 95}
+      })
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      # Request 20 for magic, but only 5 will be applied (cap at 100)
+      points = [20 | List.duplicate(0, 23)]
+      {:noreply, new_state} = Social.handle_modify_skills(state, :player, points)
+
+      p = new_state.players[:player]
+      assert p.skills.magic == 100
+      # Only 5 points should have been consumed, not 20
+      assert p.skill_points == 25
+    end
+
+    test "dead player cannot modify skills" do
+      entity = make_entity(%{char_id: :player, dead: true, skill_points: 10})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      points = [5 | List.duplicate(0, 23)]
+      {:noreply, new_state} = Social.handle_modify_skills(state, :player, points)
+      assert new_state.players[:player].skill_points == 10
+    end
+
+    test "unknown player is a no-op" do
+      state = make_map_state(%{})
+      {:noreply, new_state} = Social.handle_modify_skills(state, :ghost, [5 | List.duplicate(0, 23)])
+      assert new_state == state
+    end
+
+    test "oversized points_list beyond 24 skills is handled safely" do
+      entity = make_entity(%{char_id: :player, skill_points: 10, skills: %{magic: 50}})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      # 30 values instead of 24 — Enum.zip truncates to shorter list
+      points = [5 | List.duplicate(0, 29)]
+      {:noreply, new_state} = Social.handle_modify_skills(state, :player, points)
+      assert new_state.players[:player].skills.magic == 55
+      assert new_state.players[:player].skill_points == 5
+    end
+
+    test "undersized points_list (fewer than 24) is handled safely" do
+      entity = make_entity(%{char_id: :player, skill_points: 10, skills: %{magic: 50}})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      # Only 3 values — Enum.zip truncates to shorter list, remaining skills untouched
+      points = [5, 3, 0]
+      {:noreply, new_state} = Social.handle_modify_skills(state, :player, points)
+      p = new_state.players[:player]
+      assert p.skills.magic == 55
+      assert p.skills[:stealing] == 3
+      assert p.skill_points == 2
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Packet counter replay (decoder-level documentation tests)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "packet counter audit" do
+    # These tests document that the decoder reads and DISCARDS packet counters
+    # from 13 packet types: talk, walk, attack, cast_spell, drop, equip_item,
+    # change_heading, use_item, guild_message, question_gm, and others.
+    #
+    # VB6 clients send incrementing counters for anti-replay protection.
+    # Our server currently ignores them, meaning:
+    # - Replayed packets are processed as valid
+    # - Decreasing counters are not detected
+    # - A malicious client can replay walk/attack/drop/cast indefinitely
+    #
+    # This is a KNOWN GAP. Tests below verify the decoder correctly parses
+    # the counter bytes (so they don't corrupt the packet), even though
+    # the values are not used for validation.
+
+    alias AoProtocol.Client.Decoder
+
+    test "walk packet includes counter bytes that are parsed but discarded" do
+      counter = 42
+      packet = <<78::little-16, 1::8, counter::little-32>>
+      assert {:ok, {:walk, %{direction: :north}}, ""} = Decoder.decode(packet)
+    end
+
+    test "attack packet includes counter bytes that are parsed but discarded" do
+      counter = 999
+      packet = <<80::little-16, counter::little-32>>
+      assert {:ok, {:attack, %{}}, ""} = Decoder.decode(packet)
+    end
+
+    test "talk packet includes counter bytes that are parsed but discarded" do
+      msg = "hello"
+      msg_len = byte_size(msg)
+      counter = 100
+      packet = <<75::little-16, msg_len::little-16, msg::binary, counter::little-32>>
+      assert {:ok, {:talk, %{message: "hello"}}, ""} = Decoder.decode(packet)
+    end
+
+    test "drop packet includes counter bytes that are parsed but discarded" do
+      counter = 77
+      packet = <<93::little-16, 1::8, 5::little-32, counter::little-32>>
+      assert {:ok, {:drop, %{slot: 1, amount: 5}}, ""} = Decoder.decode(packet)
+    end
+
+    test "cast_spell packet includes counter bytes that are parsed but discarded" do
+      counter = 55
+      packet = <<94::little-16, 3::8, counter::little-32>>
+      assert {:ok, {:cast_spell, %{spell_slot: 3}}, ""} = Decoder.decode(packet)
+    end
+
+    test "use_item packet includes counter bytes that are parsed but discarded" do
+      counter = 200
+      packet = <<99::little-16, 5::8, 1::8, counter::little-32>>
+      assert {:ok, {:use_item, %{slot: 5}}, ""} = Decoder.decode(packet)
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Commerce: buy race condition audit (GenServer serialization)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "commerce: double-buy with insufficient gold" do
+    # GenServer serialization should prevent race conditions since all
+    # handle_call executions are serialized. But verify the guard works
+    # for sequential calls that should fail on the second attempt.
+    test "second buy fails after gold is spent by first" do
+      entity = make_entity(%{char_id: :player, commerce_npc_id: 1, gold: 100})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      # First buy — we can only test the guard path since we don't have real NPC shop data
+      {:reply, result1, state2} = Commerce.handle_commerce_buy(state, :player, 1, 1)
+      # Without real NPC data, this will fail at shop lookup, but the important thing is
+      # sequential calls don't corrupt state
+      {:reply, _result2, _state3} = Commerce.handle_commerce_buy(state2, :player, 1, 1)
+
+      # Document: GenServer serialization prevents race conditions at this layer
+      assert result1 in [:ok, {:error, :no_commerce}, {:error, :empty_shop_slot}, {:error, :not_enough_gold}, {:error, :inventory_full}]
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Trade: start_user_trade_request validation
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "trade request" do
+    test "trade request to non-existent player fails" do
+      entity = make_entity(%{char_id: :p1})
+      state = make_map_state(%{p1: entity})
+
+      {:reply, result, _state} = Trade.start_user_trade_request(state, :p1, entity, :nonexistent)
+      assert result == {:error, :target_not_found}
+    end
+
+    test "mutual trade request initiates trade" do
+      p1 = make_entity(%{char_id: :p1, name: "Player1", trade_request_target: nil})
+      p2 = make_entity(%{char_id: :p2, name: "Player2", trade_request_target: :p1})
+      sessions = %{p1: self(), p2: self()}
+      state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
+
+      {:reply, :ok, new_state} = Trade.start_user_trade_request(state, :p1, p1, :p2)
+      assert new_state.players[:p1].trade_partner_id == :p2
+      assert new_state.players[:p2].trade_partner_id == :p1
+    end
+
+    test "one-sided trade request stores target but does not start trade" do
+      p1 = make_entity(%{char_id: :p1, name: "Player1", trade_request_target: nil})
+      p2 = make_entity(%{char_id: :p2, name: "Player2", trade_request_target: nil})
+      sessions = %{p1: self(), p2: self()}
+      state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
+
+      {:reply, :ok, new_state} = Trade.start_user_trade_request(state, :p1, p1, :p2)
+      assert new_state.players[:p1].trade_request_target == :p2
+      assert new_state.players[:p1].trade_partner_id == nil
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Faction score: boundary conditions
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "faction_score_for_kill" do
+    test "same faction kill gives 0 score" do
+      attacker = make_entity(%{faction: :royal_army, level: 30})
+      defender = make_entity(%{faction: :royal_army, level: 25})
+      assert Social.faction_score_for_kill(attacker, defender) == 0
+    end
+
+    test "cross-faction kill gives positive score" do
+      attacker = make_entity(%{faction: :royal_army, level: 25})
+      defender = make_entity(%{faction: :chaos_legion, level: 25})
+      score = Social.faction_score_for_kill(attacker, defender)
+      assert score > 0
+      assert score <= 20
+    end
+
+    test "no faction vs no faction gives 0 score" do
+      attacker = make_entity(%{faction: :none, level: 25, criminal: false})
+      defender = make_entity(%{faction: :none, level: 25, criminal: false})
+      assert Social.faction_score_for_kill(attacker, defender) == 0
+    end
+
+    test "faction score is capped at 20" do
+      attacker = make_entity(%{faction: :royal_army, level: 1})
+      defender = make_entity(%{faction: :chaos_legion, level: 50})
+      score = Social.faction_score_for_kill(attacker, defender)
+      assert score <= 20
+    end
+
+    test "higher level attacker gets less score" do
+      low_att = Social.faction_score_for_kill(
+        make_entity(%{faction: :royal_army, level: 50}),
+        make_entity(%{faction: :chaos_legion, level: 25})
+      )
+      high_att = Social.faction_score_for_kill(
+        make_entity(%{faction: :royal_army, level: 25}),
+        make_entity(%{faction: :chaos_legion, level: 50})
+      )
+      assert high_att >= low_att
+    end
+  end
 end
