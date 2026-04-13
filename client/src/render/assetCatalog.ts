@@ -2,6 +2,7 @@ import { BaseTexture, MIPMAP_MODES, Rectangle, SCALE_MODES, Texture } from "pixi
 import { buildAssetOriginCandidates, buildAssetUrlFromOrigin, fetchJsonWithFallback } from "../net/assetHost";
 import type { GroundObject, WorldMapData } from "../app/types";
 import { getRawNpcBodyDef, getRawNpcBodySheetUrl } from "./npcRawBodies.generated";
+import { fitFrameWithinTexture, resolveBaseTextureSize } from "./textureFrames";
 
 interface DirectionalFrames {
   up: number;
@@ -251,9 +252,22 @@ export function getGrhTexture(
     baseTextureCache.set(textureKey, baseTexture);
   }
 
+  const frame = fitFrameWithinTexture(
+    {
+      x: entry.offX,
+      y: entry.offY,
+      width: entry.width,
+      height: entry.height
+    },
+    resolveBaseTextureSize(baseTexture)
+  );
+  if (!frame) {
+    return null;
+  }
+
   const texture = new Texture(
     baseTexture,
-    new Rectangle(entry.offX, entry.offY, entry.width, entry.height)
+    new Rectangle(frame.x, frame.y, frame.width, frame.height)
   );
 
   textureCache.set(cacheKey, texture);

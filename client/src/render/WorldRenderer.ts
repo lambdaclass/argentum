@@ -33,6 +33,7 @@ import {
   getRawNpcBodyDef,
   getRawNpcBodySheetUrl
 } from "./npcRawBodies.generated";
+import { fitFrameWithinTexture, resolveBaseTextureSize } from "./textureFrames";
 
 const TILE_SIZE = 32;
 const DEFAULT_MAP_SIZE = 100;
@@ -243,7 +244,7 @@ function getRawBodyTexture(
   frameY: number,
   width: number,
   height: number
-) {
+): Texture | null {
   const cacheKey = `${url}:${frameX}:${frameY}:${width}:${height}`;
   const cached = rawBodyTextureCache.get(cacheKey);
   if (cached) {
@@ -254,9 +255,21 @@ function getRawBodyTexture(
     scaleMode: SCALE_MODES.NEAREST,
     mipmap: MIPMAP_MODES.OFF
   });
+  const frame = fitFrameWithinTexture(
+    {
+      x: frameX,
+      y: frameY,
+      width,
+      height
+    },
+    resolveBaseTextureSize(baseTexture)
+  );
+  if (!frame) {
+    return null;
+  }
   const texture = new Texture(
     baseTexture,
-    new Rectangle(frameX, frameY, width, height)
+    new Rectangle(frame.x, frame.y, frame.width, frame.height)
   );
 
   rawBodyTextureCache.set(cacheKey, texture);
@@ -571,15 +584,17 @@ function createCharacterVisual(
     const rawDirection = rawNpcBody.directions[direction];
     const rawSheetUrl = getRawNpcBodySheetUrl(rawNpcBody.fileNum);
     if (rawSheetUrl) {
-      bodyFrames = rawDirection.frames.map((frame) =>
-        getRawBodyTexture(
-          rawSheetUrl,
-          frame.x,
-          frame.y,
-          rawNpcBody.width,
-          rawNpcBody.height
+      bodyFrames = rawDirection.frames
+        .map((frame) =>
+          getRawBodyTexture(
+            rawSheetUrl,
+            frame.x,
+            frame.y,
+            rawNpcBody.width,
+            rawNpcBody.height
+          )
         )
-      );
+        .filter((texture): texture is Texture => texture != null);
       bodyFrames.forEach((texture) => watchTexture?.(texture));
       frameVelocity = rawDirection.velocity;
       bodyTexture = bodyFrames[0] ?? null;

@@ -17,6 +17,57 @@
   font-family: "Avenir Next", "Segoe UI", sans-serif;
 }
 
+.boot-fatal-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top left, rgba(212, 96, 79, 0.16), transparent 28%),
+    linear-gradient(180deg, rgba(7, 11, 18, 0.96), rgba(6, 10, 16, 1));
+}
+
+.boot-fatal-card {
+  width: min(880px, 100%);
+  padding: 24px;
+  border: 1px solid rgba(212, 96, 79, 0.45);
+  border-radius: 20px;
+  background: rgba(12, 18, 28, 0.96);
+  box-shadow: var(--shadow);
+}
+
+.boot-fatal-eyebrow {
+  margin: 0 0 8px;
+  color: var(--accent-strong);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+
+.boot-fatal-card h1 {
+  margin: 0 0 12px;
+  font-size: 28px;
+}
+
+.boot-fatal-copy {
+  margin: 0 0 16px;
+  color: #ffd9cf;
+  font-size: 15px;
+}
+
+.boot-fatal-detail {
+  margin: 0;
+  padding: 16px;
+  overflow: auto;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.34);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-soft);
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .product-shell {
   position: relative;
   isolation: isolate;
