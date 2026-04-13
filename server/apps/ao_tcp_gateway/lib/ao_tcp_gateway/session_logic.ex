@@ -445,11 +445,30 @@ defmodule AoTcpGateway.SessionLogic do
                             handle_duel_abandon(state)
 
                           :not_duel_command ->
-                            if String.upcase(String.trim(message)) == "/HOGAR" do
-                              handle_hogar(state)
-                            else
-                              Arena.Map.MapServer.chat(state.map_id, state.character_id, message)
-                              {state, []}
+                            upper = String.upcase(String.trim(message))
+                            cond do
+                              upper == "/HOGAR" ->
+                                handle_hogar(state)
+
+                              upper == "/TOURNAMENT JOIN" ->
+                                name = state.entity.name
+                                case Arena.Events.TournamentServer.join(state.character_id, name) do
+                                  :ok -> {state, [{:console_msg, %{message: "Te has registrado en el torneo.", font_index: 0}}]}
+                                  {:error, :no_tournament} -> {state, [{:console_msg, %{message: "No hay torneo activo.", font_index: 0}}]}
+                                  {:error, :already_registered} -> {state, [{:console_msg, %{message: "Ya estas registrado.", font_index: 0}}]}
+                                  {:error, :tournament_full} -> {state, [{:console_msg, %{message: "El torneo esta lleno.", font_index: 0}}]}
+                                  {:error, _} -> {state, [{:console_msg, %{message: "No se pudo registrar.", font_index: 0}}]}
+                                end
+
+                              upper == "/TOURNAMENT LEAVE" ->
+                                case Arena.Events.TournamentServer.leave(state.character_id) do
+                                  :ok -> {state, [{:console_msg, %{message: "Te has retirado del torneo.", font_index: 0}}]}
+                                  {:error, _} -> {state, [{:console_msg, %{message: "No estas en un torneo.", font_index: 0}}]}
+                                end
+
+                              true ->
+                                Arena.Map.MapServer.chat(state.map_id, state.character_id, message)
+                                {state, []}
                             end
                         end
                     end

@@ -305,6 +305,9 @@ defmodule Arena.Map.CombatHandlers do
                 if npc.owner_id == nil do
                   entity = %{entity | npcs_killed: entity.npcs_killed + 1}
 
+                  # Notify invasion system about NPC kill (melee)
+                  Arena.Events.InvasionServer.notify_npc_killed(state.map_id, instance_id)
+
                   # Award guild XP on NPC kill
                   give_exp = if npc_def, do: npc_def.give_exp, else: 0
 
@@ -985,6 +988,9 @@ defmodule Arena.Map.CombatHandlers do
               state =
                 if npc.owner_id == nil do
                   entity = %{entity | npcs_killed: entity.npcs_killed + 1}
+
+                  # Notify invasion system about NPC kill (spell)
+                  Arena.Events.InvasionServer.notify_npc_killed(state.map_id, instance_id)
 
                   # Award guild XP on NPC spell kill
                   give_exp = if npc_def, do: npc_def.give_exp, else: 0

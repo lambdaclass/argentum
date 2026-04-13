@@ -18,6 +18,9 @@ defmodule Arena.Application do
       Arena.DuelServer,
       Arena.Auction,
       Arena.Forum,
+      Arena.Events.InvasionServer,
+      Arena.Events.TournamentServer,
+      Arena.Events.EventManager,
       Supervisor.child_spec(Arena.Map.MapSupervisor, shutdown: 30_000),
       ArenaWeb.Endpoint
     ]

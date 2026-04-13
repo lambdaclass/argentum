@@ -154,6 +154,10 @@ defmodule Arena.Map.MapServer do
   def inject_test_npc(map_id, instance_id, npc_entity),
     do: GenServer.call(via(map_id), {:inject_test_npc, instance_id, npc_entity})
 
+  @doc "Spawn an invasion NPC at a given position. Returns {:ok, instance_id} or {:error, reason}."
+  def spawn_invasion_npc(map_id, npc_def, x, y),
+    do: GenServer.call(via(map_id), {:spawn_invasion_npc, npc_def, x, y})
+
   def player_count(map_id), do: GenServer.call(via(map_id), :player_count)
 
   @doc "Return the zone string for the given map (e.g. \"NEWBIE\", \"CAMPO\", etc.)."
@@ -392,6 +396,43 @@ defmodule Arena.Map.MapServer do
     }
 
     {:reply, :ok, state}
+  end
+
+  def handle_call({:spawn_invasion_npc, npc_def, x, y}, _from, state) do
+    if x >= 1 and x <= Helpers.map_width() and
+         y >= 1 and y <= Helpers.map_height() and
+         TileGrid.is_walkable(state.map_id, x, y) and
+         Helpers.get_occupancy(state.occupancy, x, y) == nil do
+      instance_id = state.next_char_index
+      npc_entity = NpcEntity.from_def(npc_def, instance_id, instance_id, x, y)
+
+      npcs_live = Map.put(state.npcs_live, instance_id, npc_entity)
+      npc_char_indices = Map.put(state.npc_char_indices, instance_id, instance_id)
+      occupancy = Helpers.set_occupancy(state.occupancy, x, y, {:npc, instance_id})
+
+      state = %{
+        state
+        | npcs_live: npcs_live,
+          npc_char_indices: npc_char_indices,
+          occupancy: occupancy,
+          next_char_index: instance_id + 1
+      }
+
+      raw = Encoder.encode(Helpers.npc_create_packet(npc_entity, npc_def))
+
+      Visibility.broadcast_visible_all(state, x, y, fn pid ->
+        send(pid, {:send_raw, raw})
+      end)
+
+      # Start NPC AI tick if this is the first NPC
+      if map_size(npcs_live) == 1 do
+        Process.send_after(self(), :npc_ai_tick, @npc_ai_tick_ms)
+      end
+
+      {:reply, {:ok, instance_id}, state}
+    else
+      {:reply, {:error, :tile_blocked}, state}
+    end
   end
 
   # ---- Inventory (delegated) ----

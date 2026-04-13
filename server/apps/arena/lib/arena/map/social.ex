@@ -414,6 +414,38 @@ defmodule Arena.Map.Social do
         target_name = Enum.at(parts, 1)
         gm_faction_kick(state, char_id, target_name, :chaos_legion)
 
+      # Events, Invasions, Tournaments
+      ["/INVASION", map_str, npc_str, count_str] ->
+        gm_invasion(state, char_id, entity, map_str, npc_str, count_str)
+
+      ["/INVASION", "STOP", map_str] ->
+        gm_invasion_stop(state, char_id, map_str)
+
+      ["/INVASION", "LIST"] ->
+        gm_invasion_list(state, char_id)
+
+      ["/TOURNAMENT", "START" | rest] ->
+        max_str = List.first(rest) || "16"
+        gm_tournament_start(state, char_id, entity, max_str)
+
+      ["/TOURNAMENT", "BEGIN"] ->
+        gm_tournament_begin(state, char_id)
+
+      ["/TOURNAMENT", "CANCEL"] ->
+        gm_tournament_cancel(state, char_id)
+
+      ["/TOURNAMENT", "STATUS"] ->
+        gm_tournament_status(state, char_id)
+
+      ["/EVENT", "START", type_str, duration_str] ->
+        gm_event_start(state, char_id, entity, type_str, duration_str)
+
+      ["/EVENT", "STOP", type_str] ->
+        gm_event_stop(state, char_id, type_str)
+
+      ["/EVENT", "LIST"] ->
+        gm_event_list(state, char_id)
+
       _ ->
         gm_console(state, char_id, "Unknown GM command: #{message}")
         {:noreply, state}
@@ -1570,6 +1602,164 @@ defmodule Arena.Map.Social do
         gm_console(state, char_id, "Player '#{target_name}' not found.")
         {:noreply, state}
     end
+  end
+
+  # ---- Events / Invasions / Tournaments GM helpers ----
+
+  defp gm_invasion(state, char_id, entity, map_str, npc_str, count_str) do
+    with {map_id, ""} <- Integer.parse(map_str),
+         {npc_id, ""} <- Integer.parse(npc_str),
+         {count, ""} <- Integer.parse(count_str),
+         true <- count > 0 and count <= 200 do
+      case Arena.Events.InvasionServer.start_invasion(map_id, npc_id, count, entity.name) do
+        {:ok, spawned} ->
+          gm_console(state, char_id, "Invasion started: #{spawned} NPCs spawned on map #{map_id}.")
+
+        {:error, :invasion_already_active} ->
+          gm_console(state, char_id, "An invasion is already active on map #{map_id}.")
+
+        {:error, :npc_not_found} ->
+          gm_console(state, char_id, "NPC #{npc_id} not found.")
+
+        {:error, :no_npcs_spawned} ->
+          gm_console(state, char_id, "Could not spawn any NPCs (no walkable tiles found).")
+
+        {:error, reason} ->
+          gm_console(state, char_id, "Invasion failed: #{inspect(reason)}")
+      end
+    else
+      _ -> gm_console(state, char_id, "Usage: /INVASION map_id npc_id count (max 200)")
+    end
+
+    {:noreply, state}
+  end
+
+  defp gm_invasion_stop(state, char_id, map_str) do
+    case Integer.parse(map_str) do
+      {map_id, ""} ->
+        case Arena.Events.InvasionServer.stop_invasion(map_id) do
+          :ok -> gm_console(state, char_id, "Invasion on map #{map_id} stopped.")
+          {:error, :no_invasion} -> gm_console(state, char_id, "No active invasion on map #{map_id}.")
+        end
+
+      _ ->
+        gm_console(state, char_id, "Usage: /INVASION STOP map_id")
+    end
+
+    {:noreply, state}
+  end
+
+  defp gm_invasion_list(state, char_id) do
+    case Arena.Events.InvasionServer.list_invasions() do
+      {:ok, invasions} when map_size(invasions) == 0 ->
+        gm_console(state, char_id, "No active invasions.")
+
+      {:ok, invasions} ->
+        Enum.each(invasions, fn {map_id, inv} ->
+          gm_console(state, char_id, "Map #{map_id}: NPC #{inv.npc_id}, #{inv.kills}/#{inv.total_count} killed")
+        end)
+    end
+
+    {:noreply, state}
+  end
+
+  defp gm_tournament_start(state, char_id, entity, max_str) do
+    max_players = case Integer.parse(max_str) do
+      {n, _} when n > 1 -> n
+      _ -> 16
+    end
+
+    case Arena.Events.TournamentServer.start_tournament(max_players, entity.name) do
+      :ok -> gm_console(state, char_id, "Tournament started (max #{max_players} players).")
+      {:error, :tournament_already_active} -> gm_console(state, char_id, "A tournament is already active.")
+    end
+
+    {:noreply, state}
+  end
+
+  defp gm_tournament_begin(state, char_id) do
+    case Arena.Events.TournamentServer.begin_matches() do
+      :ok -> gm_console(state, char_id, "Tournament matches started.")
+      {:error, :not_enough_players} -> gm_console(state, char_id, "Not enough players to start.")
+      {:error, reason} -> gm_console(state, char_id, "Error: #{inspect(reason)}")
+    end
+
+    {:noreply, state}
+  end
+
+  defp gm_tournament_cancel(state, char_id) do
+    case Arena.Events.TournamentServer.cancel() do
+      :ok -> gm_console(state, char_id, "Tournament cancelled.")
+      {:error, :no_tournament} -> gm_console(state, char_id, "No active tournament.")
+    end
+
+    {:noreply, state}
+  end
+
+  defp gm_tournament_status(state, char_id) do
+    case Arena.Events.TournamentServer.get_state() do
+      nil ->
+        gm_console(state, char_id, "No active tournament.")
+
+      t ->
+        participants = length(t.participants)
+        gm_console(state, char_id, "Tournament: phase=#{t.phase}, participants=#{participants}, round=#{t.current_round}")
+    end
+
+    {:noreply, state}
+  end
+
+  defp gm_event_start(state, char_id, entity, type_str, duration_str) do
+    type = case String.downcase(type_str) do
+      "xp_bonus" -> :xp_bonus
+      "gold_bonus" -> :gold_bonus
+      "drop_bonus" -> :drop_bonus
+      _ -> :custom
+    end
+
+    case Integer.parse(duration_str) do
+      {minutes, _} when minutes > 0 ->
+        case Arena.Events.EventManager.start_event(type, minutes, entity.name) do
+          :ok -> gm_console(state, char_id, "Event #{type} started for #{minutes} minutes.")
+          {:error, :event_already_active} -> gm_console(state, char_id, "Event #{type} already active.")
+        end
+
+      _ ->
+        gm_console(state, char_id, "Usage: /EVENT START type duration_minutes")
+    end
+
+    {:noreply, state}
+  end
+
+  defp gm_event_stop(state, char_id, type_str) do
+    type = case String.downcase(type_str) do
+      "xp_bonus" -> :xp_bonus
+      "gold_bonus" -> :gold_bonus
+      "drop_bonus" -> :drop_bonus
+      _ -> :custom
+    end
+
+    case Arena.Events.EventManager.stop_event(type) do
+      :ok -> gm_console(state, char_id, "Event #{type} stopped.")
+      {:error, :no_such_event} -> gm_console(state, char_id, "No active event of type #{type}.")
+    end
+
+    {:noreply, state}
+  end
+
+  defp gm_event_list(state, char_id) do
+    case Arena.Events.EventManager.list_events() do
+      {:ok, []} ->
+        gm_console(state, char_id, "No active events.")
+
+      {:ok, events} ->
+        Enum.each(events, fn ev ->
+          mins = div(ev.remaining_seconds, 60)
+          gm_console(state, char_id, "#{ev.type}: #{ev.description} (#{mins}m remaining, #{ev.participants} participants)")
+        end)
+    end
+
+    {:noreply, state}
   end
 
   # Look up a player on this map by name (case-insensitive)
