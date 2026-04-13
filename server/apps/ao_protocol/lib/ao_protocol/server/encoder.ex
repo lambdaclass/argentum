@@ -851,6 +851,103 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.show_forum_form(), payload)
   end
 
+  # ---- Quest packets (server → client) ----
+
+  def encode({:quest_list_send, %{quest_count: count, quest_ids_str: quest_ids_str}}) do
+    payload = Writer.write_int8(count) <> Writer.write_string8(quest_ids_str)
+    Writer.build_packet(PacketIds.Server.quest_list_send(), payload)
+  end
+
+  def encode({:quest_details, params}) do
+    classes = params[:required_classes] || []
+    classes_payload = Enum.reduce(classes, <<>>, fn c, acc -> acc <> Writer.write_int8(c) end)
+
+    npcs = params[:required_npcs] || []
+    npcs_payload = Enum.reduce(npcs, <<>>, fn npc, acc ->
+      acc <> Writer.write_int16(npc[:amount] || 0) <> Writer.write_int16(npc[:npc_id] || 0) <> Writer.write_int16(npc[:killed] || 0)
+    end)
+
+    objs = params[:required_objs] || []
+    objs_payload = Enum.reduce(objs, <<>>, fn obj, acc ->
+      acc <> Writer.write_int16(obj[:amount] || 0) <> Writer.write_int16(obj[:obj_id] || 0) <> Writer.write_int16(obj[:have] || 0)
+    end)
+
+    spells = params[:required_spells] || []
+    spells_payload = Enum.reduce(spells, <<>>, fn sp, acc ->
+      acc <> Writer.write_int16(sp[:spell_id] || 0) <> Writer.write_int16(sp[:have] || 0)
+    end)
+
+    reward_objs = params[:reward_objs] || []
+    reward_objs_payload = Enum.reduce(reward_objs, <<>>, fn obj, acc ->
+      acc <> Writer.write_int16(obj[:amount] || 0) <> Writer.write_int16(obj[:obj_id] || 0)
+    end)
+
+    reward_spells = params[:reward_spells] || []
+    reward_spells_payload = Enum.reduce(reward_spells, <<>>, fn sp_id, acc ->
+      acc <> Writer.write_int16(sp_id)
+    end)
+
+    payload =
+      Writer.write_int16(params[:quest_index] || 0) <>
+      Writer.write_int8(params[:required_level] || 0) <>
+      Writer.write_int8(params[:limit_level] || 0) <>
+      Writer.write_int8(length(classes)) <> classes_payload <>
+      Writer.write_int16(params[:required_quest] || 0) <>
+      Writer.write_int8(length(npcs)) <> npcs_payload <>
+      Writer.write_int8(length(objs)) <> objs_payload <>
+      Writer.write_int8(length(spells)) <> spells_payload <>
+      Writer.write_int8(params[:required_skill] || 0) <>
+      Writer.write_int8(params[:required_skill_value] || 0) <>
+      Writer.write_int32(params[:reward_gld] || 0) <>
+      Writer.write_int32(params[:reward_exp] || 0) <>
+      Writer.write_int8(length(reward_objs)) <> reward_objs_payload <>
+      Writer.write_int8(length(reward_spells)) <> reward_spells_payload
+
+    Writer.build_packet(PacketIds.Server.quest_details(), payload)
+  end
+
+  def encode({:npc_quest_list_send, %{quests: quests}}) do
+    quests_payload = Enum.reduce(quests, <<>>, fn q, acc ->
+      classes = q[:required_classes] || []
+      classes_bin = Enum.reduce(classes, <<>>, fn c, a -> a <> Writer.write_int8(c) end)
+      npcs = q[:required_npcs] || []
+      npcs_bin = Enum.reduce(npcs, <<>>, fn npc, a ->
+        a <> Writer.write_int16(npc[:amount] || 0) <> Writer.write_int16(npc[:npc_id] || 0)
+      end)
+      objs = q[:required_objs] || []
+      objs_bin = Enum.reduce(objs, <<>>, fn obj, a ->
+        a <> Writer.write_int16(obj[:amount] || 0) <> Writer.write_int16(obj[:obj_id] || 0)
+      end)
+      req_spells = q[:required_spells] || []
+      req_spells_bin = Enum.reduce(req_spells, <<>>, fn sp_id, a -> a <> Writer.write_int16(sp_id) end)
+      reward_objs = q[:reward_objs] || []
+      reward_objs_bin = Enum.reduce(reward_objs, <<>>, fn obj, a ->
+        a <> Writer.write_int16(obj[:amount] || 0) <> Writer.write_int16(obj[:obj_id] || 0)
+      end)
+      reward_spells = q[:reward_spells] || []
+      reward_spells_bin = Enum.reduce(reward_spells, <<>>, fn sp_id, a -> a <> Writer.write_int16(sp_id) end)
+
+      acc <>
+        Writer.write_int16(q[:quest_index] || 0) <>
+        Writer.write_int8(q[:required_level] || 0) <>
+        Writer.write_int16(q[:required_quest] || 0) <>
+        Writer.write_int8(length(classes)) <> classes_bin <>
+        Writer.write_int8(q[:limit_level] || 0) <>
+        Writer.write_int8(length(npcs)) <> npcs_bin <>
+        Writer.write_int8(length(objs)) <> objs_bin <>
+        Writer.write_int8(length(req_spells)) <> req_spells_bin <>
+        Writer.write_int8(q[:required_skill] || 0) <>
+        Writer.write_int8(q[:required_skill_value] || 0) <>
+        Writer.write_int32(q[:reward_gld] || 0) <>
+        Writer.write_int32(q[:reward_exp] || 0) <>
+        Writer.write_int8(length(reward_objs)) <> reward_objs_bin <>
+        Writer.write_int8(length(reward_spells)) <> reward_spells_bin
+    end)
+
+    payload = Writer.write_int8(length(quests)) <> quests_payload
+    Writer.build_packet(PacketIds.Server.npc_quest_list_send(), payload)
+  end
+
   # ---- Helpers ----
 
   defp encode_char_flags(params) do

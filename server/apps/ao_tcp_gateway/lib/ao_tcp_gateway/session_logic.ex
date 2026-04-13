@@ -2097,6 +2097,36 @@ defmodule AoTcpGateway.SessionLogic do
     {state, [@gm_not_authorized_msg]}
   end
 
+  # ---- Quest commands ----
+
+  def handle_command(state, {:quest, _}) when state.character_id != nil do
+    Arena.Map.MapServer.quest(state.map_id, state.character_id)
+    {state, []}
+  end
+
+  def handle_command(state, {:quest_list_request, _}) when state.character_id != nil do
+    Arena.Map.MapServer.quest_list_request(state.map_id, state.character_id)
+    {state, []}
+  end
+
+  def handle_command(state, {:quest_details_request, %{quest_slot: slot}})
+      when state.character_id != nil do
+    Arena.Map.MapServer.quest_details_request(state.map_id, state.character_id, slot)
+    {state, []}
+  end
+
+  def handle_command(state, {:quest_accept, %{list_index: index}})
+      when state.character_id != nil do
+    Arena.Map.MapServer.quest_accept(state.map_id, state.character_id, index)
+    {state, []}
+  end
+
+  def handle_command(state, {:quest_abandon, %{quest_slot: slot}})
+      when state.character_id != nil do
+    Arena.Map.MapServer.quest_abandon(state.map_id, state.character_id, slot)
+    {state, []}
+  end
+
   def handle_command(state, {command_type, _}) do
     Logger.debug("Unhandled command: #{command_type}")
     {state, []}

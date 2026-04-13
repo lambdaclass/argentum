@@ -305,6 +305,10 @@ defmodule Arena.Map.CombatHandlers do
                 if npc.owner_id == nil do
                   entity = %{entity | npcs_killed: entity.npcs_killed + 1}
 
+                  # Track quest NPC kill progress
+                  npc_id_for_quest = if npc_def, do: npc_def.id, else: 0
+                  entity = if npc_id_for_quest > 0, do: Arena.QuestServer.record_npc_kill(entity, npc_id_for_quest), else: entity
+
                   # Notify invasion system about NPC kill (melee)
                   Arena.Events.InvasionServer.notify_npc_killed(state.map_id, instance_id)
 
@@ -988,6 +992,10 @@ defmodule Arena.Map.CombatHandlers do
               state =
                 if npc.owner_id == nil do
                   entity = %{entity | npcs_killed: entity.npcs_killed + 1}
+
+                  # Track quest NPC kill progress
+                  npc_id_for_quest = if npc_def, do: npc_def.id, else: 0
+                  entity = if npc_id_for_quest > 0, do: Arena.QuestServer.record_npc_kill(entity, npc_id_for_quest), else: entity
 
                   # Notify invasion system about NPC kill (spell)
                   Arena.Events.InvasionServer.notify_npc_killed(state.map_id, instance_id)

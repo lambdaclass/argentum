@@ -41,7 +41,9 @@ defmodule Arena.Data.NpcDef do
     map_entry_price: 0,
     map_target_entry: 0,
     map_target_entry_x: 0,
-    map_target_entry_y: 0
+    map_target_entry_y: 0,
+    num_quest: 0,
+    quest_numbers: []
   ]
 
   @doc "Build an NpcDef from a parsed INI section (downcased keys)."
@@ -84,7 +86,9 @@ defmodule Arena.Data.NpcDef do
       map_entry_price: parse_int(section["mapentryprice"]),
       map_target_entry: parse_int(section["maptargetentry"]),
       map_target_entry_x: parse_int(section["maptargetentryx"]),
-      map_target_entry_y: parse_int(section["maptargetentryy"])
+      map_target_entry_y: parse_int(section["maptargetentryy"]),
+      num_quest: parse_int(section["numquest"]),
+      quest_numbers: parse_quest_numbers(section)
     }
   end
 
@@ -166,4 +170,20 @@ defmodule Arena.Data.NpcDef do
 
   defp parse_bool(nil), do: false
   defp parse_bool(val), do: parse_int(val) == 1
+
+  defp parse_quest_numbers(section) do
+    num = parse_int(section["numquest"])
+
+    if num > 0 do
+      for i <- 1..num,
+          val = section["questnumber#{i}"],
+          val != nil,
+          id = parse_int(val),
+          id != 0 do
+        id
+      end
+    else
+      []
+    end
+  end
 end

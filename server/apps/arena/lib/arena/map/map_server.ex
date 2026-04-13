@@ -191,6 +191,13 @@ defmodule Arena.Map.MapServer do
   def request_account_state(map_id, char_id), do: GenServer.cast(via(map_id), {:request_account_state, char_id})
   def request_reward(map_id, char_id), do: GenServer.cast(via(map_id), {:request_reward, char_id})
 
+  # Quest commands
+  def quest(map_id, char_id), do: GenServer.cast(via(map_id), {:quest, char_id})
+  def quest_list_request(map_id, char_id), do: GenServer.cast(via(map_id), {:quest_list_request, char_id})
+  def quest_details_request(map_id, char_id, slot), do: GenServer.cast(via(map_id), {:quest_details_request, char_id, slot})
+  def quest_accept(map_id, char_id, index), do: GenServer.cast(via(map_id), {:quest_accept, char_id, index})
+  def quest_abandon(map_id, char_id, slot), do: GenServer.cast(via(map_id), {:quest_abandon, char_id, slot})
+
   @doc "Place a ground item for a treasure event (VB6: MakeObj for events)."
   def place_event_item(map_id, x, y, item_id, amount) do
     GenServer.call(via(map_id), {:place_event_item, x, y, item_id, amount})
@@ -668,6 +675,11 @@ defmodule Arena.Map.MapServer do
   def handle_cast({:arena_entry, char_id}, state), do: Social.handle_arena_entry(state, char_id)
   def handle_cast({:request_account_state, char_id}, state), do: Social.handle_request_account_state(state, char_id)
   def handle_cast({:request_reward, char_id}, state), do: Social.handle_request_reward(state, char_id)
+  def handle_cast({:quest, char_id}, state), do: Social.handle_quest(state, char_id)
+  def handle_cast({:quest_list_request, char_id}, state), do: Social.handle_quest_list_request(state, char_id)
+  def handle_cast({:quest_details_request, char_id, slot}, state), do: Social.handle_quest_details_request(state, char_id, slot)
+  def handle_cast({:quest_accept, char_id, index}, state), do: Social.handle_quest_accept(state, char_id, index)
+  def handle_cast({:quest_abandon, char_id, slot}, state), do: Social.handle_quest_abandon(state, char_id, slot)
 
   def handle_cast({:set_duel_state, char_id, in_duel, opponent_id}, state) do
     case Map.fetch(state.players, char_id) do

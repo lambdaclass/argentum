@@ -13,6 +13,7 @@ defmodule Arena.Data.GameData do
   alias Arena.Data.IniParser
   alias Arena.Data.ItemDef
   alias Arena.Data.NpcDef
+  alias Arena.Data.QuestDef
   alias Arena.Data.SpellDef
 
   @table :arena_game_data
@@ -289,6 +290,22 @@ defmodule Arena.Data.GameData do
     end
   end
 
+  @doc "Get quest definition by ID. Returns nil if not found."
+  def get_quest(quest_id) when is_integer(quest_id) do
+    case :ets.lookup(@table, {:quest, quest_id}) do
+      [{_, quest_def}] -> quest_def
+      [] -> nil
+    end
+  end
+
+  @doc "Get total number of quests loaded."
+  def quest_count do
+    case :ets.lookup(@table, :quest_count) do
+      [{_, count}] -> count
+      [] -> 0
+    end
+  end
+
   @doc "Get XP threshold associated with a level."
   def exp_for_level(level) when is_integer(level) and level > 0 do
     case :ets.lookup(@table, {:exp_for_level, level}) do
@@ -310,6 +327,7 @@ defmodule Arena.Data.GameData do
     load_npcs_dat()
     load_faction_data()
     load_tesoros_dat()
+    load_quests_dat()
 
     Logger.info("GameData loaded into ETS (#{:ets.info(table, :size)} entries)")
     {:ok, %{}}
@@ -660,6 +678,34 @@ defmodule Arena.Data.GameData do
     case Integer.parse(str) do
       {val, _} -> val
       :error -> 0
+    end
+  end
+
+  defp load_quests_dat do
+    path = Path.join(dat_dir(), "Quests.DAT")
+
+    case IniParser.parse_file(path) do
+      {:ok, sections} ->
+        count =
+          Enum.reduce(sections, 0, fn {section_name, fields}, acc ->
+            case Regex.run(~r/^QUEST(\d+)$/i, section_name) do
+              [_, id_str] ->
+                quest_id = String.to_integer(id_str)
+                quest_def = QuestDef.from_section(quest_id, fields)
+                :ets.insert(@table, {{:quest, quest_id}, quest_def})
+                acc + 1
+
+              _ ->
+                acc
+            end
+          end)
+
+        :ets.insert(@table, {:quest_count, count})
+        Logger.info("Loaded #{count} quest definitions from Quests.DAT")
+
+      {:error, reason} ->
+        Logger.warning("Could not load Quests.DAT: #{inspect(reason)}. No quest data available.")
+        :ets.insert(@table, {:quest_count, 0})
     end
   end
 

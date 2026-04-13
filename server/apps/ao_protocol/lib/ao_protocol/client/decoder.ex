@@ -1282,6 +1282,35 @@ defmodule AoProtocol.Client.Decoder do
     end
   end
 
+  # ---- Quest packets ----
+
+  # Quest (ID 258) — talk to quest NPC, no payload
+  defp decode_packet(258, rest), do: {:ok, {:quest, %{}}, rest}
+
+  # QuestListRequest (ID 260) — no payload
+  defp decode_packet(260, rest), do: {:ok, {:quest_list_request, %{}}, rest}
+
+  # QuestDetailsRequest (ID 261) — quest_slot(I8)
+  defp decode_packet(261, rest) do
+    with {:ok, quest_slot, rest} <- Reader.read_int8(rest) do
+      {:ok, {:quest_details_request, %{quest_slot: quest_slot}}, rest}
+    end
+  end
+
+  # QuestAbandon (ID 262) — quest_slot(I8)
+  defp decode_packet(262, rest) do
+    with {:ok, quest_slot, rest} <- Reader.read_int8(rest) do
+      {:ok, {:quest_abandon, %{quest_slot: quest_slot}}, rest}
+    end
+  end
+
+  # QuestAccept (ID 500) — list_index(I8)
+  defp decode_packet(500, rest) do
+    with {:ok, list_index, rest} <- Reader.read_int8(rest) do
+      {:ok, {:quest_accept, %{list_index: list_index}}, rest}
+    end
+  end
+
   # Unknown packet
   defp decode_packet(id, _rest), do: {:error, {:unknown_packet, id}}
 

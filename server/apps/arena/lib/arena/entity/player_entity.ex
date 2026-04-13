@@ -170,6 +170,9 @@ defmodule Arena.Entity.PlayerEntity do
     # Gambling counters (persisted)
     gamble_wins: 0,
     gamble_losses: 0,
-    gamble_plays: 0
+    gamble_plays: 0,
+    active_quests: [],
+    completed_quests: MapSet.new(),
+    quest_npc_id: nil
   ]
 end

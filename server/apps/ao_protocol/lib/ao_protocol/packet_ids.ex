@@ -93,6 +93,13 @@ defmodule AoProtocol.PacketIds do
     # Arena entry (VB6: eArenaEntry = 259)
     def arena_entry, do: 259
 
+    # Quests (VB6: eQuest=258, eQuestListRequest=260, eQuestDetailsRequest=261, eQuestAbandon=262)
+    def quest, do: 258
+    def quest_accept, do: 500
+    def quest_list_request, do: 260
+    def quest_details_request, do: 261
+    def quest_abandon, do: 262
+
     # Other
     def quit, do: 39
     def rest, do: 47
@@ -249,6 +256,11 @@ defmodule AoProtocol.PacketIds do
     # Sent by WsHandler after login so the web client can reconnect.
     # TCP handler never sends this. See encoder.ex and ws_handler.ex.
     def session_token, do: 200
+
+    # Quests (VB6: eQuestDetails=153, eQuestListSend=154, eNpcQuestListSend=155)
+    def quest_details, do: 153
+    def quest_list_send, do: 154
+    def npc_quest_list_send, do: 155
 
     # world_pack_signature (203) — WS-only extension carrying the expected
     # browser world-pack version/hash for this login/bootstrap.
