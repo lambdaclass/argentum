@@ -121,7 +121,18 @@ defmodule Arena.GmAdversarialTest do
       muted_until: 0,
       last_chat_at: -1_000_000_000_000,
       spouse_id: 0,
-      marriage_proposal_target: nil
+      marriage_proposal_target: nil,
+      in_duel: false,
+      duel_opponent_id: nil,
+      gamble_wins: 0,
+      gamble_losses: 0,
+      gamble_plays: 0,
+      active_quests: [],
+      completed_quests: MapSet.new(),
+      quest_npc_id: nil,
+      mounted: false,
+      saddle_obj_index: 0,
+      saddle_slot: 0
     }
 
     Map.merge(defaults, overrides)
@@ -1493,6 +1504,640 @@ defmodule Arena.GmAdversarialTest do
 
       {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/ROYALKICK Victim")
       assert new_state.players[:victim].faction == :none
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Session-level: dead player guards
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "dead player action rejection" do
+    test "dead player cannot equip items" do
+      state = make_session_state(%{is_dead: true})
+      {new_state, messages} = SessionLogic.handle_command(state, {:equip_item, %{slot: 1}})
+      assert new_state == state
+      assert [{:console_msg, %{message: msg}}] = messages
+      assert msg == "Estás muerto. No podés equipar objetos."
+    end
+
+    test "dead player cannot use items" do
+      state = make_session_state(%{is_dead: true})
+      {new_state, messages} = SessionLogic.handle_command(state, {:use_item, %{slot: 1}})
+      assert new_state == state
+      assert [{:console_msg, %{message: msg}}] = messages
+      assert msg == "Estás muerto. No podés usar objetos."
+    end
+
+    test "dead player cannot attack" do
+      state = make_session_state(%{is_dead: true})
+      {new_state, messages} = SessionLogic.handle_command(state, {:attack, %{}})
+      assert new_state == state
+      assert [{:console_msg, %{message: msg}}] = messages
+      assert msg == "Estás muerto. No podés atacar."
+    end
+
+    test "dead player cannot cast spells" do
+      state = make_session_state(%{is_dead: true})
+      {new_state, messages} = SessionLogic.handle_command(state, {:cast_spell, %{spell_slot: 1}})
+      assert new_state == state
+      assert [{:console_msg, %{message: msg}}] = messages
+      assert msg == "Estás muerto. No podés lanzar hechizos."
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Session-level: commerce state guards
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "commerce packet spoofing (not in commerce)" do
+    test "commerce_buy without open shop is rejected" do
+      state = make_session_state(%{in_commerce: false})
+      {new_state, messages} = SessionLogic.handle_command(state, {:commerce_buy, %{slot: 1, amount: 1}})
+      assert new_state == state
+      assert [{:console_msg, %{message: "No estas en un comercio."}}] = messages
+    end
+
+    test "commerce_sell without open shop is rejected" do
+      state = make_session_state(%{in_commerce: false})
+      {new_state, messages} = SessionLogic.handle_command(state, {:commerce_sell, %{slot: 1, amount: 1}})
+      assert new_state == state
+      assert [{:console_msg, %{message: "No estas en un comercio."}}] = messages
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Session-level: bank state guards
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "bank packet spoofing (not in bank)" do
+    test "bank_deposit without open bank is rejected" do
+      state = make_session_state(%{in_bank: false})
+      {new_state, messages} = SessionLogic.handle_command(state, {:bank_deposit, %{slot: 1, amount: 10, slot_destino: 1}})
+      assert new_state == state
+      assert [{:console_msg, %{message: "No estas en un banco."}}] = messages
+    end
+
+    test "bank_extract_item without open bank is rejected" do
+      state = make_session_state(%{in_bank: false})
+      {new_state, messages} = SessionLogic.handle_command(state, {:bank_extract_item, %{slot: 1, amount: 1, slot_destino: 2}})
+      assert new_state == state
+      assert [{:console_msg, %{message: "No estas en un banco."}}] = messages
+    end
+
+    test "bank_deposit_gold without open bank is rejected" do
+      state = make_session_state(%{in_bank: false})
+      {new_state, messages} = SessionLogic.handle_command(state, {:bank_deposit_gold, %{amount: 100}})
+      assert new_state == state
+      assert [{:console_msg, %{message: "No estas en un banco."}}] = messages
+    end
+
+    test "bank_extract_gold without open bank is rejected" do
+      state = make_session_state(%{in_bank: false})
+      {new_state, messages} = SessionLogic.handle_command(state, {:bank_extract_gold, %{amount: 100}})
+      assert new_state == state
+      assert [{:console_msg, %{message: "No estas en un banco."}}] = messages
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Session-level: trade state guards
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "trade packet spoofing (not in trade)" do
+    test "user_commerce_offer without active trade is rejected" do
+      state = make_session_state(%{in_trade: false})
+      {new_state, messages} = SessionLogic.handle_command(state, {:user_commerce_offer, %{obj_index: 1, amount: 1}})
+      assert new_state == state
+      assert [{:console_msg, %{message: "No estas en un comercio con otro jugador."}}] = messages
+    end
+
+    test "user_commerce_ok without active trade is rejected" do
+      state = make_session_state(%{in_trade: false})
+      {new_state, messages} = SessionLogic.handle_command(state, {:user_commerce_ok, %{}})
+      assert new_state == state
+      assert [{:console_msg, %{message: "No estas en un comercio con otro jugador."}}] = messages
+    end
+
+    test "user_commerce_reject without active trade is rejected" do
+      state = make_session_state(%{in_trade: false})
+      {new_state, messages} = SessionLogic.handle_command(state, {:user_commerce_reject, %{}})
+      assert new_state == state
+      assert [{:console_msg, %{message: "No estas en un comercio con otro jugador."}}] = messages
+    end
+
+    test "user_commerce_end without active trade is rejected" do
+      state = make_session_state(%{in_trade: false})
+      {new_state, messages} = SessionLogic.handle_command(state, {:user_commerce_end, %{}})
+      assert new_state == state
+      assert [{:console_msg, %{message: "No estas en un comercio con otro jugador."}}] = messages
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Session-level: nil character_id fallthrough for regular commands
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "nil character_id fallthrough for regular commands" do
+    @regular_commands [
+      {:equip_item, %{slot: 1}},
+      {:use_item, %{slot: 1}},
+      {:attack, %{}},
+      {:cast_spell, %{spell_slot: 1}},
+      {:commerce_buy, %{slot: 1, amount: 1}},
+      {:commerce_sell, %{slot: 1, amount: 1}},
+      {:bank_deposit, %{slot: 1, amount: 1, slot_destino: 1}},
+      {:bank_extract_item, %{slot: 1, amount: 1, slot_destino: 1}},
+      {:bank_deposit_gold, %{amount: 100}},
+      {:bank_extract_gold, %{amount: 100}},
+      {:user_commerce_offer, %{obj_index: 1, amount: 1}},
+      {:user_commerce_ok, %{}},
+      {:user_commerce_reject, %{}},
+      {:user_commerce_end, %{}},
+      {:quest, %{}},
+      {:quest_list_request, %{}},
+      {:quest_details_request, %{quest_slot: 1}},
+      {:quest_accept, %{list_index: 1}},
+      {:quest_abandon, %{quest_slot: 1}}
+    ]
+
+    for {cmd, payload} <- @regular_commands do
+      test "#{cmd} with nil character_id returns empty messages" do
+        state = make_session_state(%{character_id: nil})
+        {new_state, messages} = SessionLogic.handle_command(state, {unquote(cmd), unquote(Macro.escape(payload))})
+        assert new_state == state
+        assert messages == []
+      end
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Session-level: forum_post without open forum
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "forum_post privilege guard" do
+    test "forum_post with nil viewing_forum_id is rejected" do
+      state = make_session_state(%{viewing_forum_id: nil})
+      {new_state, messages} = SessionLogic.handle_command(state, {:forum_post, %{title: "test", message: "body"}})
+      assert new_state == state
+      assert [{:console_msg, %{message: "El foro no esta disponible."}}] = messages
+    end
+
+    test "forum_post with viewing_forum_id = 0 is rejected" do
+      state = make_session_state(%{viewing_forum_id: 0})
+      {_new_state, messages} = SessionLogic.handle_command(state, {:forum_post, %{title: "test", message: "body"}})
+      assert [{:console_msg, %{message: "El foro no esta disponible."}}] = messages
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Map-level: non-GM rejection for events/invasion/tournament slash commands
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "events/invasion/tournament non-GM rejection" do
+    @event_commands [
+      "/INVASION 1 5 50",
+      "/INVASION STOP 1",
+      "/INVASION LIST",
+      "/TOURNAMENT START 16",
+      "/TOURNAMENT BEGIN",
+      "/TOURNAMENT CANCEL",
+      "/TOURNAMENT STATUS",
+      "/EVENT START xp_bonus 30",
+      "/EVENT STOP xp_bonus",
+      "/EVENT LIST"
+    ]
+
+    for cmd <- @event_commands do
+      test "non-GM sending #{cmd} is silently ignored" do
+        entity = make_entity(%{char_id: :player, gm: false})
+        sessions = %{player: self()}
+        state = make_map_state(%{player: entity}, sessions: sessions)
+        assert {:noreply, ^state} = Social.handle_chat(state, :player, unquote(cmd))
+      end
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Map-level: GM invasion edge cases
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "GM invasion edge cases" do
+    test "/INVASION with non-numeric map_id returns usage" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_chat(state, :gm_player, "/INVASION abc 5 10")
+      assert new_state.players == state.players
+      assert_receive {:send_raw, _}
+    end
+
+    test "/INVASION with zero count returns usage" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/INVASION 1 5 0")
+      assert_receive {:send_raw, _}
+    end
+
+    test "/INVASION with count > 200 returns usage" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/INVASION 1 5 201")
+      assert_receive {:send_raw, _}
+    end
+
+    test "/INVASION with negative count returns usage" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/INVASION 1 5 -1")
+      assert_receive {:send_raw, _}
+    end
+
+    test "/INVASION STOP with no active invasion returns error" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/INVASION STOP 9999")
+      assert_receive {:send_raw, _}
+    end
+
+    test "/INVASION STOP with non-numeric map_id returns usage" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/INVASION STOP abc")
+      assert_receive {:send_raw, _}
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Map-level: GM tournament edge cases
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "GM tournament edge cases" do
+    test "/TOURNAMENT CANCEL with no active tournament returns error" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      # Ensure no tournament is active first
+      Arena.Events.TournamentServer.cancel()
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/TOURNAMENT CANCEL")
+      assert_receive {:send_raw, _}
+    end
+
+    test "/TOURNAMENT STATUS with no active tournament returns message" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      Arena.Events.TournamentServer.cancel()
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/TOURNAMENT STATUS")
+      assert_receive {:send_raw, _}
+    end
+
+    test "/TOURNAMENT BEGIN with no active tournament returns error" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      Arena.Events.TournamentServer.cancel()
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/TOURNAMENT BEGIN")
+      assert_receive {:send_raw, _}
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Map-level: GM event edge cases
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "GM event edge cases" do
+    test "/EVENT START with zero duration returns usage" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/EVENT START xp_bonus 0")
+      assert_receive {:send_raw, _}
+    end
+
+    test "/EVENT START with negative duration returns usage" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/EVENT START xp_bonus -5")
+      assert_receive {:send_raw, _}
+    end
+
+    test "/EVENT STOP with no active event returns error" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      # Stop any stale events first
+      Arena.Events.EventManager.stop_event(:xp_bonus)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/EVENT STOP xp_bonus")
+      assert_receive {:send_raw, _}
+    end
+
+    test "/EVENT LIST with no active events returns message" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      # Stop all events
+      Arena.Events.EventManager.stop_event(:xp_bonus)
+      Arena.Events.EventManager.stop_event(:gold_bonus)
+      Arena.Events.EventManager.stop_event(:drop_bonus)
+      Arena.Events.EventManager.stop_event(:custom)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/EVENT LIST")
+      assert_receive {:send_raw, _}
+    end
+
+    test "/EVENT START with unknown type maps to :custom" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      # Clean up any stale custom event
+      Arena.Events.EventManager.stop_event(:custom)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/EVENT START unknown_type 5")
+      assert_receive {:send_raw, _}
+
+      # Clean up
+      Arena.Events.EventManager.stop_event(:custom)
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Map-level: handle_gm_rain_toggle non-GM guard
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "handle_gm_rain_toggle privilege guard" do
+    test "non-GM calling handle_gm_rain_toggle is rejected with error message" do
+      entity = make_entity(%{char_id: :player, gm: false})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_gm_rain_toggle(state, :player)
+      assert new_state.meta.rain == false
+      assert_receive {:send_raw, _}
+    end
+
+    test "GM calling handle_gm_rain_toggle toggles rain" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_gm_rain_toggle(state, :gm_player)
+      assert new_state.meta.rain == true
+    end
+
+    test "unknown char_id calling handle_gm_rain_toggle is ignored" do
+      state = make_map_state(%{})
+      {:noreply, new_state} = Social.handle_gm_rain_toggle(state, :unknown)
+      assert new_state == state
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Map-level: quest system adversarial tests
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "quest_accept without NPC interaction" do
+    test "quest_accept with nil quest_npc_id sends error" do
+      entity = make_entity(%{char_id: :player, quest_npc_id: nil})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_quest_accept(state, :player, 1)
+      # Entity should be unchanged
+      assert new_state.players[:player].active_quests == []
+      assert_receive {:send_raw, _}
+    end
+  end
+
+  describe "quest_abandon with out-of-range slot" do
+    test "quest_abandon with slot 99 and no active quests sends error" do
+      entity = make_entity(%{char_id: :player, active_quests: []})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_quest_abandon(state, :player, 99)
+      assert new_state.players[:player].active_quests == []
+      assert_receive {:send_raw, _}
+    end
+
+    test "quest_abandon with slot 0 and no active quests sends error" do
+      entity = make_entity(%{char_id: :player, active_quests: []})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_quest_abandon(state, :player, 0)
+      assert new_state.players[:player].active_quests == []
+      assert_receive {:send_raw, _}
+    end
+  end
+
+  describe "quest_details_request with out-of-range slot" do
+    test "quest_details_request with slot 99 and no active quests sends error" do
+      entity = make_entity(%{char_id: :player, active_quests: []})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_quest_details_request(state, :player, 99)
+      assert new_state.players[:player].active_quests == []
+      assert_receive {:send_raw, _}
+    end
+
+    test "quest_details_request with slot 0 and no active quests sends error" do
+      entity = make_entity(%{char_id: :player, active_quests: []})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_quest_details_request(state, :player, 0)
+      assert new_state.players[:player].active_quests == []
+      assert_receive {:send_raw, _}
+    end
+  end
+
+  describe "quest_list_request with no active quests" do
+    test "quest_list_request sends packet with quest_count 0" do
+      entity = make_entity(%{char_id: :player, active_quests: []})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_quest_list_request(state, :player)
+      assert_receive {:send_raw, _raw}
+    end
+  end
+
+  describe "quest handlers with unknown char_id" do
+    test "quest_list_request for unknown char_id is silently ignored" do
+      state = make_map_state(%{})
+      {:noreply, new_state} = Social.handle_quest_list_request(state, :unknown)
+      assert new_state == state
+    end
+
+    test "quest_details_request for unknown char_id is silently ignored" do
+      state = make_map_state(%{})
+      {:noreply, new_state} = Social.handle_quest_details_request(state, :unknown, 1)
+      assert new_state == state
+    end
+
+    test "quest_accept for unknown char_id is silently ignored" do
+      state = make_map_state(%{})
+      {:noreply, new_state} = Social.handle_quest_accept(state, :unknown, 1)
+      assert new_state == state
+    end
+
+    test "quest_abandon for unknown char_id is silently ignored" do
+      state = make_map_state(%{})
+      {:noreply, new_state} = Social.handle_quest_abandon(state, :unknown, 1)
+      assert new_state == state
+    end
+
+    test "handle_quest for unknown char_id is silently ignored" do
+      state = make_map_state(%{})
+      {:noreply, new_state} = Social.handle_quest(state, :unknown)
+      assert new_state == state
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # QuestServer unit tests (pure functions)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "QuestServer.abandon_quest edge cases" do
+    test "abandon_quest with negative slot returns entity unchanged" do
+      entity = make_entity(%{active_quests: [%{quest_id: 1, npc_kills: %{}, started_at: 0}]})
+      result = Arena.QuestServer.abandon_quest(entity, -1)
+      assert result.active_quests == entity.active_quests
+    end
+
+    test "abandon_quest with slot beyond active quests returns entity unchanged" do
+      entity = make_entity(%{active_quests: [%{quest_id: 1, npc_kills: %{}, started_at: 0}]})
+      result = Arena.QuestServer.abandon_quest(entity, 99)
+      assert result.active_quests == entity.active_quests
+    end
+
+    test "abandon_quest with empty active_quests returns entity unchanged" do
+      entity = make_entity(%{active_quests: []})
+      result = Arena.QuestServer.abandon_quest(entity, 0)
+      assert result.active_quests == []
+    end
+  end
+
+  describe "QuestServer.quest_complete? edge cases" do
+    test "quest_complete? with negative slot returns false" do
+      entity = make_entity(%{})
+      assert Arena.QuestServer.quest_complete?(entity, -1) == false
+    end
+
+    test "quest_complete? with slot beyond active quests returns false" do
+      entity = make_entity(%{active_quests: []})
+      assert Arena.QuestServer.quest_complete?(entity, 0) == false
+    end
+  end
+
+  describe "QuestServer.complete_quest edge cases" do
+    test "complete_quest with negative slot returns entity unchanged" do
+      entity = make_entity(%{active_quests: [%{quest_id: 1, npc_kills: %{}, started_at: 0}]})
+      result = Arena.QuestServer.complete_quest(entity, -1)
+      assert result == entity
+    end
+
+    test "complete_quest with slot beyond active quests returns entity unchanged" do
+      entity = make_entity(%{active_quests: []})
+      result = Arena.QuestServer.complete_quest(entity, 0)
+      assert result == entity
+    end
+  end
+
+  describe "QuestServer.build_quest_details edge cases" do
+    test "build_quest_details with negative slot returns nil" do
+      entity = make_entity(%{})
+      assert Arena.QuestServer.build_quest_details(entity, -1) == nil
+    end
+
+    test "build_quest_details with slot beyond active quests returns nil" do
+      entity = make_entity(%{active_quests: []})
+      assert Arena.QuestServer.build_quest_details(entity, 0) == nil
+    end
+  end
+
+  describe "QuestServer.record_npc_kill with no active quests" do
+    test "record_npc_kill returns entity unchanged when no quests" do
+      entity = make_entity(%{active_quests: []})
+      result = Arena.QuestServer.record_npc_kill(entity, 5)
+      assert result.active_quests == []
+    end
+  end
+
+  describe "QuestServer.build_npc_quest_list with invalid quest IDs" do
+    test "build_npc_quest_list with non-existent quest IDs returns empty" do
+      result = Arena.QuestServer.build_npc_quest_list([99999, 99998])
+      assert result == []
+    end
+
+    test "build_npc_quest_list with empty list returns empty" do
+      result = Arena.QuestServer.build_npc_quest_list([])
+      assert result == []
+    end
+  end
+
+  describe "QuestServer.available_quests_for_npc edge cases" do
+    test "available_quests_for_npc with NPC having no quest_numbers returns empty" do
+      entity = make_entity(%{})
+      npc_def = %{quest_numbers: []}
+      result = Arena.QuestServer.available_quests_for_npc(entity, npc_def)
+      assert result == []
+    end
+
+    test "available_quests_for_npc with non-existent quest IDs returns empty" do
+      entity = make_entity(%{})
+      npc_def = %{quest_numbers: [99999, 99998]}
+      result = Arena.QuestServer.available_quests_for_npc(entity, npc_def)
+      assert result == []
+    end
+  end
+
+  describe "QuestServer.can_accept_quest? edge cases" do
+    test "can_accept_quest? with max active quests returns false" do
+      quests = for i <- 1..20, do: %{quest_id: i, npc_kills: %{}, started_at: 0}
+      entity = make_entity(%{active_quests: quests})
+      quest_def = %{id: 21, required_level: 0, limit_level: 0, repetible: false}
+      assert Arena.QuestServer.can_accept_quest?(entity, quest_def) == false
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # GM unknown command fallback
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "GM unknown command fallback" do
+    test "GM sending unknown slash command receives error message" do
+      gm = make_entity(%{char_id: :gm_player, gm: true, name: "AdminGM"})
+      sessions = %{gm_player: self()}
+      state = make_map_state(%{gm_player: gm}, sessions: sessions)
+
+      {:noreply, _new_state} = Social.handle_chat(state, :gm_player, "/NONEXISTENTCOMMAND")
+      assert_receive {:send_raw, _}
     end
   end
 end
