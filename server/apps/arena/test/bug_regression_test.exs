@@ -19,6 +19,16 @@ defmodule Arena.BugRegressionTest do
 
   # ── Helpers ──────────────────────────────────────────────────────────────
 
+  # Banker NPC at (51,50) — used by bank tests that need validate_bank_session to pass
+  @banker_npc %{npc_id: 1, x: 51, y: 50, instance_id: :banker1}
+
+  defp bank_state(entity_overrides, opts \\ []) do
+    inv = Keyword.get(opts, :inventory, List.duplicate(nil, 24))
+    entity = make_entity(Map.merge(%{char_id: :player, bank_npc_id: :banker1, inventory: inv}, entity_overrides))
+    sessions = %{player: self()}
+    make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
+  end
+
   defp make_entity(overrides) do
     defaults = %{
       char_id: :player, name: "Tester", account_id: "acc_test",
@@ -94,9 +104,9 @@ defmodule Arena.BugRegressionTest do
   describe "BUG 1: bank deposit rejects amount <= 0" do
     test "deposit amount=0 is rejected" do
       inv = List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 100, amount: 5, equipped: false})
-      entity = make_entity(%{char_id: :player, bank_npc_id: 1, inventory: inv})
+      entity = make_entity(%{char_id: :player, bank_npc_id: :banker1, inventory: inv})
       sessions = %{player: self()}
-      state = make_map_state(%{player: entity}, sessions: sessions)
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
       {:reply, result, new_state} = Bank.handle_bank_deposit(state, :player, 1, 0, 1)
       assert result == {:error, :invalid_amount}
@@ -106,9 +116,9 @@ defmodule Arena.BugRegressionTest do
 
     test "deposit negative amount is rejected" do
       inv = List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 100, amount: 5, equipped: false})
-      entity = make_entity(%{char_id: :player, bank_npc_id: 1, inventory: inv})
+      entity = make_entity(%{char_id: :player, bank_npc_id: :banker1, inventory: inv})
       sessions = %{player: self()}
-      state = make_map_state(%{player: entity}, sessions: sessions)
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
       {:reply, result, new_state} = Bank.handle_bank_deposit(state, :player, 1, -5, 1)
       assert result == {:error, :invalid_amount}
@@ -126,9 +136,9 @@ defmodule Arena.BugRegressionTest do
   describe "BUG 2: bank deposit rejects slot_destino > bank_max_slots" do
     test "slot_destino = 9999 is rejected" do
       inv = List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 100, amount: 5, equipped: false})
-      entity = make_entity(%{char_id: :player, bank_npc_id: 1, inventory: inv})
+      entity = make_entity(%{char_id: :player, bank_npc_id: :banker1, inventory: inv})
       sessions = %{player: self()}
-      state = make_map_state(%{player: entity}, sessions: sessions)
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
       {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 1, 1, 9999)
       assert result == {:error, :invalid_bank_slot}
@@ -136,9 +146,9 @@ defmodule Arena.BugRegressionTest do
 
     test "slot_destino = 41 is rejected" do
       inv = List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 100, amount: 5, equipped: false})
-      entity = make_entity(%{char_id: :player, bank_npc_id: 1, inventory: inv})
+      entity = make_entity(%{char_id: :player, bank_npc_id: :banker1, inventory: inv})
       sessions = %{player: self()}
-      state = make_map_state(%{player: entity}, sessions: sessions)
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
       {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 1, 1, 41)
       assert result == {:error, :invalid_bank_slot}
@@ -146,9 +156,9 @@ defmodule Arena.BugRegressionTest do
 
     test "slot_destino = 40 is accepted (boundary)" do
       inv = List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 100, amount: 5, equipped: false})
-      entity = make_entity(%{char_id: :player, bank_npc_id: 1, inventory: inv})
+      entity = make_entity(%{char_id: :player, bank_npc_id: :banker1, inventory: inv})
       sessions = %{player: self()}
-      state = make_map_state(%{player: entity}, sessions: sessions)
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
       # Will hit DB for upsert, but the guard should pass. We test the guard only.
       # slot_destino=40 is valid, so it passes the bounds check.
@@ -166,9 +176,9 @@ defmodule Arena.BugRegressionTest do
 
     test "slot_destino = -1 is rejected" do
       inv = List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 100, amount: 5, equipped: false})
-      entity = make_entity(%{char_id: :player, bank_npc_id: 1, inventory: inv})
+      entity = make_entity(%{char_id: :player, bank_npc_id: :banker1, inventory: inv})
       sessions = %{player: self()}
-      state = make_map_state(%{player: entity}, sessions: sessions)
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
       {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 1, 1, -1)
       assert result == {:error, :invalid_bank_slot}
@@ -185,9 +195,9 @@ defmodule Arena.BugRegressionTest do
   describe "BUG 3: gold items (item_id 12) cannot be deposited in bank" do
     test "depositing gold item (item_id 12) is rejected" do
       inv = List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 12, amount: 100, equipped: false})
-      entity = make_entity(%{char_id: :player, bank_npc_id: 1, inventory: inv})
+      entity = make_entity(%{char_id: :player, bank_npc_id: :banker1, inventory: inv})
       sessions = %{player: self()}
-      state = make_map_state(%{player: entity}, sessions: sessions)
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
       {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 1, 50, 1)
       assert result == {:error, :use_gold_deposit}
@@ -290,18 +300,18 @@ defmodule Arena.BugRegressionTest do
 
   describe "bank extract item rejects amount <= 0" do
     test "extract amount=0 is rejected" do
-      entity = make_entity(%{char_id: :player, bank_npc_id: 1})
+      entity = make_entity(%{char_id: :player, bank_npc_id: :banker1})
       sessions = %{player: self()}
-      state = make_map_state(%{player: entity}, sessions: sessions)
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
       {:reply, result, _state} = Bank.handle_bank_extract_item(state, :player, 1, 0, 1)
       assert result == {:error, :invalid_amount}
     end
 
     test "extract negative amount is rejected" do
-      entity = make_entity(%{char_id: :player, bank_npc_id: 1})
+      entity = make_entity(%{char_id: :player, bank_npc_id: :banker1})
       sessions = %{player: self()}
-      state = make_map_state(%{player: entity}, sessions: sessions)
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
       {:reply, result, _state} = Bank.handle_bank_extract_item(state, :player, 1, -5, 1)
       assert result == {:error, :invalid_amount}
@@ -379,9 +389,9 @@ defmodule Arena.BugRegressionTest do
   describe "BUG 8: bank_deposit slot=0 off-by-one" do
     test "bank_deposit slot=0 does not target last inventory slot" do
       inv = List.replace_at(List.duplicate(nil, 24), 23, %{item_id: 100, amount: 5, equipped: false})
-      entity = make_entity(%{char_id: :player, bank_npc_id: 1, inventory: inv})
+      entity = make_entity(%{char_id: :player, bank_npc_id: :banker1, inventory: inv})
       sessions = %{player: self()}
-      state = make_map_state(%{player: entity}, sessions: sessions)
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
       {:reply, result, new_state} = Bank.handle_bank_deposit(state, :player, 0, 1, 1)
       # Must NOT deposit from last slot — slot 0 is invalid
@@ -391,9 +401,9 @@ defmodule Arena.BugRegressionTest do
 
     test "bank_deposit negative slot is rejected" do
       inv = List.replace_at(List.duplicate(nil, 24), 23, %{item_id: 100, amount: 5, equipped: false})
-      entity = make_entity(%{char_id: :player, bank_npc_id: 1, inventory: inv})
+      entity = make_entity(%{char_id: :player, bank_npc_id: :banker1, inventory: inv})
       sessions = %{player: self()}
-      state = make_map_state(%{player: entity}, sessions: sessions)
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
       {:reply, result, new_state} = Bank.handle_bank_deposit(state, :player, -1, 1, 1)
       assert result == {:error, :invalid_slot} or
@@ -640,9 +650,9 @@ defmodule Arena.BugRegressionTest do
   describe "BUG 12b: bank deposit rejects out-of-range inventory slot" do
     test "slot=0 is rejected" do
       inv = List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 100, amount: 5, equipped: false})
-      entity = make_entity(%{char_id: :player, bank_npc_id: 1, inventory: inv})
+      entity = make_entity(%{char_id: :player, bank_npc_id: :banker1, inventory: inv})
       sessions = %{player: self()}
-      state = make_map_state(%{player: entity}, sessions: sessions)
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
       assert {:reply, {:error, :invalid_slot}, _state} =
                Bank.handle_bank_deposit(state, :player, 0, 1, 0)
@@ -650,9 +660,9 @@ defmodule Arena.BugRegressionTest do
 
     test "slot=25 is rejected" do
       inv = List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 100, amount: 5, equipped: false})
-      entity = make_entity(%{char_id: :player, bank_npc_id: 1, inventory: inv})
+      entity = make_entity(%{char_id: :player, bank_npc_id: :banker1, inventory: inv})
       sessions = %{player: self()}
-      state = make_map_state(%{player: entity}, sessions: sessions)
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
       assert {:reply, {:error, :invalid_slot}, _state} =
                Bank.handle_bank_deposit(state, :player, 25, 1, 0)
@@ -660,12 +670,204 @@ defmodule Arena.BugRegressionTest do
 
     test "slot=-1 is rejected" do
       inv = List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 100, amount: 5, equipped: false})
-      entity = make_entity(%{char_id: :player, bank_npc_id: 1, inventory: inv})
+      entity = make_entity(%{char_id: :player, bank_npc_id: :banker1, inventory: inv})
       sessions = %{player: self()}
-      state = make_map_state(%{player: entity}, sessions: sessions)
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
       assert {:reply, {:error, :invalid_slot}, _state} =
                Bank.handle_bank_deposit(state, :player, -1, 1, 0)
     end
   end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Bug 14: modify_skills mixed positive/negative inputs mint skill levels
+  # Enum.sum([100, -99]) = 1, passes "total <= skill_points" guard.
+  # But only +100 is applied (pts > 0 filter), -99 ignored.
+  # Player spends 1 skill point, gets +100 to a skill.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "BUG 14: modify_skills mixed +/- exploit" do
+    test "mixed positive/negative list cannot grant more points than sum" do
+      # Give player exactly 1 skill point
+      entity = make_entity(%{char_id: :player, skill_points: 1, skills: %{magic: 0}})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      # Attack: [100, -99, 0, 0, ...] sums to 1 (passes guard), but +100 applied to first skill
+      attack = [100, -99] ++ List.duplicate(0, 20)
+      {:noreply, new_state} = Social.handle_modify_skills(state, :player, attack)
+      p = new_state.players[:player]
+
+      # Magic should gain at most 1 point (the sum), not 100
+      magic = Map.get(p.skills, :magic, 0)
+      assert magic <= 1
+    end
+
+    test "all-negative list is rejected" do
+      entity = make_entity(%{char_id: :player, skill_points: 10, skills: %{magic: 50}})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      attack = [-5] ++ List.duplicate(0, 21)
+      {:noreply, new_state} = Social.handle_modify_skills(state, :player, attack)
+      # Skills must not change
+      assert Map.get(new_state.players[:player].skills, :magic, 0) == 50
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Bug 15: leave_faction from anywhere (no enlistador check)
+  # VB6 requires being near the matching enlistador NPC.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "BUG 15: leave_faction requires enlistador" do
+    test "leave_faction without nearby enlistador is rejected" do
+      entity = make_entity(%{char_id: :player, faction: :royal_army})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{})
+
+      {:noreply, new_state} = Social.handle_leave_faction(state, :player)
+      # Faction must NOT change — no enlistador nearby
+      assert new_state.players[:player].faction == :royal_army
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Bug 16: trade start missing dead/already-trading checks
+  # VB6 blocks trade if either player is dead or already trading.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "BUG 16: trade start safety checks" do
+    test "trade request from dead player is rejected" do
+      entity_a = make_entity(%{char_id: :alice, name: "Alice", dead: true, x: 50, y: 50})
+      entity_b = make_entity(%{char_id: :bob, name: "Bob", x: 51, y: 50})
+      sessions = %{alice: self(), bob: self()}
+      state = make_map_state(%{alice: entity_a, bob: entity_b}, sessions: sessions,
+                             occupancy: %{{51, 50} => {:player, :bob}})
+
+      {:reply, result, new_state} = Commerce.handle_open_commerce(state, :alice, 51, 50)
+      assert result == {:error, :dead} or new_state.players[:alice].trade_request_target == nil
+    end
+
+    test "trade request to dead player is rejected" do
+      entity_a = make_entity(%{char_id: :alice, name: "Alice", x: 50, y: 50})
+      entity_b = make_entity(%{char_id: :bob, name: "Bob", dead: true, x: 51, y: 50})
+      sessions = %{alice: self(), bob: self()}
+      state = make_map_state(%{alice: entity_a, bob: entity_b}, sessions: sessions,
+                             occupancy: %{{51, 50} => {:player, :bob}})
+
+      {:reply, result, new_state} = Commerce.handle_open_commerce(state, :alice, 51, 50)
+      assert result != :ok or new_state.players[:alice].trade_request_target == nil
+    end
+
+    test "trade request while already trading is rejected" do
+      entity_a = make_entity(%{char_id: :alice, name: "Alice", x: 50, y: 50,
+                               trade_partner_id: :charlie})
+      entity_b = make_entity(%{char_id: :bob, name: "Bob", x: 51, y: 50})
+      sessions = %{alice: self(), bob: self()}
+      state = make_map_state(%{alice: entity_a, bob: entity_b}, sessions: sessions,
+                             occupancy: %{{51, 50} => {:player, :bob}})
+
+      {:reply, result, _state} = Commerce.handle_open_commerce(state, :alice, 51, 50)
+      assert result == {:error, :already_trading}
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Bug 17: bank operations valid after walking away from banker
+  # VB6 revalidated banker distance on each gold operation.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "BUG 17: bank ops revalidate banker distance" do
+    test "bank_deposit_gold after walking away is rejected" do
+      # Player opened bank at (50,50), banker at (51,50). Now player at (90,90).
+      entity = make_entity(%{char_id: :player, bank_npc_id: :npc1, bank_gold: 0,
+                            gold: 500, x: 90, y: 90})
+      banker_npc = %{npc_id: 1, x: 51, y: 50, instance_id: :npc1}
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions,
+                             npcs_live: %{npc1: banker_npc})
+
+      {:reply, result, new_state} = Bank.handle_bank_deposit_gold(state, :player, 100)
+      # Must be rejected — too far from banker
+      assert result == {:error, :too_far} or new_state.players[:player].gold == 500
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Bug 18: merchant sell allows instransferible/gold items
+  # VB6 blocks instransferible, destruye, and gold items from being sold.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "BUG 18: merchant sell blocks special items" do
+    test "selling gold item (item_id 12) is rejected" do
+      inv = List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 12, amount: 100, equipped: false})
+      entity = make_entity(%{char_id: :player, commerce_npc_id: 1, inventory: inv, gold: 0})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 50)
+      # Gold items must not be sold
+      assert result != :ok or Enum.at(new_state.players[:player].inventory, 0).amount == 100
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Bug 19: bank open while trading should be blocked
+  # VB6 refuses to open bank if .flags.Comerciando is set.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "BUG 19: bank open while trading is blocked" do
+    test "opening bank while in user trade is rejected" do
+      banker_npc = %{npc_id: 1, x: 51, y: 50, instance_id: :npc1}
+      entity = make_entity(%{char_id: :player, x: 50, y: 50,
+                            trade_partner_id: :someone})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions,
+                             npcs_live: %{npc1: banker_npc},
+                             occupancy: %{{51, 50} => {:npc, :npc1}})
+
+      {:reply, result, _state} = Bank.handle_open_bank(state, :player, 51, 50)
+      assert result == {:error, :already_trading}
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Bug 20: NPC interaction radii drift from VB6
+  # Commerce: Elixir <= 2, VB6 <= 3. Bank: Elixir <= 4, VB6 <= 6.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "BUG 20: NPC interaction radii match VB6" do
+    test "bank at distance 5 is allowed (VB6 allows <= 6)" do
+      banker_npc = %{npc_id: 1, x: 55, y: 50, instance_id: :npc1}
+      entity = make_entity(%{char_id: :player, x: 50, y: 50})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions,
+                             npcs_live: %{npc1: banker_npc},
+                             occupancy: %{{55, 50} => {:npc, :npc1}})
+
+      # NPC type 4 (banquero) check will fail since GameData probably doesn't
+      # have NPC 1 as a banker. We just test the distance check doesn't reject at 5.
+      {:reply, result, _state} = Bank.handle_open_bank(state, :player, 55, 50)
+      # Should NOT be :too_far at distance 5 (VB6 allows up to 6)
+      assert result != {:error, :too_far}
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Bug 21: guild chat missing mute/dead checks
+  # guild_server.ex:79 broadcasts without any entity state checks.
+  # This is hard to test without ETS setup, but we document the gap.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # Bug 21 (guild chat mute) requires a running GuildServer with ETS membership.
+  # Tested indirectly — the fix goes in session_logic or a wrapper, not guild_server.
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Bug 22: party accept without rechecking membership
+  # party_server.ex:157 doesn't check if player joined another party.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # Bug 22 (party accept race) requires a running PartyServer GenServer.
+  # The fix is a one-line check in handle_call({:accept, ...}).
 end

@@ -2758,25 +2758,32 @@ defmodule Arena.Map.Social do
           msg(state, char_id, "No perteneces a ninguna faccion.")
           {:noreply, state}
         else
-          # VB6: strip faction items from inventory
-          entity = strip_faction_items(entity)
-          entity = %{entity | faction: :none, faction_reenlistadas: entity.faction_reenlistadas + 1}
-          players = Map.put(state.players, char_id, entity)
+          case find_nearby_npc_of_type(state, entity, [@npc_type_enlistador]) do
+            :not_found ->
+              msg(state, char_id, "Necesitas estar cerca de un enlistador.")
+              {:noreply, state}
 
-          # Update online directory
-          AoSession.OnlineDirectory.update_faction(char_id, :none)
+            {:ok, _npc, _npc_def} ->
+              # VB6: strip faction items from inventory
+              entity = strip_faction_items(entity)
+              entity = %{entity | faction: :none, faction_reenlistadas: entity.faction_reenlistadas + 1}
+              players = Map.put(state.players, char_id, entity)
 
-          # Resend full inventory after stripping
-          Enum.each(0..23, fn slot ->
-            Helpers.send_inventory_slot(state.sessions, char_id, entity.inventory, slot)
-          end)
+              # Update online directory
+              AoSession.OnlineDirectory.update_faction(char_id, :none)
 
-          # Broadcast visual change if armor was stripped (body_id reverted)
-          state = %{state | players: players}
-          Helpers.broadcast_character_change(state, entity)
+              # Resend full inventory after stripping
+              Enum.each(0..23, fn slot ->
+                Helpers.send_inventory_slot(state.sessions, char_id, entity.inventory, slot)
+              end)
 
-          msg(state, char_id, "Has renunciado a tu faccion.")
-          {:noreply, state}
+              # Broadcast visual change if armor was stripped (body_id reverted)
+              state = %{state | players: players}
+              Helpers.broadcast_character_change(state, entity)
+
+              msg(state, char_id, "Has renunciado a tu faccion.")
+              {:noreply, state}
+          end
         end
 
       :error ->
@@ -3273,44 +3280,50 @@ defmodule Arena.Map.Social do
           msg(state, char_id, "Estas muerto!")
           {:noreply, state}
         else
-          # Sum requested points — must not exceed available skill_points
-          total_requested = Enum.sum(points_list)
-
-          if total_requested <= 0 or total_requested > entity.skill_points do
-            msg(state, char_id, "No tienes suficientes puntos de habilidad.")
+          # Reject any negative values in the list
+          if Enum.any?(points_list, &(&1 < 0)) do
+            msg(state, char_id, "Valores invalidos.")
             {:noreply, state}
           else
-            # Apply points to skills, capping each at 100
-            {new_skills, points_used} =
-              @skill_order
-              |> Enum.zip(points_list)
-              |> Enum.reduce({entity.skills, 0}, fn {skill_atom, pts}, {skills, used} ->
-                if pts > 0 do
-                  current = Map.get(skills, skill_atom, 0)
-                  add = min(pts, 100 - current)
+            # Sum requested points — must not exceed available skill_points
+            total_requested = Enum.sum(points_list)
 
-                  if add > 0 do
-                    {Map.put(skills, skill_atom, current + add), used + add}
+            if total_requested <= 0 or total_requested > entity.skill_points do
+              msg(state, char_id, "No tienes suficientes puntos de habilidad.")
+              {:noreply, state}
+            else
+              # Apply points to skills, capping each at 100
+              {new_skills, points_used} =
+                @skill_order
+                |> Enum.zip(points_list)
+                |> Enum.reduce({entity.skills, 0}, fn {skill_atom, pts}, {skills, used} ->
+                  if pts > 0 do
+                    current = Map.get(skills, skill_atom, 0)
+                    add = min(pts, 100 - current)
+
+                    if add > 0 do
+                      {Map.put(skills, skill_atom, current + add), used + add}
+                    else
+                      {skills, used}
+                    end
                   else
                     {skills, used}
                   end
-                else
-                  {skills, used}
-                end
-              end)
+                end)
 
-            entity = %{entity | skills: new_skills, skill_points: entity.skill_points - points_used}
-            players = Map.put(state.players, char_id, entity)
-            state = %{state | players: players}
+              entity = %{entity | skills: new_skills, skill_points: entity.skill_points - points_used}
+              players = Map.put(state.players, char_id, entity)
+              state = %{state | players: players}
 
-            # Send updated skills back
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw, Encoder.encode({:send_skills, %{skills: entity.skills}})}
-            )
+              # Send updated skills back
+              Helpers.send_to_session(
+                state.sessions,
+                char_id,
+                {:send_raw, Encoder.encode({:send_skills, %{skills: entity.skills}})}
+              )
 
-            {:noreply, state}
+              {:noreply, state}
+            end
           end
         end
 

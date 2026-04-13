@@ -946,8 +946,13 @@ defmodule AoTcpGateway.SessionLogic do
   end
 
   def handle_command(state, {:guild_message, %{message: msg}}) when state.character_id != nil do
-    Arena.GuildServer.guild_chat(state.character_id, msg)
-    {state, []}
+    if state.is_dead == true do
+      {state, []}
+    else
+      # NOTE: mute check requires entity state which session_logic doesn't have for guild chat
+      Arena.GuildServer.guild_chat(state.character_id, msg)
+      {state, []}
+    end
   end
 
   def handle_command(state, {:guild_online, _}) when state.character_id != nil do
@@ -1150,6 +1155,9 @@ defmodule AoTcpGateway.SessionLogic do
 
   # Group/party chat
   def handle_command(state, {:grupo_msg, %{message: message}}) when state.character_id != nil do
+    if state.is_dead == true do
+      {state, []}
+    else
     case Arena.PartyServer.get_party(state.character_id) do
       {:ok, party} ->
         sender_name =
@@ -1171,6 +1179,7 @@ defmodule AoTcpGateway.SessionLogic do
 
       :not_in_party ->
         {state, [{:console_msg, %{message: "No estas en un grupo.", font_index: 0}}]}
+    end
     end
   end
 

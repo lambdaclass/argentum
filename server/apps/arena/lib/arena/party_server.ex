@@ -159,24 +159,31 @@ defmodule Arena.PartyServer do
       [{_, %{party_id: party_id}}] ->
         :ets.delete(@table, {:invite, char_id})
 
-        case :ets.lookup(@table, {:party, party_id}) do
-          [{_, party}] ->
-            if length(party.members) >= @max_members do
-              notify(char_id, "El grupo esta lleno.")
-              {:reply, {:error, :full}, state}
-            else
-              new_members = party.members ++ [char_id]
-              updated_party = %{party | members: new_members}
-              :ets.insert(@table, {{:party, party_id}, updated_party})
-              :ets.insert(@table, {{:member, char_id}, party_id})
-              broadcast_party(new_members, "Un jugador se ha unido al grupo. Miembros: #{length(new_members)}")
-              broadcast_datos_grupo(updated_party)
-              {:reply, :ok, state}
-            end
+        case :ets.lookup(@table, {:member, char_id}) do
+          [{_, _}] ->
+            notify(char_id, "Ya estas en un grupo.")
+            {:reply, {:error, :already_in_party}, state}
 
           [] ->
-            notify(char_id, "El grupo ya no existe.")
-            {:reply, {:error, :party_gone}, state}
+            case :ets.lookup(@table, {:party, party_id}) do
+              [{_, party}] ->
+                if length(party.members) >= @max_members do
+                  notify(char_id, "El grupo esta lleno.")
+                  {:reply, {:error, :full}, state}
+                else
+                  new_members = party.members ++ [char_id]
+                  updated_party = %{party | members: new_members}
+                  :ets.insert(@table, {{:party, party_id}, updated_party})
+                  :ets.insert(@table, {{:member, char_id}, party_id})
+                  broadcast_party(new_members, "Un jugador se ha unido al grupo. Miembros: #{length(new_members)}")
+                  broadcast_datos_grupo(updated_party)
+                  {:reply, :ok, state}
+                end
+
+              [] ->
+                notify(char_id, "El grupo ya no existe.")
+                {:reply, {:error, :party_gone}, state}
+            end
         end
 
       [] ->

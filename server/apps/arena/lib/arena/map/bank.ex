@@ -14,6 +14,9 @@ defmodule Arena.Map.Bank do
       {:ok, entity} when entity.dead ->
         {:reply, {:error, :dead}, state}
 
+      {:ok, entity} when entity.trade_partner_id != nil ->
+        {:reply, {:error, :already_trading}, state}
+
       {:ok, entity} ->
         npc =
           if target_x && target_y do
@@ -35,7 +38,7 @@ defmodule Arena.Map.Bank do
 
             {:reply, {:error, :no_banker}, state}
 
-          abs(entity.x - target_x) > 4 or abs(entity.y - target_y) > 4 ->
+          abs(entity.x - target_x) > 6 or abs(entity.y - target_y) > 6 ->
             Helpers.send_to_session(
               state.sessions,
               char_id,
@@ -95,9 +98,11 @@ defmodule Arena.Map.Bank do
   def handle_bank_deposit(state, char_id, slot, amount, slot_destino) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
-        if entity.bank_npc_id == nil do
-          {:reply, {:error, :no_bank}, state}
-        else
+        case validate_bank_session(state, entity) do
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+
+          :ok ->
           inv_idx = slot - 1
           inv_item = Enum.at(entity.inventory, inv_idx)
 
@@ -203,10 +208,12 @@ defmodule Arena.Map.Bank do
   def handle_bank_extract_item(state, char_id, slot, amount, _slot_destino) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
-        cond do
-          entity.bank_npc_id == nil ->
-            {:reply, {:error, :no_bank}, state}
+        case validate_bank_session(state, entity) do
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
 
+          :ok ->
+        cond do
           # VB6 parity: Cantidad < 1 (modBanco.bas:94)
           amount <= 0 ->
             {:reply, {:error, :invalid_amount}, state}
@@ -302,6 +309,7 @@ defmodule Arena.Map.Bank do
                 end
             end
         end
+        end
 
       :error ->
         {:reply, {:error, :not_on_map}, state}
@@ -311,10 +319,12 @@ defmodule Arena.Map.Bank do
   def handle_bank_deposit_gold(state, char_id, amount) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
-        cond do
-          entity.bank_npc_id == nil ->
-            {:reply, {:error, :no_bank}, state}
+        case validate_bank_session(state, entity) do
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
 
+          :ok ->
+        cond do
           amount <= 0 or entity.gold < amount ->
             {:reply, {:error, :not_enough_gold}, state}
 
@@ -339,6 +349,7 @@ defmodule Arena.Map.Bank do
 
             {:reply, :ok, state}
         end
+        end
 
       :error ->
         {:reply, {:error, :not_on_map}, state}
@@ -348,10 +359,12 @@ defmodule Arena.Map.Bank do
   def handle_bank_extract_gold(state, char_id, amount) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
-        cond do
-          entity.bank_npc_id == nil ->
-            {:reply, {:error, :no_bank}, state}
+        case validate_bank_session(state, entity) do
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
 
+          :ok ->
+        cond do
           amount <= 0 or entity.bank_gold < amount ->
             {:reply, {:error, :not_enough_gold}, state}
 
@@ -376,6 +389,7 @@ defmodule Arena.Map.Bank do
 
             {:reply, :ok, state}
         end
+        end
 
       :error ->
         {:reply, {:error, :not_on_map}, state}
@@ -396,6 +410,27 @@ defmodule Arena.Map.Bank do
   end
 
   # Bank helpers
+
+  def validate_bank_session(state, entity) do
+    cond do
+      entity.bank_npc_id == nil ->
+        {:error, :no_bank}
+
+      true ->
+        npc = Map.get(state.npcs_live, entity.bank_npc_id)
+
+        cond do
+          npc == nil ->
+            {:error, :no_bank}
+
+          abs(entity.x - npc.x) > 6 or abs(entity.y - npc.y) > 6 ->
+            {:error, :too_far}
+
+          true ->
+            :ok
+        end
+    end
+  end
 
   def get_bank_gold(char_id) do
     case GameBackend.Characters.get(char_id) do

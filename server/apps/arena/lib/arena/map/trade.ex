@@ -149,6 +149,24 @@ defmodule Arena.Map.Trade do
         {:reply, {:error, :target_not_found}, state}
 
       target ->
+        cond do
+          target.dead ->
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw,
+               Encoder.encode({:console_msg, %{message: "No puedes comerciar con un muerto.", font_index: 0}})}
+            )
+
+            {:reply, {:error, :target_dead}, state}
+
+          entity.trade_partner_id != nil ->
+            {:reply, {:error, :already_trading}, state}
+
+          target.trade_partner_id != nil ->
+            {:reply, {:error, :target_busy}, state}
+
+          true ->
         # VB6: if both players have requested trade with each other, start trade
         if target.trade_request_target == char_id do
           # Both ready -- start trade
@@ -201,6 +219,7 @@ defmodule Arena.Map.Trade do
 
           players = Map.put(state.players, char_id, entity)
           {:reply, :ok, %{state | players: players}}
+        end
         end
     end
   end

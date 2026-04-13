@@ -5,6 +5,8 @@ defmodule Arena.Map.Commerce do
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
+  @gold_item_id 12
+
   def handle_open_commerce(state, char_id, target_x, target_y) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} when entity.dead ->
@@ -13,15 +15,28 @@ defmodule Arena.Map.Commerce do
       {:ok, entity} ->
         target_occ = if target_x && target_y, do: Helpers.get_occupancy(state.occupancy, target_x, target_y)
 
+        cond do
+          entity.trade_partner_id != nil ->
+            {:reply, {:error, :already_trading}, state}
+
+          true ->
         case target_occ do
           # VB6: target is a player -> user-to-user trade request
           {:player, target_id} when target_id != char_id ->
             target = Map.get(state.players, target_id)
 
-            if target && (abs(entity.x - target.x) > 3 or abs(entity.y - target.y) > 3) do
-              {:reply, {:error, :too_far}, state}
-            else
-              Trade.start_user_trade_request(state, char_id, entity, target_id)
+            cond do
+              target == nil ->
+                {:reply, {:error, :target_not_found}, state}
+
+              target.dead ->
+                {:reply, {:error, :target_dead}, state}
+
+              abs(entity.x - target.x) > 3 or abs(entity.y - target.y) > 3 ->
+                {:reply, {:error, :too_far}, state}
+
+              true ->
+                Trade.start_user_trade_request(state, char_id, entity, target_id)
             end
 
           # Target is NPC -> NPC commerce
@@ -31,6 +46,7 @@ defmodule Arena.Map.Commerce do
 
           _ ->
             {:reply, {:error, :no_target}, state}
+        end
         end
 
       :error ->
@@ -177,6 +193,26 @@ defmodule Arena.Map.Commerce do
 
                   {:reply, {:error, :newbie_item}, state}
 
+                item_def != nil and Map.get(item_def, :instransferible, false) ->
+                  Helpers.send_to_session(
+                    state.sessions,
+                    char_id,
+                    {:send_raw,
+                     Encoder.encode({:console_msg, %{message: "No puedes vender objetos instransferibles.", font_index: 0}})}
+                  )
+
+                  {:reply, {:error, :untradeable}, state}
+
+                inv_item.item_id == @gold_item_id ->
+                  Helpers.send_to_session(
+                    state.sessions,
+                    char_id,
+                    {:send_raw,
+                     Encoder.encode({:console_msg, %{message: "No puedes vender oro.", font_index: 0}})}
+                  )
+
+                  {:reply, {:error, :gold_item}, state}
+
                 true ->
                   sell_price = if item_def, do: div(item_def.valor, 3) * amount, else: 0
 
@@ -261,7 +297,7 @@ defmodule Arena.Map.Commerce do
       npc_def == nil or not npc_def.comercia ->
         {:reply, {:error, :not_a_merchant}, state}
 
-      abs(entity.x - npc.x) > 2 or abs(entity.y - npc.y) > 2 ->
+      abs(entity.x - npc.x) > 3 or abs(entity.y - npc.y) > 3 ->
         {:reply, {:error, :too_far}, state}
 
       true ->
