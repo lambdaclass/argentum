@@ -74,8 +74,8 @@ defmodule AoProtocol.Client.Decoder do
   # Talk (ID 75) — message(String8) + packet_count(Int32)
   defp decode_packet(75, rest) do
     with {:ok, message, rest} <- Reader.read_string8(rest),
-         {:ok, _packet_count, rest} <- Reader.read_int32(rest) do
-      {:ok, {:talk, %{message: message}}, rest}
+         {:ok, packet_count, rest} <- Reader.read_int32(rest) do
+      {:ok, {:talk, %{message: message, packet_count: packet_count}}, rest}
     end
   end
 
@@ -97,7 +97,7 @@ defmodule AoProtocol.Client.Decoder do
   # Walk (ID 78)
   defp decode_packet(78, rest) do
     with {:ok, heading, rest} <- Reader.read_int8(rest),
-         {:ok, _packet_count, rest} <- Reader.read_int32(rest) do
+         {:ok, packet_count, rest} <- Reader.read_int32(rest) do
       direction =
         case heading do
           1 -> :north
@@ -107,7 +107,7 @@ defmodule AoProtocol.Client.Decoder do
           _ -> :north
         end
 
-      {:ok, {:walk, %{direction: direction}}, rest}
+      {:ok, {:walk, %{direction: direction, packet_count: packet_count}}, rest}
     end
   end
 
@@ -116,16 +116,16 @@ defmodule AoProtocol.Client.Decoder do
 
   # Attack (ID 80) — packet_count(Int32)
   defp decode_packet(80, rest) do
-    with {:ok, _packet_count, rest} <- Reader.read_int32(rest) do
-      {:ok, {:attack, %{}}, rest}
+    with {:ok, packet_count, rest} <- Reader.read_int32(rest) do
+      {:ok, {:attack, %{packet_count: packet_count}}, rest}
     end
   end
 
   # CastSpell (ID 94) — slot(Int8) + packet_count(Int32)
   defp decode_packet(94, rest) do
     with {:ok, spell_slot, rest} <- Reader.read_int8(rest),
-         {:ok, _packet_count, rest} <- Reader.read_int32(rest) do
-      {:ok, {:cast_spell, %{spell_slot: spell_slot}}, rest}
+         {:ok, packet_count, rest} <- Reader.read_int32(rest) do
+      {:ok, {:cast_spell, %{spell_slot: spell_slot, packet_count: packet_count}}, rest}
     end
   end
 
@@ -136,8 +136,8 @@ defmodule AoProtocol.Client.Decoder do
   defp decode_packet(93, rest) do
     with {:ok, slot, rest} <- Reader.read_int8(rest),
          {:ok, amount, rest} <- Reader.read_int32(rest),
-         {:ok, _packet_count, rest} <- Reader.read_int32(rest) do
-      {:ok, {:drop, %{slot: slot, amount: amount}}, rest}
+         {:ok, packet_count, rest} <- Reader.read_int32(rest) do
+      {:ok, {:drop, %{slot: slot, amount: amount, packet_count: packet_count}}, rest}
     end
   end
 
@@ -149,16 +149,16 @@ defmodule AoProtocol.Client.Decoder do
     with {:ok, slot, rest} <- Reader.read_int8(rest),
          {:ok, is_skin, rest} <- Reader.read_bool(rest),
          {:ok, _skin_type, rest} <- maybe_read_skin_type(is_skin, rest),
-         {:ok, _packet_count, rest} <- Reader.read_int32(rest) do
-      {:ok, {:equip_item, %{slot: slot}}, rest}
+         {:ok, packet_count, rest} <- Reader.read_int32(rest) do
+      {:ok, {:equip_item, %{slot: slot, packet_count: packet_count}}, rest}
     end
   end
 
   # ChangeHeading (ID 6) — heading(Int8) + packet_count(Int32)
   defp decode_packet(6, rest) do
     with {:ok, heading, rest} <- Reader.read_int8(rest),
-         {:ok, _packet_count, rest} <- Reader.read_int32(rest) do
-      {:ok, {:change_heading, %{heading: heading}}, rest}
+         {:ok, packet_count, rest} <- Reader.read_int32(rest) do
+      {:ok, {:change_heading, %{heading: heading, packet_count: packet_count}}, rest}
     end
   end
 
@@ -169,8 +169,8 @@ defmodule AoProtocol.Client.Decoder do
   defp decode_packet(99, rest) do
     with {:ok, slot, rest} <- Reader.read_int8(rest),
          {:ok, _is_main_inventory, rest} <- Reader.read_int8(rest),
-         {:ok, _packet_count, rest} <- Reader.read_int32(rest) do
-      {:ok, {:use_item, %{slot: slot}}, rest}
+         {:ok, packet_count, rest} <- Reader.read_int32(rest) do
+      {:ok, {:use_item, %{slot: slot, packet_count: packet_count}}, rest}
     end
   end
 
@@ -178,8 +178,8 @@ defmodule AoProtocol.Client.Decoder do
   defp decode_packet(95, rest) do
     with {:ok, x, rest} <- Reader.read_int8(rest),
          {:ok, y, rest} <- Reader.read_int8(rest),
-         {:ok, _packet_count, rest} <- Reader.read_int32(rest) do
-      {:ok, {:left_click, %{x: x, y: y}}, rest}
+         {:ok, packet_count, rest} <- Reader.read_int32(rest) do
+      {:ok, {:left_click, %{x: x, y: y, packet_count: packet_count}}, rest}
     end
   end
 
@@ -305,8 +305,8 @@ defmodule AoProtocol.Client.Decoder do
   # Work (ID 97) — skill(Int8) + packet_count(Int32)
   defp decode_packet(97, rest) do
     with {:ok, skill, rest} <- Reader.read_int8(rest),
-         {:ok, _packet_count, rest} <- Reader.read_int32(rest) do
-      {:ok, {:work, %{skill: skill}}, rest}
+         {:ok, packet_count, rest} <- Reader.read_int32(rest) do
+      {:ok, {:work, %{skill: skill, packet_count: packet_count}}, rest}
     end
   end
 
@@ -553,8 +553,8 @@ defmodule AoProtocol.Client.Decoder do
   # eGuildMessage=59 — chat(S8) + packet_counter(I32)
   defp decode_packet(59, rest) do
     with {:ok, chat, rest} <- Reader.read_string8(rest),
-         {:ok, _packet_count, rest} <- Reader.read_int32(rest) do
-      {:ok, {:guild_message, %{message: chat}}, rest}
+         {:ok, packet_count, rest} <- Reader.read_int32(rest) do
+      {:ok, {:guild_message, %{message: chat, packet_count: packet_count}}, rest}
     else
       _ -> :incomplete
     end
@@ -590,8 +590,8 @@ defmodule AoProtocol.Client.Decoder do
     with {:ok, x, rest} <- Reader.read_int8(rest),
          {:ok, y, rest} <- Reader.read_int8(rest),
          {:ok, skill, rest} <- Reader.read_int8(rest),
-         {:ok, _packet_count, rest} <- Reader.read_int32(rest) do
-      {:ok, {:work_left_click, %{x: x, y: y, skill: skill}}, rest}
+         {:ok, packet_count, rest} <- Reader.read_int32(rest) do
+      {:ok, {:work_left_click, %{x: x, y: y, skill: skill, packet_count: packet_count}}, rest}
     end
   end
 
@@ -1005,8 +1005,8 @@ defmodule AoProtocol.Client.Decoder do
   defp decode_packet(215, rest) do
     with {:ok, consulta, rest} <- Reader.read_string8(rest),
          {:ok, tipo, rest} <- Reader.read_string8(rest),
-         {:ok, _packet_counter, rest} <- Reader.read_int32(rest) do
-      {:ok, {:question_gm, %{consulta: consulta, tipo: tipo}}, rest}
+         {:ok, packet_count, rest} <- Reader.read_int32(rest) do
+      {:ok, {:question_gm, %{consulta: consulta, tipo: tipo, packet_count: packet_count}}, rest}
     end
   end
 

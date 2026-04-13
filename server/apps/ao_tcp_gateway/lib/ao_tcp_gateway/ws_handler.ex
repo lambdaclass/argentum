@@ -10,7 +10,7 @@ defmodule AoTcpGateway.WsHandler do
 
   alias AoProtocol.Server.Encoder
   alias AoProtocol.Client.Decoder
-  alias AoTcpGateway.{FloodGuard, SessionLogic}
+  alias AoTcpGateway.{FloodGuard, PacketCounter, SessionLogic}
 
   # Idle timeout: disconnect if no data (including pong) for 90s.
   # We send pings every 30s so a live client resets the timer.
@@ -44,7 +44,8 @@ defmodule AoTcpGateway.WsHandler do
        is_dead: false,
        hogar_timer_ref: nil,
        viewing_forum_id: nil,
-       flood_guard: FloodGuard.new()
+       flood_guard: FloodGuard.new(),
+       packet_counters: PacketCounter.new()
      }}
   end
 
@@ -128,13 +129,24 @@ defmodule AoTcpGateway.WsHandler do
         case FloodGuard.check(state.flood_guard) do
           {:ok, guard} ->
             state = %{state | flood_guard: guard, buffer: rest}
-            {state, new_frames} = dispatch_command(state, command)
-            decode_loop(state, frames ++ new_frames)
+
+            case PacketCounter.verify(state.packet_counters, command) do
+              {:ok, counters} ->
+                state = %{state | packet_counters: counters}
+                {state, new_frames} = dispatch_command(state, command)
+                decode_loop(state, frames ++ new_frames)
+
+              {:replay, _counters} ->
+                Logger.warning("WS packet replay detected, disconnecting #{inspect(state.character_id)}")
+                SessionLogic.cleanup(state)
+                state = %{state | character_id: nil, map_id: nil}
+                error_frame = {:binary, Encoder.encode({:error_msg, %{message: "Packet replay detected."}})}
+                {state, frames ++ [error_frame, {:close, 1008, "packet replay"}]}
+            end
 
           {:error, :flood} ->
             Logger.warning("WS flood detected, disconnecting #{inspect(state.character_id)}")
             SessionLogic.cleanup(state)
-            # Nil out character_id so terminate/3's cleanup is a no-op
             state = %{state | character_id: nil, map_id: nil}
             error_frame = {:binary, Encoder.encode({:error_msg, %{message: "Too many packets."}})}
             {state, frames ++ [error_frame, {:close, 1008, "flood"}]}

@@ -115,9 +115,10 @@ defmodule AoTcpGateway.PacketTraceReplayTest do
     {74, payload}
   end
 
-  defp build_walk(heading), do: {78, Writer.write_int8(heading) <> Writer.write_int32(1)}
-  defp build_talk(msg), do: {75, Writer.write_string8(msg) <> Writer.write_int32(1)}
-  defp build_heading(dir), do: {6, Writer.write_int8(dir) <> Writer.write_int32(1)}
+  defp next_counter, do: :erlang.unique_integer([:monotonic, :positive])
+  defp build_walk(heading), do: {78, Writer.write_int8(heading) <> Writer.write_int32(next_counter())}
+  defp build_talk(msg), do: {75, Writer.write_string8(msg) <> Writer.write_int32(next_counter())}
+  defp build_heading(dir), do: {6, Writer.write_int8(dir) <> Writer.write_int32(next_counter())}
   defp build_request_atributes, do: {85, <<>>}
   defp build_request_skills, do: {86, <<>>}
   defp build_request_mini_stats, do: {87, <<>>}
@@ -380,10 +381,10 @@ defmodule AoTcpGateway.PacketTraceReplayTest do
 
       {socket, _login_packets} = login(port, name)
 
-      # Send 20 walk actions as fast as possible
+      # Send 20 walk actions as fast as possible with incrementing counters
       for i <- 1..20 do
         heading = rem(i, 4) + 1
-        packet = Writer.build_packet(78, Writer.write_int8(heading) <> Writer.write_int32(1))
+        packet = Writer.build_packet(78, Writer.write_int8(heading) <> Writer.write_int32(i))
         :ok = :gen_tcp.send(socket, packet)
       end
 

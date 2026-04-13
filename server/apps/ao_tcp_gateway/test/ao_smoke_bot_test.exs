@@ -135,20 +135,22 @@ defmodule AoSmokeBotTest do
     :ok = :gen_tcp.send(socket, packet)
   end
 
+  defp next_counter, do: :erlang.unique_integer([:monotonic, :positive])
+
   defp send_walk(socket, heading) do
-    payload = Writer.write_int8(heading) <> Writer.write_int32(1)
+    payload = Writer.write_int8(heading) <> Writer.write_int32(next_counter())
     packet = Writer.build_packet(@pkt_walk, payload)
     :ok = :gen_tcp.send(socket, packet)
   end
 
   defp send_talk(socket, message) do
-    payload = Writer.write_string8(message) <> Writer.write_int32(1)
+    payload = Writer.write_string8(message) <> Writer.write_int32(next_counter())
     packet = Writer.build_packet(@pkt_talk, payload)
     :ok = :gen_tcp.send(socket, packet)
   end
 
   defp send_yell(socket, message) do
-    payload = Writer.write_string8(message) <> Writer.write_int32(1)
+    payload = Writer.write_string8(message) <> Writer.write_int32(next_counter())
     packet = Writer.build_packet(@pkt_yell, payload)
     :ok = :gen_tcp.send(socket, packet)
   end
@@ -169,7 +171,7 @@ defmodule AoSmokeBotTest do
   end
 
   defp send_change_heading(socket, direction) do
-    payload = Writer.write_int8(direction) <> Writer.write_int32(1)
+    payload = Writer.write_int8(direction) <> Writer.write_int32(next_counter())
     packet = Writer.build_packet(@pkt_change_heading, payload)
     :ok = :gen_tcp.send(socket, packet)
   end

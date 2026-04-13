@@ -11,7 +11,7 @@ defmodule AoTcpGateway.ClientHandler do
   require Logger
 
   alias AoProtocol.Server.Encoder
-  alias AoTcpGateway.{FloodGuard, SessionLogic}
+  alias AoTcpGateway.{FloodGuard, PacketCounter, SessionLogic}
 
   @impl :ranch_protocol
   def start_link(ref, socket, transport, _opts) do
@@ -43,7 +43,8 @@ defmodule AoTcpGateway.ClientHandler do
       is_dead: false,
       hogar_timer_ref: nil,
       viewing_forum_id: nil,
-      flood_guard: FloodGuard.new()
+      flood_guard: FloodGuard.new(),
+      packet_counters: PacketCounter.new()
     })
   end
 
@@ -121,16 +122,27 @@ defmodule AoTcpGateway.ClientHandler do
         case FloodGuard.check(state.flood_guard) do
           {:ok, guard} ->
             state = %{state | flood_guard: guard, buffer: rest}
-            {state, packets} = dispatch_command(state, command)
-            send_packets(state, packets)
-            decode_loop(state)
+
+            case PacketCounter.verify(state.packet_counters, command) do
+              {:ok, counters} ->
+                state = %{state | packet_counters: counters}
+                {state, packets} = dispatch_command(state, command)
+                send_packets(state, packets)
+                decode_loop(state)
+
+              {:replay, _counters} ->
+                Logger.warning("Packet replay detected, disconnecting #{inspect(state.character_id)}")
+                send_to_client(state, {:error_msg, %{message: "Packet replay detected. Disconnected."}})
+                SessionLogic.cleanup(state)
+                state.transport.close(state.socket)
+                %{state | character_id: nil, map_id: nil}
+            end
 
           {:error, :flood} ->
             Logger.warning("Flood detected, disconnecting #{inspect(state.character_id)}")
             send_to_client(state, {:error_msg, %{message: "Too many packets. Disconnected."}})
             SessionLogic.cleanup(state)
             state.transport.close(state.socket)
-            # Nil out character_id so the {:tcp_closed} handler's cleanup is a no-op
             %{state | character_id: nil, map_id: nil}
         end
 

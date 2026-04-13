@@ -291,11 +291,11 @@ defmodule AoTcpGateway.AdversarialProtocolTest do
       on_exit(fn -> cleanup_char(name) end)
       {socket, _} = login(port, name)
 
-      # Build 100 walk packets and send in one TCP write
+      # Build 100 walk packets with incrementing counters and send in one TCP write
       burst =
         for i <- 1..100, into: <<>> do
           heading = rem(i, 4) + 1
-          Writer.build_packet(78, Writer.write_int8(heading) <> Writer.write_int32(1))
+          Writer.build_packet(78, Writer.write_int8(heading) <> Writer.write_int32(i))
         end
 
       send_raw(socket, burst)
@@ -315,7 +315,7 @@ defmodule AoTcpGateway.AdversarialProtocolTest do
       {socket, _} = login(port, name)
 
       # Send a walk packet split across multiple TCP writes with empty writes
-      walk_packet = Writer.build_packet(78, Writer.write_int8(3) <> Writer.write_int32(1))
+      walk_packet = Writer.build_packet(78, Writer.write_int8(3) <> Writer.write_int32(:erlang.unique_integer([:monotonic, :positive])))
 
       # Split the packet byte by byte
       for <<byte::binary-size(1) <- walk_packet>> do
@@ -359,7 +359,7 @@ defmodule AoTcpGateway.AdversarialProtocolTest do
       Process.sleep(100)
 
       # Send talk without logging in
-      send_packet(socket, 75, Writer.write_string8("hello") <> Writer.write_int32(1))
+      send_packet(socket, 75, Writer.write_string8("hello") <> Writer.write_int32(2))
       Process.sleep(100)
 
       # Send attack without logging in

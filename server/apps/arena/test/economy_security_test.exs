@@ -1557,42 +1557,42 @@ defmodule Arena.EconomySecurityTest do
 
     alias AoProtocol.Client.Decoder
 
-    test "walk packet includes counter bytes that are parsed but discarded" do
+    test "walk packet includes counter in decoded map" do
       counter = 42
       packet = <<78::little-16, 1::8, counter::little-32>>
-      assert {:ok, {:walk, %{direction: :north}}, ""} = Decoder.decode(packet)
+      assert {:ok, {:walk, %{direction: :north, packet_count: 42}}, ""} = Decoder.decode(packet)
     end
 
-    test "attack packet includes counter bytes that are parsed but discarded" do
+    test "attack packet includes counter in decoded map" do
       counter = 999
       packet = <<80::little-16, counter::little-32>>
-      assert {:ok, {:attack, %{}}, ""} = Decoder.decode(packet)
+      assert {:ok, {:attack, %{packet_count: 999}}, ""} = Decoder.decode(packet)
     end
 
-    test "talk packet includes counter bytes that are parsed but discarded" do
+    test "talk packet includes counter in decoded map" do
       msg = "hello"
       msg_len = byte_size(msg)
       counter = 100
       packet = <<75::little-16, msg_len::little-16, msg::binary, counter::little-32>>
-      assert {:ok, {:talk, %{message: "hello"}}, ""} = Decoder.decode(packet)
+      assert {:ok, {:talk, %{message: "hello", packet_count: 100}}, ""} = Decoder.decode(packet)
     end
 
-    test "drop packet includes counter bytes that are parsed but discarded" do
+    test "drop packet includes counter in decoded map" do
       counter = 77
       packet = <<93::little-16, 1::8, 5::little-32, counter::little-32>>
-      assert {:ok, {:drop, %{slot: 1, amount: 5}}, ""} = Decoder.decode(packet)
+      assert {:ok, {:drop, %{slot: 1, amount: 5, packet_count: 77}}, ""} = Decoder.decode(packet)
     end
 
-    test "cast_spell packet includes counter bytes that are parsed but discarded" do
+    test "cast_spell packet includes counter in decoded map" do
       counter = 55
       packet = <<94::little-16, 3::8, counter::little-32>>
-      assert {:ok, {:cast_spell, %{spell_slot: 3}}, ""} = Decoder.decode(packet)
+      assert {:ok, {:cast_spell, %{spell_slot: 3, packet_count: 55}}, ""} = Decoder.decode(packet)
     end
 
-    test "use_item packet includes counter bytes that are parsed but discarded" do
+    test "use_item packet includes counter in decoded map" do
       counter = 200
       packet = <<99::little-16, 5::8, 1::8, counter::little-32>>
-      assert {:ok, {:use_item, %{slot: 5}}, ""} = Decoder.decode(packet)
+      assert {:ok, {:use_item, %{slot: 5, packet_count: 200}}, ""} = Decoder.decode(packet)
     end
   end
 

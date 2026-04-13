@@ -103,14 +103,16 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
     {socket, packets, char_id}
   end
 
+  defp next_counter, do: :erlang.unique_integer([:monotonic, :positive])
+
   defp send_walk(socket, heading) do
-    payload = Writer.write_int8(heading) <> Writer.write_int32(1)
+    payload = Writer.write_int8(heading) <> Writer.write_int32(next_counter())
     packet = Writer.build_packet(78, payload)
     :ok = :gen_tcp.send(socket, packet)
   end
 
   defp send_talk(socket, message) do
-    payload = Writer.write_string8(message) <> Writer.write_int32(1)
+    payload = Writer.write_string8(message) <> Writer.write_int32(next_counter())
     packet = Writer.build_packet(75, payload)
     :ok = :gen_tcp.send(socket, packet)
   end

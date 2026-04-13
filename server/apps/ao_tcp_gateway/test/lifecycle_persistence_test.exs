@@ -110,7 +110,7 @@ defmodule AoTcpGateway.LifecyclePersistenceTest do
   end
 
   defp send_walk(socket, heading) do
-    payload = Writer.write_int8(heading) <> Writer.write_int32(1)
+    payload = Writer.write_int8(heading) <> Writer.write_int32(:erlang.unique_integer([:monotonic, :positive]))
     packet = Writer.build_packet(78, payload)
     :ok = :gen_tcp.send(socket, packet)
   end

@@ -227,7 +227,8 @@ defmodule AoTcpGateway.WsIntegrationTest do
         :west -> 4
       end
 
-    <<@pkt_walk::little-signed-integer-16, heading::8, 1::little-signed-integer-32>>
+    counter = :erlang.unique_integer([:monotonic, :positive])
+    <<@pkt_walk::little-signed-integer-16, heading::8, counter::little-signed-integer-32>>
   end
 
   # -------------------------------------------------------------------
