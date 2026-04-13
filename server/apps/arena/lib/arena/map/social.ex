@@ -3612,43 +3612,55 @@ defmodule Arena.Map.Social do
             msg(state, char_id, "La apuesta debe ser mayor a 0.")
             {:noreply, state}
 
+          amount > 5000 ->
+            msg(state, char_id, "La apuesta maxima es 5000.")
+            {:noreply, state}
+
           entity.gold < amount ->
             msg(state, char_id, "No tienes suficiente oro.")
             {:noreply, state}
 
           true ->
-            # 50/50 chance
-            won = :rand.uniform(2) == 1
+            # VB6 parity: require nearby timbero NPC (Protocol_GmCommands.bas:188-204)
+            case find_nearby_npc_of_type(state, entity, [@npc_type_timbero]) do
+              :not_found ->
+                msg(state, char_id, "No hay un timbero cerca.")
+                {:noreply, state}
 
-            entity =
-              if won do
-                %{entity |
-                  gold: entity.gold + amount,
-                  gamble_wins: entity.gamble_wins + 1,
-                  gamble_plays: entity.gamble_plays + 1}
-              else
-                %{entity |
-                  gold: entity.gold - amount,
-                  gamble_losses: entity.gamble_losses + 1,
-                  gamble_plays: entity.gamble_plays + 1}
-              end
+              {:ok, _npc, _npc_def} ->
+                # 50/50 chance
+                won = :rand.uniform(2) == 1
 
-            players = Map.put(state.players, char_id, entity)
-            state = %{state | players: players}
+                entity =
+                  if won do
+                    %{entity |
+                      gold: entity.gold + amount,
+                      gamble_wins: entity.gamble_wins + 1,
+                      gamble_plays: entity.gamble_plays + 1}
+                  else
+                    %{entity |
+                      gold: entity.gold - amount,
+                      gamble_losses: entity.gamble_losses + 1,
+                      gamble_plays: entity.gamble_plays + 1}
+                  end
 
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
-            )
+                players = Map.put(state.players, char_id, entity)
+                state = %{state | players: players}
 
-            if won do
-              msg(state, char_id, "Has ganado #{amount} monedas de oro!")
-            else
-              msg(state, char_id, "Has perdido #{amount} monedas de oro.")
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
+                )
+
+                if won do
+                  msg(state, char_id, "Has ganado #{amount} monedas de oro!")
+                else
+                  msg(state, char_id, "Has perdido #{amount} monedas de oro.")
+                end
+
+                {:noreply, state}
             end
-
-            {:noreply, state}
         end
 
       :error ->
@@ -3663,15 +3675,28 @@ defmodule Arena.Map.Social do
   def handle_forgive(state, char_id) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
-        if entity.criminal do
-          entity = %{entity | criminal: false}
-          players = Map.put(state.players, char_id, entity)
-          state = %{state | players: players}
-          msg(state, char_id, "Has sido perdonado.")
+        if entity.dead do
+          msg(state, char_id, "Estas muerto!")
           {:noreply, state}
         else
-          msg(state, char_id, "No eres un criminal.")
-          {:noreply, state}
+          # VB6 parity: require nearby priest NPC (Protocol_GmCommands.bas:1686-1697)
+          case find_nearby_npc_of_type(state, entity, [@npc_type_revividor, @npc_type_resucitador_newbie]) do
+            :not_found ->
+              msg(state, char_id, "Necesitas estar cerca de un sacerdote.")
+              {:noreply, state}
+
+            {:ok, _npc, _npc_def} ->
+              if entity.criminal do
+                entity = %{entity | criminal: false}
+                players = Map.put(state.players, char_id, entity)
+                state = %{state | players: players}
+                msg(state, char_id, "Has sido perdonado.")
+                {:noreply, state}
+              else
+                msg(state, char_id, "No eres un criminal.")
+                {:noreply, state}
+              end
+          end
         end
 
       :error ->

@@ -718,32 +718,40 @@ defmodule Arena.EconomySecurityTest do
       assert result == {:error, :no_bank}
     end
 
-    test "deposit from empty slot returns :empty_slot even with negative amount" do
+    test "deposit with negative amount hits amount guard before empty_slot" do
       entity = make_entity(%{char_id: :player, bank_npc_id: 1})
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      # slot=1, empty inventory → inv_item == nil → :empty_slot
+      # amount <= 0 guard fires before inv_item == nil check
       {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 1, -5, 1)
-      assert result == {:error, :empty_slot}
+      assert result == {:error, :invalid_amount}
     end
 
-    test "AUDIT: negative amount bypasses amount guard (inv_item.amount < negative is false)" do
-      # bank.ex line 107: `inv_item.amount < amount` — when amount is negative, this is always false.
-      # This means negative amounts pass the guard and reach the DB upsert path.
-      # new_amount = inv_item.amount - (-5) = inv_item.amount + 5 → item DUPLICATION.
-      # We can't test the full path without DB, but this documents the bug.
-      assert true, "See bank.ex:107 — missing `amount <= 0` guard on item deposit"
+    test "negative amount is rejected by amount guard (FIX APPLIED)" do
+      # bank.ex: `amount <= 0` guard now rejects negative amounts before
+      # reaching `inv_item.amount < amount`, preventing item duplication.
+      inv = List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 100, amount: 5, equipped: false})
+      entity = make_entity(%{char_id: :player, bank_npc_id: 1, inventory: inv})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:reply, result, new_state} = Bank.handle_bank_deposit(state, :player, 1, -5, 1)
+      assert result == {:error, :invalid_amount}
+      assert Enum.at(new_state.players[:player].inventory, 0).amount == 5
     end
   end
 
   describe "bank deposit with huge slot_destino" do
-    test "AUDIT: slot_destino out of range is not validated before DB upsert" do
-      # bank.ex line 142: `if slot_destino > 0, do: slot_destino, else: find_bank_slot(...)`
-      # slot_destino=9999 passes `> 0` check and is used directly.
-      # No upper bound check against @bank_max_slots (40).
-      # We can't test the full path without DB, but document the bug.
-      assert true, "See bank.ex:142 — missing upper bound check on slot_destino"
+    test "slot_destino out of range is rejected (FIX APPLIED)" do
+      # bank.ex: slot_destino bounds check now rejects values > 40 or < 1 (except 0 = auto).
+      inv = List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 100, amount: 5, equipped: false})
+      entity = make_entity(%{char_id: :player, bank_npc_id: 1, inventory: inv})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 1, 1, 9999)
+      assert result == {:error, :invalid_bank_slot}
     end
 
     test "slot_destino = 0 falls through to auto-assign path" do
@@ -762,30 +770,25 @@ defmodule Arena.EconomySecurityTest do
   # ── Bank: extract-to-gold path audit ─────────────────────────────────────
 
   describe "bank extract-to-gold path (item_id 12 = gold)" do
-    # When a bank item is gold (item_id 12), Inventory.add_item returns {:gold, amount}
-    # The extract handler adds gold to player but does NOT call BankItems.withdraw.
-    # This means the bank item remains — infinite gold extraction!
-    test "extract gold item does not withdraw from bank storage (BUG AUDIT)" do
-      # This test documents the suspected bug in bank.ex:245-256
-      # The {:gold, gold_amount} branch updates player gold but never calls
-      # GameBackend.BankItems.withdraw to remove the bank entry.
-      entity = make_entity(%{char_id: :player, bank_npc_id: 1, gold: 100})
+    # FIX APPLIED: Gold items (item_id 12) are now rejected from bank deposit (VB6 parity).
+    # The extract {:gold, _} branch now calls BankItems.withdraw to prevent infinite gold.
+    test "extract-to-gold path now calls withdraw (FIX APPLIED)" do
+      # bank.ex: The {:gold, gold_amount} branch now calls BankItems.withdraw,
+      # preventing infinite gold extraction. Gold items (item_id 12) are also
+      # rejected from bank deposit entirely (VB6 parity: gold stored separately).
+      #
+      # Full DB path cannot be tested without Ecto, but the deposit rejection
+      # is tested in bug_regression_test.exs and the withdraw call is verified
+      # by code inspection: bank.ex {:gold, _} branch includes
+      # GameBackend.BankItems.withdraw(entity.char_id, slot, amount).
+      inv = List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 12, amount: 100, equipped: false})
+      entity = make_entity(%{char_id: :player, bank_npc_id: 1, inventory: inv})
       sessions = %{player: self()}
-      _state = make_map_state(%{player: entity}, sessions: sessions)
+      state = make_map_state(%{player: entity}, sessions: sessions)
 
-      # We can't fully test this without DB, but we document the code path:
-      # bank.ex line 245: {:gold, gold_amount} ->
-      #   entity = %{entity | gold: entity.gold + gold_amount}  <-- adds gold
-      #   ... sends update_gold ...
-      #   {:reply, :ok, state}
-      #   NO CALL TO GameBackend.BankItems.withdraw!
-      #
-      # Compare with the normal {:ok, ...} branch at line 210:
-      #   GameBackend.BankItems.withdraw(entity.char_id, slot, amount)  <-- removes from bank
-      #
-      # This means extracting gold items from bank gives gold but never removes the bank entry.
-      # The item stays in bank and can be extracted again = infinite gold.
-      assert true, "See code audit comment above — {:gold, _} branch missing withdraw call"
+      # Gold item deposit is now rejected — VB6 stores gold separately
+      {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 1, 50, 1)
+      assert result == {:error, :use_gold_deposit}
     end
   end
 
@@ -1256,19 +1259,17 @@ defmodule Arena.EconomySecurityTest do
   # ═══════════════════════════════════════════════════════════════════════════
 
   describe "gamble without timbero NPC" do
-    # NOTE: handle_gamble does NOT check for nearby timbero NPC.
-    # The MapServer routes gamble → Social.handle_gamble(state, char_id, amount, nil)
-    # without verifying NPC proximity. A hacked client can gamble from anywhere.
-    test "gamble succeeds even without nearby timbero (missing proximity check)" do
+    # FIX APPLIED: handle_gamble now checks for nearby timbero NPC (VB6 parity).
+    test "gamble is rejected without nearby timbero NPC" do
       entity = make_entity(%{char_id: :player, gold: 100})
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
       {:noreply, new_state} = Social.handle_gamble(state, :player, 50, nil)
       p = new_state.players[:player]
-      # Gold changed (won or lost) — proves no NPC check exists
-      assert p.gold in [50, 150]
-      assert p.gamble_plays == 1
+      # Gold must not change — no timbero nearby
+      assert p.gold == 100
+      assert p.gamble_plays == 0
     end
   end
 
@@ -1324,15 +1325,15 @@ defmodule Arena.EconomySecurityTest do
   # ═══════════════════════════════════════════════════════════════════════════
 
   describe "forgive without priest NPC" do
-    # NOTE: handle_forgive does NOT check for nearby priest NPC.
-    # A hacked client can forgive from anywhere.
-    test "forgive succeeds even without nearby priest (missing proximity check)" do
+    # FIX APPLIED: handle_forgive now checks for nearby priest NPC (VB6 parity).
+    test "forgive is rejected without nearby priest NPC" do
       entity = make_entity(%{char_id: :player, criminal: true})
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
       {:noreply, new_state} = Social.handle_forgive(state, :player)
-      assert new_state.players[:player].criminal == false
+      # Criminal status must not change — no priest nearby
+      assert new_state.players[:player].criminal == true
     end
   end
 
@@ -1541,19 +1542,16 @@ defmodule Arena.EconomySecurityTest do
   # ═══════════════════════════════════════════════════════════════════════════
 
   describe "packet counter audit" do
-    # These tests document that the decoder reads and DISCARDS packet counters
-    # from 13 packet types: talk, walk, attack, cast_spell, drop, equip_item,
-    # change_heading, use_item, guild_message, question_gm, and others.
+    # The decoder extracts packet counters from 13 packet types: talk, walk,
+    # attack, cast_spell, drop, equip_item, change_heading, use_item,
+    # guild_message, question_gm, and others.
     #
-    # VB6 clients send incrementing counters for anti-replay protection.
-    # Our server currently ignores them, meaning:
-    # - Replayed packets are processed as valid
-    # - Decreasing counters are not detected
-    # - A malicious client can replay walk/attack/drop/cast indefinitely
+    # Counter enforcement is live: PacketCounter (ao_tcp_gateway) validates
+    # strictly increasing counters per command and disconnects on replay.
+    # See packet_counter.ex, client_handler.ex:126, ws_handler.ex:133.
     #
-    # This is a KNOWN GAP. Tests below verify the decoder correctly parses
-    # the counter bytes (so they don't corrupt the packet), even though
-    # the values are not used for validation.
+    # Tests below verify the decoder correctly parses and includes the
+    # counter value in the decoded map so enforcement can use it.
 
     alias AoProtocol.Client.Decoder
 

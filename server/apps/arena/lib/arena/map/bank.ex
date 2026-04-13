@@ -7,6 +7,7 @@ defmodule Arena.Map.Bank do
 
   @npc_type_banquero 4
   @bank_max_slots 40
+  @gold_item_id 12
 
   def handle_open_bank(state, char_id, target_x, target_y) do
     case Map.fetch(state.players, char_id) do
@@ -101,11 +102,23 @@ defmodule Arena.Map.Bank do
           inv_item = Enum.at(entity.inventory, inv_idx)
 
           cond do
+            # VB6 parity: Cantidad > 0 (modBanco.bas:201)
+            amount <= 0 ->
+              {:reply, {:error, :invalid_amount}, state}
+
+            # VB6 parity: validate slot_destino range against bank_max_slots
+            slot_destino != 0 and (slot_destino < 1 or slot_destino > @bank_max_slots) ->
+              {:reply, {:error, :invalid_bank_slot}, state}
+
             inv_item == nil ->
               {:reply, {:error, :empty_slot}, state}
 
             inv_item.amount < amount ->
               {:reply, {:error, :not_enough}, state}
+
+            # VB6 parity: gold is stored separately (Stats.Banco), not as bank item
+            inv_item.item_id == @gold_item_id ->
+              {:reply, {:error, :use_gold_deposit}, state}
 
             true ->
               item_def = GameData.get_item(inv_item.item_id)
@@ -186,86 +199,104 @@ defmodule Arena.Map.Bank do
   def handle_bank_extract_item(state, char_id, slot, amount, _slot_destino) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
-        if entity.bank_npc_id == nil do
-          {:reply, {:error, :no_bank}, state}
-        else
-          bank_items = GameBackend.BankItems.get_bank(entity.char_id)
-          bank_item = Enum.find(bank_items, fn bi -> bi.slot == slot end)
+        cond do
+          entity.bank_npc_id == nil ->
+            {:reply, {:error, :no_bank}, state}
 
-          cond do
-            bank_item == nil ->
-              {:reply, {:error, :empty_bank_slot}, state}
+          # VB6 parity: Cantidad < 1 (modBanco.bas:94)
+          amount <= 0 ->
+            {:reply, {:error, :invalid_amount}, state}
 
-            bank_item.amount < amount ->
-              {:reply, {:error, :not_enough}, state}
+          true ->
+            bank_items = GameBackend.BankItems.get_bank(entity.char_id)
+            bank_item = Enum.find(bank_items, fn bi -> bi.slot == slot end)
 
-            true ->
-              # Add to inventory
-              case Inventory.add_item(entity.inventory, bank_item.item_id, amount, bank_item.elemental_tags || 0) do
-                {:ok, new_inventory, inv_slot} ->
-                  entity = %{entity | inventory: new_inventory}
-                  players = Map.put(state.players, char_id, entity)
-                  state = %{state | players: players}
+            cond do
+              bank_item == nil ->
+                {:reply, {:error, :empty_bank_slot}, state}
 
-                  # Update bank DB
-                  GameBackend.BankItems.withdraw(entity.char_id, slot, amount)
-                  new_bank_amount = bank_item.amount - amount
+              bank_item.amount < amount ->
+                {:reply, {:error, :not_enough}, state}
 
-                  if new_bank_amount <= 0 do
+              true ->
+                # Add to inventory
+                case Inventory.add_item(entity.inventory, bank_item.item_id, amount, bank_item.elemental_tags || 0) do
+                  {:ok, new_inventory, inv_slot} ->
+                    entity = %{entity | inventory: new_inventory}
+                    players = Map.put(state.players, char_id, entity)
+                    state = %{state | players: players}
+
+                    # Update bank DB
+                    GameBackend.BankItems.withdraw(entity.char_id, slot, amount)
+                    new_bank_amount = bank_item.amount - amount
+
+                    if new_bank_amount <= 0 do
+                      Helpers.send_to_session(
+                        state.sessions,
+                        char_id,
+                        {:send_raw, Encoder.encode({:change_bank_slot, %{slot: slot, obj_index: 0, amount: 0, valor: 0}})}
+                      )
+                    else
+                      item_def = GameData.get_item(bank_item.item_id)
+                      valor = if item_def, do: item_def.valor, else: 0
+
+                      Helpers.send_to_session(
+                        state.sessions,
+                        char_id,
+                        {:send_raw,
+                         Encoder.encode(
+                           {:change_bank_slot,
+                            %{
+                              slot: slot,
+                              obj_index: bank_item.item_id,
+                              amount: new_bank_amount,
+                              valor: valor,
+                              elemental_tags: bank_item.elemental_tags || 0
+                            }}
+                         )}
+                      )
+                    end
+
+                    # Send updated inventory slot
+                    Helpers.send_inventory_slot(state.sessions, char_id, new_inventory, inv_slot)
+                    {:reply, :ok, state}
+
+                  {:gold, gold_amount} ->
+                    # VB6 parity: gold items (item_id 12) should not be in bank storage.
+                    # If one somehow exists, convert to gold AND withdraw from bank.
+                    entity = %{entity | gold: entity.gold + gold_amount}
+                    players = Map.put(state.players, char_id, entity)
+                    state = %{state | players: players}
+
+                    # Remove from bank DB (was missing before — infinite gold bug)
+                    GameBackend.BankItems.withdraw(entity.char_id, slot, amount)
+
+                    Helpers.send_to_session(
+                      state.sessions,
+                      char_id,
+                      {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
+                    )
+
+                    # Clear the bank slot on client
                     Helpers.send_to_session(
                       state.sessions,
                       char_id,
                       {:send_raw, Encoder.encode({:change_bank_slot, %{slot: slot, obj_index: 0, amount: 0, valor: 0}})}
                     )
-                  else
-                    item_def = GameData.get_item(bank_item.item_id)
-                    valor = if item_def, do: item_def.valor, else: 0
 
+                    {:reply, :ok, state}
+
+                  {:error, :inventory_full} ->
                     Helpers.send_to_session(
                       state.sessions,
                       char_id,
                       {:send_raw,
-                       Encoder.encode(
-                         {:change_bank_slot,
-                          %{
-                            slot: slot,
-                            obj_index: bank_item.item_id,
-                            amount: new_bank_amount,
-                            valor: valor,
-                            elemental_tags: bank_item.elemental_tags || 0
-                          }}
-                       )}
+                       Encoder.encode({:console_msg, %{message: "No tienes espacio en tu inventario.", font_index: 0}})}
                     )
-                  end
 
-                  # Send updated inventory slot
-                  Helpers.send_inventory_slot(state.sessions, char_id, new_inventory, inv_slot)
-                  {:reply, :ok, state}
-
-                {:gold, gold_amount} ->
-                  entity = %{entity | gold: entity.gold + gold_amount}
-                  players = Map.put(state.players, char_id, entity)
-                  state = %{state | players: players}
-
-                  Helpers.send_to_session(
-                    state.sessions,
-                    char_id,
-                    {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
-                  )
-
-                  {:reply, :ok, state}
-
-                {:error, :inventory_full} ->
-                  Helpers.send_to_session(
-                    state.sessions,
-                    char_id,
-                    {:send_raw,
-                     Encoder.encode({:console_msg, %{message: "No tienes espacio en tu inventario.", font_index: 0}})}
-                  )
-
-                  {:reply, {:error, :inventory_full}, state}
-              end
-          end
+                    {:reply, {:error, :inventory_full}, state}
+                end
+            end
         end
 
       :error ->
