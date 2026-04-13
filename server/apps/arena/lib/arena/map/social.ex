@@ -241,6 +241,64 @@ defmodule Arena.Map.Social do
         target_name = Enum.at(parts, 1)
         gm_locate(state, char_id, target_name)
 
+      ["/REVIVE", _name_upper] ->
+        target_name = Enum.at(parts, 1)
+        gm_revive(state, char_id, target_name)
+
+      ["/ONLINEMAP"] ->
+        gm_online_map(state, char_id)
+
+      ["/KILLNPC"] ->
+        gm_kill_npc(state, char_id, entity)
+
+      ["/KILLNPCPERM"] ->
+        gm_kill_npc_permanent(state, char_id, entity)
+
+      ["/MASSKILL"] ->
+        gm_mass_kill_npcs(state, char_id, entity)
+
+      ["/SPAWNNPCR", npc_id_str] ->
+        gm_spawn_npc_respawn(state, char_id, entity, npc_id_str)
+
+      ["/SPAWNLIST"] ->
+        gm_spawn_list(state, char_id)
+
+      ["/CREATURES", map_str] ->
+        gm_creatures_in_map(state, char_id, map_str)
+
+      ["/GIVEITEM", _name, item_str, amount_str] ->
+        target_name = Enum.at(parts, 1)
+        gm_give_item(state, char_id, target_name, item_str, amount_str)
+
+      ["/CHARSTATS", _name] ->
+        target_name = Enum.at(parts, 1)
+        gm_char_stats(state, char_id, target_name)
+
+      ["/CHARGOLD", _name] ->
+        target_name = Enum.at(parts, 1)
+        gm_char_gold(state, char_id, target_name)
+
+      ["/CHARINV", _name] ->
+        target_name = Enum.at(parts, 1)
+        gm_char_inventory(state, char_id, target_name)
+
+      ["/CHARBANK", _name] ->
+        target_name = Enum.at(parts, 1)
+        gm_char_bank(state, char_id, target_name)
+
+      ["/CHARSKILLS", _name] ->
+        target_name = Enum.at(parts, 1)
+        gm_char_skills(state, char_id, target_name)
+
+      ["/EDITCHAR", _name, option_str, arg1] ->
+        target_name = Enum.at(parts, 1)
+        gm_edit_char(state, char_id, target_name, option_str, arg1)
+
+      ["/ALTERNAME", _old, _new] ->
+        old_name = Enum.at(parts, 1)
+        new_name = Enum.at(parts, 2)
+        gm_alter_name(state, char_id, old_name, new_name)
+
       _ ->
         gm_console(state, char_id, "Unknown GM command: #{message}")
         {:noreply, state}
@@ -600,6 +658,158 @@ defmodule Arena.Map.Social do
     end
   end
 
+  # /KILLNPC — kill the NPC at the GM's facing tile (allows respawn)
+  defp gm_kill_npc(state, char_id, entity) do
+    {tx, ty} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
+
+    case Helpers.get_occupancy(state.occupancy, tx, ty) do
+      {:npc, instance_id} ->
+        case Map.get(state.npcs_live, instance_id) do
+          nil ->
+            gm_console(state, char_id, "No NPC found at facing tile.")
+            {:noreply, state}
+
+          npc ->
+            npc_def = GameData.get_npc(npc.npc_id)
+            npc_name = if npc_def, do: npc_def.name, else: "NPC #{npc.npc_id}"
+
+            # Mark NPC as dead with respawn (same as combat death)
+            dead_npc = %{
+              npc
+              | alive: false,
+                respawn_at:
+                  System.monotonic_time(:millisecond) +
+                    if(npc_def, do: npc_def.intervalo_respawn, else: 60) * 1000
+            }
+
+            npcs_live = Map.put(state.npcs_live, instance_id, dead_npc)
+            occupancy = Helpers.clear_occupancy(state.occupancy, npc.x, npc.y)
+
+            # Broadcast removal
+            raw = Encoder.encode({:character_remove, %{char_index: npc.char_index}})
+
+            Visibility.broadcast_visible_all(state, npc.x, npc.y, fn pid ->
+              send(pid, {:send_raw, raw})
+            end)
+
+            state = %{state | npcs_live: npcs_live, occupancy: occupancy}
+            gm_console(state, char_id, "Killed NPC #{npc_name} (respawn enabled).")
+            {:noreply, state}
+        end
+
+      _ ->
+        gm_console(state, char_id, "No NPC at facing tile (#{tx}, #{ty}).")
+        {:noreply, state}
+    end
+  end
+
+  # /KILLNPCPERM — kill the NPC at the GM's facing tile permanently (no respawn)
+  defp gm_kill_npc_permanent(state, char_id, entity) do
+    {tx, ty} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
+
+    case Helpers.get_occupancy(state.occupancy, tx, ty) do
+      {:npc, instance_id} ->
+        case Map.get(state.npcs_live, instance_id) do
+          nil ->
+            gm_console(state, char_id, "No NPC found at facing tile.")
+            {:noreply, state}
+
+          npc ->
+            npc_def = GameData.get_npc(npc.npc_id)
+            npc_name = if npc_def, do: npc_def.name, else: "NPC #{npc.npc_id}"
+
+            # Remove NPC entirely (no respawn)
+            npcs_live = Map.delete(state.npcs_live, instance_id)
+            occupancy = Helpers.clear_occupancy(state.occupancy, npc.x, npc.y)
+
+            # Broadcast removal
+            raw = Encoder.encode({:character_remove, %{char_index: npc.char_index}})
+
+            Visibility.broadcast_visible_all(state, npc.x, npc.y, fn pid ->
+              send(pid, {:send_raw, raw})
+            end)
+
+            state = %{state | npcs_live: npcs_live, occupancy: occupancy}
+            gm_console(state, char_id, "Killed NPC #{npc_name} permanently (no respawn).")
+            {:noreply, state}
+        end
+
+      _ ->
+        gm_console(state, char_id, "No NPC at facing tile (#{tx}, #{ty}).")
+        {:noreply, state}
+    end
+  end
+
+  # /MASSKILL — kill all NPCs within AOI range
+  defp gm_mass_kill_npcs(state, char_id, entity) do
+    aoi_x = Helpers.aoi_range_x()
+    aoi_y = Helpers.aoi_range_y()
+
+    {killed, state} =
+      Enum.reduce(state.npcs_live, {0, state}, fn {inst_id, npc}, {count, st} ->
+        if npc.alive and abs(npc.x - entity.x) <= aoi_x and abs(npc.y - entity.y) <= aoi_y do
+          npcs_live = Map.delete(st.npcs_live, inst_id)
+          occupancy = Helpers.clear_occupancy(st.occupancy, npc.x, npc.y)
+
+          raw = Encoder.encode({:character_remove, %{char_index: npc.char_index}})
+
+          Visibility.broadcast_visible_all(st, npc.x, npc.y, fn pid ->
+            send(pid, {:send_raw, raw})
+          end)
+
+          {count + 1, %{st | npcs_live: npcs_live, occupancy: occupancy}}
+        else
+          {count, st}
+        end
+      end)
+
+    gm_console(state, char_id, "Killed #{killed} NPCs nearby.")
+    {:noreply, state}
+  end
+
+  # /SPAWNNPCR npc_id — spawn an NPC at the GM's facing tile (with respawn flag)
+  defp gm_spawn_npc_respawn(state, char_id, entity, npc_id_str) do
+    # For now, spawns the same way as /SPAWNNPC — respawn persistence is a future enhancement
+    gm_spawn_npc(state, char_id, entity, npc_id_str)
+  end
+
+  # /SPAWNLIST — list all live NPCs on the current map
+  defp gm_spawn_list(state, char_id) do
+    entries =
+      Enum.filter(state.npcs_live, fn {_inst_id, npc} -> npc.alive end)
+      |> Enum.map(fn {inst_id, npc} ->
+        npc_def = GameData.get_npc(npc.npc_id)
+        name = if npc_def, do: npc_def.name, else: "?"
+        "#{inst_id}: #{name} (#{npc.npc_id}) at (#{npc.x},#{npc.y})"
+      end)
+
+    gm_console(state, char_id, "NPCs on map (#{length(entries)}):")
+
+    Enum.each(entries, fn entry ->
+      gm_console(state, char_id, entry)
+    end)
+
+    {:noreply, state}
+  end
+
+  # /CREATURES map_id — list NPCs on a specific map
+  defp gm_creatures_in_map(state, char_id, map_str) do
+    case Integer.parse(map_str) do
+      {map_id, ""} ->
+        if map_id == state.map_id do
+          # Local map — reuse spawn list logic
+          gm_spawn_list(state, char_id)
+        else
+          gm_console(state, char_id, "Cross-map NPC queries are not supported yet.")
+          {:noreply, state}
+        end
+
+      _ ->
+        gm_console(state, char_id, "Usage: /CREATURES map_id")
+        {:noreply, state}
+    end
+  end
+
   # /LOCATE name — find a player's location (uses OnlineDirectory if available)
   defp gm_locate(state, char_id, target_name) do
     case AoSession.OnlineDirectory.lookup_by_name(target_name) do
@@ -618,6 +828,268 @@ defmodule Arena.Map.Social do
             gm_console(state, char_id, "Player '#{target_name}' not found.")
             {:noreply, state}
         end
+    end
+  end
+
+  # /REVIVE name — resurrect a dead player on this map
+  defp gm_revive(state, char_id, target_name) do
+    case find_player_by_name(state, target_name) do
+      {:ok, target_id, target} ->
+        if not target.dead do
+          gm_console(state, char_id, "#{target.name} no esta muerto.")
+          {:noreply, state}
+        else
+          target = %{target | dead: false, hp: target.max_hp}
+          players = Map.put(state.players, target_id, target)
+          state = %{state | players: players}
+
+          Helpers.send_to_session(
+            state.sessions,
+            target_id,
+            {:send_raw, Encoder.encode({:update_hp, %{min_hp: target.hp}})}
+          )
+
+          Helpers.send_to_session(
+            state.sessions,
+            target_id,
+            {:send_raw,
+             Encoder.encode(
+               {:console_msg, %{message: "Un GM te ha resucitado.", font_index: 0}}
+             )}
+          )
+
+          Helpers.broadcast_character_change(state, target)
+          gm_console(state, char_id, "#{target.name} ha sido resucitado.")
+          {:noreply, state}
+        end
+
+      :not_found ->
+        gm_console(state, char_id, "Player '#{target_name}' not found on this map.")
+        {:noreply, state}
+    end
+  end
+
+  # /ONLINEMAP — list players on current map
+  defp gm_online_map(state, char_id) do
+    names = Enum.map(state.players, fn {_id, entity} -> entity.name end)
+    count = length(names)
+    gm_console(state, char_id, "Jugadores en mapa (#{count}): #{Enum.join(names, ", ")}")
+    {:noreply, state}
+  end
+
+  # ---- Batch 3: Character Management GM helpers ----
+
+  defp gm_give_item(state, char_id, target_name, item_str, amount_str) do
+    with {item_id, ""} <- Integer.parse(item_str),
+         {amount, ""} <- Integer.parse(amount_str),
+         true <- amount > 0 do
+      case find_player_by_name(state, target_name) do
+        {:ok, target_id, target} ->
+          case Arena.Inventory.add_item(target.inventory, item_id, amount) do
+            {:ok, new_inventory, slot} ->
+              target = %{target | inventory: new_inventory}
+              players = Map.put(state.players, target_id, target)
+              state = %{state | players: players}
+              Helpers.send_inventory_slot(state.sessions, target_id, new_inventory, slot)
+              gm_console(state, char_id, "Gave #{amount}x item #{item_id} to #{target.name}.")
+              {:noreply, state}
+
+            {:gold, gold_amount} ->
+              target = %{target | gold: target.gold + gold_amount}
+              players = Map.put(state.players, target_id, target)
+              state = %{state | players: players}
+
+              Helpers.send_to_session(
+                state.sessions,
+                target_id,
+                {:send_raw, Encoder.encode({:update_gold, %{gold: target.gold}})}
+              )
+
+              gm_console(state, char_id, "Gave #{gold_amount} gold to #{target.name}.")
+              {:noreply, state}
+
+            {:error, :inventory_full} ->
+              gm_console(state, char_id, "#{target.name}'s inventory is full.")
+              {:noreply, state}
+          end
+
+        :not_found ->
+          gm_console(state, char_id, "Player '#{target_name}' not found on this map.")
+          {:noreply, state}
+      end
+    else
+      _ ->
+        gm_console(state, char_id, "Usage: /GIVEITEM name item_id amount")
+        {:noreply, state}
+    end
+  end
+
+  defp gm_char_stats(state, char_id, target_name) do
+    case find_player_by_name(state, target_name) do
+      {:ok, _target_id, target} ->
+        gm_console(state, char_id, "=== Stats: #{target.name} ===")
+        gm_console(state, char_id, "STR: #{target.str} AGI: #{target.agi} INT: #{target.int}")
+        gm_console(state, char_id, "CON: #{target.con} CHA: #{target.cha}")
+        gm_console(state, char_id, "Level: #{target.level} XP: #{target.xp}")
+        gm_console(state, char_id, "HP: #{target.hp}/#{target.max_hp} Mana: #{target.mana}/#{target.max_mana}")
+        gm_console(state, char_id, "Stamina: #{target.stamina}/#{target.max_stamina}")
+        {:noreply, state}
+
+      :not_found ->
+        gm_console(state, char_id, "Player '#{target_name}' not found.")
+        {:noreply, state}
+    end
+  end
+
+  defp gm_char_gold(state, char_id, target_name) do
+    case find_player_by_name(state, target_name) do
+      {:ok, _target_id, target} ->
+        gm_console(state, char_id, "#{target.name} gold: #{target.gold}")
+        {:noreply, state}
+
+      :not_found ->
+        gm_console(state, char_id, "Player '#{target_name}' not found.")
+        {:noreply, state}
+    end
+  end
+
+  defp gm_char_inventory(state, char_id, target_name) do
+    case find_player_by_name(state, target_name) do
+      {:ok, _target_id, target} ->
+        gm_console(state, char_id, "=== Inventory: #{target.name} ===")
+
+        target.inventory
+        |> Enum.with_index(1)
+        |> Enum.each(fn {item, slot} ->
+          if item != nil do
+            item_def = GameData.get_item(item.item_id)
+            name = if item_def, do: item_def.name, else: "?"
+            gm_console(state, char_id, "Slot #{slot}: #{name} (#{item.item_id}) x#{item.amount}")
+          end
+        end)
+
+        {:noreply, state}
+
+      :not_found ->
+        gm_console(state, char_id, "Player '#{target_name}' not found.")
+        {:noreply, state}
+    end
+  end
+
+  defp gm_char_bank(state, char_id, target_name) do
+    case find_player_by_name(state, target_name) do
+      {:ok, _target_id, target} ->
+        gm_console(state, char_id, "#{target.name} bank gold: #{Map.get(target, :bank_gold, 0)}")
+        {:noreply, state}
+
+      :not_found ->
+        gm_console(state, char_id, "Player '#{target_name}' not found.")
+        {:noreply, state}
+    end
+  end
+
+  defp gm_char_skills(state, char_id, target_name) do
+    case find_player_by_name(state, target_name) do
+      {:ok, _target_id, target} ->
+        gm_console(state, char_id, "=== Skills: #{target.name} ===")
+
+        Enum.each(target.skills, fn {skill, level} ->
+          gm_console(state, char_id, "#{skill}: #{level}")
+        end)
+
+        {:noreply, state}
+
+      :not_found ->
+        gm_console(state, char_id, "Player '#{target_name}' not found.")
+        {:noreply, state}
+    end
+  end
+
+  defp gm_edit_char(state, char_id, target_name, option_str, value_str) do
+    case find_player_by_name(state, target_name) do
+      {:ok, target_id, target} ->
+        case {option_str, Integer.parse(value_str)} do
+          {"1", {value, _}} ->
+            target = %{target | gold: max(value, 0)}
+            players = Map.put(state.players, target_id, target)
+            state = %{state | players: players}
+
+            Helpers.send_to_session(
+              state.sessions,
+              target_id,
+              {:send_raw, Encoder.encode({:update_gold, %{gold: target.gold}})}
+            )
+
+            gm_console(state, char_id, "Set #{target.name} gold to #{target.gold}.")
+            {:noreply, state}
+
+          {"2", {value, _}} ->
+            target = %{target | level: max(min(value, 50), 1)}
+            players = Map.put(state.players, target_id, target)
+            state = %{state | players: players}
+            gm_console(state, char_id, "Set #{target.name} level to #{target.level}.")
+            {:noreply, state}
+
+          {"3", {value, _}} ->
+            target = %{target | xp: max(value, 0)}
+            players = Map.put(state.players, target_id, target)
+            state = %{state | players: players}
+            gm_console(state, char_id, "Set #{target.name} XP to #{target.xp}.")
+            {:noreply, state}
+
+          {"4", {value, _}} ->
+            target = %{target | hp: max(min(value, target.max_hp), 0)}
+            players = Map.put(state.players, target_id, target)
+            state = %{state | players: players}
+
+            Helpers.send_to_session(
+              state.sessions,
+              target_id,
+              {:send_raw, Encoder.encode({:update_hp, %{min_hp: target.hp, shield: 0}})}
+            )
+
+            gm_console(state, char_id, "Set #{target.name} HP to #{target.hp}.")
+            {:noreply, state}
+
+          {"5", {value, _}} ->
+            target = %{target | mana: max(min(value, target.max_mana), 0)}
+            players = Map.put(state.players, target_id, target)
+            state = %{state | players: players}
+
+            Helpers.send_to_session(
+              state.sessions,
+              target_id,
+              {:send_raw, Encoder.encode({:update_mana, %{min_mana: target.mana}})}
+            )
+
+            gm_console(state, char_id, "Set #{target.name} mana to #{target.mana}.")
+            {:noreply, state}
+
+          _ ->
+            gm_console(state, char_id, "Usage: /EDITCHAR name option value")
+            gm_console(state, char_id, "Options: 1=Gold 2=Level 3=XP 4=HP 5=Mana")
+            {:noreply, state}
+        end
+
+      :not_found ->
+        gm_console(state, char_id, "Player '#{target_name}' not found.")
+        {:noreply, state}
+    end
+  end
+
+  defp gm_alter_name(state, char_id, old_name, new_name) do
+    case find_player_by_name(state, old_name) do
+      {:ok, target_id, target} ->
+        target = %{target | name: new_name}
+        players = Map.put(state.players, target_id, target)
+        state = %{state | players: players}
+        Helpers.broadcast_character_change(state, target)
+        gm_console(state, char_id, "Renamed #{old_name} to #{new_name}.")
+        {:noreply, state}
+
+      :not_found ->
+        gm_console(state, char_id, "Player '#{old_name}' not found.")
+        {:noreply, state}
     end
   end
 
@@ -2754,4 +3226,5 @@ defmodule Arena.Map.Social do
         {:noreply, state}
     end
   end
+
 end

@@ -107,6 +107,18 @@ defmodule AoSession.OnlineDirectory do
     end
   end
 
+  @doc "Return a list of names for every online player."
+  def list_all_names do
+    :ets.foldl(
+      fn
+        {{:by_id, _char_id}, %{name: name}}, acc -> [name | acc]
+        _other, acc -> acc
+      end,
+      [],
+      @table
+    )
+  end
+
   @doc "Count online players."
   def online_count do
     # Count :by_id entries only (not :by_name which are secondary index)

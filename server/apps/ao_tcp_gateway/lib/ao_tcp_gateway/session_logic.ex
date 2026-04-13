@@ -1508,12 +1508,25 @@ defmodule AoTcpGateway.SessionLogic do
 
   def handle_command(state, {:unban_char, %{name: name}})
       when state.character_id != nil and state.is_gm == true do
-    {state, [{:console_msg, %{message: "Unban no implementado para #{name}.", font_index: 0}}]}
+    case GameBackend.Characters.get_by_name(name) do
+      nil ->
+        {state, [{:console_msg, %{message: "Personaje '#{name}' no encontrado.", font_index: 0}}]}
+
+      character ->
+        case GameBackend.Account.unban(character.account_id) do
+          {:ok, _} ->
+            {state, [{:console_msg, %{message: "#{name} ha sido desbaneado.", font_index: 0}}]}
+
+          {:error, reason} ->
+            {state, [{:console_msg, %{message: "Error al desbanear: #{inspect(reason)}", font_index: 0}}]}
+        end
+    end
   end
 
   def handle_command(state, {:revive_char, %{name: name}})
       when state.character_id != nil and state.is_gm == true do
-    {state, [{:console_msg, %{message: "Revive no implementado para #{name}.", font_index: 0}}]}
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/REVIVE #{name}")
+    {state, []}
   end
 
   def handle_command(state, {:summon_char, %{name: name}})
@@ -1522,9 +1535,69 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
+  # ---- Batch 2: NPC Management ----
+
+  # Kill NPC (ID 121) — route to /KILLNPC
   def handle_command(state, {:kill_npc, _})
       when state.character_id != nil and state.is_gm == true do
-    {state, [{:console_msg, %{message: "Usa /KILL <nombre> para matar NPCs.", font_index: 0}}]}
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/KILLNPC")
+    {state, []}
+  end
+
+  # KillNPCTargeted (ID 339) — kill NPC at target position (with respawn)
+  def handle_command(state, {:kill_npc_targeted, _})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/KILLNPC")
+    {state, []}
+  end
+
+  # KillNPCNoRespawn (ID 394)
+  def handle_command(state, {:kill_npc_no_respawn, _})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/KILLNPCPERM")
+    {state, []}
+  end
+
+  # KillAllNearbyNPCs (ID 395)
+  def handle_command(state, {:kill_all_nearby_npcs, _})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/MASSKILL")
+    {state, []}
+  end
+
+  # CreateNPC (ID 399) — spawn NPC without respawn
+  def handle_command(state, {:create_npc, %{npc_id: npc_id}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/SPAWNNPC #{npc_id}")
+    {state, []}
+  end
+
+  # CreateNPCWithRespawn (ID 400)
+  def handle_command(state, {:create_npc_with_respawn, %{npc_id: npc_id}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/SPAWNNPCR #{npc_id}")
+    {state, []}
+  end
+
+  # SpawnCreature (ID 359)
+  def handle_command(state, {:spawn_creature, %{creature_id: creature_id}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/SPAWNNPC #{creature_id}")
+    {state, []}
+  end
+
+  # SpawnListRequest (ID 358) — list all spawnable NPC IDs
+  def handle_command(state, {:spawn_list_request, _})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/SPAWNLIST")
+    {state, []}
+  end
+
+  # CreaturesInMap (ID 326)
+  def handle_command(state, {:creatures_in_map, %{map: map}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/CREATURES #{map}")
+    {state, []}
   end
 
   def handle_command(state, {:request_char_info, %{name: name}})
@@ -1579,6 +1652,111 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
+  # ---- Batch 3: Character Management ----
+
+  def handle_command(state, {:create_item, %{item_id: item_id, amount: amount}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/SPAWNITEM #{item_id} #{amount}")
+    {state, []}
+  end
+
+  def handle_command(state, {:give_item, %{name: name, item_id: item_id, amount: amount, reason: _reason}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/GIVEITEM #{name} #{item_id} #{amount}")
+    {state, []}
+  end
+
+  def handle_command(state, {:request_char_stats, %{name: name}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/CHARSTATS #{name}")
+    {state, []}
+  end
+
+  def handle_command(state, {:request_char_gold, %{name: name}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/CHARGOLD #{name}")
+    {state, []}
+  end
+
+  def handle_command(state, {:request_char_inventory, %{name: name}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/CHARINV #{name}")
+    {state, []}
+  end
+
+  def handle_command(state, {:request_char_bank, %{name: name}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/CHARBANK #{name}")
+    {state, []}
+  end
+
+  def handle_command(state, {:request_char_skills, %{name: name}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/CHARSKILLS #{name}")
+    {state, []}
+  end
+
+  def handle_command(state, {:edit_char, %{name: name, option: option, arg1: arg1, arg2: _arg2}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/EDITCHAR #{name} #{option} #{arg1}")
+    {state, []}
+  end
+
+  def handle_command(state, {:alter_name, %{name: name, new_name: new_name}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/ALTERNAME #{name} #{new_name}")
+    {state, []}
+  end
+
+  # ---- Batch 1: Essential Server Admin ----
+
+  def handle_command(state, {:online, _})
+      when state.character_id != nil and state.is_gm == true do
+    names = AoSession.OnlineDirectory.list_all_names()
+    count = length(names)
+    name_list = Enum.join(names, ", ")
+    {state, [{:console_msg, %{message: "Jugadores online (#{count}): #{name_list}", font_index: 0}}]}
+  end
+
+  def handle_command(state, {:online_map, _})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/ONLINEMAP")
+    {state, []}
+  end
+
+  def handle_command(state, {:kick_all_chars, _})
+      when state.character_id != nil and state.is_gm == true do
+    AoSession.OnlineDirectory.broadcast_all(:disconnect)
+    {state, [{:console_msg, %{message: "Todos los jugadores han sido expulsados.", font_index: 0}}]}
+  end
+
+  def handle_command(state, {:server_open_toggle, _})
+      when state.character_id != nil and state.is_gm == true do
+    # Toggle server open state - for now just acknowledge
+    {state, [{:console_msg, %{message: "Server open/close toggle recibido.", font_index: 0}}]}
+  end
+
+  def handle_command(state, {:save_chars, _})
+      when state.character_id != nil and state.is_gm == true do
+    # Trigger save for all online characters
+    AoSession.OnlineDirectory.broadcast_all(:force_save)
+    {state, [{:console_msg, %{message: "Guardado de personajes iniciado.", font_index: 0}}]}
+  end
+
+  def handle_command(state, {:global_message, %{message: message}})
+      when state.character_id != nil and state.is_gm == true do
+    if byte_size(message) > 0 do
+      raw =
+        AoProtocol.Server.Encoder.encode(
+          {:console_msg, %{message: "Servidor> #{message}", font_index: 0}}
+        )
+
+      AoSession.OnlineDirectory.broadcast_all({:send_raw, raw})
+    end
+
+    {state, []}
+  end
+
   # RoleMasterRequest (ID 63) — any player sends a question to RoleMasters.
   # VB6: reads request string, forwards to online RoleMasters, confirms to player.
   def handle_command(state, {:role_master_request, %{request: request}})
@@ -1629,7 +1807,12 @@ defmodule AoTcpGateway.SessionLogic do
     :go_to_char, :warp_me_to_target, :warp_char, :invisible, :silence,
     :jail, :kick, :execute, :ban_char, :unban_char, :revive_char,
     :summon_char, :kill_npc, :request_char_info, :where, :gm_message,
-    :server_message, :online_gm, :rain_toggle
+    :server_message, :online_gm, :rain_toggle,
+    :online, :online_map, :kick_all_chars, :server_open_toggle, :save_chars, :global_message,
+    :kill_npc_targeted, :kill_npc_no_respawn, :kill_all_nearby_npcs,
+    :create_npc, :create_npc_with_respawn, :spawn_creature, :spawn_list_request, :creatures_in_map,
+    :create_item, :give_item, :request_char_stats, :request_char_gold,
+    :request_char_inventory, :request_char_bank, :request_char_skills, :edit_char, :alter_name
   ]
 
   def handle_command(state, {cmd_type, _})

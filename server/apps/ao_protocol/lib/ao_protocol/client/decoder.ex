@@ -839,6 +839,145 @@ defmodule AoProtocol.Client.Decoder do
   # RainToggle (ID 150)
   defp decode_packet(150, rest), do: {:ok, {:rain_toggle, %{}}, rest}
 
+  # ---- Batch 2: NPC Management GM packets ----
+
+  # CreaturesInMap (ID 326) — map(I16)
+  defp decode_packet(326, rest) do
+    with {:ok, map, rest} <- Reader.read_int16(rest) do
+      {:ok, {:creatures_in_map, %{map: map}}, rest}
+    end
+  end
+
+  # KillNPCTargeted (ID 339) — no payload (kills NPC at target, allows respawn)
+  defp decode_packet(339, rest), do: {:ok, {:kill_npc_targeted, %{}}, rest}
+
+  # SpawnListRequest (ID 358) — no payload
+  defp decode_packet(358, rest), do: {:ok, {:spawn_list_request, %{}}, rest}
+
+  # SpawnCreature (ID 359) — creature_id(I16)
+  defp decode_packet(359, rest) do
+    with {:ok, creature_id, rest} <- Reader.read_int16(rest) do
+      {:ok, {:spawn_creature, %{creature_id: creature_id}}, rest}
+    end
+  end
+
+  # KillNPCNoRespawn (ID 394) — no payload
+  defp decode_packet(394, rest), do: {:ok, {:kill_npc_no_respawn, %{}}, rest}
+
+  # KillAllNearbyNPCs (ID 395) — no payload
+  defp decode_packet(395, rest), do: {:ok, {:kill_all_nearby_npcs, %{}}, rest}
+
+  # CreateNPC (ID 399) — npc_id(I16)
+  defp decode_packet(399, rest) do
+    with {:ok, npc_id, rest} <- Reader.read_int16(rest) do
+      {:ok, {:create_npc, %{npc_id: npc_id}}, rest}
+    end
+  end
+
+  # CreateNPCWithRespawn (ID 400) — npc_id(I16)
+  defp decode_packet(400, rest) do
+    with {:ok, npc_id, rest} <- Reader.read_int16(rest) do
+      {:ok, {:create_npc_with_respawn, %{npc_id: npc_id}}, rest}
+    end
+  end
+
+  # ---- Batch 3: Character Management GM packets ----
+
+  # EditChar (ID 341) — name(S8) + option(I8) + arg1(S8) + arg2(S8)
+  defp decode_packet(341, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest),
+         {:ok, option, rest} <- Reader.read_int8(rest),
+         {:ok, arg1, rest} <- Reader.read_string8(rest),
+         {:ok, arg2, rest} <- Reader.read_string8(rest) do
+      {:ok, {:edit_char, %{name: name, option: option, arg1: arg1, arg2: arg2}}, rest}
+    end
+  end
+
+  # RequestCharStats (ID 343) — name(S8)
+  defp decode_packet(343, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:request_char_stats, %{name: name}}, rest}
+    end
+  end
+
+  # RequestCharGold (ID 344) — name(S8)
+  defp decode_packet(344, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:request_char_gold, %{name: name}}, rest}
+    end
+  end
+
+  # RequestCharInventory (ID 345) — name(S8)
+  defp decode_packet(345, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:request_char_inventory, %{name: name}}, rest}
+    end
+  end
+
+  # RequestCharBank (ID 346) — name(S8)
+  defp decode_packet(346, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:request_char_bank, %{name: name}}, rest}
+    end
+  end
+
+  # RequestCharSkills (ID 347) — name(S8)
+  defp decode_packet(347, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:request_char_skills, %{name: name}}, rest}
+    end
+  end
+
+  # CreateItem (ID 386) — item_id(I16) + amount(I16)
+  defp decode_packet(386, rest) do
+    with {:ok, item_id, rest} <- Reader.read_int16(rest),
+         {:ok, amount, rest} <- Reader.read_int16(rest) do
+      {:ok, {:create_item, %{item_id: item_id, amount: amount}}, rest}
+    end
+  end
+
+  # AlterName (ID 405) — name(S8) + new_name(S8)
+  defp decode_packet(405, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest),
+         {:ok, new_name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:alter_name, %{name: name, new_name: new_name}}, rest}
+    end
+  end
+
+  # GiveItem (ID 430) — name(S8) + item_id(I16) + amount(I16) + reason(S8)
+  defp decode_packet(430, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest),
+         {:ok, item_id, rest} <- Reader.read_int16(rest),
+         {:ok, amount, rest} <- Reader.read_int16(rest),
+         {:ok, reason, rest} <- Reader.read_string8(rest) do
+      {:ok, {:give_item, %{name: name, item_id: item_id, amount: amount, reason: reason}}, rest}
+    end
+  end
+
+  # ---- Batch 1: Essential Server Admin GM packets ----
+
+  # Online (ID 255) — no payload
+  defp decode_packet(255, rest), do: {:ok, {:online, %{}}, rest}
+
+  # OnlineMap (ID 350) — no payload
+  defp decode_packet(350, rest), do: {:ok, {:online_map, %{}}, rest}
+
+  # ServerOpenToggle (ID 402) — no payload
+  defp decode_packet(402, rest), do: {:ok, {:server_open_toggle, %{}}, rest}
+
+  # SaveChars (ID 417) — no payload
+  defp decode_packet(417, rest), do: {:ok, {:save_chars, %{}}, rest}
+
+  # KickAllChars (ID 420) — no payload
+  defp decode_packet(420, rest), do: {:ok, {:kick_all_chars, %{}}, rest}
+
+  # GlobalMessage (ID 425) — message(S8)
+  defp decode_packet(425, rest) do
+    with {:ok, message, rest} <- Reader.read_string8(rest) do
+      {:ok, {:global_message, %{message: message}}, rest}
+    end
+  end
+
   # DonateGold (ID 210) — amount(I32)
   defp decode_packet(210, rest) do
     with {:ok, amount, rest} <- Reader.read_int32(rest) do
