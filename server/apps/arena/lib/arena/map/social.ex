@@ -2872,29 +2872,48 @@ defmodule Arena.Map.Social do
   def handle_faction_chat(state, char_id, message) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
-        if entity.faction == :none do
-          msg(state, char_id, "No perteneces a ninguna faccion.")
-          {:noreply, state}
-        else
-          # VB6: uses eConsoleFactionMessage (ID 38) with faction label key
-          {faction_label, font_index} = faction_chat_style(entity.faction)
-          chat_msg = "#{entity.name}: #{message}"
+        now = System.monotonic_time(:millisecond)
+        wall_now = System.system_time(:millisecond)
 
-          raw =
-            Encoder.encode(
-              {:console_faction_message,
-               %{
-                 message: chat_msg,
-                 font_index: font_index,
-                 faction_label: faction_label
-               }}
-            )
+        cond do
+          entity.dead ->
+            {:noreply, state}
 
-          for {_cid, other} <- state.players, other.faction == entity.faction do
-            Helpers.send_to_session(state.sessions, other.char_id, {:send_raw, raw})
-          end
+          entity.muted_until > 0 and wall_now < entity.muted_until ->
+            msg(state, char_id, "Estás silenciado.")
+            {:noreply, state}
 
-          {:noreply, state}
+          entity.faction == :none ->
+            msg(state, char_id, "No perteneces a ninguna faccion.")
+            {:noreply, state}
+
+          now - entity.last_chat_at < @chat_cooldown_ms ->
+            msg(state, char_id, "Estás hablando demasiado rápido.")
+            {:noreply, state}
+
+          true ->
+            # VB6: uses eConsoleFactionMessage (ID 38) with faction label key
+            {faction_label, font_index} = faction_chat_style(entity.faction)
+            chat_msg = "#{entity.name}: #{message}"
+
+            raw =
+              Encoder.encode(
+                {:console_faction_message,
+                 %{
+                   message: chat_msg,
+                   font_index: font_index,
+                   faction_label: faction_label
+                 }}
+              )
+
+            for {_cid, other} <- state.players, other.faction == entity.faction do
+              Helpers.send_to_session(state.sessions, other.char_id, {:send_raw, raw})
+            end
+
+            # Update last_chat_at for cooldown tracking
+            entity = %{entity | last_chat_at: now}
+            players = Map.put(state.players, char_id, entity)
+            {:noreply, %{state | players: players}}
         end
 
       :error ->

@@ -106,6 +106,10 @@ defmodule Arena.Map.Bank do
             amount <= 0 ->
               {:reply, {:error, :invalid_amount}, state}
 
+            # VB6 parity: validate inventory slot range (1..24)
+            slot < 1 or slot > 24 ->
+              {:reply, {:error, :invalid_slot}, state}
+
             # VB6 parity: validate slot_destino range against bank_max_slots
             slot_destino != 0 and (slot_destino < 1 or slot_destino > @bank_max_slots) ->
               {:reply, {:error, :invalid_bank_slot}, state}

@@ -16,7 +16,13 @@ defmodule Arena.Map.Commerce do
         case target_occ do
           # VB6: target is a player -> user-to-user trade request
           {:player, target_id} when target_id != char_id ->
-            Trade.start_user_trade_request(state, char_id, entity, target_id)
+            target = Map.get(state.players, target_id)
+
+            if target && (abs(entity.x - target.x) > 3 or abs(entity.y - target.y) > 3) do
+              {:reply, {:error, :too_far}, state}
+            else
+              Trade.start_user_trade_request(state, char_id, entity, target_id)
+            end
 
           # Target is NPC -> NPC commerce
           {:npc, inst_id} ->
@@ -38,6 +44,9 @@ defmodule Arena.Map.Commerce do
         {:reply, {:error, :dead}, state}
 
       {:ok, entity} ->
+        if amount <= 0 do
+          {:reply, {:error, :invalid_amount}, state}
+        else
         npc_id = entity.commerce_npc_id
         npc_def = if npc_id, do: GameData.get_npc(npc_id)
 
@@ -119,6 +128,7 @@ defmodule Arena.Map.Commerce do
             end
           end
         end
+        end
 
       :error ->
         {:reply, {:error, :not_on_map}, state}
@@ -131,9 +141,17 @@ defmodule Arena.Map.Commerce do
         {:reply, {:error, :dead}, state}
 
       {:ok, entity} ->
-        if entity.commerce_npc_id == nil do
-          {:reply, {:error, :no_commerce}, state}
-        else
+        cond do
+          entity.commerce_npc_id == nil ->
+            {:reply, {:error, :no_commerce}, state}
+
+          amount <= 0 ->
+            {:reply, {:error, :invalid_amount}, state}
+
+          slot < 1 or slot > 24 ->
+            {:reply, {:error, :invalid_slot}, state}
+
+          true ->
           inv_idx = slot - 1
           inv_item = Enum.at(entity.inventory, inv_idx)
 

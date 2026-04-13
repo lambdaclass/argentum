@@ -435,15 +435,15 @@ defmodule Arena.EconomySecurityTest do
   end
 
   describe "bank slot=0 off-by-one exploit" do
-    test "deposit from slot 0 with empty inventory hits off-by-one path" do
-      # Empty inventory: slot=0 → inv_idx = -1 → Enum.at(inv, -1) reads last element (nil)
+    test "deposit from slot 0 is rejected as invalid slot (FIX APPLIED)" do
+      # slot=0 → inv_idx = -1 would read from end of list.
+      # Now caught by slot bounds check: slot < 1 or slot > 24 → :invalid_slot
       entity = make_entity(%{char_id: :player, bank_npc_id: 1})
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      # slot=0 → inv_idx = -1 → reads nil from empty inventory → :empty_slot
       {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 0, 1, 1)
-      assert result == {:error, :empty_slot}
+      assert result == {:error, :invalid_slot}
     end
   end
 

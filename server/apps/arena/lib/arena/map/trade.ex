@@ -26,6 +26,16 @@ defmodule Arena.Map.Trade do
           inv_item = Enum.at(entity.inventory, slot_idx)
           item_tags = Map.get(inv_item, :elemental_tags, 0)
 
+          # Check total already offered for this item
+          already_offered =
+            Enum.reduce(entity.trade_offer_items, 0, fn
+              {id, amt, t}, acc when id == obj_index and t == item_tags -> acc + amt
+              _, acc -> acc
+            end)
+
+          if already_offered + amount > inv_item.amount do
+            {:reply, {:error, :invalid_offer}, state}
+          else
           # Add or update the offered item in trade_offer_items
           existing = Enum.find_index(entity.trade_offer_items, fn {id, _, t} -> id == obj_index and t == item_tags end)
 
@@ -58,6 +68,7 @@ defmodule Arena.Map.Trade do
           state = %{state | players: players}
           send_trade_slot_update(state, char_id, entity)
           {:reply, :ok, state}
+          end
         end
 
       {:ok, _entity} ->
@@ -375,11 +386,9 @@ defmodule Arena.Map.Trade do
       if slot_idx do
         case Inventory.remove_from_slot(g.inventory, slot_idx, amount) do
           {:ok, new_inv, _} ->
-            g = %{g | inventory: new_inv}
-
             case Inventory.add_item(r.inventory, obj_index, amount, tags) do
-              {:ok, new_inv, _slot} -> {g, %{r | inventory: new_inv}}
-              {:gold, gold_amount} -> {g, %{r | gold: r.gold + gold_amount}}
+              {:ok, new_inv_r, _slot} -> {%{g | inventory: new_inv}, %{r | inventory: new_inv_r}}
+              {:gold, gold_amount} -> {%{g | inventory: new_inv}, %{r | gold: r.gold + gold_amount}}
               _ -> {g, r}
             end
 
