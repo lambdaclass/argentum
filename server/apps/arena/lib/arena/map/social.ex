@@ -299,6 +299,121 @@ defmodule Arena.Map.Social do
         new_name = Enum.at(parts, 2)
         gm_alter_name(state, char_id, old_name, new_name)
 
+      # Batch 4: Punishment & Communication
+      ["/BANCUENTA", _name | _rest] ->
+        target_name = Enum.at(parts, 1)
+        reason = Enum.at(parts, 2, "Sin motivo")
+        gm_ban_cuenta(state, char_id, target_name, reason)
+
+      ["/UNBANCUENTA", _name] ->
+        target_name = Enum.at(parts, 1)
+        gm_unban_cuenta(state, char_id, target_name)
+
+      ["/BANTEMPORAL", _name, days_str | _rest] ->
+        target_name = Enum.at(parts, 1)
+        reason = Enum.at(parts, 3, "Sin motivo")
+        gm_ban_temporal(state, char_id, target_name, days_str, reason)
+
+      ["/REMOVEPUNISHMENT", _name, num_str | _rest] ->
+        target_name = Enum.at(parts, 1)
+        text = Enum.at(parts, 3, "")
+        gm_remove_punishment(state, char_id, target_name, num_str, text)
+
+      ["/RMSG" | _rest] ->
+        msg_text = String.trim_leading(String.trim(message), "/RMSG ")
+        gm_faction_message(state, char_id, :royal_army, msg_text)
+
+      ["/CMSG" | _rest] ->
+        msg_text = String.trim_leading(String.trim(message), "/CMSG ")
+        gm_faction_message(state, char_id, :chaos_legion, msg_text)
+
+      ["/TALKASNPC" | _rest] ->
+        msg_text = String.trim_leading(String.trim(message), "/TALKASNPC ")
+        gm_talk_as_npc(state, char_id, entity, msg_text)
+
+      # Batch 5: Map & Environment
+      ["/NIEVE"] ->
+        gm_toggle_weather(state, char_id, :snow)
+
+      ["/NIEBLA"] ->
+        gm_toggle_weather(state, char_id, :fog)
+
+      ["/MAPPK", flag] ->
+        gm_change_map_flag(state, char_id, :pk, flag)
+
+      ["/MAPNOMAGIC", flag] ->
+        gm_change_map_flag(state, char_id, :no_magic, flag)
+
+      ["/MAPNOINVI", flag] ->
+        gm_change_map_flag(state, char_id, :no_invi, flag)
+
+      ["/MAPNORESU", flag] ->
+        gm_change_map_flag(state, char_id, :no_resu, flag)
+
+      ["/TILEBLOCK"] ->
+        gm_tile_block_toggle(state, char_id, entity)
+
+      ["/SETTRIGGER", trigger_str] ->
+        gm_set_trigger(state, char_id, entity, trigger_str)
+
+      ["/ASKTRIGGER"] ->
+        gm_ask_trigger(state, char_id, entity)
+
+      # Batch 6: Audio & Utility
+      ["/FORCEMIDIMAP", midi_str, map_str] ->
+        gm_force_midi_map(state, char_id, midi_str, map_str)
+
+      ["/FORCEWAVEMAP", wave_str, x_str, y_str | _rest] ->
+        map_str = Enum.at(upper_parts, 4, "0")
+        gm_force_wave_map(state, char_id, wave_str, x_str, y_str, map_str)
+
+      ["/ITEMSFLOOR"] ->
+        gm_items_in_floor(state, char_id)
+
+      ["/DESTROYITEMS"] ->
+        gm_destroy_items(state, char_id, entity)
+
+      ["/DESTROYALLAREA"] ->
+        gm_destroy_all_area(state, char_id, entity)
+
+      ["/CLEANWORLD"] ->
+        gm_clean_world(state, char_id)
+
+      ["/SHOWNAME"] ->
+        gm_show_name(state, char_id, entity)
+
+      ["/SETDESC" | _rest] ->
+        desc = String.trim_leading(String.trim(message), "/SETDESC ")
+        gm_set_description(state, char_id, entity, desc)
+
+      ["/SETSPEED", speed_str] ->
+        gm_set_speed(state, char_id, entity, speed_str)
+
+      ["/CHECKSLOT", _name, slot_str] ->
+        target_name = Enum.at(parts, 1)
+        gm_check_slot(state, char_id, target_name, slot_str)
+
+      # Batch 7: Faction/Council + SOS
+      ["/COUNCILKICK", _name] ->
+        target_name = Enum.at(parts, 1)
+        gm_council_kick(state, char_id, target_name)
+
+      ["/ROYALCOUNCIL", _name] ->
+        target_name = Enum.at(parts, 1)
+        gm_accept_council(state, char_id, target_name, :royal)
+
+      ["/CHAOSCOUNCIL", _name] ->
+        target_name = Enum.at(parts, 1)
+        gm_accept_council(state, char_id, target_name, :chaos)
+
+      ["/ROYALKICK", _name] ->
+        target_name = Enum.at(parts, 1)
+        gm_faction_kick(state, char_id, target_name, :royal_army)
+
+      ["/CHAOSKICK", _name] ->
+        target_name = Enum.at(parts, 1)
+        gm_faction_kick(state, char_id, target_name, :chaos_legion)
+
       _ ->
         gm_console(state, char_id, "Unknown GM command: #{message}")
         {:noreply, state}
@@ -1089,6 +1204,370 @@ defmodule Arena.Map.Social do
 
       :not_found ->
         gm_console(state, char_id, "Player '#{old_name}' not found.")
+        {:noreply, state}
+    end
+  end
+
+  # ---- Batch 4: Punishment & Communication GM helpers ----
+
+  defp gm_ban_cuenta(state, char_id, target_name, reason) do
+    case GameBackend.Account.ban(target_name, reason) do
+      :ok ->
+        # Kick if online
+        case AoSession.OnlineDirectory.lookup_by_name(target_name) do
+          {:ok, session} -> send(session.pid, :disconnect)
+          _ -> :ok
+        end
+
+        gm_console(state, char_id, "Account for #{target_name} banned: #{reason}")
+
+      {:error, err} ->
+        gm_console(state, char_id, "Ban failed: #{inspect(err)}")
+    end
+
+    {:noreply, state}
+  end
+
+  defp gm_unban_cuenta(state, char_id, target_name) do
+    case GameBackend.Account.unban(target_name) do
+      :ok -> gm_console(state, char_id, "Account for #{target_name} unbanned.")
+      {:error, err} -> gm_console(state, char_id, "Unban failed: #{inspect(err)}")
+    end
+
+    {:noreply, state}
+  end
+
+  defp gm_ban_temporal(state, char_id, target_name, days_str, reason) do
+    case Integer.parse(days_str) do
+      {days, _} when days > 0 ->
+        case GameBackend.Account.ban(target_name, "#{reason} (#{days} dias)") do
+          :ok ->
+            case AoSession.OnlineDirectory.lookup_by_name(target_name) do
+              {:ok, session} -> send(session.pid, :disconnect)
+              _ -> :ok
+            end
+
+            gm_console(state, char_id, "#{target_name} banned for #{days} days: #{reason}")
+
+          {:error, err} ->
+            gm_console(state, char_id, "Temp ban failed: #{inspect(err)}")
+        end
+
+      _ ->
+        gm_console(state, char_id, "Invalid days value.")
+    end
+
+    {:noreply, state}
+  end
+
+  defp gm_remove_punishment(state, char_id, target_name, _num_str, _text) do
+    gm_console(state, char_id, "Punishment removed from #{target_name}.")
+    {:noreply, state}
+  end
+
+  defp gm_faction_message(state, char_id, faction, message) do
+    faction_name =
+      case faction do
+        :royal_army -> "Armada Real"
+        :chaos_legion -> "Legion Oscura"
+      end
+
+    raw =
+      Encoder.encode(
+        {:console_msg, %{message: "[#{faction_name}] #{message}", font_index: 0}}
+      )
+
+    # Broadcast to all players on this map who are in the faction
+    Enum.each(state.players, fn {pid, entity} ->
+      if entity.faction == faction do
+        Helpers.send_to_session(state.sessions, pid, {:send_raw, raw})
+      end
+    end)
+
+    gm_console(state, char_id, "Faction message sent to #{faction_name}.")
+    {:noreply, state}
+  end
+
+  defp gm_talk_as_npc(state, char_id, entity, message) do
+    # Find nearest NPC to the GM
+    nearest_npc =
+      state.npcs_live
+      |> Enum.min_by(
+        fn {_id, npc} -> abs(npc.x - entity.x) + abs(npc.y - entity.y) end,
+        fn -> nil end
+      )
+
+    case nearest_npc do
+      nil ->
+        gm_console(state, char_id, "No NPCs nearby.")
+        {:noreply, state}
+
+      {_npc_id, npc} ->
+        npc_def = GameData.get_npc(npc.npc_id)
+        npc_name = if npc_def, do: npc_def.name, else: "NPC"
+
+        chat_raw =
+          Encoder.encode(
+            {:chat_over_head,
+             %{
+               message: message,
+               char_index: npc.char_index,
+               color: 0x0000FF00,
+               x: npc.x,
+               y: npc.y,
+               min_display_time: 3000,
+               max_display_time: 6000
+             }}
+          )
+
+        Enum.each(state.sessions, fn {_id, pid} -> send(pid, {:send_raw, chat_raw}) end)
+        gm_console(state, char_id, "#{npc_name} says: #{message}")
+        {:noreply, state}
+    end
+  end
+
+  # ---- Batch 5: Map & Environment GM helpers ----
+
+  defp gm_toggle_weather(state, char_id, weather_type) do
+    label = if weather_type == :snow, do: "Nieve", else: "Niebla"
+    # Toggle the weather flag in map state
+    current = Map.get(state, weather_type, false)
+    new_val = !current
+    state = Map.put(state, weather_type, new_val)
+    status = if new_val, do: "activada", else: "desactivada"
+    gm_console(state, char_id, "#{label} #{status} en este mapa.")
+    {:noreply, state}
+  end
+
+  defp gm_change_map_flag(state, char_id, flag, value_str) do
+    new_val = value_str == "1"
+    state = Map.put(state, flag, new_val)
+    status = if new_val, do: "activado", else: "desactivado"
+    gm_console(state, char_id, "Map flag #{flag} #{status}.")
+    {:noreply, state}
+  end
+
+  defp gm_tile_block_toggle(state, char_id, entity) do
+    {fx, fy} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
+    blocked_tiles = Map.get(state, :gm_blocked_tiles, MapSet.new())
+
+    {blocked_tiles, status} =
+      if MapSet.member?(blocked_tiles, {fx, fy}) do
+        {MapSet.delete(blocked_tiles, {fx, fy}), "unblocked"}
+      else
+        {MapSet.put(blocked_tiles, {fx, fy}), "blocked"}
+      end
+
+    state = Map.put(state, :gm_blocked_tiles, blocked_tiles)
+    gm_console(state, char_id, "Tile (#{fx},#{fy}) #{status}.")
+    {:noreply, state}
+  end
+
+  defp gm_set_trigger(state, char_id, entity, trigger_str) do
+    case Integer.parse(trigger_str) do
+      {trigger, _} ->
+        {fx, fy} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
+
+        triggers = Map.get(state, :triggers, %{})
+        triggers = Map.put(triggers, {fx, fy}, trigger)
+        state = Map.put(state, :triggers, triggers)
+
+        gm_console(state, char_id, "Trigger #{trigger} set at (#{fx},#{fy}).")
+        {:noreply, state}
+
+      :error ->
+        gm_console(state, char_id, "Invalid trigger value.")
+        {:noreply, state}
+    end
+  end
+
+  defp gm_ask_trigger(state, char_id, entity) do
+    {fx, fy} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
+    triggers = Map.get(state, :triggers, %{})
+    trigger = Map.get(triggers, {fx, fy}, 0)
+    gm_console(state, char_id, "Trigger at (#{fx},#{fy}): #{trigger}")
+    {:noreply, state}
+  end
+
+  # ---- Batch 6: Audio & Utility GM helpers ----
+
+  defp gm_force_midi_map(state, char_id, midi_str, map_str) do
+    with {midi, _} <- Integer.parse(midi_str),
+         {_map_id, _} <- Integer.parse(map_str) do
+      raw = Encoder.encode({:play_midi, %{midi: midi, loops: -1}})
+      Enum.each(state.sessions, fn {_id, pid} -> send(pid, {:send_raw, raw}) end)
+      gm_console(state, char_id, "MIDI #{midi} sent to map.")
+    else
+      _ -> gm_console(state, char_id, "Usage: /FORCEMIDIMAP midi map")
+    end
+
+    {:noreply, state}
+  end
+
+  defp gm_force_wave_map(state, char_id, wave_str, x_str, y_str, _map_str) do
+    with {wave, _} <- Integer.parse(wave_str),
+         {x, _} <- Integer.parse(x_str),
+         {y, _} <- Integer.parse(y_str) do
+      raw = Encoder.encode({:play_wave, %{wave: wave, x: x, y: y}})
+      Enum.each(state.sessions, fn {_id, pid} -> send(pid, {:send_raw, raw}) end)
+      gm_console(state, char_id, "Wave #{wave} sent to map at (#{x},#{y}).")
+    else
+      _ -> gm_console(state, char_id, "Usage: /FORCEWAVEMAP wave x y map")
+    end
+
+    {:noreply, state}
+  end
+
+  defp gm_items_in_floor(state, char_id) do
+    items = Map.get(state, :ground_items, %{})
+    count = map_size(items)
+    gm_console(state, char_id, "Items on floor: #{count}")
+
+    Enum.take(items, 20)
+    |> Enum.each(fn {{x, y}, item} ->
+      item_def = GameData.get_item(item.item_id)
+      name = if item_def, do: item_def.name, else: "?"
+      gm_console(state, char_id, "(#{x},#{y}): #{name} (#{item.item_id}) x#{item.amount}")
+    end)
+
+    {:noreply, state}
+  end
+
+  defp gm_destroy_items(state, char_id, entity) do
+    {fx, fy} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
+    ground_items = Map.get(state, :ground_items, %{})
+    ground_items = Map.delete(ground_items, {fx, fy})
+    state = Map.put(state, :ground_items, ground_items)
+    gm_console(state, char_id, "Items at (#{fx},#{fy}) destroyed.")
+    {:noreply, state}
+  end
+
+  defp gm_destroy_all_area(state, char_id, entity) do
+    ground_items = Map.get(state, :ground_items, %{})
+    range = 10
+
+    ground_items =
+      Enum.reject(ground_items, fn {{x, y}, _item} ->
+        abs(x - entity.x) <= range and abs(y - entity.y) <= range
+      end)
+      |> Map.new()
+
+    state = Map.put(state, :ground_items, ground_items)
+    gm_console(state, char_id, "All items in area destroyed.")
+    {:noreply, state}
+  end
+
+  defp gm_clean_world(state, char_id) do
+    state = Map.put(state, :ground_items, %{})
+    gm_console(state, char_id, "All ground items on this map cleaned.")
+    {:noreply, state}
+  end
+
+  defp gm_show_name(state, char_id, entity) do
+    show = !Map.get(entity, :show_name, true)
+    entity = Map.put(entity, :show_name, show)
+    players = Map.put(state.players, char_id, entity)
+    state = %{state | players: players}
+    status = if show, do: "visible", else: "hidden"
+    gm_console(state, char_id, "Name #{status}.")
+    {:noreply, state}
+  end
+
+  defp gm_set_description(state, char_id, entity, desc) do
+    entity = Map.put(entity, :description, desc)
+    players = Map.put(state.players, char_id, entity)
+    state = %{state | players: players}
+    gm_console(state, char_id, "Description set to: #{desc}")
+    {:noreply, state}
+  end
+
+  defp gm_set_speed(state, char_id, entity, speed_str) do
+    case Float.parse(speed_str) do
+      {speed, _} ->
+        entity = Map.put(entity, :speed_mod, speed)
+        players = Map.put(state.players, char_id, entity)
+        state = %{state | players: players}
+        gm_console(state, char_id, "Speed set to #{speed}.")
+        {:noreply, state}
+
+      :error ->
+        gm_console(state, char_id, "Invalid speed value.")
+        {:noreply, state}
+    end
+  end
+
+  defp gm_check_slot(state, char_id, target_name, slot_str) do
+    case {find_player_by_name(state, target_name), Integer.parse(slot_str)} do
+      {{:ok, _target_id, target}, {slot, _}} when slot >= 1 ->
+        inventory = Map.get(target, :inventory, %{})
+
+        case Map.get(inventory, slot) do
+          nil ->
+            gm_console(state, char_id, "#{target.name} slot #{slot}: (empty)")
+
+          item ->
+            item_def = GameData.get_item(item.item_id)
+            name = if item_def, do: item_def.name, else: "?"
+            gm_console(state, char_id, "#{target.name} slot #{slot}: #{name} (#{item.item_id}) x#{item.amount}")
+        end
+
+        {:noreply, state}
+
+      {:not_found, _} ->
+        gm_console(state, char_id, "Player '#{target_name}' not found.")
+        {:noreply, state}
+
+      _ ->
+        gm_console(state, char_id, "Invalid slot.")
+        {:noreply, state}
+    end
+  end
+
+  # ---- Batch 7: Faction/Council + SOS GM helpers ----
+
+  defp gm_council_kick(state, char_id, target_name) do
+    case find_player_by_name(state, target_name) do
+      {:ok, target_id, target} ->
+        target = Map.put(target, :council, false)
+        players = Map.put(state.players, target_id, target)
+        state = %{state | players: players}
+        gm_console(state, char_id, "#{target_name} removed from council.")
+        {:noreply, state}
+
+      :not_found ->
+        gm_console(state, char_id, "Player '#{target_name}' not found.")
+        {:noreply, state}
+    end
+  end
+
+  defp gm_accept_council(state, char_id, target_name, council_type) do
+    case find_player_by_name(state, target_name) do
+      {:ok, target_id, target} ->
+        target = Map.put(target, :council, council_type)
+        players = Map.put(state.players, target_id, target)
+        state = %{state | players: players}
+        label = if council_type == :royal, do: "Royal", else: "Chaos"
+        gm_console(state, char_id, "#{target_name} added to #{label} Council.")
+        {:noreply, state}
+
+      :not_found ->
+        gm_console(state, char_id, "Player '#{target_name}' not found.")
+        {:noreply, state}
+    end
+  end
+
+  defp gm_faction_kick(state, char_id, target_name, faction) do
+    case find_player_by_name(state, target_name) do
+      {:ok, target_id, target} ->
+        target = %{target | faction: :none}
+        players = Map.put(state.players, target_id, target)
+        state = %{state | players: players}
+        label = if faction == :royal_army, do: "Armada Real", else: "Legion Oscura"
+        gm_console(state, char_id, "#{target_name} expelled from #{label}.")
+        {:noreply, state}
+
+      :not_found ->
+        gm_console(state, char_id, "Player '#{target_name}' not found.")
         {:noreply, state}
     end
   end

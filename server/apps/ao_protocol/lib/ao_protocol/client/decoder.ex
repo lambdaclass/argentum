@@ -1032,6 +1032,256 @@ defmodule AoProtocol.Client.Decoder do
   # ArenaEntry (ID 259) — no payload
   defp decode_packet(259, rest), do: {:ok, {:arena_entry, %{}}, rest}
 
+  # ---- Batch 4: Punishment & Communication ----
+
+  # ShowName (ID 320) — no payload
+  defp decode_packet(320, rest), do: {:ok, {:show_name, %{}}, rest}
+
+  # SosShowList (ID 330) — no payload
+  defp decode_packet(330, rest), do: {:ok, {:sos_show_list, %{}}, rest}
+
+  # SosRemove (ID 331) — name(S8)
+  defp decode_packet(331, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:sos_remove, %{name: name}}, rest}
+    end
+  end
+
+  # SetDescription (ID 369) — desc(S8)
+  defp decode_packet(369, rest) do
+    with {:ok, desc, rest} <- Reader.read_string8(rest) do
+      {:ok, {:set_description, %{desc: desc}}, rest}
+    end
+  end
+
+  # ForceMidiMap (ID 370) — midi(I8) + map(I16)
+  defp decode_packet(370, rest) do
+    with {:ok, midi, rest} <- Reader.read_int8(rest),
+         {:ok, map, rest} <- Reader.read_int16(rest) do
+      {:ok, {:force_midi_map, %{midi: midi, map: map}}, rest}
+    end
+  end
+
+  # ForceWaveMap (ID 371) — wave(I8) + x(I8) + y(I8) + map(I16)
+  defp decode_packet(371, rest) do
+    with {:ok, wave, rest} <- Reader.read_int8(rest),
+         {:ok, x, rest} <- Reader.read_int8(rest),
+         {:ok, y, rest} <- Reader.read_int8(rest),
+         {:ok, map, rest} <- Reader.read_int16(rest) do
+      {:ok, {:force_wave_map, %{wave: wave, x: x, y: y, map: map}}, rest}
+    end
+  end
+
+  # RoyalArmyMessage (ID 372) — msg(S8)
+  defp decode_packet(372, rest) do
+    with {:ok, message, rest} <- Reader.read_string8(rest) do
+      {:ok, {:royal_army_message, %{message: message}}, rest}
+    end
+  end
+
+  # ChaosLegionMessage (ID 373) — msg(S8)
+  defp decode_packet(373, rest) do
+    with {:ok, message, rest} <- Reader.read_string8(rest) do
+      {:ok, {:chaos_legion_message, %{message: message}}, rest}
+    end
+  end
+
+  # TalkAsNPC (ID 374) — msg(S8)
+  defp decode_packet(374, rest) do
+    with {:ok, message, rest} <- Reader.read_string8(rest) do
+      {:ok, {:talk_as_npc, %{message: message}}, rest}
+    end
+  end
+
+  # DestroyAllArea (ID 375) — no payload
+  defp decode_packet(375, rest), do: {:ok, {:destroy_all_area, %{}}, rest}
+
+  # AcceptRoyalCouncil (ID 376) — name(S8)
+  defp decode_packet(376, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:accept_royal_council, %{name: name}}, rest}
+    end
+  end
+
+  # AcceptChaosCouncil (ID 377) — name(S8)
+  defp decode_packet(377, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:accept_chaos_council, %{name: name}}, rest}
+    end
+  end
+
+  # ItemsInFloor (ID 378) — no payload
+  defp decode_packet(378, rest), do: {:ok, {:items_in_floor, %{}}, rest}
+
+  # CouncilKick (ID 381) — name(S8)
+  defp decode_packet(381, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:council_kick, %{name: name}}, rest}
+    end
+  end
+
+  # SetTrigger (ID 382) — trigger(I8)
+  defp decode_packet(382, rest) do
+    with {:ok, trigger, rest} <- Reader.read_int8(rest) do
+      {:ok, {:set_trigger, %{trigger: trigger}}, rest}
+    end
+  end
+
+  # AskTrigger (ID 383) — no payload
+  defp decode_packet(383, rest), do: {:ok, {:ask_trigger, %{}}, rest}
+
+  # DestroyItems (ID 387) — no payload
+  defp decode_packet(387, rest), do: {:ok, {:destroy_items, %{}}, rest}
+
+  # ChaosLegionKick (ID 388) — name(S8)
+  defp decode_packet(388, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:chaos_legion_kick, %{name: name}}, rest}
+    end
+  end
+
+  # RoyalArmyKick (ID 389) — name(S8)
+  defp decode_packet(389, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:royal_army_kick, %{name: name}}, rest}
+    end
+  end
+
+  # ForceMidiAll (ID 390) — midi(I8)
+  defp decode_packet(390, rest) do
+    with {:ok, midi, rest} <- Reader.read_int8(rest) do
+      {:ok, {:force_midi_all, %{midi: midi}}, rest}
+    end
+  end
+
+  # ForceWaveAll (ID 391) — wave(I8)
+  defp decode_packet(391, rest) do
+    with {:ok, wave, rest} <- Reader.read_int8(rest) do
+      {:ok, {:force_wave_all, %{wave: wave}}, rest}
+    end
+  end
+
+  # RemovePunishment (ID 392) — name(S8) + num(I8) + text(S8)
+  defp decode_packet(392, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest),
+         {:ok, num, rest} <- Reader.read_int8(rest),
+         {:ok, text, rest} <- Reader.read_string8(rest) do
+      {:ok, {:remove_punishment, %{name: name, num: num, text: text}}, rest}
+    end
+  end
+
+  # TileBlockedToggle (ID 393) — no payload
+  defp decode_packet(393, rest), do: {:ok, {:tile_blocked_toggle, %{}}, rest}
+
+  # ---- Batch 5: Map & Environment ----
+
+  # ChangeMapPK (ID 408) — bool(I8)
+  defp decode_packet(408, rest) do
+    with {:ok, val, rest} <- Reader.read_int8(rest) do
+      {:ok, {:change_map_pk, %{value: val != 0}}, rest}
+    end
+  end
+
+  # ChangeMapNoMagic (ID 411) — bool(I8)
+  defp decode_packet(411, rest) do
+    with {:ok, val, rest} <- Reader.read_int8(rest) do
+      {:ok, {:change_map_no_magic, %{value: val != 0}}, rest}
+    end
+  end
+
+  # ChangeMapNoInvi (ID 412) — bool(I8)
+  defp decode_packet(412, rest) do
+    with {:ok, val, rest} <- Reader.read_int8(rest) do
+      {:ok, {:change_map_no_invi, %{value: val != 0}}, rest}
+    end
+  end
+
+  # ChangeMapNoResu (ID 413) — bool(I8)
+  defp decode_packet(413, rest) do
+    with {:ok, val, rest} <- Reader.read_int8(rest) do
+      {:ok, {:change_map_no_resu, %{value: val != 0}}, rest}
+    end
+  end
+
+  # CleanSOS (ID 418) — no payload
+  defp decode_packet(418, rest), do: {:ok, {:clean_sos, %{}}, rest}
+
+  # CheckSlot (ID 423) — name(S8) + slot(I8)
+  defp decode_packet(423, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest),
+         {:ok, slot, rest} <- Reader.read_int8(rest) do
+      {:ok, {:check_slot, %{name: name, slot: slot}}, rest}
+    end
+  end
+
+  # SetSpeed (ID 424) — speed(Real32)
+  defp decode_packet(424, rest) do
+    case rest do
+      <<speed::little-float-32, remaining::binary>> ->
+        {:ok, {:set_speed, %{speed: speed}}, remaining}
+
+      _ ->
+        :incomplete
+    end
+  end
+
+  # NieveToggle (ID 440) — no payload
+  defp decode_packet(440, rest), do: {:ok, {:nieve_toggle, %{}}, rest}
+
+  # NieblaToggle (ID 441) — no payload
+  defp decode_packet(441, rest), do: {:ok, {:niebla_toggle, %{}}, rest}
+
+  # BanCuenta (ID 459) — name(S8) + reason(S8)
+  defp decode_packet(459, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest),
+         {:ok, reason, rest} <- Reader.read_string8(rest) do
+      {:ok, {:ban_cuenta, %{name: name, reason: reason}}, rest}
+    end
+  end
+
+  # UnbanCuenta (ID 460) — name(S8)
+  defp decode_packet(460, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:unban_cuenta, %{name: name}}, rest}
+    end
+  end
+
+  # BanTemporal (ID 464) — name(S8) + reason(S8) + days(I8)
+  defp decode_packet(464, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest),
+         {:ok, reason, rest} <- Reader.read_string8(rest),
+         {:ok, days, rest} <- Reader.read_int8(rest) do
+      {:ok, {:ban_temporal, %{name: name, reason: reason, days: days}}, rest}
+    end
+  end
+
+  # NickToIP (ID 363) — name(S8)
+  defp decode_packet(363, rest) do
+    with {:ok, name, rest} <- Reader.read_string8(rest) do
+      {:ok, {:nick_to_ip, %{name: name}}, rest}
+    end
+  end
+
+  # IPToNick (ID 364) — ip1(I8) + ip2(I8) + ip3(I8) + ip4(I8)
+  defp decode_packet(364, rest) do
+    with {:ok, ip1, rest} <- Reader.read_int8(rest),
+         {:ok, ip2, rest} <- Reader.read_int8(rest),
+         {:ok, ip3, rest} <- Reader.read_int8(rest),
+         {:ok, ip4, rest} <- Reader.read_int8(rest) do
+      {:ok, {:ip_to_nick, %{ip: "#{ip1}.#{ip2}.#{ip3}.#{ip4}"}}, rest}
+    end
+  end
+
+  # CleanWorld (ID 361) — no payload
+  defp decode_packet(361, rest), do: {:ok, {:clean_world, %{}}, rest}
+
+  # ServerOpenToggleV2 (ID 362) — msg(S8) — server_message variant
+  defp decode_packet(362, rest) do
+    with {:ok, message, rest} <- Reader.read_string8(rest) do
+      {:ok, {:server_message, %{message: message}}, rest}
+    end
+  end
+
   # Unknown packet
   defp decode_packet(id, _rest), do: {:error, {:unknown_packet, id}}
 

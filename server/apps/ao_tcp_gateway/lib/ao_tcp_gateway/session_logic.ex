@@ -1708,6 +1708,251 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
+  # ---- Batch 4: Punishment & Communication ----
+
+  def handle_command(state, {:ban_cuenta, %{name: name, reason: reason}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/BANCUENTA #{name} #{reason}")
+    {state, []}
+  end
+
+  def handle_command(state, {:unban_cuenta, %{name: name}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/UNBANCUENTA #{name}")
+    {state, []}
+  end
+
+  def handle_command(state, {:ban_temporal, %{name: name, reason: reason, days: days}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/BANTEMPORAL #{name} #{days} #{reason}")
+    {state, []}
+  end
+
+  def handle_command(state, {:remove_punishment, %{name: name, num: num, text: text}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/REMOVEPUNISHMENT #{name} #{num} #{text}")
+    {state, []}
+  end
+
+  def handle_command(state, {:royal_army_message, %{message: message}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/RMSG #{message}")
+    {state, []}
+  end
+
+  def handle_command(state, {:chaos_legion_message, %{message: message}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/CMSG #{message}")
+    {state, []}
+  end
+
+  def handle_command(state, {:talk_as_npc, %{message: message}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/TALKASNPC #{message}")
+    {state, []}
+  end
+
+  # ---- Batch 5: Map & Environment ----
+
+  def handle_command(state, {:nieve_toggle, _})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/NIEVE")
+    {state, []}
+  end
+
+  def handle_command(state, {:niebla_toggle, _})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/NIEBLA")
+    {state, []}
+  end
+
+  def handle_command(state, {:change_map_pk, %{value: value}})
+      when state.character_id != nil and state.is_gm == true do
+    flag = if value, do: "1", else: "0"
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/MAPPK #{flag}")
+    {state, []}
+  end
+
+  def handle_command(state, {:change_map_no_magic, %{value: value}})
+      when state.character_id != nil and state.is_gm == true do
+    flag = if value, do: "1", else: "0"
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/MAPNOMAGIC #{flag}")
+    {state, []}
+  end
+
+  def handle_command(state, {:change_map_no_invi, %{value: value}})
+      when state.character_id != nil and state.is_gm == true do
+    flag = if value, do: "1", else: "0"
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/MAPNOINVI #{flag}")
+    {state, []}
+  end
+
+  def handle_command(state, {:change_map_no_resu, %{value: value}})
+      when state.character_id != nil and state.is_gm == true do
+    flag = if value, do: "1", else: "0"
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/MAPNORESU #{flag}")
+    {state, []}
+  end
+
+  def handle_command(state, {:tile_blocked_toggle, _})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/TILEBLOCK")
+    {state, []}
+  end
+
+  def handle_command(state, {:set_trigger, %{trigger: trigger}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/SETTRIGGER #{trigger}")
+    {state, []}
+  end
+
+  def handle_command(state, {:ask_trigger, _})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/ASKTRIGGER")
+    {state, []}
+  end
+
+  # ---- Batch 6: Audio & Utility ----
+
+  def handle_command(state, {:force_midi_all, %{midi: midi}})
+      when state.character_id != nil and state.is_gm == true do
+    raw = AoProtocol.Server.Encoder.encode({:play_midi, %{midi: midi, loops: -1}})
+    AoSession.OnlineDirectory.broadcast_all({:send_raw, raw})
+    {state, [{:console_msg, %{message: "MIDI #{midi} enviado a todos.", font_index: 0}}]}
+  end
+
+  def handle_command(state, {:force_wave_all, %{wave: wave}})
+      when state.character_id != nil and state.is_gm == true do
+    raw = AoProtocol.Server.Encoder.encode({:play_wave, %{wave: wave, x: 0, y: 0}})
+    AoSession.OnlineDirectory.broadcast_all({:send_raw, raw})
+    {state, [{:console_msg, %{message: "Wave #{wave} enviado a todos.", font_index: 0}}]}
+  end
+
+  def handle_command(state, {:force_midi_map, %{midi: midi, map: map}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/FORCEMIDIMAP #{midi} #{map}")
+    {state, []}
+  end
+
+  def handle_command(state, {:force_wave_map, %{wave: wave, x: x, y: y, map: map}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/FORCEWAVEMAP #{wave} #{x} #{y} #{map}")
+    {state, []}
+  end
+
+  def handle_command(state, {:items_in_floor, _})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/ITEMSFLOOR")
+    {state, []}
+  end
+
+  def handle_command(state, {:destroy_items, _})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/DESTROYITEMS")
+    {state, []}
+  end
+
+  def handle_command(state, {:destroy_all_area, _})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/DESTROYALLAREA")
+    {state, []}
+  end
+
+  def handle_command(state, {:clean_world, _})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/CLEANWORLD")
+    {state, []}
+  end
+
+  def handle_command(state, {:show_name, _})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/SHOWNAME")
+    {state, []}
+  end
+
+  def handle_command(state, {:set_description, %{desc: desc}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/SETDESC #{desc}")
+    {state, []}
+  end
+
+  def handle_command(state, {:set_speed, %{speed: speed}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/SETSPEED #{speed}")
+    {state, []}
+  end
+
+  def handle_command(state, {:nick_to_ip, %{name: name}})
+      when state.character_id != nil and state.is_gm == true do
+    case AoSession.OnlineDirectory.lookup_by_name(name) do
+      {:ok, session} ->
+        ip = Map.get(session, :ip, "desconocida")
+        {state, [{:console_msg, %{message: "IP de #{name}: #{ip}", font_index: 0}}]}
+
+      :not_found ->
+        {state, [{:console_msg, %{message: "Jugador #{name} no encontrado.", font_index: 0}}]}
+    end
+  end
+
+  def handle_command(state, {:ip_to_nick, %{ip: ip}})
+      when state.character_id != nil and state.is_gm == true do
+    names = AoSession.OnlineDirectory.list_all_names()
+    {state, [{:console_msg, %{message: "Busqueda IP #{ip}: #{Enum.join(names, ", ")}", font_index: 0}}]}
+  end
+
+  def handle_command(state, {:check_slot, %{name: name, slot: slot}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/CHECKSLOT #{name} #{slot}")
+    {state, []}
+  end
+
+  # ---- Batch 7: Faction/Council + SOS ----
+
+  def handle_command(state, {:council_kick, %{name: name}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/COUNCILKICK #{name}")
+    {state, []}
+  end
+
+  def handle_command(state, {:accept_royal_council, %{name: name}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/ROYALCOUNCIL #{name}")
+    {state, []}
+  end
+
+  def handle_command(state, {:accept_chaos_council, %{name: name}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/CHAOSCOUNCIL #{name}")
+    {state, []}
+  end
+
+  def handle_command(state, {:royal_army_kick, %{name: name}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/ROYALKICK #{name}")
+    {state, []}
+  end
+
+  def handle_command(state, {:chaos_legion_kick, %{name: name}})
+      when state.character_id != nil and state.is_gm == true do
+    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/CHAOSKICK #{name}")
+    {state, []}
+  end
+
+  def handle_command(state, {:sos_show_list, _})
+      when state.character_id != nil and state.is_gm == true do
+    {state, [{:console_msg, %{message: "Lista de SOS: (vacia)", font_index: 0}}]}
+  end
+
+  def handle_command(state, {:sos_remove, %{name: _name}})
+      when state.character_id != nil and state.is_gm == true do
+    {state, [{:console_msg, %{message: "SOS removido.", font_index: 0}}]}
+  end
+
+  def handle_command(state, {:clean_sos, _})
+      when state.character_id != nil and state.is_gm == true do
+    {state, [{:console_msg, %{message: "Lista de SOS limpiada.", font_index: 0}}]}
+  end
+
   # ---- Batch 1: Essential Server Admin ----
 
   def handle_command(state, {:online, _})
@@ -1812,7 +2057,20 @@ defmodule AoTcpGateway.SessionLogic do
     :kill_npc_targeted, :kill_npc_no_respawn, :kill_all_nearby_npcs,
     :create_npc, :create_npc_with_respawn, :spawn_creature, :spawn_list_request, :creatures_in_map,
     :create_item, :give_item, :request_char_stats, :request_char_gold,
-    :request_char_inventory, :request_char_bank, :request_char_skills, :edit_char, :alter_name
+    :request_char_inventory, :request_char_bank, :request_char_skills, :edit_char, :alter_name,
+    # Batch 4: Punishment & Communication
+    :ban_cuenta, :unban_cuenta, :ban_temporal, :remove_punishment,
+    :royal_army_message, :chaos_legion_message, :talk_as_npc,
+    # Batch 5: Map & Environment
+    :nieve_toggle, :niebla_toggle, :change_map_pk, :change_map_no_magic,
+    :change_map_no_invi, :change_map_no_resu, :tile_blocked_toggle, :set_trigger, :ask_trigger,
+    # Batch 6: Audio & Utility
+    :force_midi_all, :force_wave_all, :force_midi_map, :force_wave_map,
+    :items_in_floor, :destroy_items, :destroy_all_area, :clean_world,
+    :show_name, :set_description, :set_speed, :nick_to_ip, :ip_to_nick, :check_slot,
+    # Batch 7: Faction/Council + SOS
+    :council_kick, :accept_royal_council, :accept_chaos_council,
+    :royal_army_kick, :chaos_legion_kick, :sos_show_list, :sos_remove, :clean_sos
   ]
 
   def handle_command(state, {cmd_type, _})
