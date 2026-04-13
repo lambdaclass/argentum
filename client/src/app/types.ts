@@ -1,5 +1,13 @@
 export type ConnectionStatus = "offline" | "connecting" | "connected";
 export type LogLevel = "info" | "warn" | "error" | "packet-in" | "packet-out";
+export type LogChannel =
+  | "system"
+  | "general"
+  | "party"
+  | "guild"
+  | "faction"
+  | "service"
+  | "debug";
 export type Direction = "north" | "east" | "south" | "west";
 export type KeyBindingAction =
   | "openHud"
@@ -191,6 +199,7 @@ export interface WorldMapData {
 export interface PacketLogEntry {
   id: number;
   level: LogLevel;
+  channel: LogChannel;
   message: string;
 }
 
@@ -277,6 +286,7 @@ export interface ClientState {
   party: {
     open: boolean;
     members: string[];
+    leaderName: string;
     invited: boolean;
     inviterName: string;
     safeMode: boolean;
@@ -285,7 +295,18 @@ export interface ClientState {
     open: boolean;
     name: string;
     members: string[];
+    onlineMembers: string[];
     rank: string;
+    leaderName: string;
+    founderName: string;
+    alignment: string;
+    description: string;
+    news: string;
+    memberCount: number;
+    level: number;
+    currentExp: number;
+    neededExp: number;
+    pendingRequests: string[];
   };
   weather: {
     raining: boolean;
@@ -340,6 +361,10 @@ export type ServerPacket =
   | { type: "console_msg"; message: string; fontIndex: number }
   | { type: "console_faction_message"; message: string; fontIndex: number; factionLabel: string }
   | { type: "guild_chat"; status: number; message: string }
+  | { type: "guild_list"; guildNames: string[] }
+  | { type: "guild_news"; news: string; guildList: string[]; memberList: string[]; level: number; currentExp: number; neededExp: number }
+  | { type: "guild_leader_info"; guildList: string[]; memberList: string[]; news: string; requests: string[]; level: number; currentExp: number; neededExp: number }
+  | { type: "guild_details"; name: string; founder: string; date: string; leader: string; memberCount: number; alignment: string; description: string; level: number }
   | { type: "character_create"; character: CharacterCreatePacket }
   | { type: "character_remove"; charIndex: number }
   | { type: "character_move"; charIndex: number; x: number; y: number }
@@ -368,6 +393,8 @@ export type ServerPacket =
   | { type: "user_hitted_user"; charIndex: number; target: number; damage: number }
   | { type: "safe_mode_on" }
   | { type: "safe_mode_off" }
+  | { type: "party_safe_mode_on" }
+  | { type: "party_safe_mode_off" }
   | { type: "navigate_toggle"; navigating: boolean }
   | { type: "create_fx"; charIndex: number; fxId: number; loops: number; x: number; y: number }
   | { type: "play_wave"; wav: number; x: number; y: number; cancelLast: boolean; localize: boolean }
@@ -428,6 +455,7 @@ export type ServerPacket =
     }
   | { type: "mini_stats"; classId: number; raceId: number; genderId: number; factionStatus: number }
   | { type: "send_skills"; skills: SkillEntry[] }
+  | { type: "datos_grupo"; inParty: boolean; members: string[]; leaderName: string }
   | { type: "rain_toggle"; raining: boolean }
   | { type: "snow_toggle"; snowing: boolean }
   | { type: "unknown"; packetId: number };
@@ -529,12 +557,45 @@ export type ClientAction =
   | { type: "skills/setAll"; entries: SkillEntry[]; source?: "server" }
   | { type: "skills/select"; key: string | null }
   | { type: "party/toggle" }
-  | { type: "party/setMembers"; members: string[] }
+  | { type: "party/setMembers"; members: string[]; leaderName?: string }
+  | { type: "party/setSnapshot"; members: string[]; leaderName: string }
   | { type: "party/setInvite"; invited: boolean; inviterName: string }
   | { type: "party/clear" }
   | { type: "party/toggleSafe" }
+  | { type: "party/setSafeMode"; safeMode: boolean }
   | { type: "clan/toggle" }
   | { type: "clan/setInfo"; name: string; members: string[]; rank: string }
+  | {
+      type: "clan/setDetails";
+      name: string;
+      founderName: string;
+      createdAt: string;
+      leaderName: string;
+      memberCount: number;
+      alignment: string;
+      description: string;
+      level: number;
+    }
+  | {
+      type: "clan/setNews";
+      news: string;
+      guildList: string[];
+      memberList: string[];
+      level: number;
+      currentExp: number;
+      neededExp: number;
+    }
+  | {
+      type: "clan/setLeaderInfo";
+      guildList: string[];
+      memberList: string[];
+      news: string;
+      pendingRequests: string[];
+      level: number;
+      currentExp: number;
+      neededExp: number;
+    }
+  | { type: "clan/setOnlineMembers"; members: string[] }
   | { type: "clan/clear" }
   | { type: "weather/rain"; raining: boolean }
   | { type: "weather/snow"; snowing: boolean }
@@ -544,6 +605,6 @@ export type ClientAction =
   | { type: "settings/setSoundVolume"; volume: number }
   | { type: "settings/setKeyBinding"; action: KeyBindingAction; key: string | null }
   | { type: "settings/resetKeyBindings" }
-  | { type: "log/add"; level: LogLevel; message: string }
+  | { type: "log/add"; level: LogLevel; message: string; channel?: LogChannel }
   | { type: "log/clear" }
   | { type: "session/resetRuntime" };

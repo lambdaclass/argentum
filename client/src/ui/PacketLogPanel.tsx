@@ -21,7 +21,7 @@ export function PacketLogPanel({ state, onClear }: PacketLogPanelProps) {
       <div className="packet-log">
         {state.log.map((entry) => (
           <div className={`packet-entry packet-entry-${entry.level}`} key={entry.id}>
-            <span>{entry.level.toUpperCase()}</span>
+            <span>{`${entry.channel.toUpperCase()} · ${entry.level.toUpperCase()}`}</span>
             <p>{entry.message}</p>
           </div>
         ))}

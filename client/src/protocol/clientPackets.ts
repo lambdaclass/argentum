@@ -14,6 +14,20 @@ const CLIENT_PACKET = {
   safeToggle: 82,
   requestAttributes: 85,
   requestSkills: 86,
+  requestAccountState: 41,
+  requestGuildLeaderInfo: 84,
+  groupMsg: 45,
+  help: 51,
+  information: 55,
+  reward: 56,
+  requestMotd: 57,
+  uptime: 58,
+  guildMessage: 59,
+  guildOnline: 60,
+  councilMessage: 61,
+  factionMessage: 62,
+  punishments: 66,
+  guildRequestDetails: 37,
   drop: 93,
   commerceStart: 53,
   commerceBuy: 9,
@@ -230,6 +244,74 @@ export function encodeRequestAttributes() {
 
 export function encodeRequestSkills() {
   return buildPacket(CLIENT_PACKET.requestSkills);
+}
+
+export function encodeRequestAccountState() {
+  return buildPacket(CLIENT_PACKET.requestAccountState);
+}
+
+export function encodePartyMessage(message: string) {
+  return buildPacket(CLIENT_PACKET.groupMsg, (bytes) => {
+    writeString8(bytes, message);
+  });
+}
+
+export function encodeHelp() {
+  return buildPacket(CLIENT_PACKET.help);
+}
+
+export function encodeInformation() {
+  return buildPacket(CLIENT_PACKET.information);
+}
+
+export function encodeReward() {
+  return buildPacket(CLIENT_PACKET.reward);
+}
+
+export function encodeRequestMotd() {
+  return buildPacket(CLIENT_PACKET.requestMotd);
+}
+
+export function encodeUptime() {
+  return buildPacket(CLIENT_PACKET.uptime);
+}
+
+export function encodeGuildMessage(message: string) {
+  return buildPacket(CLIENT_PACKET.guildMessage, (bytes) => {
+    writeString8(bytes, message);
+  });
+}
+
+export function encodeGuildOnline() {
+  return buildPacket(CLIENT_PACKET.guildOnline);
+}
+
+export function encodeCouncilMessage(message: string) {
+  return buildPacket(CLIENT_PACKET.councilMessage, (bytes) => {
+    writeString8(bytes, message);
+  });
+}
+
+export function encodeFactionMessage(message: string) {
+  return buildPacket(CLIENT_PACKET.factionMessage, (bytes) => {
+    writeString8(bytes, message);
+  });
+}
+
+export function encodePunishments(name: string) {
+  return buildPacket(CLIENT_PACKET.punishments, (bytes) => {
+    writeString8(bytes, name);
+  });
+}
+
+export function encodeGuildRequestDetails(guild: string) {
+  return buildPacket(CLIENT_PACKET.guildRequestDetails, (bytes) => {
+    writeString8(bytes, guild);
+  });
+}
+
+export function encodeRequestGuildLeaderInfo() {
+  return buildPacket(CLIENT_PACKET.requestGuildLeaderInfo);
 }
 
 export function encodeCommerceStart() {

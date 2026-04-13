@@ -1,5 +1,5 @@
 import type { Dispatch } from "react";
-import type { ClientAction, ClientState, Direction, ServerPacket } from "../app/types";
+import type { ClientAction, ClientState, Direction, LogChannel, ServerPacket } from "../app/types";
 import type { WorldRenderer } from "../render/WorldRenderer";
 import { GameRuntime, type MovementDebugSnapshot } from "../runtime/GameRuntime";
 import { fetchMapData, getLoadedMapPackManifest, loadedMapPackMatches } from "./mapApi";
@@ -17,26 +17,40 @@ import {
   encodeCommerceEnd,
   encodeCommerceSell,
   encodeCommerceStart,
+  encodeCouncilMessage,
   encodeCreateCharacter,
   encodeDoubleClick,
   encodeDrop,
   encodeEquipItem,
+  encodeFactionMessage,
+  encodeGuildMessage,
+  encodeGuildOnline,
+  encodeGuildRequestDetails,
   encodeHeal,
+  encodeHelp,
+  encodeInformation,
   encodeLeftClick,
   encodeLoginExisting,
   encodeMeditate,
   encodeOnline,
+  encodePartyMessage,
   encodePartySafeToggle,
   encodePickUp,
+  encodePunishments,
   encodeQuit,
+  encodeRequestAccountState,
   encodeRequestAttributes,
+  encodeRequestGuildLeaderInfo,
+  encodeRequestMotd,
   encodeRequestMiniStats,
   encodeRequestPositionUpdate,
   encodeRequestSkills,
+  encodeReward,
   encodeResucitate,
   encodeRest,
   encodeSafeToggle,
   encodeTalk,
+  encodeUptime,
   encodeUserTradeAccept,
   encodeUserTradeEnd,
   encodeUserTradeOffer,
@@ -70,6 +84,8 @@ export class SessionClient {
   private selfCharIndex: number | null = null;
   private closeReason: string | null = null;
   private soundPlayer: ((payload: SoundEffectPayload) => void) | null = null;
+  private pendingConsoleChannel: LogChannel | null = null;
+  private pendingConsoleChannelDeadline = 0;
 
   constructor(dispatch: Dispatch<ClientAction>, getState: () => ClientState) {
     this.dispatch = dispatch;
@@ -157,6 +173,8 @@ export class SessionClient {
     this.runtime.resetConnection();
     this.selfCharIndex = null;
     this.closeReason = null;
+    this.pendingConsoleChannel = null;
+    this.pendingConsoleChannelDeadline = 0;
     this.dispatch({ type: "connection/setStatus", status: "connecting" });
     this.dispatch({
       type: "log/add",
@@ -224,6 +242,8 @@ export class SessionClient {
       this.runtime.resetConnection();
       this.selfCharIndex = null;
       this.closeReason = null;
+      this.pendingConsoleChannel = null;
+      this.pendingConsoleChannelDeadline = 0;
       this.dispatch({ type: "session/resetRuntime" });
       this.dispatch({
         type: "connection/setStatus",
@@ -463,6 +483,53 @@ export class SessionClient {
     this.dispatch({ type: "log/add", level: "packet-out", message: "ONLINE" });
   }
 
+  sendHelp() {
+    this.markPendingConsoleChannel("service");
+    this.sendRaw(encodeHelp());
+    this.dispatch({ type: "log/add", level: "packet-out", message: "HELP", channel: "service" });
+  }
+
+  sendRequestMotd() {
+    this.markPendingConsoleChannel("service");
+    this.sendRaw(encodeRequestMotd());
+    this.dispatch({ type: "log/add", level: "packet-out", message: "REQUEST_MOTD", channel: "service" });
+  }
+
+  sendUptime() {
+    this.markPendingConsoleChannel("service");
+    this.sendRaw(encodeUptime());
+    this.dispatch({ type: "log/add", level: "packet-out", message: "UPTIME", channel: "service" });
+  }
+
+  sendInformation() {
+    this.markPendingConsoleChannel("service");
+    this.sendRaw(encodeInformation());
+    this.dispatch({ type: "log/add", level: "packet-out", message: "INFORMATION", channel: "service" });
+  }
+
+  sendReward() {
+    this.markPendingConsoleChannel("service");
+    this.sendRaw(encodeReward());
+    this.dispatch({ type: "log/add", level: "packet-out", message: "REWARD", channel: "service" });
+  }
+
+  sendRequestAccountState() {
+    this.markPendingConsoleChannel("service");
+    this.sendRaw(encodeRequestAccountState());
+    this.dispatch({ type: "log/add", level: "packet-out", message: "REQUEST_ACCOUNT_STATE", channel: "service" });
+  }
+
+  sendPunishments(name: string) {
+    this.markPendingConsoleChannel("service");
+    this.sendRaw(encodePunishments(name));
+    this.dispatch({
+      type: "log/add",
+      level: "packet-out",
+      message: `PUNISHMENTS ${name}`,
+      channel: "service"
+    });
+  }
+
   sendRest() {
     this.sendRaw(encodeRest());
     this.dispatch({ type: "log/add", level: "packet-out", message: "REST" });
@@ -515,6 +582,16 @@ export class SessionClient {
     this.dispatch({ type: "log/add", level: "packet-out", message: "PARTY_SAFE_TOGGLE" });
   }
 
+  sendPartyMessage(message: string) {
+    this.sendRaw(encodePartyMessage(message));
+    this.dispatch({
+      type: "log/add",
+      level: "packet-out",
+      message: `PARTY "${message}"`,
+      channel: "party"
+    });
+  }
+
   sendPartyInvite(name: string) {
     this.sendChat(`/PARTY ${name}`);
   }
@@ -548,7 +625,77 @@ export class SessionClient {
   }
 
   sendClanChat(msg: string) {
-    this.sendChat(`/CC ${msg}`);
+    this.sendRaw(encodeGuildMessage(msg));
+    this.dispatch({
+      type: "log/add",
+      level: "packet-out",
+      message: `CLAN "${msg}"`,
+      channel: "guild"
+    });
+  }
+
+  sendFactionChat(msg: string) {
+    this.sendRaw(encodeFactionMessage(msg));
+    this.dispatch({
+      type: "log/add",
+      level: "packet-out",
+      message: `FACTION "${msg}"`,
+      channel: "faction"
+    });
+  }
+
+  sendCouncilChat(msg: string) {
+    this.sendRaw(encodeCouncilMessage(msg));
+    this.dispatch({
+      type: "log/add",
+      level: "packet-out",
+      message: `COUNCIL "${msg}"`,
+      channel: "guild"
+    });
+  }
+
+  sendClanInfo() {
+    const clanName = this.getState().clan.name.trim();
+    this.markPendingConsoleChannel("guild");
+    if (clanName.length > 0) {
+      this.sendRaw(encodeGuildRequestDetails(clanName));
+      this.dispatch({
+        type: "log/add",
+        level: "packet-out",
+        message: `CLAN_INFO ${clanName}`,
+        channel: "guild"
+      });
+      return;
+    }
+
+    this.sendChat("/CLANINFO");
+  }
+
+  sendClanNews() {
+    this.markPendingConsoleChannel("guild");
+    this.sendChat("/CLANNOTICIAS");
+  }
+
+  sendClanOnline() {
+    this.markPendingConsoleChannel("guild");
+    this.sendRaw(encodeGuildOnline());
+    this.dispatch({
+      type: "log/add",
+      level: "packet-out",
+      message: "CLAN_ONLINE",
+      channel: "guild"
+    });
+  }
+
+  sendClanLeaderInfo() {
+    this.markPendingConsoleChannel("guild");
+    this.sendRaw(encodeRequestGuildLeaderInfo());
+    this.dispatch({
+      type: "log/add",
+      level: "packet-out",
+      message: "CLAN_LEADER_INFO",
+      channel: "guild"
+    });
   }
 
   requestPositionUpdate() {
@@ -622,6 +769,47 @@ export class SessionClient {
 
   private setLastEvent(message: string | null) {
     this.dispatch({ type: "combat/setLastEvent", message });
+  }
+
+  private markPendingConsoleChannel(channel: LogChannel, ttlMs = 2_500) {
+    this.pendingConsoleChannel = channel;
+    this.pendingConsoleChannelDeadline = Date.now() + ttlMs;
+  }
+
+  private getPendingConsoleChannel() {
+    if (this.pendingConsoleChannel == null) {
+      return null;
+    }
+
+    if (Date.now() > this.pendingConsoleChannelDeadline) {
+      this.pendingConsoleChannel = null;
+      return null;
+    }
+
+    const channel = this.pendingConsoleChannel;
+    this.pendingConsoleChannel = null;
+    return channel;
+  }
+
+  private classifyConsoleMessage(message: string): LogChannel {
+    const pending = this.getPendingConsoleChannel();
+    if (pending) {
+      return pending;
+    }
+
+    if (/^\[grupo\]/i.test(message) || /\bgrupo\b/i.test(message)) {
+      return "party";
+    }
+
+    if (/^\[clan\]/i.test(message) || /\bclan\b/i.test(message)) {
+      return "guild";
+    }
+
+    if (/^uptime\b/i.test(message) || /\bboveda\b|\bbanco\b|\btimbero\b|\brecompensa\b|\bpenas\b|\bayuda\b/i.test(message)) {
+      return "service";
+    }
+
+    return "general";
   }
 
   private findCharacterTile(charIndex: number | null) {
@@ -766,6 +954,26 @@ export class SessionClient {
         this.dispatch({ type: "combat/setSafeMode", safeMode: false });
         this.setLastEvent("Modo seguro desactivado.");
         this.dispatch({ type: "log/add", level: "info", message: "Safe mode disabled." });
+        return;
+
+      case "party_safe_mode_on":
+        this.dispatch({ type: "party/setSafeMode", safeMode: true });
+        this.dispatch({
+          type: "log/add",
+          level: "info",
+          message: "Seguro de grupo activado.",
+          channel: "party"
+        });
+        return;
+
+      case "party_safe_mode_off":
+        this.dispatch({ type: "party/setSafeMode", safeMode: false });
+        this.dispatch({
+          type: "log/add",
+          level: "info",
+          message: "Seguro de grupo desactivado.",
+          channel: "party"
+        });
         return;
 
       case "change_map":
@@ -965,15 +1173,111 @@ export class SessionClient {
         }
         this.parsePartyMessage(packet.message);
         this.setLastEvent(packet.message);
-        this.dispatch({ type: "log/add", level: "info", message: packet.message });
+        this.dispatch({
+          type: "log/add",
+          level: "info",
+          message: packet.message,
+          channel: this.classifyConsoleMessage(packet.message)
+        });
         return;
 
       case "console_faction_message":
-        this.dispatch({ type: "log/add", level: "info", message: `[${packet.factionLabel}] ${packet.message}` });
+        this.dispatch({
+          type: "log/add",
+          level: "info",
+          message: `[${packet.factionLabel}] ${packet.message}`,
+          channel: "faction"
+        });
         return;
 
       case "guild_chat":
-        this.dispatch({ type: "log/add", level: "info", message: `[Clan] ${packet.message}` });
+        this.dispatch({
+          type: "log/add",
+          level: "info",
+          message: `[Clan] ${packet.message}`,
+          channel: "guild"
+        });
+        return;
+
+      case "guild_list":
+        this.dispatch({
+          type: "log/add",
+          level: "info",
+          message: `Clanes disponibles: ${packet.guildNames.join(", ")}`,
+          channel: "guild"
+        });
+        return;
+
+      case "guild_details":
+        this.dispatch({
+          type: "clan/setDetails",
+          name: packet.name,
+          founderName: packet.founder,
+          createdAt: packet.date,
+          leaderName: packet.leader,
+          memberCount: packet.memberCount,
+          alignment: packet.alignment,
+          description: packet.description,
+          level: packet.level
+        });
+        this.dispatch({
+          type: "log/add",
+          level: "info",
+          message: `Clan ${packet.name}: ${packet.memberCount} miembros, lider ${packet.leader}.`,
+          channel: "guild"
+        });
+        return;
+
+      case "guild_news":
+        this.dispatch({
+          type: "clan/setNews",
+          news: packet.news,
+          guildList: packet.guildList,
+          memberList: packet.memberList,
+          level: packet.level,
+          currentExp: packet.currentExp,
+          neededExp: packet.neededExp
+        });
+        this.dispatch({
+          type: "log/add",
+          level: "info",
+          message: packet.news.length > 0 ? packet.news : "Sin noticias de clan.",
+          channel: "guild"
+        });
+        return;
+
+      case "guild_leader_info":
+        this.dispatch({
+          type: "clan/setLeaderInfo",
+          guildList: packet.guildList,
+          memberList: packet.memberList,
+          news: packet.news,
+          pendingRequests: packet.requests,
+          level: packet.level,
+          currentExp: packet.currentExp,
+          neededExp: packet.neededExp
+        });
+        this.dispatch({
+          type: "log/add",
+          level: "info",
+          message:
+            packet.requests.length > 0
+              ? `Solicitudes pendientes: ${packet.requests.join(", ")}`
+              : "Sin solicitudes pendientes.",
+          channel: "guild"
+        });
+        return;
+
+      case "datos_grupo":
+        if (packet.inParty) {
+          this.dispatch({
+            type: "party/setSnapshot",
+            members: packet.members,
+            leaderName: packet.leaderName
+          });
+        } else {
+          this.dispatch({ type: "party/clear" });
+        }
         return;
 
       case "error_msg":

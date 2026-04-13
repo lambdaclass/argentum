@@ -639,13 +639,25 @@ function createSocialState(): ClientState {
   next.connection.characterName = "PlaywrightHero";
   next.party.open = true;
   next.party.members = ["PlaywrightHero", "Aster"];
+  next.party.leaderName = "PlaywrightHero";
   next.party.invited = false;
   next.party.inviterName = "";
   next.party.safeMode = false;
   next.clan.open = true;
-  next.clan.name = "";
-  next.clan.members = [];
-  next.clan.rank = "";
+  next.clan.name = "Cronistas";
+  next.clan.members = ["PlaywrightHero", "Aster", "Marea"];
+  next.clan.onlineMembers = ["PlaywrightHero", "Aster"];
+  next.clan.rank = "Lider";
+  next.clan.leaderName = "PlaywrightHero";
+  next.clan.founderName = "PlaywrightHero";
+  next.clan.alignment = "Ciudadano";
+  next.clan.description = "Clan de prueba para las pantallas sociales.";
+  next.clan.news = "La cronica de hoy ya esta disponible.";
+  next.clan.memberCount = 3;
+  next.clan.level = 2;
+  next.clan.currentExp = 18;
+  next.clan.neededExp = 30;
+  next.clan.pendingRequests = ["Rhea"];
   return next;
 }
 
@@ -705,7 +717,11 @@ function SocialSmokePage() {
                 ...current.clan,
                 name: clanName,
                 members: ["PlaywrightHero"],
-                rank: "Fundador"
+                onlineMembers: ["PlaywrightHero"],
+                rank: "Fundador",
+                leaderName: "PlaywrightHero",
+                founderName: "PlaywrightHero",
+                memberCount: 1
               }
             }));
             return;
@@ -718,10 +734,36 @@ function SocialSmokePage() {
                 ...current.clan,
                 name: "",
                 members: [],
-                rank: ""
+                onlineMembers: [],
+                rank: "",
+                leaderName: "",
+                founderName: "",
+                alignment: "",
+                description: "",
+                news: "",
+                memberCount: 0,
+                level: 1,
+                currentExp: 0,
+                neededExp: 0,
+                pendingRequests: []
               }
             }));
           }
+        }}
+        onSendClanChat={(message) => {
+          setTranscript((current) => [`[Clan] ${message}`, ...current]);
+        }}
+        onRefreshInfo={() => {
+          setTranscript((current) => ["Requested clan details", ...current]);
+        }}
+        onRefreshNews={() => {
+          setTranscript((current) => ["Requested clan news", ...current]);
+        }}
+        onRefreshOnline={() => {
+          setTranscript((current) => ["Requested clan online list", ...current]);
+        }}
+        onRefreshLeaderInfo={() => {
+          setTranscript((current) => ["Requested clan leader info", ...current]);
         }}
       />
 

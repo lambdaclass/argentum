@@ -108,6 +108,46 @@ describe("appReducer", () => {
     expect(next.world.map).toBeNull();
   });
 
+  it("stores authoritative party snapshots", () => {
+    const state = appReducer(createInitialState(), {
+      type: "party/setSnapshot",
+      members: ["Ari", "Niora"],
+      leaderName: "Ari"
+    });
+
+    expect(state.party.members).toEqual(["Ari", "Niora"]);
+    expect(state.party.leaderName).toBe("Ari");
+    expect(state.party.invited).toBe(false);
+  });
+
+  it("stores guild details and news together", () => {
+    const withDetails = appReducer(createInitialState(), {
+      type: "clan/setDetails",
+      name: "Luz del Alba",
+      founderName: "Ari",
+      createdAt: "2026-04-13",
+      leaderName: "Ari",
+      memberCount: 3,
+      alignment: "Ciudadano",
+      description: "Cronistas de la aurora",
+      level: 2
+    });
+    const next = appReducer(withDetails, {
+      type: "clan/setNews",
+      news: "Guardia lista.",
+      guildList: ["Luz del Alba"],
+      memberList: ["Ari", "Niora", "Korin"],
+      level: 2,
+      currentExp: 14,
+      neededExp: 25
+    });
+
+    expect(next.clan.name).toBe("Luz del Alba");
+    expect(next.clan.memberCount).toBe(3);
+    expect(next.clan.news).toBe("Guardia lista.");
+    expect(next.clan.members).toEqual(["Ari", "Niora", "Korin"]);
+  });
+
   it("does not mark NPCs dead just because character_create reports zero HP", () => {
     const state = appReducer(createInitialState(), {
       type: "world/upsertCharacter",

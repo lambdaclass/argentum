@@ -1051,6 +1051,30 @@ export function App({ uiDemoMode = false }: AppProps) {
       return;
     }
 
+    const partyMatch = trimmed.match(/^\/(?:grupo|g)\s+(.+)$/i);
+    if (partyMatch) {
+      session.sendPartyMessage(partyMatch[1]);
+      return;
+    }
+
+    const clanMatch = trimmed.match(/^\/(?:cc|clan)\s+(.+)$/i);
+    if (clanMatch) {
+      session.sendClanChat(clanMatch[1]);
+      return;
+    }
+
+    const factionMatch = trimmed.match(/^\/(?:faccion|faction)\s+(.+)$/i);
+    if (factionMatch) {
+      session.sendFactionChat(factionMatch[1]);
+      return;
+    }
+
+    const councilMatch = trimmed.match(/^\/(?:cmsg|consejo|council)\s+(.+)$/i);
+    if (councilMatch) {
+      session.sendCouncilChat(councilMatch[1]);
+      return;
+    }
+
     switch (trimmed.toLowerCase()) {
       case "/online":
         session.sendOnline();
@@ -1087,6 +1111,62 @@ export function App({ uiDemoMode = false }: AppProps) {
       default:
         session.sendChat(trimmed);
     }
+  }, [session]);
+
+  const handlePartyChat = useCallback((message: string) => {
+    session.sendPartyMessage(message);
+  }, [session]);
+
+  const handleGuildChat = useCallback((message: string) => {
+    session.sendClanChat(message);
+  }, [session]);
+
+  const handleFactionChat = useCallback((message: string) => {
+    session.sendFactionChat(message);
+  }, [session]);
+
+  const handleRequestHelp = useCallback(() => {
+    session.sendHelp();
+  }, [session]);
+
+  const handleRequestMotd = useCallback(() => {
+    session.sendRequestMotd();
+  }, [session]);
+
+  const handleRequestUptime = useCallback(() => {
+    session.sendUptime();
+  }, [session]);
+
+  const handleRequestInformation = useCallback(() => {
+    session.sendInformation();
+  }, [session]);
+
+  const handleRequestReward = useCallback(() => {
+    session.sendReward();
+  }, [session]);
+
+  const handleRequestAccountState = useCallback(() => {
+    session.sendRequestAccountState();
+  }, [session]);
+
+  const handleRequestPunishments = useCallback((name: string) => {
+    session.sendPunishments(name);
+  }, [session]);
+
+  const handleRefreshClanInfo = useCallback(() => {
+    session.sendClanInfo();
+  }, [session]);
+
+  const handleRefreshClanNews = useCallback(() => {
+    session.sendClanNews();
+  }, [session]);
+
+  const handleRefreshClanOnline = useCallback(() => {
+    session.sendClanOnline();
+  }, [session]);
+
+  const handleRefreshClanLeaderInfo = useCallback(() => {
+    session.sendClanLeaderInfo();
   }, [session]);
 
   const handleOpenWorldMap = useCallback(() => {
@@ -1619,6 +1699,11 @@ export function App({ uiDemoMode = false }: AppProps) {
               <ClansPanel
                 state={state}
                 onSendChat={(msg) => session.sendChat(msg)}
+                onSendClanChat={handleGuildChat}
+                onRefreshInfo={handleRefreshClanInfo}
+                onRefreshNews={handleRefreshClanNews}
+                onRefreshOnline={handleRefreshClanOnline}
+                onRefreshLeaderInfo={handleRefreshClanLeaderInfo}
                 onClose={() => dispatch({ type: "clan/toggle" })}
               />
             ) : null}
@@ -1654,7 +1739,12 @@ export function App({ uiDemoMode = false }: AppProps) {
 
             {activeRightTab === "chat" ? (
               <ChatPanel
+                entries={state.log}
+                selfName={state.world.self.name}
                 onSend={handleChatSend}
+                onSendParty={handlePartyChat}
+                onSendGuild={handleGuildChat}
+                onSendFaction={handleFactionChat}
                 onPickUp={() => session.sendPickUp()}
                 onRequestPosition={() => session.requestPositionUpdate()}
                 onRequestStats={() => session.sendRequestAttributes()}
@@ -1664,6 +1754,13 @@ export function App({ uiDemoMode = false }: AppProps) {
                 onMeditate={() => session.sendMeditate()}
                 onHeal={() => session.sendHeal()}
                 onResucitate={() => session.sendResucitate()}
+                onRequestHelp={handleRequestHelp}
+                onRequestMotd={handleRequestMotd}
+                onRequestUptime={handleRequestUptime}
+                onRequestInformation={handleRequestInformation}
+                onRequestReward={handleRequestReward}
+                onRequestAccountState={handleRequestAccountState}
+                onRequestPunishments={handleRequestPunishments}
               />
             ) : null}
 

@@ -3,6 +3,7 @@ import type {
   ClientAction,
   ClientState,
   GroundObject,
+  LogChannel,
   PacketLogEntry,
   SessionCredentials
 } from "./types";
@@ -75,10 +76,23 @@ export function persistCredentials(credentials: SessionCredentials | null) {
   window.localStorage.setItem(STORAGE_TOKEN, credentials.token);
 }
 
-function createLogEntry(level: PacketLogEntry["level"], message: string): PacketLogEntry {
+function inferLogChannel(level: PacketLogEntry["level"]): LogChannel {
+  if (level === "packet-in" || level === "packet-out") {
+    return "debug";
+  }
+
+  return "system";
+}
+
+function createLogEntry(
+  level: PacketLogEntry["level"],
+  message: string,
+  channel: LogChannel = inferLogChannel(level)
+): PacketLogEntry {
   return {
     id: Date.now() + Math.floor(Math.random() * 10_000),
     level,
+    channel,
     message
   };
 }
@@ -258,6 +272,7 @@ export function createInitialState(): ClientState {
     party: {
       open: false,
       members: [],
+      leaderName: "",
       invited: false,
       inviterName: "",
       safeMode: false
@@ -266,7 +281,18 @@ export function createInitialState(): ClientState {
       open: false,
       name: "",
       members: [],
-      rank: ""
+      onlineMembers: [],
+      rank: "",
+      leaderName: "",
+      founderName: "",
+      alignment: "",
+      description: "",
+      news: "",
+      memberCount: 0,
+      level: 1,
+      currentExp: 0,
+      neededExp: 0,
+      pendingRequests: []
     },
     weather: {
       raining: false,
@@ -1293,7 +1319,7 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
     case "log/add":
       return {
         ...state,
-        log: [createLogEntry(action.level, action.message), ...state.log].slice(0, 80)
+        log: [createLogEntry(action.level, action.message, action.channel), ...state.log].slice(0, 200)
       };
 
     case "log/clear":
@@ -1368,6 +1394,7 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
         party: {
           open: false,
           members: [],
+          leaderName: "",
           invited: false,
           inviterName: "",
           safeMode: false
@@ -1376,7 +1403,18 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
           open: false,
           name: "",
           members: [],
-          rank: ""
+          onlineMembers: [],
+          rank: "",
+          leaderName: "",
+          founderName: "",
+          alignment: "",
+          description: "",
+          news: "",
+          memberCount: 0,
+          level: 1,
+          currentExp: 0,
+          neededExp: 0,
+          pendingRequests: []
         },
         weather: {
           raining: false,
@@ -1399,7 +1437,20 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
         ...state,
         party: {
           ...state.party,
-          members: action.members
+          members: action.members,
+          leaderName: action.leaderName ?? state.party.leaderName
+        }
+      };
+
+    case "party/setSnapshot":
+      return {
+        ...state,
+        party: {
+          ...state.party,
+          members: action.members,
+          leaderName: action.leaderName,
+          invited: false,
+          inviterName: ""
         }
       };
 
@@ -1419,6 +1470,7 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
         party: {
           ...state.party,
           members: [],
+          leaderName: "",
           invited: false,
           inviterName: "",
           safeMode: false
@@ -1431,6 +1483,15 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
         party: {
           ...state.party,
           safeMode: !state.party.safeMode
+        }
+      };
+
+    case "party/setSafeMode":
+      return {
+        ...state,
+        party: {
+          ...state.party,
+          safeMode: action.safeMode
         }
       };
 
@@ -1454,6 +1515,63 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
         }
       };
 
+    case "clan/setDetails":
+      return {
+        ...state,
+        clan: {
+          ...state.clan,
+          name: action.name,
+          founderName: action.founderName,
+          leaderName: action.leaderName,
+          memberCount: action.memberCount,
+          alignment: action.alignment,
+          description: action.description,
+          level: action.level,
+          rank:
+            state.world.self.name.length > 0 && state.world.self.name === action.leaderName
+              ? "Lider"
+              : state.clan.rank || "Miembro"
+        }
+      };
+
+    case "clan/setNews":
+      return {
+        ...state,
+        clan: {
+          ...state.clan,
+          news: action.news,
+          members: action.memberList,
+          memberCount: action.memberList.length,
+          level: action.level,
+          currentExp: action.currentExp,
+          neededExp: action.neededExp
+        }
+      };
+
+    case "clan/setLeaderInfo":
+      return {
+        ...state,
+        clan: {
+          ...state.clan,
+          members: action.memberList,
+          memberCount: action.memberList.length,
+          news: action.news,
+          pendingRequests: action.pendingRequests,
+          level: action.level,
+          currentExp: action.currentExp,
+          neededExp: action.neededExp
+        }
+      };
+
+    case "clan/setOnlineMembers":
+      return {
+        ...state,
+        clan: {
+          ...state.clan,
+          onlineMembers: action.members
+        }
+      };
+
     case "clan/clear":
       return {
         ...state,
@@ -1461,7 +1579,18 @@ export function appReducer(state: ClientState, action: ClientAction): ClientStat
           ...state.clan,
           name: "",
           members: [],
-          rank: ""
+          onlineMembers: [],
+          rank: "",
+          leaderName: "",
+          founderName: "",
+          alignment: "",
+          description: "",
+          news: "",
+          memberCount: 0,
+          level: 1,
+          currentExp: 0,
+          neededExp: 0,
+          pendingRequests: []
         }
       };
 

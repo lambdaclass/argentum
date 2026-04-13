@@ -66,6 +66,72 @@ describe("decodeServerPackets", () => {
     ]);
   });
 
+  it("decodes authoritative party snapshot packets", () => {
+    const buffer = bufferFromBytes(
+      packet(143, [
+        1,
+        2,
+        ...string8("Ari(Lider)"),
+        ...string8("Niora")
+      ])
+    );
+
+    expect(decodeServerPackets(buffer)).toEqual([
+      {
+        type: "datos_grupo",
+        inParty: true,
+        members: ["Ari", "Niora"],
+        leaderName: "Ari"
+      }
+    ]);
+  });
+
+  it("decodes guild details and guild news packets", () => {
+    const buffer = bufferFromBytes([
+      ...packet(95, [
+        ...string8("Luz del Alba"),
+        ...string8("Ari"),
+        ...string8("2026-04-13"),
+        ...string8("Ari"),
+        ...int16(3),
+        ...string8("Ciudadano"),
+        ...string8("Cronistas de la aurora"),
+        2
+      ]),
+      ...packet(89, [
+        ...string8("Guardia lista."),
+        ...string8("Luz del Alba"),
+        ...string8("Ari-Niora-Korin"),
+        2,
+        ...int16(14),
+        ...int16(25)
+      ])
+    ]);
+
+    expect(decodeServerPackets(buffer)).toEqual([
+      {
+        type: "guild_details",
+        name: "Luz del Alba",
+        founder: "Ari",
+        date: "2026-04-13",
+        leader: "Ari",
+        memberCount: 3,
+        alignment: "Ciudadano",
+        description: "Cronistas de la aurora",
+        level: 2
+      },
+      {
+        type: "guild_news",
+        news: "Guardia lista.",
+        guildList: ["Luz del Alba"],
+        memberList: ["Ari", "Niora", "Korin"],
+        level: 2,
+        currentExp: 14,
+        neededExp: 25
+      }
+    ]);
+  });
+
   it("stops decoding after an unknown packet id", () => {
     const buffer = bufferFromBytes([
       ...packet(59, [1]),

@@ -2737,6 +2737,44 @@ h3 {
   flex: 1 1 auto;
 }
 
+.chat-filter-row,
+.clan-refresh-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chat-tab-active {
+  border-color: rgba(255, 216, 132, 0.32);
+  box-shadow: inset 0 0 0 1px rgba(255, 216, 132, 0.18);
+}
+
+.chat-stream-log {
+  min-height: 240px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.chat-service-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.chat-service-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.chat-service-row input {
+  border: 1px solid rgba(255, 216, 132, 0.14);
+  background: rgba(7, 12, 20, 0.94);
+  color: var(--text);
+  padding: 9px 10px;
+  border-radius: 10px;
+}
+
 .bank-grid {
   grid-template-columns: repeat(5, minmax(0, 1fr));
   grid-template-rows: repeat(8, 40px);
@@ -2791,6 +2829,12 @@ h3 {
   min-width: 0;
   padding: 8px 10px;
   font-size: 11px;
+}
+
+@media (max-width: 960px) {
+  .chat-service-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .merchant-inventory-grid {

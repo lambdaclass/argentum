@@ -34,6 +34,7 @@ function createHarnessState(): ClientState {
       invited: true,
       inviterName: "Niora",
       members: [],
+      leaderName: "",
       safeMode: true
     },
     clan: {
@@ -41,7 +42,18 @@ function createHarnessState(): ClientState {
       open: true,
       name: "Luz del Alba",
       members: ["Ari", "Niora", "Korin"],
-      rank: "Lider"
+      onlineMembers: ["Ari", "Niora"],
+      rank: "Lider",
+      leaderName: "Ari",
+      founderName: "Ari",
+      alignment: "Ciudadano",
+      description: "Clan de prueba para el harness.",
+      news: "Reunion al anochecer.",
+      memberCount: 3,
+      level: 3,
+      currentExp: 12,
+      neededExp: 20,
+      pendingRequests: ["Tarin"]
     }
   };
 }
@@ -66,7 +78,8 @@ function HarnessApp() {
             ...current.party,
             invited: false,
             inviterName: "",
-            members: [current.world.self.name, "Lina", "Orion"]
+            members: [current.world.self.name, "Lina", "Orion"],
+            leaderName: current.world.self.name
           }
         };
       }
@@ -79,7 +92,8 @@ function HarnessApp() {
             ...current.party,
             invited: false,
             inviterName: "",
-            members: target.length > 0 ? [current.world.self.name, target] : current.party.members
+            members: target.length > 0 ? [current.world.self.name, target] : current.party.members,
+            leaderName: current.world.self.name
           }
         };
       }
@@ -101,6 +115,7 @@ function HarnessApp() {
           party: {
             ...current.party,
             members: [],
+            leaderName: "",
             invited: false,
             inviterName: "",
             safeMode: false
@@ -116,7 +131,11 @@ function HarnessApp() {
             ...current.clan,
             name: target,
             members: [current.world.self.name],
-            rank: "Fundador"
+            onlineMembers: [current.world.self.name],
+            rank: "Fundador",
+            leaderName: current.world.self.name,
+            founderName: current.world.self.name,
+            memberCount: 1
           }
         };
       }
@@ -137,7 +156,18 @@ function HarnessApp() {
             open: true,
             name: "",
             members: [],
-            rank: ""
+            onlineMembers: [],
+            rank: "",
+            leaderName: "",
+            founderName: "",
+            alignment: "",
+            description: "",
+            news: "",
+            memberCount: 0,
+            level: 1,
+            currentExp: 0,
+            neededExp: 0,
+            pendingRequests: []
           }
         };
       }
@@ -149,7 +179,11 @@ function HarnessApp() {
             ...current.clan,
             name: "Cabal de Prueba",
             members: [current.world.self.name, "Lina"],
-            rank: "Recluta"
+            onlineMembers: [current.world.self.name, "Lina"],
+            rank: "Recluta",
+            leaderName: "Lina",
+            founderName: "Lina",
+            memberCount: 2
           }
         };
       }
@@ -285,6 +319,11 @@ function HarnessApp() {
               state={state}
               onClose={() => setSurface("party")}
               onSendChat={sendChat}
+              onSendClanChat={(msg) => log(`/CC ${msg}`)}
+              onRefreshInfo={() => log("refresh clan info")}
+              onRefreshNews={() => log("refresh clan news")}
+              onRefreshOnline={() => log("refresh clan online")}
+              onRefreshLeaderInfo={() => log("refresh clan leader info")}
             />
           ) : null}
         </div>

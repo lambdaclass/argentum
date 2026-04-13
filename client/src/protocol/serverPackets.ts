@@ -2,6 +2,21 @@ import { BinaryReader } from "./BinaryReader";
 import type { CharacterCreatePacket, ServerPacket, SkillEntry, TradeOfferSlot } from "../app/types";
 import { getSpellMetadata } from "../data/gameData";
 
+function splitDashList(value: string) {
+  return value
+    .split("-")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+function parsePartyMemberLabel(value: string) {
+  const leader = value.endsWith("(Lider)");
+  return {
+    leader,
+    name: leader ? value.replace(/\(Lider\)$/, "").trim() : value.trim()
+  };
+}
+
 function decodeCharacterCreate(reader: BinaryReader): CharacterCreatePacket {
   const charIndex = reader.readInt16();
   const bodyId = reader.readInt16();
@@ -114,6 +129,12 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
 
     case 21:
       return { type: "safe_mode_off" };
+
+    case 22:
+      return { type: "party_safe_mode_on" };
+
+    case 23:
+      return { type: "party_safe_mode_off" };
 
     case 25:
       return { type: "update_stamina", current: reader.readInt16() };
@@ -297,6 +318,12 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
         y: reader.readUint8(),
         cancelLast: reader.readUint8() !== 0,
         localize: reader.readUint8() !== 0
+      };
+
+    case 56:
+      return {
+        type: "guild_list",
+        guildNames: splitDashList(reader.readString8())
       };
 
     case 59: {
@@ -510,6 +537,42 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
       return { type: "send_skills", skills };
     }
 
+    case 89:
+      return {
+        type: "guild_news",
+        news: reader.readString8(),
+        guildList: splitDashList(reader.readString8()),
+        memberList: splitDashList(reader.readString8()),
+        level: reader.readUint8(),
+        currentExp: reader.readInt16(),
+        neededExp: reader.readInt16()
+      };
+
+    case 94:
+      return {
+        type: "guild_leader_info",
+        guildList: splitDashList(reader.readString8()),
+        memberList: splitDashList(reader.readString8()),
+        news: reader.readString8(),
+        requests: splitDashList(reader.readString8()),
+        level: reader.readUint8(),
+        currentExp: reader.readInt16(),
+        neededExp: reader.readInt16()
+      };
+
+    case 95:
+      return {
+        type: "guild_details",
+        name: reader.readString8(),
+        founder: reader.readString8(),
+        date: reader.readString8(),
+        leader: reader.readString8(),
+        memberCount: reader.readInt16(),
+        alignment: reader.readString8(),
+        description: reader.readString8(),
+        level: reader.readUint8()
+      };
+
     case 158:
     {
       reader.readInt32();
@@ -522,6 +585,32 @@ function decodePacket(packetId: number, reader: BinaryReader): ServerPacket {
 
     case 175:
       return { type: "update_bank_gold", bankGold: reader.readInt32() };
+
+    case 143: {
+      const inParty = reader.readBool();
+      if (!inParty) {
+        return { type: "datos_grupo", inParty, members: [], leaderName: "" };
+      }
+
+      const count = reader.readUint8();
+      const members: string[] = [];
+      let leaderName = "";
+
+      for (let index = 0; index < count; index += 1) {
+        const parsed = parsePartyMemberLabel(reader.readString8());
+        members.push(parsed.name);
+        if (parsed.leader) {
+          leaderName = parsed.name;
+        }
+      }
+
+      return {
+        type: "datos_grupo",
+        inParty,
+        members,
+        leaderName: leaderName || members[0] || ""
+      };
+    }
 
     case 200:
       return {
