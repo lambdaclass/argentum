@@ -241,7 +241,10 @@ browser/product work. Tasks `160-181` are backend modernization and
 operations that should not block parity signoff unless explicitly pulled into
 scope. Tasks `182-183` are optional legacy features that the inspected VB6
 baseline kept disabled and should only be revisited after backend
-modernization unless a target shard explicitly re-enables them.
+modernization unless a target shard explicitly re-enables them. Tasks
+`184-193` are follow-up security and parity drift items discovered during the
+adversarial-test and VB6-code audit and should be closed before calling the
+backend hardened.
 
 ## Scope Rules
 
@@ -883,6 +886,57 @@ When in doubt:
      backend-modernization tracks are complete.
      Outcome: the re-enabled shard gets real election flows without delaying
      parity for the inspected disabled baseline.
+
+### Security And Remaining Drift Audit
+
+- Already closed during the recent audit:
+  - packet-counter anti-replay is now enforced on the counted VB6 packet set
+  - request-position resync is landed and bound in the browser client
+  - negative `commerce_buy` / `commerce_sell` amount exploits are fixed
+  - bank slot `0` / invalid-slot guards and extract-to-gold withdrawal are fixed
+  - bank-session proximity is revalidated on each bank operation
+  - trade over-offer and receiver-full item-loss regressions are fixed
+  - faction chat now respects dead/mute/cooldown rules
+- Remaining work from the same audit should stay visible here until closed.
+
+184. Make party invites authoritative and leader-only.
+     Outcome: non-leaders cannot invite, and accepting a stale invite cannot
+     move a player into a second party or corrupt party membership state.
+185. Enforce mute/dead/cooldown rules on guild and party chat.
+     Outcome: all social chat paths follow the same moderation and spam rules,
+     not just normal chat and faction chat.
+186. Rate-limit `question_gm` and `role_master_request`.
+     Outcome: support/admin channels cannot be flooded even when packet replay
+     protection is already in place.
+187. Finish secure trade start validation to match the inspected VB6 safety
+     rules.
+     Outcome: player-trade start rechecks distance, same-map visibility,
+     target-alive/not-busy state, and any safe-zone restrictions instead of
+     only proximity and existence.
+188. Revalidate guild invite authority on accept.
+     Outcome: a stale invite cannot still be accepted after the inviter loses
+     leadership or the guild state changes.
+189. Restore VB6 `leave_faction` restrictions.
+     Outcome: faction leave requires the correct enlistador interaction and
+     preserves the old aligned-clan restrictions/side effects instead of the
+     current looser behavior.
+190. Restore selected-NPC semantics for account-state and reward flows.
+     Outcome: banker, timbero, and enlistador requests use the actual targeted
+     NPC and correct faction-side checks instead of any nearby NPC of the right
+     type.
+191. Align the remaining merchant/account-state behavior with the inspected VB6
+     backend.
+     Outcome: merchant sell restrictions such as the remaining old item rules,
+     and the timbero account-state text/value semantics, stop drifting from the
+     VB6 baseline.
+192. Close the remaining interaction-radius and bank-open guard drifts.
+     Outcome: NPC interaction radii and the old "already trading" bank-open
+     rule match the inspected VB6 behavior instead of stricter or looser
+     approximations.
+193. Keep the exploit and parity audit executable.
+     Outcome: every bug above has a regression test in the adversarial/parity
+     suites, and roadmap comments are updated when a gap is fixed so audit
+     notes do not become stale folklore.
 
 ## Checks To Run
 
