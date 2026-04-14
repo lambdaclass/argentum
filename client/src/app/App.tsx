@@ -3,6 +3,10 @@ import { appReducer, createInitialState } from "./appReducer";
 import { buildBrowserPath, normalizeBrowserRoute, type BrowserRoute } from "./browserRoutes";
 import { bindingMatches } from "./settings";
 import type { Direction, KeyBindingAction } from "./types";
+import {
+  canStartInitialSceneBootstrap,
+  describeViewportNotice
+} from "./viewportState";
 import { SessionClient, type MovementDebugSnapshot } from "../net/SessionClient";
 import { MapMusicController } from "../audio/mapMusic";
 import { SoundEffectsController } from "../audio/soundEffects";
@@ -92,63 +96,6 @@ function hotkeyIndexFromKey(key: string) {
 
   if (key === "0") {
     return 9;
-  }
-
-  return null;
-}
-
-function describeConnectionIssue(error: string | null, hasSavedSession: boolean) {
-  if (!error) {
-    return null;
-  }
-
-  const normalized = error.toLowerCase();
-
-  if (normalized.includes("banned")) {
-    return {
-      eyebrow: "Access",
-      title: "Account banned",
-      copy: "This account is blocked on the client side until the backend or an admin clears the ban.",
-      tone: "danger" as const
-    };
-  }
-
-  if (normalized.includes("muted")) {
-    return {
-      eyebrow: "Access",
-      title: "Chat muted",
-      copy: "The account can still exist, but chat actions are restricted until the mute is cleared.",
-      tone: "warning" as const
-    };
-  }
-
-  if (normalized.includes("server full") || normalized.includes("server-full") || normalized.includes("full")) {
-    return {
-      eyebrow: "Access",
-      title: "Server full",
-      copy: "The world reached its capacity limit. Retry once a slot opens up.",
-      tone: "warning" as const
-    };
-  }
-
-  if (normalized.includes("maintenance")) {
-    return {
-      eyebrow: "Access",
-      title: "Maintenance mode",
-      copy: "The world is offline for maintenance. Try again when the server comes back.",
-      tone: "warning" as const
-    };
-  }
-
-  if (normalized.includes("token expired")) {
-    return {
-      eyebrow: "Access",
-      title: "Session expired",
-      copy: hasSavedSession
-        ? "The saved reconnect token expired. Sign in again to get a fresh session."
-        : "Your session expired. Sign in again to get a fresh token.",
-      tone: "danger" as const
-    };
   }
 
   return null;
@@ -305,30 +252,45 @@ export function App({ uiDemoMode = false }: AppProps) {
       return;
     }
 
-    if (!initialSceneBootstrapDoneRef.current) {
-      if (
+    const canBootstrapInitialScene = canStartInitialSceneBootstrap({
+      isGameplayRoute,
+      assetStatus,
+      mapPackStatus,
+      connectionStatus: state.connection.status,
+      mapStatus: state.world.mapStatus,
+      hasMap: state.world.map != null,
+      hasAssetCatalog: assetCatalog != null,
+      hasSelfCharIndex: state.world.self.charIndex != null,
+      hasSelfPosition: state.world.self.x != null && state.world.self.y != null
+    });
+
+    if (!initialSceneBootstrapDoneRef.current && !canBootstrapInitialScene) {
+      setSceneBootstrapStatus("idle");
+      setSceneBootstrapError(null);
+      return;
+    }
+
+    if (
+      initialSceneBootstrapDoneRef.current &&
+      (
         state.connection.status !== "connected" ||
         state.world.mapStatus !== "ready" ||
         !state.world.map ||
-        state.world.self.charIndex == null ||
-        state.world.self.x == null ||
-        state.world.self.y == null
-      ) {
-        setSceneBootstrapStatus("loading");
-        setSceneBootstrapError(null);
-        return;
-      }
-    } else if (
-      state.connection.status !== "connected" ||
-      state.world.mapStatus !== "ready" ||
-      !state.world.map ||
-      state.world.self.charIndex == null
+        state.world.self.charIndex == null
+      )
     ) {
       return;
     }
 
     if (initialSceneBootstrapDoneRef.current || !assetCatalog) {
       setSceneBootstrapStatus("ready");
+      setSceneBootstrapError(null);
+      return;
+    }
+
+    const currentMap = state.world.map;
+    if (!currentMap) {
+      setSceneBootstrapStatus("idle");
       setSceneBootstrapError(null);
       return;
     }
@@ -347,7 +309,7 @@ export function App({ uiDemoMode = false }: AppProps) {
         effectId: state.world.self.dead ? 0 : state.world.self.effectId,
         heading: state.world.self.heading
       },
-      ...state.world.map.npcs.flatMap((npc) => {
+      ...currentMap.npcs.flatMap((npc) => {
         const def = getNpcDef(assetCatalog, npc.id);
         if (!def) {
           return [];
@@ -373,7 +335,7 @@ export function App({ uiDemoMode = false }: AppProps) {
 
     const urls = collectSceneAssetUrls(
       assetCatalog,
-      state.world.map,
+      currentMap,
       sceneCharacters,
       Object.values(state.world.groundObjects)
     );
@@ -1309,93 +1271,33 @@ export function App({ uiDemoMode = false }: AppProps) {
     return `Map ${state.world.mapId ?? "--"} · ${mapName} · Pos ${position}`;
   }, [state.world.map?.name, state.world.mapId, state.world.self.x, state.world.self.y]);
 
-  const worldOverlay = useMemo(() => {
-    if (assetStatus !== "ready" || mapPackStatus !== "ready") {
-      return null;
-    }
-
-    if (state.connection.status === "connecting") {
-      return {
-        eyebrow: "Cuenta",
-        title: state.connection.credentials ? "Reconnecting" : "Connecting",
-        copy: state.connection.credentials
-          ? "Reusing the saved session to reconnect this account."
-          : "Opening the account login flow with the current name and password.",
-        tone: "connecting" as const
-      };
-    }
-
-    if (state.world.mapStatus === "error") {
-      return {
-        eyebrow: "Map",
-        title: "Map Load Failed",
-        copy: state.world.mapError ?? "The world data could not be loaded.",
-        tone: "error" as const
-      };
-    }
-
-    if ((state.world.mapStatus === "loading" || state.world.mapStatus === "transferring") && !state.world.map) {
-      return {
-        eyebrow: "Map",
-        title: state.world.mapStatus === "transferring" ? "Changing Map" : "Loading Map",
-        copy: "Keeping the session alive while the destination map is prepared.",
-        tone: "loading" as const
-      };
-    }
-
-    if (sceneBootstrapStatus === "loading") {
-      return {
-        eyebrow: "Map",
-        title: "Preparing Scene",
-        copy: "Loading the current map art and actor sheets before entering the world.",
-        tone: "loading" as const
-      };
-    }
-
-    if (sceneBootstrapStatus === "error") {
-      return {
-        eyebrow: "Map",
-        title: "Scene Load Failed",
-        copy: sceneBootstrapError ?? "The first map scene could not be prepared.",
-        tone: "error" as const
-      };
-    }
-
-    if (state.connection.status === "offline" && !state.world.map) {
-      const issue = describeConnectionIssue(
-        state.connection.lastError,
-        state.connection.credentials != null
-      );
-
-      if (issue) {
-        return issue;
-      }
-
-      return {
-        eyebrow: "Cuenta",
-        title: state.connection.credentials ? "Reconnect Ready" : "Ready To Enter",
-        copy:
-          state.connection.lastError ??
-          (state.connection.credentials
-            ? "Assets are loaded. A saved reconnect session is ready in Sesion."
-            : "Assets are loaded. Enter an account name and password in Sesion, then connect."),
-        tone: "reconnect" as const
-      };
-    }
-
-    return null;
-  }, [
-    assetStatus,
-    mapPackStatus,
-    state.connection.lastError,
-    state.connection.status,
-    state.world.map,
-    state.world.mapError,
-    state.world.mapId,
-    state.world.mapStatus,
-    sceneBootstrapError,
-    sceneBootstrapStatus
-  ]);
+  const worldOverlay = useMemo(
+    () =>
+      describeViewportNotice({
+        assetStatus,
+        mapPackStatus,
+        connectionStatus: state.connection.status,
+        hasSavedSession: state.connection.credentials != null,
+        connectionError: state.connection.lastError,
+        mapStatus: state.world.mapStatus,
+        mapError: state.world.mapError,
+        hasMap: state.world.map != null,
+        sceneBootstrapStatus,
+        sceneBootstrapError
+      }),
+    [
+      assetStatus,
+      mapPackStatus,
+      sceneBootstrapError,
+      sceneBootstrapStatus,
+      state.connection.credentials,
+      state.connection.lastError,
+      state.connection.status,
+      state.world.map,
+      state.world.mapError,
+      state.world.mapStatus
+    ]
+  );
 
   const moveDebugText = useMemo(() => {
     const now = Date.now();
@@ -1457,46 +1359,48 @@ export function App({ uiDemoMode = false }: AppProps) {
               </>
             ) : (
               <div className="world-loading-state">
-                <p className="eyebrow">Viewport</p>
+                <p className="eyebrow">{worldOverlay?.eyebrow ?? "Viewport"}</p>
                 <h3>
-                  {assetStatus === "error"
-                    ? "Asset Load Failed"
-                    : mapPackStatus === "error"
-                      ? "Map Pack Load Failed"
-                      : state.connection.status === "connecting"
-                        ? "Connecting"
-                      : state.world.mapStatus === "error"
-                        ? "Map Load Failed"
-                      : state.world.mapStatus === "loading" || state.world.mapStatus === "transferring"
-                        ? state.world.mapStatus === "transferring"
-                          ? "Changing Map"
-                          : "Loading Map"
-                      : sceneBootstrapStatus === "error"
-                        ? "Scene Load Failed"
-                      : sceneBootstrapStatus === "loading"
-                        ? "Preparing Scene"
-                      : mapPackStatus === "ready"
-                        ? "Loading Assets"
-                        : "Loading Map Pack"}
+                  {worldOverlay?.title ??
+                    (assetStatus === "error"
+                      ? "Asset Load Failed"
+                      : mapPackStatus === "error"
+                        ? "Map Pack Load Failed"
+                        : state.connection.status === "connecting"
+                          ? "Connecting"
+                        : state.world.mapStatus === "error"
+                          ? "Map Load Failed"
+                        : state.world.mapStatus === "loading" || state.world.mapStatus === "transferring"
+                          ? state.world.mapStatus === "transferring"
+                            ? "Changing Map"
+                            : "Loading Map"
+                        : sceneBootstrapStatus === "error"
+                          ? "Scene Load Failed"
+                        : sceneBootstrapStatus === "loading"
+                          ? "Preparing Scene"
+                        : mapPackStatus === "ready"
+                          ? "Loading Assets"
+                          : "Loading Map Pack")}
                 </h3>
                 <p className="panel-copy compact">
-                  {assetStatus === "error"
-                    ? assetError ?? "The web client could not load its sprite indices."
-                    : mapPackStatus === "error"
-                      ? mapPackError ?? "The web client could not load its prepacked map bundle."
-                      : state.connection.status === "connecting"
-                        ? "Restoring the saved gameplay session and waiting for the server bootstrap."
-                      : state.world.mapStatus === "error"
-                        ? state.world.mapError ?? "The world data could not be loaded."
-                      : state.world.mapStatus === "loading" || state.world.mapStatus === "transferring"
-                        ? "Keeping the session alive while the destination map is prepared."
-                      : sceneBootstrapStatus === "error"
-                        ? sceneBootstrapError ?? "The first map scene could not be prepared."
-                      : sceneBootstrapStatus === "loading"
-                        ? "Loading the first scene's textures before entering the world."
-                      : mapPackStatus !== "ready"
-                        ? mapPackProgressLabel
-                        : "Waiting for the same sprite/index catalog used by the historical clients before entering the world."}
+                  {worldOverlay?.copy ??
+                    (assetStatus === "error"
+                      ? assetError ?? "The web client could not load its sprite indices."
+                      : mapPackStatus === "error"
+                        ? mapPackError ?? "The web client could not load its prepacked map bundle."
+                        : state.connection.status === "connecting"
+                          ? "Restoring the saved gameplay session and waiting for the server bootstrap."
+                        : state.world.mapStatus === "error"
+                          ? state.world.mapError ?? "The world data could not be loaded."
+                        : state.world.mapStatus === "loading" || state.world.mapStatus === "transferring"
+                          ? "Keeping the session alive while the destination map is prepared."
+                        : sceneBootstrapStatus === "error"
+                          ? sceneBootstrapError ?? "The first map scene could not be prepared."
+                        : sceneBootstrapStatus === "loading"
+                          ? "Loading the first scene's textures before entering the world."
+                        : mapPackStatus !== "ready"
+                          ? mapPackProgressLabel
+                          : "Waiting for the same sprite/index catalog used by the historical clients before entering the world.")}
                 </p>
                 {assetStatus === "error" || mapPackStatus === "error" || sceneBootstrapStatus === "error" ? (
                   <div className="world-loading-actions">

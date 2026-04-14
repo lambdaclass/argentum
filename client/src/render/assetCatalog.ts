@@ -462,12 +462,14 @@ export function collectSceneAssetUrls(
           urls.add(rawSheetUrl);
         }
       } else if (rawNpcBody?.type === "direct") {
-        addGrhUrls(rawNpcBody[direction], true);
+        addGrhUrls(rawNpcBody[direction], rawNpcBody.useCharIndex ?? false);
       } else {
         addGrhUrls(bodyGrhForDirection(catalog, character.bodyId, direction), true);
       }
 
-      addGrhUrls(headGrhForDirection(catalog, character.headId, direction), true);
+      if (!(rawNpcBody?.type === "direct" && rawNpcBody.includesHead)) {
+        addGrhUrls(headGrhForDirection(catalog, character.headId, direction), true);
+      }
       addGrhUrls(character.weaponId, true);
       addGrhUrls(character.shieldId, true);
       addGrhUrls(character.helmetId, true);

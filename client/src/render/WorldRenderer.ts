@@ -43,6 +43,8 @@ const GHOST_BODY_ID = 829;
 const GHOST_HEAD_ID = 0;
 const GHOST_BODY_DEF = {
   type: "direct" as const,
+  useCharIndex: false,
+  includesHead: true,
   bodyOffsetX: 0,
   bodyOffsetY: 0,
   offHeadX: 0,
@@ -574,7 +576,7 @@ function createCharacterVisual(
 
   if (directBody?.type === "direct") {
     const bodyGrhId = directBody[direction];
-    const useCharIndex = !ghostBody;
+    const useCharIndex = directBody.useCharIndex ?? false;
     const bodyAnimation = bodyGrhId ? getGrhAnimation(catalog, bodyGrhId, useCharIndex) : null;
     bodyFrames = bodyAnimation?.textures ?? null;
     frameVelocity = bodyAnimation?.velocidad ?? 210;
@@ -628,7 +630,7 @@ function createCharacterVisual(
 
   const headGrhId =
     effectiveHeadId > 0 ? headGrhForDirection(catalog, effectiveHeadId, direction) : null;
-  if (headGrhId) {
+  if (headGrhId && !(directBody?.type === "direct" && directBody.includesHead)) {
     const headTexture = getGrhTexture(catalog, headGrhId, true);
     if (headTexture) {
       watchTexture?.(headTexture);

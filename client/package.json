@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "maps:build": "cd ../server && mix run --no-start scripts/build_map_pack.exs",
+    "generate:npc-raw-bodies": "node scripts/generateNpcRawBodies.mjs",
     "predev": "npm run maps:build",
     "prebuild": "npm run maps:build",
     "prepreview": "npm run maps:build",

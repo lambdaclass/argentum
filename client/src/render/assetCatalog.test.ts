@@ -187,4 +187,76 @@ describe("collectSceneAssetUrls", () => {
 
     expect(urls).toContain("http://127.0.0.1:7667/graficos/6215.png");
   });
+
+  it("loads direct raw NPC bodies from the full graphics index", () => {
+    const catalog: AssetCatalog = {
+      endpoint: "ws://127.0.0.1:7667/ao",
+      assetOrigin: "http://127.0.0.1:7667",
+      bodies: [],
+      heads: [],
+      objects: [],
+      npcs: [],
+      grhMap: [],
+      grhChar: []
+    };
+
+    catalog.grhMap[55759] = {
+      id: 55759,
+      grafico: 0,
+      offX: 0,
+      offY: 0,
+      width: 24,
+      height: 50,
+      frames: [55742, 55743, 55744, 55745, 55746, 55747]
+    };
+    catalog.grhMap[55742] = {
+      id: 55742,
+      grafico: 4015,
+      offX: 0,
+      offY: 48,
+      width: 24,
+      height: 50
+    };
+    catalog.grhMap[55743] = {
+      id: 55743,
+      grafico: 4015,
+      offX: 24,
+      offY: 48,
+      width: 24,
+      height: 50
+    };
+
+    const urls = collectSceneAssetUrls(
+      catalog,
+      {
+        mapId: 3,
+        name: "Raw NPC",
+        width: 1,
+        height: 1,
+        tiles: new Uint8Array(1),
+        musicHi: 0,
+        musicLow: 0,
+        layers: [[], [], [], []],
+        npcs: [],
+        exits: []
+      },
+      [
+        {
+          x: 1,
+          y: 1,
+          bodyId: 4505,
+          headId: 0,
+          weaponId: 0,
+          shieldId: 0,
+          helmetId: 0,
+          cartId: 0,
+          backpackId: 0,
+          effectId: 0,
+          heading: 1
+        }
+      ]
+    );
+
+    expect(urls).toContain("http://127.0.0.1:7667/graficos/4015.png");
+  });
 });
