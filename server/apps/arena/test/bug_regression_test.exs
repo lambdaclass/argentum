@@ -901,6 +901,30 @@ defmodule Arena.BugRegressionTest do
     end
   end
 
+  describe "BUG 29: status spells blocked in safe zone" do
+    test "apply_spell_status paralysis blocked in safe zone" do
+      alias Arena.Map.CombatHandlers
+
+      attacker = make_entity(%{char_id: :attacker, x: 50, y: 50, char_index: 1, mana: 500, faction: :none})
+      defender = make_entity(%{char_id: :defender, x: 51, y: 50, char_index: 2, faction: :none, paralyzed: false})
+
+      sessions = %{attacker: self(), defender: self()}
+      state = make_map_state(%{attacker: attacker, defender: defender}, sessions: sessions)
+      state = %{state | meta: Map.put(state.meta, :safe_zone, true)}
+      occ = :array.set((50 - 1) * 100 + (51 - 1), {:player, :defender}, state.occupancy)
+      state = %{state | occupancy: occ}
+
+      # Spell that paralyzes
+      spell_def = %{paraliza: true, envenena: false, cura_veneno: false,
+                    invisibilidad: false, inmoviliza: false, duration: 5}
+
+      new_state = CombatHandlers.apply_spell_status(state, :attacker, attacker, spell_def, 51, 50)
+
+      defender_after = Map.get(new_state.players, :defender)
+      refute defender_after.paralyzed, "Paralysis spell should not affect players in safe zone"
+    end
+  end
+
   # ═══════════════════════════════════════════════════════════════════════════
   # Bug 24: change_description missing dead check
   # VB6: dead players cannot change description. Also has content filtering.

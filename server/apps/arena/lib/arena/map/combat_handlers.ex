@@ -1071,12 +1071,12 @@ defmodule Arena.Map.CombatHandlers do
           defender ->
             # VB6 parity: faction/duel exceptions for safe zone (same as physical attacks)
             duel_pvp_exception =
-              entity.in_duel and defender.in_duel and
-                entity.duel_opponent_id == target_id and defender.duel_opponent_id == char_id
+              Map.get(entity, :in_duel, false) and Map.get(defender, :in_duel, false) and
+                Map.get(entity, :duel_opponent_id) == target_id and Map.get(defender, :duel_opponent_id) == char_id
 
             cond do
               # VB6: safe zone blocks offensive spells on players (PuedeAtacar)
-              Map.get(state.meta, :safe_zone, false) and
+              Map.get(state[:meta] || %{}, :safe_zone, false) and
                   not faction_pvp_exception?(state.map_id, entity, defender) and
                   not duel_pvp_exception ->
                 Helpers.send_to_session(
@@ -1304,6 +1304,29 @@ defmodule Arena.Map.CombatHandlers do
         %{state | players: players}
 
       target_entity ->
+        # VB6: offensive status spells (paralysis, poison, immobilize) blocked in safe zone
+        offensive_status = spell_def.paraliza or spell_def.envenena or spell_def.inmoviliza
+        is_other_player = target_id != char_id
+
+        safe_zone = Map.get(state[:meta] || %{}, :safe_zone, false)
+
+        duel_pvp_exception =
+          is_other_player and Map.get(entity, :in_duel, false) and Map.get(target_entity, :in_duel, false) and
+            Map.get(entity, :duel_opponent_id) == target_id and Map.get(target_entity, :duel_opponent_id) == char_id
+
+        if offensive_status and is_other_player and safe_zone and
+             not faction_pvp_exception?(state.map_id, entity, target_entity) and
+             not duel_pvp_exception do
+          Helpers.send_to_session(
+            state.sessions,
+            char_id,
+            {:send_raw, Encoder.encode({:console_msg, %{message: "Zona segura.", font_index: 0}})}
+          )
+
+          players = Map.put(state.players, char_id, entity)
+          %{state | players: players}
+        else
+
         duration_ms = max((spell_def.duration || 0) * 1000, 3000)
 
         target_entity =
@@ -1345,6 +1368,7 @@ defmodule Arena.Map.CombatHandlers do
 
         players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, target_entity)
         %{state | players: players}
+        end
     end
   end
 
