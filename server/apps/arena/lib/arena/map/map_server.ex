@@ -226,7 +226,7 @@ defmodule Arena.Map.MapServer do
 
   @impl true
   def init(map_id) do
-    {:ok, %{map_id: map_id, loading: true}, {:continue, :load}}
+    {:ok, %Arena.Map.State{map_id: map_id, loading: true}, {:continue, :load}}
   end
 
   @impl true
@@ -252,7 +252,7 @@ defmodule Arena.Map.MapServer do
 
         if result != :ok do
           Logger.error("Failed to load map #{map_id} into NIF: #{inspect(result)}")
-          {:stop, :normal, %{map_id: map_id, loading: true}}
+          {:stop, :normal, %Arena.Map.State{map_id: map_id, loading: true}}
         else
           blocked_count = Enum.count(map_data.tiles, &(&1 != 0))
 
@@ -307,7 +307,7 @@ defmodule Arena.Map.MapServer do
             snow: map_data.snow
           }
 
-          state = %{
+          state = %Arena.Map.State{
             map_id: map_id,
             loading: false,
             meta: meta,
@@ -337,7 +337,7 @@ defmodule Arena.Map.MapServer do
 
       {:error, reason} ->
         Logger.error("Failed to parse map #{map_id}: #{inspect(reason)}")
-        {:stop, :normal, %{map_id: map_id, loading: true}}
+        {:stop, :normal, %Arena.Map.State{map_id: map_id, loading: true}}
     end
   end
 
@@ -769,13 +769,11 @@ defmodule Arena.Map.MapServer do
 
   @impl true
   def terminate(reason, state) do
-    player_count = if is_map(state[:players]), do: map_size(state.players), else: 0
+    player_count = map_size(state.players)
     Logger.info("MapServer #{state.map_id} shutting down (#{inspect(reason)}), saving #{player_count} players")
 
-    if is_map(state[:players]) and is_map(state[:sessions]) do
-      for {char_id, entity} <- state.players do
-        Helpers.send_to_session(state.sessions, char_id, {:autosave, entity})
-      end
+    for {char_id, entity} <- state.players do
+      Helpers.send_to_session(state.sessions, char_id, {:autosave, entity})
     end
 
     TileGrid.unload_map(state.map_id)

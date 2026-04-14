@@ -1247,10 +1247,11 @@ defmodule Arena.Map.GmCommands do
 
   defp gm_toggle_weather(state, char_id, weather_type) do
     label = if weather_type == :snow, do: "Nieve", else: "Niebla"
-    # Toggle the weather flag in map state
-    current = Map.get(state, weather_type, false)
+    # Toggle the weather flag in meta
+    current = Map.get(state.meta, weather_type, false)
     new_val = !current
-    state = Map.put(state, weather_type, new_val)
+    meta = Map.put(state.meta, weather_type, new_val)
+    state = %{state | meta: meta}
     status = if new_val, do: "activada", else: "desactivada"
     gm_console(state, char_id, "#{label} #{status} en este mapa.")
     {:noreply, state}
@@ -1258,7 +1259,8 @@ defmodule Arena.Map.GmCommands do
 
   defp gm_change_map_flag(state, char_id, flag, value_str) do
     new_val = value_str == "1"
-    state = Map.put(state, flag, new_val)
+    meta = Map.put(state.meta, flag, new_val)
+    state = %{state | meta: meta}
     status = if new_val, do: "activado", else: "desactivado"
     gm_console(state, char_id, "Map flag #{flag} #{status}.")
     {:noreply, state}
@@ -1266,16 +1268,14 @@ defmodule Arena.Map.GmCommands do
 
   defp gm_tile_block_toggle(state, char_id, entity) do
     {fx, fy} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
-    blocked_tiles = Map.get(state, :gm_blocked_tiles, MapSet.new())
-
     {blocked_tiles, status} =
-      if MapSet.member?(blocked_tiles, {fx, fy}) do
-        {MapSet.delete(blocked_tiles, {fx, fy}), "unblocked"}
+      if MapSet.member?(state.gm_blocked_tiles, {fx, fy}) do
+        {MapSet.delete(state.gm_blocked_tiles, {fx, fy}), "unblocked"}
       else
-        {MapSet.put(blocked_tiles, {fx, fy}), "blocked"}
+        {MapSet.put(state.gm_blocked_tiles, {fx, fy}), "blocked"}
       end
 
-    state = Map.put(state, :gm_blocked_tiles, blocked_tiles)
+    state = %{state | gm_blocked_tiles: blocked_tiles}
     gm_console(state, char_id, "Tile (#{fx},#{fy}) #{status}.")
     {:noreply, state}
   end
@@ -1285,9 +1285,8 @@ defmodule Arena.Map.GmCommands do
       {trigger, _} ->
         {fx, fy} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
 
-        triggers = Map.get(state, :triggers, %{})
-        triggers = Map.put(triggers, {fx, fy}, trigger)
-        state = Map.put(state, :triggers, triggers)
+        triggers = Map.put(state.triggers, {fx, fy}, trigger)
+        state = %{state | triggers: triggers}
 
         gm_console(state, char_id, "Trigger #{trigger} set at (#{fx},#{fy}).")
         {:noreply, state}
@@ -1300,8 +1299,7 @@ defmodule Arena.Map.GmCommands do
 
   defp gm_ask_trigger(state, char_id, entity) do
     {fx, fy} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
-    triggers = Map.get(state, :triggers, %{})
-    trigger = Map.get(triggers, {fx, fy}, 0)
+    trigger = Map.get(state.triggers, {fx, fy}, 0)
     gm_console(state, char_id, "Trigger at (#{fx},#{fy}): #{trigger}")
     {:noreply, state}
   end
@@ -1336,7 +1334,7 @@ defmodule Arena.Map.GmCommands do
   end
 
   defp gm_items_in_floor(state, char_id) do
-    items = Map.get(state, :ground_items, %{})
+    items = state.ground_items
     count = map_size(items)
     gm_console(state, char_id, "Items on floor: #{count}")
 
@@ -1352,30 +1350,28 @@ defmodule Arena.Map.GmCommands do
 
   defp gm_destroy_items(state, char_id, entity) do
     {fx, fy} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
-    ground_items = Map.get(state, :ground_items, %{})
-    ground_items = Map.delete(ground_items, {fx, fy})
-    state = Map.put(state, :ground_items, ground_items)
+    ground_items = Map.delete(state.ground_items, {fx, fy})
+    state = %{state | ground_items: ground_items}
     gm_console(state, char_id, "Items at (#{fx},#{fy}) destroyed.")
     {:noreply, state}
   end
 
   defp gm_destroy_all_area(state, char_id, entity) do
-    ground_items = Map.get(state, :ground_items, %{})
     range = 10
 
     ground_items =
-      Enum.reject(ground_items, fn {{x, y}, _item} ->
+      Enum.reject(state.ground_items, fn {{x, y}, _item} ->
         abs(x - entity.x) <= range and abs(y - entity.y) <= range
       end)
       |> Map.new()
 
-    state = Map.put(state, :ground_items, ground_items)
+    state = %{state | ground_items: ground_items}
     gm_console(state, char_id, "All items in area destroyed.")
     {:noreply, state}
   end
 
   defp gm_clean_world(state, char_id) do
-    state = Map.put(state, :ground_items, %{})
+    state = %{state | ground_items: %{}}
     gm_console(state, char_id, "All ground items on this map cleaned.")
     {:noreply, state}
   end

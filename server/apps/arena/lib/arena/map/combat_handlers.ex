@@ -1076,7 +1076,7 @@ defmodule Arena.Map.CombatHandlers do
 
             cond do
               # VB6: safe zone blocks offensive spells on players (PuedeAtacar)
-              Map.get(state[:meta] || %{}, :safe_zone, false) and
+              Map.get(state.meta, :safe_zone, false) and
                   not faction_pvp_exception?(state.map_id, entity, defender) and
                   not duel_pvp_exception ->
                 Helpers.send_to_session(
@@ -1308,7 +1308,7 @@ defmodule Arena.Map.CombatHandlers do
         offensive_status = spell_def.paraliza or spell_def.envenena or spell_def.inmoviliza
         is_other_player = target_id != char_id
 
-        safe_zone = Map.get(state[:meta] || %{}, :safe_zone, false)
+        safe_zone = Map.get(state.meta, :safe_zone, false)
 
         duel_pvp_exception =
           is_other_player and Map.get(entity, :in_duel, false) and Map.get(target_entity, :in_duel, false) and
@@ -1861,7 +1861,7 @@ defmodule Arena.Map.CombatHandlers do
 
     # VB6: TirarTodosLosItems — drop inventory on ground in unsafe zones
     {player, state} =
-      if not Map.get(state.meta || %{}, :safe_zone, false) do
+      if not Map.get(state.meta, :safe_zone, false) do
         drop_inventory_on_death(state, player)
       else
         {player, state}
@@ -1887,7 +1887,7 @@ defmodule Arena.Map.CombatHandlers do
     end
 
     # VB6: /HOGAR message in unsafe zones
-    if not Map.get(state.meta || %{}, :safe_zone, false) do
+    if not Map.get(state.meta, :safe_zone, false) do
       Helpers.send_to_session(
         state.sessions,
         char_id,
@@ -2181,25 +2181,23 @@ defmodule Arena.Map.CombatHandlers do
 
   def process_regen_tick(state) do
     # Separate counters for hunger and thirst (VB6 has AGUACounter / COMCounter).
-    thirst_counter = Map.get(state, :thirst_tick_counter, 0) + 1
+    thirst_counter = state.thirst_tick_counter + 1
     drain_thirst? = thirst_counter >= @thirst_drain_interval
     thirst_counter = if drain_thirst?, do: 0, else: thirst_counter
-    state = Map.put(state, :thirst_tick_counter, thirst_counter)
+    state = %{state | thirst_tick_counter: thirst_counter}
 
-    hunger_counter = Map.get(state, :hunger_tick_counter, 0) + 1
+    hunger_counter = state.hunger_tick_counter + 1
     drain_hunger? = hunger_counter >= @hunger_drain_interval
     hunger_counter = if drain_hunger?, do: 0, else: hunger_counter
-    state = Map.put(state, :hunger_tick_counter, hunger_counter)
+    state = %{state | hunger_tick_counter: hunger_counter}
 
-    # Legacy key: keep hunger_thirst_tick_counter in sync for backward compat
-    # (uses thirst counter as the "primary" counter)
-    state = Map.put(state, :hunger_thirst_tick_counter, thirst_counter)
+    state = %{state | hunger_thirst_tick_counter: thirst_counter}
 
     # VB6: penalty (jail timer) decrements by 1 per minute
-    penalty_counter = Map.get(state, :penalty_tick_counter, 0) + 1
+    penalty_counter = state.penalty_tick_counter + 1
     decrement_penalty? = penalty_counter >= @penalty_decrement_interval
     penalty_counter = if decrement_penalty?, do: 0, else: penalty_counter
-    state = Map.put(state, :penalty_tick_counter, penalty_counter)
+    state = %{state | penalty_tick_counter: penalty_counter}
 
     Enum.reduce(state.players, state, fn {char_id, entity}, state ->
       if entity.dead do
