@@ -339,4 +339,35 @@ defmodule Arena.Map.Helpers do
   defdelegate broadcast_visible(state, x, y, exclude_id, fun), to: Arena.Map.Visibility
   defdelegate broadcast_visible_all(state, x, y, fun), to: Arena.Map.Visibility
   defdelegate broadcast_range(state, x, y, range_x, range_y, fun), to: Arena.Map.Visibility
+
+  # ── Shared helpers (moved from Social) ─────────────────────────────────
+
+  @doc "Send a console message to a player's session."
+  def msg(state, char_id, message) do
+    send_to_session(
+      state.sessions,
+      char_id,
+      {:send_raw, Encoder.encode({:console_msg, %{message: message, font_index: 0}})}
+    )
+  end
+
+  @doc "Find an NPC of a given type within 5 tiles of the entity."
+  def find_nearby_npc_of_type(state, entity, npc_types) do
+    result =
+      Enum.find_value(state.npcs_live, fn {_id, npc} ->
+        npc_def = GameData.get_npc(npc.npc_id)
+
+        if npc_def != nil and
+             npc_def.npc_type in npc_types and
+             abs(npc.x - entity.x) <= 5 and
+             abs(npc.y - entity.y) <= 5 do
+          {npc, npc_def}
+        end
+      end)
+
+    case result do
+      {npc, npc_def} -> {:ok, npc, npc_def}
+      nil -> :not_found
+    end
+  end
 end

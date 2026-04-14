@@ -1,0 +1,274 @@
+defmodule Arena.Map.Healing do
+  @moduledoc "Rest, meditate, heal, and resurrect handlers."
+
+  alias Arena.Map.{Helpers, Visibility}
+  alias AoProtocol.Server.Encoder
+
+  @magical_classes [:mage, :cleric, :druid, :bard, :paladin]
+  @npc_type_revividor 1
+  @npc_type_resucitador_newbie 9
+
+  def handle_rest(state, char_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        cond do
+          entity.dead ->
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "Estas muerto.", font_index: 0}})}
+            )
+
+            {:noreply, state}
+
+          entity.hp >= entity.max_hp ->
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "Estas sano.", font_index: 0}})}
+            )
+
+            {:noreply, state}
+
+          true ->
+            new_resting = not entity.resting
+            entity = %{entity | resting: new_resting, meditating: false}
+            players = Map.put(state.players, char_id, entity)
+
+            msg = if new_resting, do: "Has comenzado a descansar.", else: "Has dejado de descansar."
+
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: msg, font_index: 0}})}
+            )
+
+            {:noreply, %{state | players: players}}
+        end
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_meditate(state, char_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        cond do
+          entity.dead ->
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "Estas muerto.", font_index: 0}})}
+            )
+
+            {:noreply, state}
+
+          entity.class not in @magical_classes ->
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw,
+               Encoder.encode({:console_msg, %{message: "Solo las clases magicas pueden meditar.", font_index: 0}})}
+            )
+
+            {:noreply, state}
+
+          entity.mana >= entity.max_mana ->
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "Tienes el mana completo.", font_index: 0}})}
+            )
+
+            {:noreply, state}
+
+          true ->
+            new_meditating = not entity.meditating
+            entity = %{entity | meditating: new_meditating, resting: false}
+            players = Map.put(state.players, char_id, entity)
+
+            msg = if new_meditating, do: "Has comenzado a meditar.", else: "Has dejado de meditar."
+
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: msg, font_index: 0}})}
+            )
+
+            # VB6: show meditate FX (varies by level/faction; simplified to fx_id 4 here)
+            if new_meditating do
+              Visibility.broadcast_visible_all(state, entity.x, entity.y, fn pid ->
+                send(pid, {:send_raw, Encoder.encode({:create_fx, %{char_index: entity.char_index, fx: 4, loops: 0}})})
+              end)
+            end
+
+            {:noreply, %{state | players: players}}
+        end
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_heal(state, char_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        cond do
+          entity.dead ->
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "Estas muerto.", font_index: 0}})}
+            )
+
+            {:noreply, state}
+
+          entity.hp >= entity.max_hp ->
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "Estas sano.", font_index: 0}})}
+            )
+
+            {:noreply, state}
+
+          true ->
+            # VB6: heal is NPC interaction -- full heal from Revividor NPC.
+            case Helpers.find_nearby_npc_of_type(state, entity, [@npc_type_revividor, @npc_type_resucitador_newbie]) do
+              {:ok, _npc, npc_def} ->
+                # VB6: ResucitadorNewbie only serves newbies (level <= 12)
+                if npc_def.npc_type == @npc_type_resucitador_newbie and entity.level > 12 do
+                  Helpers.send_to_session(
+                    state.sessions,
+                    char_id,
+                    {:send_raw,
+                     Encoder.encode(
+                       {:console_msg, %{message: "Solo los newbies pueden ser curados aqui.", font_index: 0}}
+                     )}
+                  )
+
+                  {:noreply, state}
+                else
+                  entity = %{entity | hp: entity.max_hp}
+                  players = Map.put(state.players, char_id, entity)
+
+                  Helpers.send_to_session(
+                    state.sessions,
+                    char_id,
+                    {:send_raw, Encoder.encode({:console_msg, %{message: "Has sido curado.", font_index: 0}})}
+                  )
+
+                  Helpers.send_to_session(
+                    state.sessions,
+                    char_id,
+                    {:send_raw, Encoder.encode({:update_hp, %{min_hp: entity.max_hp, shield: 0}})}
+                  )
+
+                  {:noreply, %{state | players: players}}
+                end
+
+              :not_found ->
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw, Encoder.encode({:console_msg, %{message: "No hay un sacerdote cerca.", font_index: 0}})}
+                )
+
+                {:noreply, state}
+            end
+        end
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_resucitate(state, char_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        if entity.dead do
+          # VB6: resurrection requires Revividor NPC nearby
+          case Helpers.find_nearby_npc_of_type(state, entity, [@npc_type_revividor, @npc_type_resucitador_newbie]) do
+            {:ok, _npc, npc_def} ->
+              # VB6: ResucitadorNewbie only serves newbies (level <= 12)
+              if npc_def.npc_type == @npc_type_resucitador_newbie and entity.level > 12 do
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw,
+                   Encoder.encode(
+                     {:console_msg, %{message: "Solo los newbies pueden ser resucitados aqui.", font_index: 0}}
+                   )}
+                )
+
+                {:noreply, state}
+              else
+                entity = %{
+                  entity
+                  | dead: false,
+                    hp: entity.max_hp,
+                    mana: 0,
+                    buffs: [],
+                    paralyzed: false,
+                    poisoned: false,
+                    invisible: false
+                }
+
+                players = Map.put(state.players, char_id, entity)
+
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw, Encoder.encode({:update_hp, %{min_hp: entity.max_hp, shield: 0}})}
+                )
+
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw, Encoder.encode({:update_mana, %{min_mana: 0}})}
+                )
+
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw, Encoder.encode({:console_msg, %{message: "Has sido resucitado.", font_index: 0}})}
+                )
+
+                state = %{state | players: players}
+                Helpers.broadcast_character_change(state, entity)
+
+                Visibility.broadcast_visible_all(state, entity.x, entity.y, fn pid ->
+                  send(
+                    pid,
+                    {:send_raw, Encoder.encode({:create_fx, %{char_index: entity.char_index, fx: 15, loops: 0}})}
+                  )
+                end)
+
+                {:noreply, state}
+              end
+
+            :not_found ->
+              Helpers.send_to_session(
+                state.sessions,
+                char_id,
+                {:send_raw, Encoder.encode({:console_msg, %{message: "No hay un sacerdote cerca.", font_index: 0}})}
+              )
+
+              {:noreply, state}
+          end
+        else
+          Helpers.send_to_session(
+            state.sessions,
+            char_id,
+            {:send_raw, Encoder.encode({:console_msg, %{message: "No estas muerto.", font_index: 0}})}
+          )
+
+          {:noreply, state}
+        end
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+end

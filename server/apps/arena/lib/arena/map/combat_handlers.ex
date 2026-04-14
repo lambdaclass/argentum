@@ -561,7 +561,7 @@ defmodule Arena.Map.CombatHandlers do
                 # Faction score + kill counters + guild XP on PvP kill
                 entity =
                   if defender.dead do
-                    score = Arena.Map.Social.faction_score_for_kill(entity, defender)
+                    score = Arena.Map.Faction.faction_score_for_kill(entity, defender)
                     entity = if score > 0, do: %{entity | faction_score: entity.faction_score + score}, else: entity
                     entity = update_pvp_kill_counters(entity, defender)
 
@@ -1185,7 +1185,7 @@ defmodule Arena.Map.CombatHandlers do
                 # Faction score + kill counters + guild XP on PvP spell kill
                 entity =
                   if defender.dead do
-                    score = Arena.Map.Social.faction_score_for_kill(entity, defender)
+                    score = Arena.Map.Faction.faction_score_for_kill(entity, defender)
                     entity = if score > 0, do: %{entity | faction_score: entity.faction_score + score}, else: entity
                     entity = update_pvp_kill_counters(entity, defender)
 

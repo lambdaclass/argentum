@@ -28,6 +28,7 @@ defmodule Arena.Map.MapServer do
   alias Arena.Entity.PlayerEntity
   alias Arena.Entity.NpcEntity
   alias Arena.Map.{Helpers, Visibility, Movement, CombatHandlers, InventoryHandlers, Commerce, Bank, Trade, Social}
+  alias Arena.Map.{Chat, Healing, Pets, QuestHandlers, Faction, NpcInteraction, GmCommands}
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
@@ -599,24 +600,24 @@ defmodule Arena.Map.MapServer do
     do: Movement.handle_change_heading(state, char_id, heading)
 
   @impl true
-  def handle_cast({:chat, char_id, message}, state), do: Social.handle_chat(state, char_id, message)
+  def handle_cast({:chat, char_id, message}, state), do: Chat.handle_chat(state, char_id, message)
   @impl true
-  def handle_cast({:gm_rain_toggle, char_id}, state), do: Social.handle_gm_rain_toggle(state, char_id)
+  def handle_cast({:gm_rain_toggle, char_id}, state), do: GmCommands.handle_gm_rain_toggle(state, char_id)
   @impl true
-  def handle_cast({:yell, char_id, message}, state), do: Social.handle_yell(state, char_id, message)
+  def handle_cast({:yell, char_id, message}, state), do: Chat.handle_yell(state, char_id, message)
   @impl true
-  def handle_cast({:rest, char_id}, state), do: Social.handle_rest(state, char_id)
+  def handle_cast({:rest, char_id}, state), do: Healing.handle_rest(state, char_id)
   @impl true
-  def handle_cast({:meditate, char_id}, state), do: Social.handle_meditate(state, char_id)
+  def handle_cast({:meditate, char_id}, state), do: Healing.handle_meditate(state, char_id)
   @impl true
-  def handle_cast({:heal, char_id}, state), do: Social.handle_heal(state, char_id)
+  def handle_cast({:heal, char_id}, state), do: Healing.handle_heal(state, char_id)
   @impl true
-  def handle_cast({:resucitate, char_id}, state), do: Social.handle_resucitate(state, char_id)
+  def handle_cast({:resucitate, char_id}, state), do: Healing.handle_resucitate(state, char_id)
   @impl true
   def handle_cast({:request_atributes, char_id}, state), do: Social.handle_request_atributes(state, char_id)
   @impl true
   def handle_cast({:train_skill, char_id, skill_index}, state),
-    do: Social.handle_train_skill(state, char_id, skill_index)
+    do: NpcInteraction.handle_train_skill(state, char_id, skill_index)
 
   @impl true
   def handle_cast({:craft_item, char_id, skill_atom, item_id}, state),
@@ -627,21 +628,21 @@ defmodule Arena.Map.MapServer do
   @impl true
   def handle_cast({:request_mini_stats, char_id}, state), do: Social.handle_request_mini_stats(state, char_id)
   @impl true
-  def handle_cast({:double_click, char_id, x, y}, state), do: Social.handle_double_click(state, char_id, x, y)
+  def handle_cast({:double_click, char_id, x, y}, state), do: NpcInteraction.handle_double_click(state, char_id, x, y)
   @impl true
-  def handle_cast({:enlist_faction, char_id, faction}, state), do: Social.handle_enlist_faction(state, char_id, faction)
+  def handle_cast({:enlist_faction, char_id, faction}, state), do: Faction.handle_enlist_faction(state, char_id, faction)
   @impl true
-  def handle_cast({:leave_faction, char_id}, state), do: Social.handle_leave_faction(state, char_id)
+  def handle_cast({:leave_faction, char_id}, state), do: Faction.handle_leave_faction(state, char_id)
   @impl true
-  def handle_cast({:faction_chat, char_id, message}, state), do: Social.handle_faction_chat(state, char_id, message)
+  def handle_cast({:faction_chat, char_id, message}, state), do: Faction.handle_faction_chat(state, char_id, message)
   @impl true
-  def handle_cast({:pet_stand, char_id}, state), do: Social.handle_pet_stand(state, char_id)
+  def handle_cast({:pet_stand, char_id}, state), do: Pets.handle_pet_stand(state, char_id)
   @impl true
-  def handle_cast({:pet_follow, char_id}, state), do: Social.handle_pet_follow(state, char_id)
+  def handle_cast({:pet_follow, char_id}, state), do: Pets.handle_pet_follow(state, char_id)
   @impl true
-  def handle_cast({:pet_leave, char_id}, state), do: Social.handle_pet_leave(state, char_id)
+  def handle_cast({:pet_leave, char_id}, state), do: Pets.handle_pet_leave(state, char_id)
   @impl true
-  def handle_cast({:pet_leave_all, char_id}, state), do: Social.handle_pet_leave_all(state, char_id)
+  def handle_cast({:pet_leave_all, char_id}, state), do: Pets.handle_pet_leave_all(state, char_id)
   @impl true
   def handle_cast({:move_spell, char_id, upwards, slot}, state),
     do: Social.handle_move_spell(state, char_id, upwards, slot)
@@ -672,22 +673,21 @@ defmodule Arena.Map.MapServer do
   @impl true
   def handle_cast({:divorce, char_id}, state), do: Social.handle_divorce(state, char_id)
 
-  def handle_cast({:train_list, char_id}, state), do: Social.handle_train_list(state, char_id)
+  def handle_cast({:train_list, char_id}, state), do: NpcInteraction.handle_train_list(state, char_id)
 
   def handle_cast({:gamble, char_id, amount}, state) do
-    # Find nearby timbero NPC instance_id
-    Social.handle_gamble(state, char_id, amount, nil)
+    NpcInteraction.handle_gamble(state, char_id, amount, nil)
   end
 
-  def handle_cast({:forgive, char_id}, state), do: Social.handle_forgive(state, char_id)
-  def handle_cast({:arena_entry, char_id}, state), do: Social.handle_arena_entry(state, char_id)
+  def handle_cast({:forgive, char_id}, state), do: NpcInteraction.handle_forgive(state, char_id)
+  def handle_cast({:arena_entry, char_id}, state), do: NpcInteraction.handle_arena_entry(state, char_id)
   def handle_cast({:request_account_state, char_id}, state), do: Social.handle_request_account_state(state, char_id)
   def handle_cast({:request_reward, char_id}, state), do: Social.handle_request_reward(state, char_id)
-  def handle_cast({:quest, char_id}, state), do: Social.handle_quest(state, char_id)
-  def handle_cast({:quest_list_request, char_id}, state), do: Social.handle_quest_list_request(state, char_id)
-  def handle_cast({:quest_details_request, char_id, slot}, state), do: Social.handle_quest_details_request(state, char_id, slot)
-  def handle_cast({:quest_accept, char_id, index}, state), do: Social.handle_quest_accept(state, char_id, index)
-  def handle_cast({:quest_abandon, char_id, slot}, state), do: Social.handle_quest_abandon(state, char_id, slot)
+  def handle_cast({:quest, char_id}, state), do: QuestHandlers.handle_quest(state, char_id)
+  def handle_cast({:quest_list_request, char_id}, state), do: QuestHandlers.handle_quest_list_request(state, char_id)
+  def handle_cast({:quest_details_request, char_id, slot}, state), do: QuestHandlers.handle_quest_details_request(state, char_id, slot)
+  def handle_cast({:quest_accept, char_id, index}, state), do: QuestHandlers.handle_quest_accept(state, char_id, index)
+  def handle_cast({:quest_abandon, char_id, slot}, state), do: QuestHandlers.handle_quest_abandon(state, char_id, slot)
 
   def handle_cast({:set_duel_state, char_id, in_duel, opponent_id}, state) do
     case Map.fetch(state.players, char_id) do
