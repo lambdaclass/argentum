@@ -3340,6 +3340,10 @@ defmodule Arena.Map.Social do
 
   def handle_change_description(state, char_id, desc) do
     case Map.fetch(state.players, char_id) do
+      {:ok, entity} when entity.dead ->
+        msg(state, char_id, "Estas muerto.")
+        {:noreply, state}
+
       {:ok, entity} ->
         desc = String.slice(desc, 0, @max_description_length)
         entity = %{entity | description: desc}
@@ -3427,6 +3431,9 @@ defmodule Arena.Map.Social do
 
   def handle_modify_gold(state, char_id, amount) do
     case Map.fetch(state.players, char_id) do
+      {:ok, entity} when entity.dead ->
+        {:noreply, state}
+
       {:ok, entity} ->
         new_gold = max(entity.gold + amount, 0)
         entity = %{entity | gold: new_gold}
@@ -3438,6 +3445,36 @@ defmodule Arena.Map.Social do
       :error ->
         {:noreply, state}
     end
+  end
+
+  @doc """
+  Atomically deduct gold from a player, returning {:reply, {:ok, new_gold}, state}
+  or {:reply, {:error, reason}, state}. Used by transfer_gold/donate_gold to avoid
+  TOCTOU races where snapshot_entity reads gold then async modify fires later.
+  """
+  def handle_deduct_gold(state, char_id, amount) when amount > 0 do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} when entity.dead ->
+        {:reply, {:error, :dead}, state}
+
+      {:ok, entity} when entity.gold >= amount ->
+        new_gold = entity.gold - amount
+        entity = %{entity | gold: new_gold}
+        players = Map.put(state.players, char_id, entity)
+        state = %{state | players: players}
+        Helpers.send_to_session(state.sessions, char_id, {:send_raw, Encoder.encode({:update_gold, %{gold: new_gold}})})
+        {:reply, {:ok, new_gold}, state}
+
+      {:ok, _entity} ->
+        {:reply, {:error, :not_enough_gold}, state}
+
+      :error ->
+        {:reply, {:error, :not_on_map}, state}
+    end
+  end
+
+  def handle_deduct_gold(state, _char_id, _amount) do
+    {:reply, {:error, :invalid_amount}, state}
   end
 
   # ==================================================================

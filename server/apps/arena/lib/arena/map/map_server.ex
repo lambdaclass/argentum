@@ -179,6 +179,10 @@ defmodule Arena.Map.MapServer do
 
   def modify_gold(map_id, char_id, amount), do: GenServer.cast(via(map_id), {:modify_gold, char_id, amount})
 
+  @doc "Atomically deduct gold if player has enough. Returns {:ok, new_gold} or {:error, reason}."
+  def deduct_gold(map_id, char_id, amount),
+    do: GenServer.call(via(map_id), {:deduct_gold, char_id, amount})
+
   def propose_marriage(map_id, char_id, target_char_id),
     do: GenServer.cast(via(map_id), {:propose_marriage, char_id, target_char_id})
 
@@ -656,6 +660,10 @@ defmodule Arena.Map.MapServer do
 
   @impl true
   def handle_cast({:modify_gold, char_id, amount}, state), do: Social.handle_modify_gold(state, char_id, amount)
+
+  @impl true
+  def handle_call({:deduct_gold, char_id, amount}, _from, state),
+    do: Social.handle_deduct_gold(state, char_id, amount)
 
   @impl true
   def handle_cast({:propose_marriage, char_id, target_char_id}, state),

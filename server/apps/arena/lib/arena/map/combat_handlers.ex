@@ -1069,7 +1069,31 @@ defmodule Arena.Map.CombatHandlers do
             %{state | players: players}
 
           defender ->
+            # VB6 parity: faction/duel exceptions for safe zone (same as physical attacks)
+            duel_pvp_exception =
+              entity.in_duel and defender.in_duel and
+                entity.duel_opponent_id == target_id and defender.duel_opponent_id == char_id
+
             cond do
+              # VB6: safe zone blocks offensive spells on players (PuedeAtacar)
+              Map.get(state.meta, :safe_zone, false) and
+                  not faction_pvp_exception?(state.map_id, entity, defender) and
+                  not duel_pvp_exception ->
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw, Encoder.encode({:console_msg, %{message: "Zona segura.", font_index: 0}})}
+                )
+
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+                )
+
+                players = Map.put(state.players, char_id, entity)
+                %{state | players: players}
+
               same_faction?(entity, defender) ->
                 Helpers.send_to_session(
                   state.sessions,

@@ -870,4 +870,152 @@ defmodule Arena.BugRegressionTest do
 
   # Bug 22 (party accept race) requires a running PartyServer GenServer.
   # The fix is a one-line check in handle_call({:accept, ...}).
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Bug 23: Spell damage bypasses safe zone check
+  # VB6: PuedeAtacar/CanAttackUser blocks offensive spells in safe zones.
+  # Physical attacks check state.meta.safe_zone but spell damage skips it.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "BUG 23: spell damage blocked in safe zone" do
+    test "apply_spell_damage does not hit player in safe zone" do
+      alias Arena.Map.CombatHandlers
+
+      attacker = make_entity(%{char_id: :attacker, x: 50, y: 50, char_index: 1, mana: 500,
+                               faction: :none, criminal: true})
+      defender = make_entity(%{char_id: :defender, x: 51, y: 50, char_index: 2, hp: 100, max_hp: 100,
+                               faction: :none, criminal: false})
+
+      sessions = %{attacker: self(), defender: self()}
+      state = make_map_state(%{attacker: attacker, defender: defender}, sessions: sessions)
+      state = %{state | meta: Map.put(state.meta, :safe_zone, true)}
+      # Place defender in occupancy
+      occ = :array.set((50 - 1) * 100 + (51 - 1), {:player, :defender}, state.occupancy)
+      state = %{state | occupancy: occ}
+
+      # Directly call apply_spell_damage with 50 damage at defender's tile
+      new_state = CombatHandlers.apply_spell_damage(state, :attacker, attacker, 50, 51, 50)
+
+      defender_after = Map.get(new_state.players, :defender)
+      assert defender_after.hp == 100, "Spell should not damage players in safe zone"
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Bug 24: change_description missing dead check
+  # VB6: dead players cannot change description. Also has content filtering.
+  # Elixir: only truncates, no dead check.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "BUG 24: change_description dead check" do
+    test "dead player cannot change description" do
+      entity = make_entity(%{char_id: :player, dead: true, description: "old"})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_change_description(state, :player, "new desc")
+
+      player = Map.get(new_state.players, :player)
+      assert player.description == "old", "Dead player should not change description"
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Bug 25: transfer_gold validates amount at snapshot but fires async modify
+  # VB6: gold transfer is synchronous via banker. Here we test the MapServer
+  # handler (modify_gold) rejects going below 0 to prevent double-spend.
+  # Also: transfer_gold should reject amount <= 0.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "BUG 25: modify_gold clamp prevents negative gold" do
+    test "modify_gold never allows gold below 0" do
+      entity = make_entity(%{char_id: :player, gold: 100})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_modify_gold(state, :player, -500)
+
+      player = Map.get(new_state.players, :player)
+      assert player.gold == 0, "Gold should clamp to 0, not go negative"
+    end
+
+    test "modify_gold with exact amount works" do
+      entity = make_entity(%{char_id: :player, gold: 100})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_modify_gold(state, :player, -100)
+
+      player = Map.get(new_state.players, :player)
+      assert player.gold == 0
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Bug 25-26: transfer_gold/donate_gold TOCTOU fix via atomic deduct_gold
+  # VB6: gold changes are synchronous. The async snapshot+cast pattern allowed
+  # double-spend races. New deduct_gold is a synchronous call.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "BUG 25-26: deduct_gold atomic validation" do
+    test "deduct_gold succeeds when player has enough gold" do
+      entity = make_entity(%{char_id: :player, gold: 500})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:reply, {:ok, new_gold}, new_state} = Social.handle_deduct_gold(state, :player, 200)
+
+      assert new_gold == 300
+      assert Map.get(new_state.players, :player).gold == 300
+    end
+
+    test "deduct_gold rejects when player has insufficient gold" do
+      entity = make_entity(%{char_id: :player, gold: 100})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:reply, {:error, :not_enough_gold}, new_state} = Social.handle_deduct_gold(state, :player, 200)
+
+      # Gold unchanged
+      assert Map.get(new_state.players, :player).gold == 100
+    end
+
+    test "deduct_gold rejects dead player" do
+      entity = make_entity(%{char_id: :player, dead: true, gold: 500})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:reply, {:error, :dead}, _state} = Social.handle_deduct_gold(state, :player, 100)
+    end
+
+    test "deduct_gold rejects amount <= 0" do
+      entity = make_entity(%{char_id: :player, gold: 500})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:reply, {:error, :invalid_amount}, _state} = Social.handle_deduct_gold(state, :player, 0)
+      {:reply, {:error, :invalid_amount}, _state} = Social.handle_deduct_gold(state, :player, -100)
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Bug 27: modify_gold should not be callable for arbitrary amounts
+  # VB6: there is no client packet that directly modifies gold.
+  # All gold changes go through validated paths (trade, commerce, bank).
+  # The MapServer.modify_gold public API should be restricted.
+  # We test that it at least rejects dead players (VB6 parity).
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "BUG 27: modify_gold rejects dead players" do
+    test "dead player gold is not modified" do
+      entity = make_entity(%{char_id: :player, dead: true, gold: 100})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Social.handle_modify_gold(state, :player, 500)
+
+      player = Map.get(new_state.players, :player)
+      assert player.gold == 100, "Dead player gold should not change"
+    end
+  end
 end

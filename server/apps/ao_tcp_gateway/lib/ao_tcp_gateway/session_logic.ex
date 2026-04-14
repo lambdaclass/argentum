@@ -1425,47 +1425,59 @@ defmodule AoTcpGateway.SessionLogic do
 
   # DonateGold (ID 210) — donate gold to faction
   def handle_command(state, {:donate_gold, %{amount: amount}}) when state.character_id != nil do
-    case Arena.Map.MapServer.snapshot_entity(state.map_id, state.character_id) do
-      {:ok, entity} ->
-        cond do
-          entity.faction == :none ->
-            {state, [{:console_msg, %{message: "No perteneces a ninguna faccion.", font_index: 0}}]}
-          entity.gold < amount or amount <= 0 ->
-            {state, [{:console_msg, %{message: "No tienes suficiente oro.", font_index: 0}}]}
-          true ->
-            # Deduct gold — faction treasury not yet tracked
-            Arena.Map.MapServer.modify_gold(state.map_id, state.character_id, -amount)
-            {state, [
-              {:update_gold, %{gold: entity.gold - amount}},
-              {:console_msg, %{message: "Has donado #{amount} monedas de oro a tu faccion.", font_index: 0}}
-            ]}
-        end
-      _ -> {state, []}
+    if amount <= 0 do
+      {state, [{:console_msg, %{message: "Cantidad invalida.", font_index: 0}}]}
+    else
+      case Arena.Map.MapServer.snapshot_entity(state.map_id, state.character_id) do
+        {:ok, entity} when entity.faction == :none ->
+          {state, [{:console_msg, %{message: "No perteneces a ninguna faccion.", font_index: 0}}]}
+
+        {:ok, _entity} ->
+          # Atomic deduct — prevents TOCTOU race with snapshot
+          case Arena.Map.MapServer.deduct_gold(state.map_id, state.character_id, amount) do
+            {:ok, new_gold} ->
+              {state, [
+                {:update_gold, %{gold: new_gold}},
+                {:console_msg, %{message: "Has donado #{amount} monedas de oro a tu faccion.", font_index: 0}}
+              ]}
+
+            {:error, _reason} ->
+              {state, [{:console_msg, %{message: "No tienes suficiente oro.", font_index: 0}}]}
+          end
+
+        _ -> {state, []}
+      end
     end
   end
 
   # TransferGold (ID 224) — transfer gold to another player
   def handle_command(state, {:transfer_gold, %{name: name, amount: amount}}) when state.character_id != nil do
-    case AoSession.OnlineDirectory.lookup_by_name(name) do
-      {:ok, target_id, target_info} when amount > 0 ->
-        case Arena.Map.MapServer.snapshot_entity(state.map_id, state.character_id) do
-          {:ok, entity} when entity.gold >= amount ->
-            Arena.Map.MapServer.modify_gold(state.map_id, state.character_id, -amount)
-            # Target may be on different map
-            target_map = target_info.map_id
-            Arena.Map.MapServer.modify_gold(target_map, target_id, amount)
-            {state, [
-              {:update_gold, %{gold: entity.gold - amount}},
-              {:console_msg, %{message: "Has transferido #{amount} oro a #{name}.", font_index: 0}}
-            ]}
-          {:ok, _} ->
-            {state, [{:console_msg, %{message: "No tienes suficiente oro.", font_index: 0}}]}
-          _ -> {state, []}
-        end
-      :not_found ->
-        {state, [{:console_msg, %{message: "Jugador no encontrado.", font_index: 0}}]}
-      _ ->
-        {state, [{:console_msg, %{message: "Cantidad invalida.", font_index: 0}}]}
+    if amount <= 0 do
+      {state, [{:console_msg, %{message: "Cantidad invalida.", font_index: 0}}]}
+    else
+      case AoSession.OnlineDirectory.lookup_by_name(name) do
+        {:ok, target_id, target_info} ->
+          # Atomic deduct — prevents TOCTOU race with snapshot
+          case Arena.Map.MapServer.deduct_gold(state.map_id, state.character_id, amount) do
+            {:ok, new_gold} ->
+              # Credit target (async is fine — we already atomically deducted from sender)
+              target_map = target_info.map_id
+              Arena.Map.MapServer.modify_gold(target_map, target_id, amount)
+              {state, [
+                {:update_gold, %{gold: new_gold}},
+                {:console_msg, %{message: "Has transferido #{amount} oro a #{name}.", font_index: 0}}
+              ]}
+
+            {:error, _reason} ->
+              {state, [{:console_msg, %{message: "No tienes suficiente oro.", font_index: 0}}]}
+          end
+
+        :not_found ->
+          {state, [{:console_msg, %{message: "Jugador no encontrado.", font_index: 0}}]}
+
+        _ ->
+          {state, [{:console_msg, %{message: "Cantidad invalida.", font_index: 0}}]}
+      end
     end
   end
 
