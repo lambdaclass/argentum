@@ -28,7 +28,7 @@ defmodule Arena.Map.MapServer do
   alias Arena.Entity.PlayerEntity
   alias Arena.Entity.NpcEntity
   alias Arena.Map.{Helpers, Visibility, Movement, CombatHandlers, InventoryHandlers, Commerce, Bank, Trade, Social}
-  alias Arena.Map.{Chat, Healing, Pets, QuestHandlers, Faction, NpcInteraction, GmCommands}
+  alias Arena.Map.{Chat, Healing, Pets, QuestHandlers, Faction, NpcInteraction, GmCommands, StatusTicks}
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
@@ -728,7 +728,7 @@ defmodule Arena.Map.MapServer do
         if entity.buffs == [] do
           state
         else
-          CombatHandlers.process_player_buffs(state, char_id, entity, now)
+          StatusTicks.process_player_buffs(state, char_id, entity, now)
         end
       end)
 
@@ -738,7 +738,7 @@ defmodule Arena.Map.MapServer do
 
   @impl true
   def handle_info(:regen_tick, state) do
-    state = CombatHandlers.process_regen_tick(state)
+    state = StatusTicks.process_regen_tick(state)
     Process.send_after(self(), :regen_tick, @regen_tick_ms)
     {:noreply, state}
   end

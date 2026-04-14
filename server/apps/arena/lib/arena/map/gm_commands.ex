@@ -465,7 +465,7 @@ defmodule Arena.Map.GmCommands do
           gm_console(state, char_id, "#{target.name} is already dead.")
           {:noreply, state}
         else
-          {target, state} = Arena.Map.CombatHandlers.handle_player_death(state, target_id, %{target | hp: 0})
+          {target, state} = Arena.Map.PlayerDeath.handle_player_death(state, target_id, %{target | hp: 0})
           players = Map.put(state.players, target_id, target)
           state = %{state | players: players}
 

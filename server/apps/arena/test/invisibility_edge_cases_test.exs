@@ -9,7 +9,7 @@ defmodule Arena.InvisibilityEdgeCasesTest do
   use ExUnit.Case, async: true
 
   alias Arena.Data.{GameData, SpellDef}
-  alias Arena.Map.{CombatHandlers, Helpers}
+  alias Arena.Map.{CombatHandlers, Helpers, StatusTicks}
 
   # ── Setup ──────────────────────────────────────────────────────────────────
 
@@ -426,7 +426,7 @@ defmodule Arena.InvisibilityEdgeCasesTest do
         })
 
       state = make_state(%{player: entity})
-      new_state = CombatHandlers.process_player_buffs(state, :player, entity, now)
+      new_state = StatusTicks.process_player_buffs(state, :player, entity, now)
       updated = new_state.players[:player]
 
       assert updated.oculto == false
