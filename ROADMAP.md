@@ -843,7 +843,9 @@ When in doubt:
      state helpers, audit all `GameBackend.*` write sites, add persistence
      telemetry, introduce ordered per-character writers, add an idempotent
      operation ledger, and migrate bank/inventory/trade persistence behind
-     flush barriers.
+     flush barriers. Introduce handler effects only for low-frequency
+     persistence/audit/control-plane paths; keep movement, visibility, NPC AI,
+     regen, and hot combat loops direct unless profiling says otherwise.
      Outcome: autosave, logout, bank, inventory, trade, auction, and guild
      writes are authoritative, ordered, retryable, observable, and no longer
      depend on ad hoc blocking calls from the map loop.
