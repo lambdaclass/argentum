@@ -837,15 +837,27 @@ When in doubt:
 163. Add per-MapServer hotspot telemetry.
      Outcome: player count, NPC count, tick duration, mailbox length, and
      broadcast rates are visible per map.
-164. Implement the authoritative persistence and backend refactor plan from
+164. Add `Arena.Map.State` update helpers: `put_player/3`, `update_player/3`,
+     `delete_player/2`, `put_npc/3`, `update_npc/3`, `put_meta/3`,
+     `put_ground_items/2`. Removes repeated `%{state | players: Map.put(...)}`
+     boilerplate across all handler modules. Low-risk, do before further splits.
+     Outcome: handler modules use composable state helpers instead of manual
+     struct update patterns.
+165. Split `gm_commands.ex` (1,657 lines) by command family: `Gm.Moderation`,
+     `Gm.Teleport`, `Gm.Inspection`, `Gm.World`, `Gm.Events`, `Gm.Faction`.
+     Keep `GmCommands` as the parser/router. Do not split by arbitrary size.
+     Outcome: GM command implementations are organized by domain, parsing stays
+     centralized.
+166. Introduce handler effects only where they remove real coupling: GM audit
+     logs, persistence operations, and packet broadcasts in bank/trade/autosave
+     paths. Do not do a full `{state, effects}` rewrite.
+     Outcome: low-frequency persistence/audit/control-plane paths are decoupled
+     from inline send calls.
+167. Implement the authoritative persistence and backend refactor plan from
      [research/arena-authoritative-persistence-and-refactor.md](research/arena-authoritative-persistence-and-refactor.md).
-     The arena test-state migration to `%Arena.Map.State{}` is done; next add
-     state helpers, audit all `GameBackend.*` write sites, add persistence
-     telemetry, introduce ordered per-character writers, add an idempotent
-     operation ledger, and migrate bank/inventory/trade persistence behind
-     flush barriers. Introduce handler effects only for low-frequency
-     persistence/audit/control-plane paths; keep movement, visibility, NPC AI,
-     regen, and hot combat loops direct unless profiling says otherwise.
+     Audit all `GameBackend.*` write sites, add persistence telemetry, introduce
+     ordered per-character writers, add an idempotent operation ledger, and
+     migrate bank/inventory/trade persistence behind flush barriers.
      Outcome: autosave, logout, bank, inventory, trade, auction, and guild
      writes are authoritative, ordered, retryable, observable, and no longer
      depend on ad hoc blocking calls from the map loop.

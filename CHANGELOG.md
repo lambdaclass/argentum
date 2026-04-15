@@ -4,23 +4,22 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **Arena internal boundaries refactor (2026-04-14/15):**
+  - Split `social.ex` (4,192 → 772 lines) into 8 focused modules: Chat,
+    Healing, Pets, QuestHandlers, Faction, NpcInteraction, GmCommands, Social.
+  - Introduced `%Arena.Map.State{}` struct for compile-time key safety on the
+    production map state path (22 explicit fields, 6 previously-dynamic).
+  - Split `combat_handlers.ex` (2,489 → 1,083 lines) into 4 focused modules:
+    CombatHandlers, SpellEffects, PlayerDeath, StatusTicks.
+  - Migrated all 13 test files to shared `Arena.Test.MapStateFactory`, removing
+    stale `floor_items`/`next_floor_id` fields and raw-map drift.
+  - Updated MapServer `@moduledoc` to reflect all 16 domain modules.
+  - 2,774 tests passing, zero compile warnings. Runtime model unchanged.
 - Client NPC body loading and bootstrap state handling fixed so NPC sprites use
   the full client body table instead of falling back to incorrect placeholder
   rendering.
-- Arena social handlers split out of the former large `social.ex` module into
-  focused chat, healing, pets, quests, faction, NPC interaction, GM command, and
-  remaining social modules.
-- `%Arena.Map.State{}` introduced for explicit map-state fields and compile-time
-  key safety on the production map state path.
-- Arena combat handlers split into focused combat dispatch, spell effects,
-  player death, and status tick modules.
-- MapServer routing cleanup grouped `deduct_gold` with the other map-server
-  calls.
 - Arena authoritative persistence and backend refactor research added in
   [research/arena-authoritative-persistence-and-refactor.md](research/arena-authoritative-persistence-and-refactor.md).
-- Arena test fixtures migrated to a shared `%Arena.Map.State{}` factory path,
-  replacing old partial raw-map fixtures and removing stale `floor_items` /
-  `next_floor_id` test-state drift.
 - Browser product shell completed for the current username/password path:
   register/login/logout/session restore, character options/list/create/select,
   ranking, and `login_existing_char(char_id, session_token)` gameplay launch.
