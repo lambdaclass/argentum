@@ -25,6 +25,7 @@ defmodule Arena.IntervalTimerAuditTest do
   alias Arena.Map.{MapServer, CombatHandlers, StatusTicks}
   alias Arena.Entity.PlayerEntity
   alias AoProtocol.Server.Encoder
+  import Arena.Test.MapStateFactory
 
   @test_map_id 1
 
@@ -241,16 +242,13 @@ defmodule Arena.IntervalTimerAuditTest do
 
   describe "regen tick correctness" do
     defp make_regen_state(players, opts \\ []) do
-      %{
+      map_state(
         players: players,
-        sessions: %{},
-        npcs_live: %{},
         meta: %{safe_zone: false},
-        visibility_mode: :global,
         thirst_tick_counter: Keyword.get(opts, :thirst_counter, 0),
         hunger_tick_counter: Keyword.get(opts, :hunger_counter, 0),
         penalty_tick_counter: Keyword.get(opts, :penalty_counter, 0)
-      }
+      )
     end
 
     test "passive HP regen: con/30 per tick, min 1" do
@@ -435,16 +433,13 @@ defmodule Arena.IntervalTimerAuditTest do
     @hunger_drain_interval 60
 
     defp make_drain_state(players, opts \\ []) do
-      %{
+      map_state(
         players: players,
-        sessions: %{},
-        npcs_live: %{},
         meta: %{safe_zone: false},
-        visibility_mode: :global,
         thirst_tick_counter: Keyword.get(opts, :thirst_counter, 0),
         hunger_tick_counter: Keyword.get(opts, :hunger_counter, 0),
         penalty_tick_counter: Keyword.get(opts, :penalty_counter, 0)
-      }
+      )
     end
 
     test "thirst drains by 10 at thirst interval (54 ticks)" do
@@ -709,16 +704,13 @@ defmodule Arena.IntervalTimerAuditTest do
 
   describe "edge-case timing" do
     defp make_edge_state(players, opts \\ []) do
-      %{
+      map_state(
         players: players,
-        sessions: %{},
-        npcs_live: %{},
         meta: %{safe_zone: false},
-        visibility_mode: :global,
         thirst_tick_counter: Keyword.get(opts, :thirst_counter, 0),
         hunger_tick_counter: Keyword.get(opts, :hunger_counter, 0),
         penalty_tick_counter: Keyword.get(opts, :penalty_counter, 0)
-      }
+      )
     end
 
     test "zero hunger/thirst stays at zero after drain tick" do

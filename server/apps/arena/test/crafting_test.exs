@@ -8,6 +8,8 @@ defmodule Arena.CraftingTest do
   alias Arena.Entity.PlayerEntity
   alias Arena.Data.CraftingRecipes
 
+  import Arena.Test.MapStateFactory
+
   setup_all do
     case Arena.Data.GameData.start_link() do
       {:ok, _pid} -> :ok
@@ -21,15 +23,11 @@ defmodule Arena.CraftingTest do
     trigger_map = Keyword.get(opts, :trigger_map, %{})
     npcs_live = Keyword.get(opts, :npcs_live, %{})
 
-    %{
+    map_state(
       players: players,
-      sessions: %{},
-      npcs: %{},
       npcs_live: npcs_live,
-      map_id: 1,
-      meta: %{safe_zone: false, trigger_map: trigger_map},
-      visibility_mode: :global
-    }
+      meta: %{safe_zone: false, trigger_map: trigger_map}
+    )
   end
 
   # ---- CraftingRecipes.select_product/2 ----
@@ -501,7 +499,7 @@ defmodule Arena.CraftingTest do
       state = make_state(%{1 => entity})
 
       # skill_index 18 = :mining
-      {:noreply, new_state} = Arena.Map.Social.handle_train_skill(state, 1, 18)
+      {:noreply, new_state} = Arena.Map.NpcInteraction.handle_train_skill(state, 1, 18)
 
       # Should NOT spend skill points (no trainer), but should attempt crafting
       # Mining without pickaxe will fail with "Necesitas la herramienta adecuada"
@@ -520,7 +518,7 @@ defmodule Arena.CraftingTest do
       state = make_state(%{1 => entity})
 
       # skill_index 3 = :combat_weapons (not a crafting skill)
-      {:noreply, new_state} = Arena.Map.Social.handle_train_skill(state, 1, 3)
+      {:noreply, new_state} = Arena.Map.NpcInteraction.handle_train_skill(state, 1, 3)
       # Should NOT spend skill points
       assert new_state.players[1].skill_points == 5
     end

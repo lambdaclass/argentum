@@ -9,6 +9,8 @@ defmodule Arena.MeleeAggroAndNpcSpellLevelTest do
   alias Arena.Entity.{NpcEntity, PlayerEntity}
   alias Arena.Combat
 
+  import Arena.Test.MapStateFactory
+
   setup_all do
     case Arena.Data.GameData.start_link() do
       {:ok, _pid} -> :ok
@@ -83,21 +85,14 @@ defmodule Arena.MeleeAggroAndNpcSpellLevelTest do
       exp_count: 100
     }
 
-    occupancy = :array.new(100 * 100, default: nil)
-
-    %{
+    map_state(
       map_id: 999,
       players: %{char_id => player},
       sessions: %{char_id => self()},
       npcs_live: %{1 => npc},
       npc_char_indices: %{100 => 1},
-      occupancy: occupancy,
-      visibility_mode: :global,
-      visible_sets: nil,
-      grid: nil,
-      ground_items: %{},
       meta: %{safe_zone: false}
-    }
+    )
   end
 
   # Force :rand to produce a specific next uniform value.

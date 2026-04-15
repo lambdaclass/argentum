@@ -12,6 +12,8 @@ defmodule Arena.InvisibilityNpcSpellAuditTest do
   alias Arena.Entity.{NpcEntity, PlayerEntity}
   alias Arena.Map.Helpers
 
+  import Arena.Test.MapStateFactory
+
   setup_all do
     case Arena.Data.GameData.start_link() do
       {:ok, _pid} -> :ok
@@ -68,20 +70,14 @@ defmodule Arena.InvisibilityNpcSpellAuditTest do
         do: %{},
         else: %{7 => player}
 
-    occupancy = :array.new(100 * 100, default: nil)
-
-    %{
+    map_state(
       map_id: 999,
       players: players,
       sessions: %{7 => self()},
       npcs_live: %{1 => npc},
       npc_char_indices: %{100 => 1},
-      occupancy: occupancy,
-      visibility_mode: :global,
-      visible_sets: nil,
-      grid: nil,
-      ground_items: %{}
-    }
+      occupancy: Keyword.get(opts, :occupancy)
+    )
   end
 
   # ==================================================================

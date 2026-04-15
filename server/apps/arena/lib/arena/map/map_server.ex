@@ -6,14 +6,26 @@ defmodule Arena.Map.MapServer do
   Player actions are processed immediately in mailbox order.
   Periodic timers handle background work only (NPC AI, regen, autosave).
 
+  State is held in `%Arena.Map.State{}` for compile-time key safety.
+
   Handler logic is delegated to domain modules:
   - `Arena.Map.Movement` — walk, heading, tile exits
-  - `Arena.Map.CombatHandlers` — attack, spells, buffs, regen
+  - `Arena.Map.CombatHandlers` — attack dispatch, XP, loot
+  - `Arena.Map.SpellEffects` — spell application (damage, heal, status, AoE)
+  - `Arena.Map.PlayerDeath` — death cleanup, inventory drop, PvP counters
+  - `Arena.Map.StatusTicks` — buff expiry, regen, hunger/thirst, penalty
   - `Arena.Map.InventoryHandlers` — pick up, drop, equip, use item
   - `Arena.Map.Commerce` — NPC shopkeeper
   - `Arena.Map.Bank` — banking
   - `Arena.Map.Trade` — user-to-user trade
-  - `Arena.Map.Social` — chat, rest, meditate, heal, stats, NPC interaction
+  - `Arena.Map.Chat` — chat, yell
+  - `Arena.Map.Healing` — rest, meditate, heal, resucitate
+  - `Arena.Map.Faction` — enlist, leave, faction chat, faction score
+  - `Arena.Map.NpcInteraction` — double-click, train, gamble, forgive
+  - `Arena.Map.GmCommands` — all /commands for game masters
+  - `Arena.Map.Pets` — pet stand, follow, leave
+  - `Arena.Map.QuestHandlers` — quest list, details, accept, abandon
+  - `Arena.Map.Social` — stats, skills, gold, description, spells, misc
   - `Arena.Map.Visibility` — spatial grid, AoI broadcasts, visible sets
   - `Arena.Map.Helpers` — shared utilities (occupancy, packets, conversions)
   """

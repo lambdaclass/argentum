@@ -5,6 +5,8 @@ defmodule Arena.NpcAiTest do
   alias Arena.Entity.NpcEntity
   alias Arena.Data.NpcDef
 
+  import Arena.Test.MapStateFactory
+
   setup_all do
     case Arena.Data.GameData.start_link() do
       {:ok, _pid} -> :ok
@@ -64,20 +66,13 @@ defmodule Arena.NpcAiTest do
       max_hp: 100
     }
 
-    occupancy = :array.new(100 * 100, default: nil)
-
-    %{
+    map_state(
       map_id: 999,
       players: %{7 => player},
       sessions: %{7 => self()},
       npcs_live: %{1 => npc},
-      npc_char_indices: %{100 => 1},
-      occupancy: occupancy,
-      visibility_mode: :global,
-      visible_sets: nil,
-      grid: nil,
-      ground_items: %{}
-    }
+      npc_char_indices: %{100 => 1}
+    )
   end
 
   defp make_leashed_state(opts) do
@@ -117,20 +112,13 @@ defmodule Arena.NpcAiTest do
       max_hp: 100
     }
 
-    occupancy = :array.new(100 * 100, default: nil)
-
-    %{
+    map_state(
       map_id: 999,
       players: %{7 => player},
       sessions: %{7 => self()},
       npcs_live: %{1 => npc},
-      npc_char_indices: %{100 => 1},
-      occupancy: occupancy,
-      visibility_mode: :global,
-      visible_sets: nil,
-      grid: nil,
-      ground_items: %{}
-    }
+      npc_char_indices: %{100 => 1}
+    )
   end
 
   describe "NPC leash distance" do

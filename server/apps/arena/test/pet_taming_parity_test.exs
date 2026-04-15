@@ -16,6 +16,8 @@ defmodule Arena.PetTamingParityTest do
   alias Arena.NpcAi
   alias Arena.Entity.NpcEntity
 
+  import Arena.Test.MapStateFactory
+
   setup_all do
     case Arena.Data.GameData.start_link() do
       {:ok, _pid} -> :ok
@@ -79,18 +81,16 @@ defmodule Arena.PetTamingParityTest do
     players = opts[:players] || %{7 => make_player()}
     npcs = opts[:npcs] || %{1 => make_npc()}
 
-    %{
+    map_state(
       map_id: 999,
       players: players,
       sessions: opts[:sessions] || %{7 => self()},
       npcs_live: npcs,
       npc_char_indices: opts[:npc_char_indices] || %{100 => 1},
-      occupancy: :array.new(100 * 100, default: nil),
       visibility_mode: :global,
       visible_sets: nil,
-      grid: nil,
-      ground_items: %{}
-    }
+      grid: nil
+    )
   end
 
   # ================================================================
@@ -281,7 +281,7 @@ defmodule Arena.PetTamingParityTest do
         npc_char_indices: %{100 => 1, 200 => 2}
       )
 
-      {:noreply, state} = Arena.Map.Social.handle_pet_stand(state, 7)
+      {:noreply, state} = Arena.Map.Pets.handle_pet_stand(state, 7)
 
       assert state.npcs_live[1].pet_mode == :stand
       assert state.npcs_live[2].pet_mode == :stand
@@ -293,7 +293,7 @@ defmodule Arena.PetTamingParityTest do
 
       state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
 
-      {:noreply, state} = Arena.Map.Social.handle_pet_stand(state, 7)
+      {:noreply, state} = Arena.Map.Pets.handle_pet_stand(state, 7)
 
       # Pet mode should remain unchanged
       assert state.npcs_live[1].pet_mode == :follow,
@@ -313,7 +313,7 @@ defmodule Arena.PetTamingParityTest do
         npc_char_indices: %{100 => 1, 200 => 2}
       )
 
-      {:noreply, state} = Arena.Map.Social.handle_pet_follow(state, 7)
+      {:noreply, state} = Arena.Map.Pets.handle_pet_follow(state, 7)
 
       assert state.npcs_live[1].pet_mode == :follow
       assert state.npcs_live[2].pet_mode == :follow
@@ -332,7 +332,7 @@ defmodule Arena.PetTamingParityTest do
         npc_char_indices: %{100 => 1, 200 => 2}
       )
 
-      {:noreply, state} = Arena.Map.Social.handle_pet_leave(state, 7)
+      {:noreply, state} = Arena.Map.Pets.handle_pet_leave(state, 7)
 
       # First pet (instance 1) should be removed from npcs_live
       refute Map.has_key?(state.npcs_live, 1), "First pet should be despawned"
@@ -347,7 +347,7 @@ defmodule Arena.PetTamingParityTest do
       owner = make_player(pet_ids: [])
       state = make_state(players: %{7 => owner}, npcs: %{})
 
-      {:noreply, _state} = Arena.Map.Social.handle_pet_leave(state, 7)
+      {:noreply, _state} = Arena.Map.Pets.handle_pet_leave(state, 7)
       # No crash — message "No tienes mascotas." sent to session
     end
   end
@@ -365,7 +365,7 @@ defmodule Arena.PetTamingParityTest do
         npc_char_indices: %{100 => 1, 200 => 2, 300 => 3}
       )
 
-      {:noreply, state} = Arena.Map.Social.handle_pet_leave_all(state, 7)
+      {:noreply, state} = Arena.Map.Pets.handle_pet_leave_all(state, 7)
 
       # All pets should be removed
       refute Map.has_key?(state.npcs_live, 1)

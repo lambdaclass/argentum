@@ -6,7 +6,9 @@ defmodule Arena.BugRegressionTest do
   use ExUnit.Case, async: true
 
   alias Arena.Data.GameData
-  alias Arena.Map.{Bank, Commerce, Social, Trade}
+  alias Arena.Map.{Bank, Commerce, Faction, NpcInteraction, Social, SpellEffects, Trade}
+
+  import Arena.Test.MapStateFactory
 
   setup_all do
     case GameData.start_link() do
@@ -70,29 +72,12 @@ defmodule Arena.BugRegressionTest do
   end
 
   defp make_map_state(players, opts \\ []) do
-    occupancy_map = Keyword.get(opts, :occupancy, %{})
-    sessions = Keyword.get(opts, :sessions, %{})
-    npcs_live = Keyword.get(opts, :npcs_live, %{})
-
-    base_occ = :array.new(100 * 100, default: nil)
-
-    occupancy =
-      Enum.reduce(occupancy_map, base_occ, fn {{x, y}, value}, acc ->
-        idx = (y - 1) * 100 + (x - 1)
-        :array.set(idx, value, acc)
-      end)
-
-    %{
+    map_state(
       players: players,
-      sessions: sessions,
-      occupancy: occupancy,
-      npcs_live: npcs_live,
-      map_id: 1,
-      floor_items: %{},
-      next_floor_id: 1,
-      visibility_mode: :global,
-      meta: %{rain: false, sin_invi_ocul: false}
-    }
+      sessions: Keyword.get(opts, :sessions, %{}),
+      npcs_live: Keyword.get(opts, :npcs_live, %{}),
+      occupancy: Keyword.get(opts, :occupancy, %{})
+    )
   end
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -216,7 +201,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{})
 
-      {:noreply, new_state} = Social.handle_gamble(state, :player, 50, nil)
+      {:noreply, new_state} = NpcInteraction.handle_gamble(state, :player, 50, nil)
       # Gold must not change — gamble should be rejected
       assert new_state.players[:player].gold == 100
       assert new_state.players[:player].gamble_plays == 0
@@ -236,7 +221,7 @@ defmodule Arena.BugRegressionTest do
 
       # We need a real NPC def with npc_type=6 (timbero). GameData may not have one,
       # so we test the NPC lookup path. If no NPC def exists, it falls through.
-      {:noreply, new_state} = Social.handle_gamble(state, :player, 50, nil)
+      {:noreply, new_state} = NpcInteraction.handle_gamble(state, :player, 50, nil)
       # If GameData has no timbero NPC, it should reject (no timbero found)
       # If it does have one, gold changes. Either way, the NPC check runs.
       p = new_state.players[:player]
@@ -256,7 +241,7 @@ defmodule Arena.BugRegressionTest do
         npcs_live: %{npc1: non_timbero}
       )
 
-      {:noreply, new_state} = Social.handle_gamble(state, :player, 50, nil)
+      {:noreply, new_state} = NpcInteraction.handle_gamble(state, :player, 50, nil)
       assert new_state.players[:player].gold == 100
     end
   end
@@ -273,7 +258,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{})
 
-      {:noreply, new_state} = Social.handle_forgive(state, :player)
+      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player)
       # Criminal status must not change — forgive should be rejected
       assert new_state.players[:player].criminal == true
     end
@@ -289,7 +274,7 @@ defmodule Arena.BugRegressionTest do
         npcs_live: %{npc1: non_priest}
       )
 
-      {:noreply, new_state} = Social.handle_forgive(state, :player)
+      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player)
       assert new_state.players[:player].criminal == true
     end
   end
@@ -516,7 +501,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, _new_state} = Social.handle_faction_chat(state, :player, "test message")
+      {:noreply, _new_state} = Faction.handle_faction_chat(state, :player, "test message")
 
       # Muted player should get a rejection message, not have their message broadcast
       # Check mailbox for what was sent to us (the session process)
@@ -533,7 +518,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, _new_state} = Social.handle_faction_chat(state, :player, "test message")
+      {:noreply, _new_state} = Faction.handle_faction_chat(state, :player, "test message")
 
       messages = flush_messages()
       refute Enum.any?(messages, fn
@@ -598,7 +583,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      assert {:noreply, _state} = Social.handle_faction_chat(state, :player, "hello")
+      assert {:noreply, _state} = Faction.handle_faction_chat(state, :player, "hello")
 
       # Should NOT receive a faction broadcast
       refute_receive {:send_raw, _}, 100
@@ -610,7 +595,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      assert {:noreply, _state} = Social.handle_faction_chat(state, :player, "hello")
+      assert {:noreply, _state} = Faction.handle_faction_chat(state, :player, "hello")
 
       # Should receive mute message, not a faction broadcast
       msgs = flush_messages([])
@@ -629,7 +614,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      assert {:noreply, _state} = Social.handle_faction_chat(state, :player, "spam")
+      assert {:noreply, _state} = Faction.handle_faction_chat(state, :player, "spam")
 
       # Should receive cooldown warning, not a faction broadcast containing the message
       msgs = flush_messages([])
@@ -726,7 +711,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{})
 
-      {:noreply, new_state} = Social.handle_leave_faction(state, :player)
+      {:noreply, new_state} = Faction.handle_leave_faction(state, :player)
       # Faction must NOT change — no enlistador nearby
       assert new_state.players[:player].faction == :royal_army
     end
@@ -879,7 +864,7 @@ defmodule Arena.BugRegressionTest do
 
   describe "BUG 23: spell damage blocked in safe zone" do
     test "apply_spell_damage does not hit player in safe zone" do
-      alias Arena.Map.CombatHandlers
+      alias Arena.Map.SpellEffects
 
       attacker = make_entity(%{char_id: :attacker, x: 50, y: 50, char_index: 1, mana: 500,
                                faction: :none, criminal: true})
@@ -894,7 +879,7 @@ defmodule Arena.BugRegressionTest do
       state = %{state | occupancy: occ}
 
       # Directly call apply_spell_damage with 50 damage at defender's tile
-      new_state = CombatHandlers.apply_spell_damage(state, :attacker, attacker, 50, 51, 50)
+      new_state = SpellEffects.apply_spell_damage(state, :attacker, attacker, 50, 51, 50)
 
       defender_after = Map.get(new_state.players, :defender)
       assert defender_after.hp == 100, "Spell should not damage players in safe zone"
@@ -903,7 +888,7 @@ defmodule Arena.BugRegressionTest do
 
   describe "BUG 29: status spells blocked in safe zone" do
     test "apply_spell_status paralysis blocked in safe zone" do
-      alias Arena.Map.CombatHandlers
+      alias Arena.Map.SpellEffects
 
       attacker = make_entity(%{char_id: :attacker, x: 50, y: 50, char_index: 1, mana: 500, faction: :none})
       defender = make_entity(%{char_id: :defender, x: 51, y: 50, char_index: 2, faction: :none, paralyzed: false})
@@ -918,7 +903,7 @@ defmodule Arena.BugRegressionTest do
       spell_def = %{paraliza: true, envenena: false, cura_veneno: false,
                     invisibilidad: false, inmoviliza: false, duration: 5}
 
-      new_state = CombatHandlers.apply_spell_status(state, :attacker, attacker, spell_def, 51, 50)
+      new_state = SpellEffects.apply_spell_status(state, :attacker, attacker, spell_def, 51, 50)
 
       defender_after = Map.get(new_state.players, :defender)
       refute defender_after.paralyzed, "Paralysis spell should not affect players in safe zone"

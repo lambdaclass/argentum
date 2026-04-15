@@ -9,8 +9,10 @@ defmodule Arena.TrainerWeatherTest do
   """
   use ExUnit.Case, async: true
 
-  alias Arena.Map.Social
+  alias Arena.Map.NpcInteraction
   alias Arena.Entity.PlayerEntity
+
+  import Arena.Test.MapStateFactory
 
   setup_all do
     case Arena.Data.GameData.start_link() do
@@ -33,17 +35,13 @@ defmodule Arena.TrainerWeatherTest do
         skills: %{combat_weapons: 10}
       }
 
-      state = %{
+      state = map_state(
         players: %{1 => entity},
-        sessions: %{},
-        npcs: %{},
-        npcs_live: %{},
-        meta: %{safe_zone: false},
-        visibility_mode: :global
-      }
+        meta: %{safe_zone: false}
+      )
 
       # skill_index 5 = :short_weapons in @skill_order
-      {:noreply, new_state} = Social.handle_train_skill(state, 1, 5)
+      {:noreply, new_state} = NpcInteraction.handle_train_skill(state, 1, 5)
       player = new_state.players[1]
 
       # Skill points should NOT be spent — no trainer nearby
@@ -63,19 +61,16 @@ defmodule Arena.TrainerWeatherTest do
       # NPC type 3 = trainer, within 5 tiles
       trainer_npc = %{npc_id: 100, x: 51, y: 50}
 
-      state = %{
+      state = map_state(
         players: %{1 => entity},
-        sessions: %{},
-        npcs: %{},
         npcs_live: %{100 => trainer_npc},
-        meta: %{safe_zone: false},
-        visibility_mode: :global
-      }
+        meta: %{safe_zone: false}
+      )
 
       # We need a trainer NPC def with npc_type 3 in GameData.
       # Since GameData may not have NPC 100, we test the rejection case
       # (no valid trainer) and confirm the gating exists.
-      {:noreply, new_state} = Social.handle_train_skill(state, 1, 5)
+      {:noreply, new_state} = NpcInteraction.handle_train_skill(state, 1, 5)
       player = new_state.players[1]
 
       # Without a real NPC def for id 100 in GameData, training should still fail

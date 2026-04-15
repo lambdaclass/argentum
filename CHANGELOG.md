@@ -4,6 +4,33 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- Client NPC body loading and bootstrap state handling fixed so NPC sprites use
+  the full client body table instead of falling back to incorrect placeholder
+  rendering.
+- Arena social handlers split out of the former large `social.ex` module into
+  focused chat, healing, pets, quests, faction, NPC interaction, GM command, and
+  remaining social modules.
+- `%Arena.Map.State{}` introduced for explicit map-state fields and compile-time
+  key safety on the production map state path.
+- Arena combat handlers split into focused combat dispatch, spell effects,
+  player death, and status tick modules.
+- MapServer routing cleanup grouped `deduct_gold` with the other map-server
+  calls.
+- Arena authoritative persistence and backend refactor research added in
+  [research/arena-authoritative-persistence-and-refactor.md](research/arena-authoritative-persistence-and-refactor.md).
+- Arena test fixtures migrated to a shared `%Arena.Map.State{}` factory path,
+  replacing old partial raw-map fixtures and removing stale `floor_items` /
+  `next_floor_id` test-state drift.
+- Browser product shell completed for the current username/password path:
+  register/login/logout/session restore, character options/list/create/select,
+  ranking, and `login_existing_char(char_id, session_token)` gameplay launch.
+- Browser gameplay UI parity surfaces completed for snow rendering, trade item
+  names/GRH/elemental tags, spell cooldown/requirement/AoE hints, dead/error/
+  loading/reconnect states, music/SFX/keybind settings, and minimap display.
+- Recent adversarial/security fixes closed multiple economy, social, and
+  persistence drift bugs, including commerce gold minting, trade atomicity,
+  bank revalidation, invalid slot handling, mute/dead chat checks, safe-zone
+  spell effects, and TOCTOU gold-transfer issues.
 - Parity-gate TCP harness hardened: deterministic packet waits, shared TCP
   packet decoder/helpers, SQL sandbox owner lifecycle for Ranch/TCP tests,
   and default soak exclusion.

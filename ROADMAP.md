@@ -7,6 +7,13 @@ This is the only roadmap. `CHANGELOG.md` tracks completed work.
 - **Backend gameplay:** close for the modern web path, but not full VB6 parity.
   Do not call the backend compatible until the backend tasks below are closed
   or deliberately removed from scope.
+- **Arena internal boundaries:** the first large backend refactor pass is
+  landed: social handlers are split, combat handlers are split, and production
+  map state now uses `%Arena.Map.State{}`. Arena tests now have a shared
+  `%Arena.Map.State{}` factory path instead of old partial raw-map fixtures.
+  The next backend modernization work should start from the authoritative
+  persistence and refactor research plan in
+  [research/arena-authoritative-persistence-and-refactor.md](research/arena-authoritative-persistence-and-refactor.md).
 - **Parity gate:** the harness foundation is in place. The main remaining proof
   gap is a real VB6 traffic corpus and replay coverage built from captured
   sessions instead of synthetic fixtures alone.
@@ -51,8 +58,8 @@ This is the only roadmap. `CHANGELOG.md` tracks completed work.
   - snow already exists in the client path: packet decode, reducer state, and
     renderer hooks are landed
   - minimap already exists in the current browser client
-  - trade metadata and spell hints already exist at least partially and should
-    be treated as completeness/polish work, not net-new surfaces
+  - trade metadata and spell hints already exist in the current browser client
+    and should be treated as polish/testing work, not net-new surfaces
   - ghost/dead UX and explicit banned/muted/server-full/maintenance/
     token-expired states already exist in the client
 - **Secondary gaps / investigation items:**
@@ -484,8 +491,10 @@ When in doubt:
     implicit.
 36. Implement the remaining GM/admin binary packet behavior for that target.
     Outcome: the supported old GM/admin packet family works end-to-end.
-37. Implement quests and quest-NPC protocol.
-    Outcome: quest state and quest NPC interactions exist on the backend.
+37. Implement quests and quest-NPC protocol. DONE.
+    Outcome: quest state, quest NPC interactions, quest list/details/accept/
+    abandon handlers, protocol packets, and QuestServer edge-case coverage
+    exist on the backend.
 38. Implement duels / reto exact flow. DONE.
     DuelServer GenServer: best-of-3 rounds, gold betting with 10% tax,
     /RETAR /ACEPTAR /CANCELAR /ABANDONAR commands, combat restriction +
@@ -563,22 +572,22 @@ When in doubt:
 62. Keep WebSocket/session bootstrap isolated from gameplay bytes.
     Outcome: browser auth/lobby flow never contaminates AO gameplay packet
     semantics.
-63. Decode and dispatch `snow_toggle`.
+63. Decode and dispatch `snow_toggle`. DONE.
     Outcome: snow state reaches the browser renderer correctly.
-64. Render snow when `snow_toggle` is active.
+64. Render snow when `snow_toggle` is active. DONE.
     Outcome: weather parity is visually complete in the browser.
-65. Show trade item name in the trade panel.
+65. Show trade item name in the trade panel. DONE.
     Outcome: the player sees the real item label from packet 100.
-66. Show trade item `GRH`/sprite metadata in the trade panel.
+66. Show trade item `GRH`/sprite metadata in the trade panel. DONE.
     Outcome: trade visuals use the metadata already sent by the server.
-67. Show trade item elemental tags in the trade panel.
+67. Show trade item elemental tags in the trade panel. DONE.
     Outcome: non-zero item tags are visible instead of hidden protocol data.
-68. Show spell cooldown hints.
+68. Show spell cooldown hints. DONE.
     Outcome: spell timing constraints are visible before the server rejects the
     cast.
-69. Show spell requirement hints.
+69. Show spell requirement hints. DONE.
     Outcome: land/water/staff/dead targeting rules are visible in the browser.
-70. Show spell AoE/radius hints.
+70. Show spell AoE/radius hints. DONE.
     Outcome: spell area semantics are visible before cast.
 71. Keep NPC sprite/body mappings checked by fixture or screenshot tests.
     Outcome: visual regressions in body-to-sprite mapping are caught early.
@@ -599,37 +608,37 @@ When in doubt:
     Outcome: guild communication is not collapsed into generic log lines.
 78. Keep party chat visible as a distinct chat stream.
     Outcome: party communication is not collapsed into generic log lines.
-79. Add clear ghost/dead HUD cues.
+79. Add clear ghost/dead HUD cues. DONE.
     Outcome: dead state is visually obvious in the browser.
-80. Disable actions that the dead state will reject anyway.
+80. Disable actions that the dead state will reject anyway. DONE.
     Outcome: obvious dead-state rejections are prevented client-side.
-81. Add a loading overlay.
+81. Add a loading overlay. DONE.
     Outcome: map/session transitions are visible instead of abrupt.
-82. Add a reconnect overlay.
+82. Add a reconnect overlay. DONE.
     Outcome: connection recovery is visible and less confusing.
-83. Add a banned error state.
+83. Add a banned error state. DONE.
     Outcome: banned users get an explicit browser state instead of a generic
     failure.
-84. Add a muted error/state message.
-    Outcome: muted users see a clear chat restriction state.
-85. Add a server-full error state.
+84. Add a muted error/state message. DONE.
+     Outcome: muted users see a clear chat restriction state.
+85. Add a server-full error state. DONE.
     Outcome: capacity failures are explicit in the browser.
-86. Add a maintenance error state.
+86. Add a maintenance error state. DONE.
      Outcome: maintenance mode is explicit in the browser.
-87. Add a token-expired error state.
+87. Add a token-expired error state. DONE.
      Outcome: auth/session expiry is explicit in the browser.
-88. Add browser music settings.
+88. Add browser music settings. DONE.
      Outcome: music can be enabled, disabled, and persisted intentionally.
-89. Add browser SFX settings.
+89. Add browser SFX settings. DONE.
      Outcome: sound effects can be enabled, disabled, and persisted
      intentionally.
 90. Do not add a browser graphics-quality menu by default; only add optional
     visual preferences if profiling later proves a real need.
      Outcome: the 2D client stays fast by design instead of outsourcing
      performance to a quality menu.
-91. Add browser keybind settings.
+91. Add browser keybind settings. DONE.
      Outcome: controls can be configured instead of hardcoded.
-92. Add a minimap if it remains part of the web UX target.
+92. Add a minimap if it remains part of the web UX target. DONE.
      Outcome: navigation support is explicit instead of ad hoc.
 93. Add map markers if they remain part of the web UX target.
      Outcome: navigation targets are explicit instead of ad hoc.
@@ -653,53 +662,53 @@ When in doubt:
 102. Add web E2E smoke coverage for bank, trade, social UI, weather, and
      reconnect.
      Outcome: advanced browser gameplay flows are tested end-to-end.
-103. Add `POST /api/auth/login`.
+103. Add `POST /api/auth/login`. DONE.
      Outcome: account-level username/password login exists over HTTP.
 104. Add `POST /api/auth/google`.
      Outcome: account-level Google login exists over HTTP.
-105. Add `GET /api/auth/session`.
+105. Add `GET /api/auth/session`. DONE.
      Outcome: browser session restore works without touching the AO socket.
-106. Add `POST /api/auth/logout`.
+106. Add `POST /api/auth/logout`. DONE.
      Outcome: account logout is explicit and clean.
-107. Add `GET /api/characters`.
+107. Add `GET /api/characters`. DONE.
      Outcome: the browser can list account-owned characters.
-108. Add `POST /api/characters`.
+108. Add `POST /api/characters`. DONE.
      Outcome: character creation exists in the account lobby flow.
-109. Add `POST /api/characters/:id/session`.
+109. Add `POST /api/characters/:id/session`. DONE.
      Outcome: selecting a character yields the token needed for unchanged AO
      socket entry.
-110. Support password-only accounts.
+110. Support password-only accounts. DONE.
      Outcome: the account model works without Google linkage.
 111. Support Google-only accounts.
      Outcome: the account model works without a local password.
 112. Support linked password+Google accounts.
      Outcome: one account can support both auth methods cleanly.
-113. Build the browser username/password login flow.
+113. Build the browser username/password login flow. DONE.
      Outcome: users can sign in with credentials before the AO session starts.
-114. Build the browser session-restore flow.
+114. Build the browser session-restore flow. DONE.
      Outcome: users can resume account sessions cleanly.
 115. Build the browser Google login flow.
      Outcome: Google auth is first-class in the browser, not a token paste
      path.
 116. Build the browser Google account-link flow.
      Outcome: existing accounts can attach Google auth cleanly.
-117. Build the browser character list flow.
+117. Build the browser character list flow. DONE.
      Outcome: the browser shows owned characters before opening the AO session.
-118. Build the browser character creation flow.
+118. Build the browser character creation flow. DONE.
      Outcome: the browser can create a new character before opening the AO
      session.
-119. Build the browser character selection flow.
+119. Build the browser character selection flow. DONE.
      Outcome: the browser chooses a character before opening the AO session.
-120. Include race/class choices in the browser character create flow.
+120. Include race/class choices in the browser character create flow. DONE.
      Outcome: browser-side character creation exposes core class/race setup.
-121. Include head/home/stat choices in the browser character create flow.
-     Outcome: browser-side character creation exposes the remaining setup
-     choices the backend expects.
-122. Stop using socket `login_new_char` as the primary browser account flow.
+121. Add browser stat choices to the character create flow.
+     Outcome: browser-side character creation exposes stat setup instead of
+     relying only on defaults; head and home choices are already landed.
+122. Stop using socket `login_new_char` as the primary browser account flow. DONE.
      Outcome: account auth and gameplay auth are clearly separated.
-123. Launch the AO socket with `login_existing_char(char_id, session_token)`.
+123. Launch the AO socket with `login_existing_char(char_id, session_token)`. DONE.
      Outcome: gameplay protocol stays unchanged after the HTTP lobby.
-124. Prefer same-origin serving or proxying for the account API.
+124. Prefer same-origin serving or proxying for the account API. DONE.
      Outcome: cookies/session handling stays simple.
      Design note: this browser product-shell lane should copy the old web flow
      shape where it helps, but must not copy old renderer/client architecture
@@ -828,9 +837,16 @@ When in doubt:
 163. Add per-MapServer hotspot telemetry.
      Outcome: player count, NPC count, tick duration, mailbox length, and
      broadcast rates are visible per map.
-164. Add batch persistence / write-queue strategy for scattered DB writes.
-     Outcome: autosave, logout, bank, and guild writes can be hardened and
-     scaled without ad hoc call patterns.
+164. Implement the authoritative persistence and backend refactor plan from
+     [research/arena-authoritative-persistence-and-refactor.md](research/arena-authoritative-persistence-and-refactor.md).
+     The arena test-state migration to `%Arena.Map.State{}` is done; next add
+     state helpers, audit all `GameBackend.*` write sites, add persistence
+     telemetry, introduce ordered per-character writers, add an idempotent
+     operation ledger, and migrate bank/inventory/trade persistence behind
+     flush barriers.
+     Outcome: autosave, logout, bank, inventory, trade, auction, and guild
+     writes are authoritative, ordered, retryable, observable, and no longer
+     depend on ad hoc blocking calls from the map loop.
 165. Pre-resolve `.dat` references at load time where hot-path lookups still
      repeat.
      Outcome: gameplay avoids repeated definition lookups that can be resolved

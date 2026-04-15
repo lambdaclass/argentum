@@ -9,7 +9,9 @@ defmodule Arena.EconomySecurityTest do
   use ExUnit.Case, async: true
 
   alias Arena.Data.GameData
-  alias Arena.Map.{Commerce, Bank, Movement, Social}
+  alias Arena.Map.{Chat, Commerce, Bank, Faction, Movement, NpcInteraction, Social}
+
+  import Arena.Test.MapStateFactory
 
   setup_all do
     case GameData.start_link() do
@@ -134,29 +136,13 @@ defmodule Arena.EconomySecurityTest do
   @banker_npc %{npc_id: 1, x: 51, y: 50, instance_id: :banker1}
 
   defp make_map_state(players, opts \\ []) do
-    occupancy_map = Keyword.get(opts, :occupancy, %{})
-    sessions = Keyword.get(opts, :sessions, %{})
-    npcs_live = Keyword.get(opts, :npcs_live, %{})
-
-    base_occ = :array.new(100 * 100, default: nil)
-
-    occupancy =
-      Enum.reduce(occupancy_map, base_occ, fn {{x, y}, value}, acc ->
-        idx = (y - 1) * 100 + (x - 1)
-        :array.set(idx, value, acc)
-      end)
-
-    %{
+    map_state(
       players: players,
-      sessions: sessions,
-      occupancy: occupancy,
-      npcs_live: npcs_live,
-      map_id: 1,
-      floor_items: %{},
-      next_floor_id: 1,
-      visibility_mode: :global,
+      sessions: Keyword.get(opts, :sessions, %{}),
+      npcs_live: Keyword.get(opts, :npcs_live, %{}),
+      occupancy: Keyword.get(opts, :occupancy, %{}),
       meta: %{rain: false, sin_invi_ocul: false}
-    }
+    )
   end
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -542,7 +528,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Social.handle_chat(state, :player, "I should be muted")
+      {:noreply, new_state} = Chat.handle_chat(state, :player, "I should be muted")
       # State should not change (no last_chat_at update)
       assert new_state.players[:player].last_chat_at == entity.last_chat_at
       # Player should receive the "silenciado" message
@@ -554,7 +540,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Social.handle_chat(state, :player, "Hello!")
+      {:noreply, new_state} = Chat.handle_chat(state, :player, "Hello!")
       # last_chat_at should be updated
       assert new_state.players[:player].last_chat_at > entity.last_chat_at
     end
@@ -566,7 +552,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Social.handle_chat(state, :player, "I can talk again!")
+      {:noreply, new_state} = Chat.handle_chat(state, :player, "I can talk again!")
       assert new_state.players[:player].last_chat_at > entity.last_chat_at
     end
   end
@@ -579,7 +565,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Social.handle_chat(state, :player, "Second message too fast")
+      {:noreply, new_state} = Chat.handle_chat(state, :player, "Second message too fast")
       # last_chat_at should NOT be updated (message was rate-limited)
       assert new_state.players[:player].last_chat_at == entity.last_chat_at
       assert_receive {:send_raw, _}
@@ -592,7 +578,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Social.handle_chat(state, :player, "This should work")
+      {:noreply, new_state} = Chat.handle_chat(state, :player, "This should work")
       assert new_state.players[:player].last_chat_at > entity.last_chat_at
     end
   end
@@ -600,7 +586,7 @@ defmodule Arena.EconomySecurityTest do
   describe "chat for non-existent player" do
     test "chat for unknown char_id is silently ignored" do
       state = make_map_state(%{})
-      {:noreply, new_state} = Social.handle_chat(state, :unknown, "Hello")
+      {:noreply, new_state} = Chat.handle_chat(state, :unknown, "Hello")
       assert new_state == state
     end
   end
@@ -1269,7 +1255,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Social.handle_gamble(state, :player, 50, nil)
+      {:noreply, new_state} = NpcInteraction.handle_gamble(state, :player, 50, nil)
       p = new_state.players[:player]
       # Gold must not change — no timbero nearby
       assert p.gold == 100
@@ -1283,7 +1269,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Social.handle_gamble(state, :player, 50, nil)
+      {:noreply, new_state} = NpcInteraction.handle_gamble(state, :player, 50, nil)
       assert new_state.players[:player].gold == 100
       assert new_state.players[:player].gamble_plays == 0
     end
@@ -1295,7 +1281,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Social.handle_gamble(state, :player, 0, nil)
+      {:noreply, new_state} = NpcInteraction.handle_gamble(state, :player, 0, nil)
       assert new_state.players[:player].gold == 100
     end
 
@@ -1304,7 +1290,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Social.handle_gamble(state, :player, -50, nil)
+      {:noreply, new_state} = NpcInteraction.handle_gamble(state, :player, -50, nil)
       assert new_state.players[:player].gold == 100
     end
 
@@ -1313,13 +1299,13 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Social.handle_gamble(state, :player, 999, nil)
+      {:noreply, new_state} = NpcInteraction.handle_gamble(state, :player, 999, nil)
       assert new_state.players[:player].gold == 100
     end
 
     test "gamble for unknown player is a no-op" do
       state = make_map_state(%{})
-      {:noreply, new_state} = Social.handle_gamble(state, :unknown, 50, nil)
+      {:noreply, new_state} = NpcInteraction.handle_gamble(state, :unknown, 50, nil)
       assert new_state == state
     end
   end
@@ -1335,7 +1321,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Social.handle_forgive(state, :player)
+      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player)
       # Criminal status must not change — no priest nearby
       assert new_state.players[:player].criminal == true
     end
@@ -1347,13 +1333,13 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Social.handle_forgive(state, :player)
+      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player)
       assert new_state.players[:player].criminal == false
     end
 
     test "forgive for unknown player is a no-op" do
       state = make_map_state(%{})
-      {:noreply, new_state} = Social.handle_forgive(state, :ghost)
+      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :ghost)
       assert new_state == state
     end
   end
@@ -1368,7 +1354,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Social.handle_leave_faction(state, :player)
+      {:noreply, new_state} = Faction.handle_leave_faction(state, :player)
       assert new_state.players[:player].faction == :none
       assert new_state.players[:player].faction_reenlistadas == 0
     end
@@ -1384,7 +1370,7 @@ defmodule Arena.EconomySecurityTest do
       state = make_map_state(%{player: entity}, sessions: sessions,
                              npcs_live: %{enl1: enlistador})
 
-      {:noreply, new_state} = Social.handle_leave_faction(state, :player)
+      {:noreply, new_state} = Faction.handle_leave_faction(state, :player)
       # Without a real enlistador NPC def in GameData, this may be rejected.
       # That's correct — the enlistador check is the fix.
       p = new_state.players[:player]
@@ -1397,7 +1383,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, state2} = Social.handle_leave_faction(state, :player)
+      {:noreply, state2} = Faction.handle_leave_faction(state, :player)
       # No enlistador → faction unchanged
       assert state2.players[:player].faction == :chaos_legion
       assert state2.players[:player].faction_reenlistadas == 0
@@ -1405,7 +1391,7 @@ defmodule Arena.EconomySecurityTest do
 
     test "leave faction for unknown player is a no-op" do
       state = make_map_state(%{})
-      {:noreply, new_state} = Social.handle_leave_faction(state, :ghost)
+      {:noreply, new_state} = Faction.handle_leave_faction(state, :ghost)
       assert new_state == state
     end
   end
@@ -1416,13 +1402,13 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, _state} = Social.handle_faction_chat(state, :player, "test message")
+      {:noreply, _state} = Faction.handle_faction_chat(state, :player, "test message")
       # Should receive error message, not faction broadcast
     end
 
     test "faction chat for unknown player is a no-op" do
       state = make_map_state(%{})
-      {:noreply, new_state} = Social.handle_faction_chat(state, :ghost, "hello")
+      {:noreply, new_state} = Faction.handle_faction_chat(state, :ghost, "hello")
       assert new_state == state
     end
   end
@@ -1672,13 +1658,13 @@ defmodule Arena.EconomySecurityTest do
     test "same faction kill gives 0 score" do
       attacker = make_entity(%{faction: :royal_army, level: 30})
       defender = make_entity(%{faction: :royal_army, level: 25})
-      assert Social.faction_score_for_kill(attacker, defender) == 0
+      assert Faction.faction_score_for_kill(attacker, defender) == 0
     end
 
     test "cross-faction kill gives positive score" do
       attacker = make_entity(%{faction: :royal_army, level: 25})
       defender = make_entity(%{faction: :chaos_legion, level: 25})
-      score = Social.faction_score_for_kill(attacker, defender)
+      score = Faction.faction_score_for_kill(attacker, defender)
       assert score > 0
       assert score <= 20
     end
@@ -1686,22 +1672,22 @@ defmodule Arena.EconomySecurityTest do
     test "no faction vs no faction gives 0 score" do
       attacker = make_entity(%{faction: :none, level: 25, criminal: false})
       defender = make_entity(%{faction: :none, level: 25, criminal: false})
-      assert Social.faction_score_for_kill(attacker, defender) == 0
+      assert Faction.faction_score_for_kill(attacker, defender) == 0
     end
 
     test "faction score is capped at 20" do
       attacker = make_entity(%{faction: :royal_army, level: 1})
       defender = make_entity(%{faction: :chaos_legion, level: 50})
-      score = Social.faction_score_for_kill(attacker, defender)
+      score = Faction.faction_score_for_kill(attacker, defender)
       assert score <= 20
     end
 
     test "higher level attacker gets less score" do
-      low_att = Social.faction_score_for_kill(
+      low_att = Faction.faction_score_for_kill(
         make_entity(%{faction: :royal_army, level: 50}),
         make_entity(%{faction: :chaos_legion, level: 25})
       )
-      high_att = Social.faction_score_for_kill(
+      high_att = Faction.faction_score_for_kill(
         make_entity(%{faction: :royal_army, level: 25}),
         make_entity(%{faction: :chaos_legion, level: 50})
       )

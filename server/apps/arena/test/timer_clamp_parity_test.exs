@@ -39,6 +39,8 @@ defmodule Arena.TimerClampParityTest do
   alias Arena.Entity.PlayerEntity
   alias AoProtocol.Server.Encoder
 
+  import Arena.Test.MapStateFactory
+
   @test_map_id 1
 
   # ── Setup (minimal infrastructure, same pattern as other arena tests) ──
@@ -236,16 +238,7 @@ defmodule Arena.TimerClampParityTest do
         thirst: 100
       }
 
-      state = %{
-        players: %{40_020 => entity},
-        sessions: %{},
-        npcs_live: %{},
-        occupancy: %{},
-        meta: %{safe_zone: false},
-        map_id: @test_map_id,
-        visibility_mode: :global,
-        grid: %{}
-      }
+      state = map_state(players: %{40_020 => entity}, meta: %{safe_zone: false})
 
       {:reply, {:error, :cooldown}, _} = CombatHandlers.handle_cast_spell(state, 40_020, 1, nil, nil)
 
@@ -274,15 +267,7 @@ defmodule Arena.TimerClampParityTest do
     test "passive HP regen: con/30 per tick, min 1" do
       entity = %PlayerEntity{char_id: 1, hp: 50, max_hp: 100, con: 18, hunger: 100, thirst: 100}
 
-      state = %{
-        players: %{1 => entity},
-        sessions: %{},
-        npcs_live: %{},
-        meta: %{safe_zone: false},
-        visibility_mode: :global,
-        hunger_thirst_tick_counter: 0,
-        penalty_tick_counter: 0
-      }
+      state = map_state(players: %{1 => entity}, meta: %{safe_zone: false})
 
       new_state = StatusTicks.process_regen_tick(state)
       assert new_state.players[1].hp == 50 + max(div(18, 30), 1)
@@ -291,15 +276,7 @@ defmodule Arena.TimerClampParityTest do
     test "resting HP regen: con/6 per tick, min 1" do
       entity = %PlayerEntity{char_id: 2, hp: 50, max_hp: 100, con: 18, hunger: 100, thirst: 100, resting: true}
 
-      state = %{
-        players: %{2 => entity},
-        sessions: %{},
-        npcs_live: %{},
-        meta: %{safe_zone: false},
-        visibility_mode: :global,
-        hunger_thirst_tick_counter: 0,
-        penalty_tick_counter: 0
-      }
+      state = map_state(players: %{2 => entity}, meta: %{safe_zone: false})
 
       new_state = StatusTicks.process_regen_tick(state)
       assert new_state.players[2].hp == 50 + max(div(18, 6), 1)
@@ -308,15 +285,7 @@ defmodule Arena.TimerClampParityTest do
     test "passive mana regen: int/35 per tick, min 1" do
       entity = %PlayerEntity{char_id: 3, mana: 50, max_mana: 100, int: 18, hunger: 100, thirst: 100}
 
-      state = %{
-        players: %{3 => entity},
-        sessions: %{},
-        npcs_live: %{},
-        meta: %{safe_zone: false},
-        visibility_mode: :global,
-        hunger_thirst_tick_counter: 0,
-        penalty_tick_counter: 0
-      }
+      state = map_state(players: %{3 => entity}, meta: %{safe_zone: false})
 
       new_state = StatusTicks.process_regen_tick(state)
       assert new_state.players[3].mana == 50 + max(div(18, 35), 1)
@@ -325,15 +294,7 @@ defmodule Arena.TimerClampParityTest do
     test "stamina regen: agi/6 per tick, min 1" do
       entity = %PlayerEntity{char_id: 4, stamina: 50, max_stamina: 100, agi: 18, hunger: 100, thirst: 100}
 
-      state = %{
-        players: %{4 => entity},
-        sessions: %{},
-        npcs_live: %{},
-        meta: %{safe_zone: false},
-        visibility_mode: :global,
-        hunger_thirst_tick_counter: 0,
-        penalty_tick_counter: 0
-      }
+      state = map_state(players: %{4 => entity}, meta: %{safe_zone: false})
 
       new_state = StatusTicks.process_regen_tick(state)
       assert new_state.players[4].stamina == 50 + max(div(18, 6), 1)
@@ -355,15 +316,7 @@ defmodule Arena.TimerClampParityTest do
         thirst: 100
       }
 
-      state = %{
-        players: %{5 => entity},
-        sessions: %{},
-        npcs_live: %{},
-        meta: %{safe_zone: false},
-        visibility_mode: :global,
-        hunger_thirst_tick_counter: 0,
-        penalty_tick_counter: 0
-      }
+      state = map_state(players: %{5 => entity}, meta: %{safe_zone: false})
 
       new_state = StatusTicks.process_regen_tick(state)
       p = new_state.players[5]
@@ -385,15 +338,7 @@ defmodule Arena.TimerClampParityTest do
         thirst: 100
       }
 
-      state = %{
-        players: %{6 => entity},
-        sessions: %{},
-        npcs_live: %{},
-        meta: %{safe_zone: false},
-        visibility_mode: :global,
-        hunger_thirst_tick_counter: 0,
-        penalty_tick_counter: 0
-      }
+      state = map_state(players: %{6 => entity}, meta: %{safe_zone: false})
 
       new_state = StatusTicks.process_regen_tick(state)
       p = new_state.players[6]
@@ -412,16 +357,12 @@ defmodule Arena.TimerClampParityTest do
     test "thirst drains on 54th tick, hunger drains on 60th tick" do
       entity = %PlayerEntity{char_id: 10, hunger: 100, thirst: 100}
 
-      state = %{
+      state = map_state(
         players: %{10 => entity},
-        sessions: %{},
-        npcs_live: %{},
         meta: %{safe_zone: false},
-        visibility_mode: :global,
         thirst_tick_counter: 53,
-        hunger_tick_counter: 59,
-        penalty_tick_counter: 0
-      }
+        hunger_tick_counter: 59
+      )
 
       new_state = StatusTicks.process_regen_tick(state)
       p = new_state.players[10]
@@ -432,16 +373,7 @@ defmodule Arena.TimerClampParityTest do
     test "no drain on non-drain tick" do
       entity = %PlayerEntity{char_id: 11, hunger: 100, thirst: 100}
 
-      state = %{
-        players: %{11 => entity},
-        sessions: %{},
-        npcs_live: %{},
-        meta: %{safe_zone: false},
-        visibility_mode: :global,
-        thirst_tick_counter: 0,
-        hunger_tick_counter: 0,
-        penalty_tick_counter: 0
-      }
+      state = map_state(players: %{11 => entity}, meta: %{safe_zone: false})
 
       new_state = StatusTicks.process_regen_tick(state)
       p = new_state.players[11]
@@ -452,16 +384,7 @@ defmodule Arena.TimerClampParityTest do
     test "540 thirst ticks and 600 hunger ticks fully deplete" do
       entity = %PlayerEntity{char_id: 12, hunger: 100, thirst: 100}
 
-      init = %{
-        players: %{12 => entity},
-        sessions: %{},
-        npcs_live: %{},
-        meta: %{safe_zone: false},
-        visibility_mode: :global,
-        thirst_tick_counter: 0,
-        hunger_tick_counter: 0,
-        penalty_tick_counter: 0
-      }
+      init = map_state(players: %{12 => entity}, meta: %{safe_zone: false})
 
       # 600 ticks: thirst drains 11 times (floor(600/54)=11 → 110 drained → clamped to 0)
       # hunger drains 10 times (floor(600/60)=10 → 100 drained → exactly 0)
@@ -474,16 +397,12 @@ defmodule Arena.TimerClampParityTest do
     test "hunger/thirst clamp to 0" do
       entity = %PlayerEntity{char_id: 13, hunger: 5, thirst: 3}
 
-      state = %{
+      state = map_state(
         players: %{13 => entity},
-        sessions: %{},
-        npcs_live: %{},
         meta: %{safe_zone: false},
-        visibility_mode: :global,
         thirst_tick_counter: 53,
-        hunger_tick_counter: 59,
-        penalty_tick_counter: 0
-      }
+        hunger_tick_counter: 59
+      )
 
       new_state = StatusTicks.process_regen_tick(state)
       p = new_state.players[13]
@@ -500,15 +419,11 @@ defmodule Arena.TimerClampParityTest do
     test "decrements on 20th tick" do
       entity = %PlayerEntity{char_id: 20, hunger: 100, thirst: 100, penalty: 5}
 
-      state = %{
+      state = map_state(
         players: %{20 => entity},
-        sessions: %{},
-        npcs_live: %{},
         meta: %{safe_zone: false},
-        visibility_mode: :global,
-        hunger_thirst_tick_counter: 0,
         penalty_tick_counter: 19
-      }
+      )
 
       new_state = StatusTicks.process_regen_tick(state)
       assert new_state.players[20].penalty == 4
@@ -517,15 +432,7 @@ defmodule Arena.TimerClampParityTest do
     test "does not decrement on non-penalty tick" do
       entity = %PlayerEntity{char_id: 21, hunger: 100, thirst: 100, penalty: 5}
 
-      state = %{
-        players: %{21 => entity},
-        sessions: %{},
-        npcs_live: %{},
-        meta: %{safe_zone: false},
-        visibility_mode: :global,
-        hunger_thirst_tick_counter: 0,
-        penalty_tick_counter: 0
-      }
+      state = map_state(players: %{21 => entity}, meta: %{safe_zone: false})
 
       new_state = StatusTicks.process_regen_tick(state)
       assert new_state.players[21].penalty == 5

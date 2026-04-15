@@ -11,8 +11,9 @@ defmodule Arena.HungerThirstTest do
   """
   use ExUnit.Case, async: true
 
-  alias Arena.Map.{CombatHandlers, StatusTicks}
+  alias Arena.Map.StatusTicks
   alias Arena.Entity.PlayerEntity
+  import Arena.Test.MapStateFactory
 
   setup_all do
     case Arena.Data.GameData.start_link() do
@@ -26,15 +27,12 @@ defmodule Arena.HungerThirstTest do
   # VB6: IntervaloSed = 54 regen ticks, IntervaloHambre = 60 regen ticks.
   # Set counters to interval-1 so the next tick triggers the drain.
   defp make_state(players, opts \\ []) do
-    %{
+    map_state(
       players: players,
-      sessions: %{},
-      npcs_live: %{},
       meta: %{safe_zone: false},
-      visibility_mode: :global,
       thirst_tick_counter: Keyword.get(opts, :thirst_counter, 53),
       hunger_tick_counter: Keyword.get(opts, :hunger_counter, 59)
-    }
+    )
   end
 
   describe "hunger/thirst drain in regen tick" do

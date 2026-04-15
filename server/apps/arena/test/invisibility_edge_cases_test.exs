@@ -9,7 +9,9 @@ defmodule Arena.InvisibilityEdgeCasesTest do
   use ExUnit.Case, async: true
 
   alias Arena.Data.{GameData, SpellDef}
-  alias Arena.Map.{CombatHandlers, Helpers, StatusTicks}
+  alias Arena.Map.{Helpers, SpellEffects, StatusTicks}
+
+  import Arena.Test.MapStateFactory
 
   # ── Setup ──────────────────────────────────────────────────────────────────
 
@@ -122,27 +124,10 @@ defmodule Arena.InvisibilityEdgeCasesTest do
   end
 
   defp make_state(players, opts \\ []) do
-    occupancy_map = Keyword.get(opts, :occupancy, %{})
-    npcs_live = Keyword.get(opts, :npcs_live, %{})
-
-    base_occ = :array.new(100 * 100, default: nil)
-
-    occupancy =
-      Enum.reduce(occupancy_map, base_occ, fn {{x, y}, value}, acc ->
-        idx = (y - 1) * 100 + (x - 1)
-        :array.set(idx, value, acc)
-      end)
-
-    %{
-      players: players,
-      sessions: %{},
-      occupancy: occupancy,
-      npcs_live: npcs_live,
-      map_id: 1,
-      floor_items: %{},
-      next_floor_id: 1,
-      visibility_mode: :global
-    }
+    map_state(
+      [players: players] ++
+        opts
+    )
   end
 
   defp make_spell(overrides) do
@@ -269,7 +254,7 @@ defmodule Arena.InvisibilityEdgeCasesTest do
       spell = make_spell(%{remove_invisibility: true})
 
       new_state =
-        CombatHandlers.apply_spell_remove_invisibility(state, :caster, caster, spell, 50, 50)
+        SpellEffects.apply_spell_remove_invisibility(state, :caster, caster, spell, 50, 50)
 
       updated_target = new_state.players[:target]
       assert updated_target.invisible == false
@@ -294,7 +279,7 @@ defmodule Arena.InvisibilityEdgeCasesTest do
       spell = make_spell(%{remove_invisibility: true})
 
       new_state =
-        CombatHandlers.apply_spell_remove_invisibility(state, :caster, caster, spell, 50, 50)
+        SpellEffects.apply_spell_remove_invisibility(state, :caster, caster, spell, 50, 50)
 
       updated_target = new_state.players[:target]
       assert updated_target.invisible == true
@@ -319,7 +304,7 @@ defmodule Arena.InvisibilityEdgeCasesTest do
       spell = make_spell(%{remove_invisibility: true})
 
       new_state =
-        CombatHandlers.apply_spell_remove_invisibility(state, :caster, caster, spell, 50, 50)
+        SpellEffects.apply_spell_remove_invisibility(state, :caster, caster, spell, 50, 50)
 
       updated_target = new_state.players[:target]
       # 62 - 50 = 12, which is > 11 radius
