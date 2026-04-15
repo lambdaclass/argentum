@@ -211,5 +211,87 @@ defmodule Arena.Combat do
     max(round(result), 0)
   end
 
+  # ==================================================================
+  # Level-up stat gains
+  # ==================================================================
+
+  @doc """
+  Compute all stat gains for a level-up, given the *current* entity stats and
+  a random HP factor (0.0..1.0 exclusive, typically from `:rand.uniform()`).
+
+  Returns a map with keys: `:new_level`, `:hp_gain`, `:mana_gain`, `:sta_gain`,
+  `:skill_points`, `:min_hit`, `:max_hit`, `:remaining_xp`.
+
+  VB6 formulas:
+    hp_gain  = max(trunc(class_hp_mod * (0.8 + rand_factor * 0.4)), 1)
+    mana_gain = trunc(int * class_mana_mult)
+    sta_gain  = max(trunc(class_stamina_growth * agi / 33), 1)
+  """
+  def level_up_gains(level, class_id, int, agi, current_xp, rand_hp_factor) do
+    next_xp = GameData.exp_for_level(level + 1)
+
+    if next_xp && current_xp >= next_xp do
+      new_level = level + 1
+
+      hp_mod = GameData.class_hp_mod(class_id)
+      hp_gain = max(trunc(hp_mod * (0.8 + rand_hp_factor * 0.4)), 1)
+
+      mana_mult = GameData.class_mana_mult(class_id)
+      mana_gain = trunc(int * mana_mult)
+
+      sta_growth = GameData.class_stamina_growth(class_id)
+      sta_gain = max(trunc(sta_growth * agi / 33), 1)
+
+      skill_pts = GameData.class_skill_points(class_id)
+
+      {new_min_hit, new_max_hit} = base_user_damage(new_level, class_id)
+
+      {:level_up,
+       %{
+         new_level: new_level,
+         hp_gain: hp_gain,
+         mana_gain: mana_gain,
+         sta_gain: sta_gain,
+         skill_points: skill_pts,
+         min_hit: new_min_hit,
+         max_hit: new_max_hit,
+         remaining_xp: current_xp - next_xp
+       }}
+    else
+      :no_level_up
+    end
+  end
+
+  # ==================================================================
+  # Skill gain
+  # ==================================================================
+
+  @skill_gain_chance 35
+  @max_skill 100
+
+  @doc """
+  Return the probability (0..100) that a skill at the given level gains a point.
+  Returns 0 when the skill is already at max.
+
+  This is the pure half of the VB6 skill-gain check; the caller rolls
+  `:rand.uniform(100)` and compares against this value.
+  """
+  def skill_gain_probability(current_skill) do
+    if current_skill < @max_skill, do: @skill_gain_chance, else: 0
+  end
+
+  @doc """
+  Cap earned XP against the NPC's remaining experience pool.
+  Returns `{capped_xp, new_pool}`.
+
+  VB6: ExpCount tracks how much XP an NPC instance can still award.
+  """
+  def cap_xp_to_pool(xp_gained, available_pool) when xp_gained > 0 and available_pool >= 0 do
+    capped = min(xp_gained, available_pool)
+    {capped, available_pool - capped}
+  end
+
+  def cap_xp_to_pool(xp_gained, available_pool), do: {xp_gained, available_pool}
+
   defp clamp(val, min_val, max_val), do: min(max(val, min_val), max_val)
 end

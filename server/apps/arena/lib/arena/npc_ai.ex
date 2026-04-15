@@ -308,22 +308,8 @@ defmodule Arena.NpcAi do
       target_npc = %{target_npc | hp: new_hp}
 
       if new_hp <= 0 do
-        # Target NPC died
-        respawn_delay = if target_def, do: target_def.intervalo_respawn, else: 60
-
-        target_npc = %{
-          target_npc
-          | alive: false,
-            respawn_at: System.monotonic_time(:millisecond) + respawn_delay * 1000
-        }
-
-        state = put_in(state.npcs_live[target_instance_id], target_npc)
-        occupancy = Helpers.clear_occupancy(state.occupancy, target_npc.x, target_npc.y)
-        state = %{state | occupancy: occupancy}
-
-        remove_raw = Encoder.encode({:character_remove, %{char_index: target_npc.char_index}})
-        broadcast_to_nearby_players(state, target_npc.x, target_npc.y, remove_raw)
-        state
+        # Target NPC died — delegate to consolidated death handler
+        Arena.Map.NpcDeath.resolve_npc_death(state, target_instance_id, target_npc, source: :pet)
       else
         put_in(state.npcs_live[target_instance_id], target_npc)
       end
@@ -332,17 +318,8 @@ defmodule Arena.NpcAi do
 
   @doc false
   def despawn_pet(state, instance_id, npc) do
-    # Remove pet from occupancy grid
-    occupancy = Helpers.clear_occupancy(state.occupancy, npc.x, npc.y)
-    state = %{state | occupancy: occupancy}
-
-    # Broadcast removal to nearby players
-    remove_raw = Encoder.encode({:character_remove, %{char_index: npc.char_index}})
-    broadcast_to_nearby_players(state, npc.x, npc.y, remove_raw)
-
-    # Remove pet from npcs_live entirely (no respawn for pets)
-    npcs_live = Map.delete(state.npcs_live, instance_id)
-    %{state | npcs_live: npcs_live}
+    # Delegate to consolidated NPC death handler (pet despawn — no killer, no rewards)
+    Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :pet)
   end
 
   # --- Target acquisition ---

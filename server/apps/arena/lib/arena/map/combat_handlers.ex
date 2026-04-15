@@ -30,9 +30,6 @@ defmodule Arena.Map.CombatHandlers do
   @faction_pvp_maps [58, 59, 60, 195, 196]
   _ = @faction_pvp_maps
 
-  @skill_gain_chance 35
-  @max_skill 100
-
   # ==================================================================
   # Attack handlers
   # ==================================================================
@@ -265,74 +262,17 @@ defmodule Arena.Map.CombatHandlers do
             )
 
             if new_hp <= 0 do
-              # NPC died
-              state =
-                if npc.owner_id != nil do
-                  # Pet died — remove from npcs_live and owner's pet_ids
-                  Arena.Map.SpellEffects.handle_pet_death(state, instance_id, npc)
-                else
-                  npc = %{
-                    npc
-                    | alive: false,
-                      respawn_at:
-                        System.monotonic_time(:millisecond) +
-                          if(npc_def, do: npc_def.intervalo_respawn, else: 60) * 1000
-                  }
-
-                  put_in(state.npcs_live[instance_id], npc)
-                end
-
-              occupancy = Helpers.clear_occupancy(state.occupancy, npc.x, npc.y)
-              state = %{state | occupancy: occupancy}
-
-              # Broadcast NPC removal
-              remove_raw = Encoder.encode({:character_remove, %{char_index: npc.char_index}})
-              Visibility.broadcast_visible_all(state, npc.x, npc.y, fn pid -> send(pid, {:send_raw, remove_raw}) end)
-
-              # Per-hit XP on the killing blow (no XP for killing pets)
+              # NPC died — delegate to consolidated death handler
               {entity, state} =
-                if npc.owner_id == nil do
-                  award_hit_xp(state, char_id, entity, final_damage, npc_def, instance_id)
-                else
-                  {entity, state}
-                end
+                Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc,
+                  killer_char_id: char_id,
+                  killer_entity: entity,
+                  final_damage: final_damage,
+                  source: :melee
+                )
 
-              # Kill rewards (counter, guild XP, gold, loot) — no rewards for killing pets
-              state =
-                if npc.owner_id == nil do
-                  entity = %{entity | npcs_killed: entity.npcs_killed + 1}
-
-                  # Track quest NPC kill progress
-                  npc_id_for_quest = if npc_def, do: npc_def.id, else: 0
-                  entity = if npc_id_for_quest > 0, do: Arena.QuestServer.record_npc_kill(entity, npc_id_for_quest), else: entity
-
-                  # Notify invasion system about NPC kill (melee)
-                  Arena.Events.InvasionServer.notify_npc_killed(state.map_id, instance_id)
-
-                  # Award guild XP on NPC kill
-                  give_exp = if npc_def, do: npc_def.give_exp, else: 0
-
-                  if give_exp > 0 do
-                    case Arena.GuildServer.guild_id_for(char_id) do
-                      nil -> :ok
-                      gid -> Arena.GuildServer.add_guild_exp(gid, max(div(give_exp, 10), 1))
-                    end
-                  end
-
-                  # VB6: NPCTirarOro — drop gold on the floor at NPC position
-                  give_gld = if npc_def, do: npc_def.give_gld, else: 0
-                  state = drop_npc_gold(state, npc, give_gld)
-
-                  # Drop loot
-                  state = drop_npc_loot(state, npc, npc_def)
-
-                  players = Map.put(state.players, char_id, entity)
-                  %{state | players: players}
-                else
-                  players = Map.put(state.players, char_id, entity)
-                  %{state | players: players}
-                end
-
+              players = Map.put(state.players, char_id, entity)
+              state = %{state | players: players}
               state
             else
               state = put_in(state.npcs_live[instance_id], npc)
@@ -765,8 +705,9 @@ defmodule Arena.Map.CombatHandlers do
 
   def maybe_gain_skill(entity, skill_name) do
     current = Map.get(entity.skills, skill_name, 0)
+    chance = Combat.skill_gain_probability(current)
 
-    if current < @max_skill and :rand.uniform(100) <= @skill_gain_chance do
+    if chance > 0 and :rand.uniform(100) <= chance do
       %{entity | skills: Map.put(entity.skills, skill_name, current + 1)}
     else
       entity
@@ -837,86 +778,69 @@ defmodule Arena.Map.CombatHandlers do
   end
 
   def check_level_up(entity, sessions, char_id) do
-    next_xp = GameData.exp_for_level(entity.level + 1)
+    class_id = Helpers.class_atom_to_id(entity.class)
 
-    if next_xp && entity.xp >= next_xp do
-      class_id = Helpers.class_atom_to_id(entity.class)
-      new_level = entity.level + 1
+    case Combat.level_up_gains(entity.level, class_id, entity.int, entity.agi, entity.xp, :rand.uniform()) do
+      {:level_up, gains} ->
+        new_max_hp = entity.max_hp + gains.hp_gain
+        new_max_mana = entity.max_mana + gains.mana_gain
+        new_max_stamina = entity.max_stamina + gains.sta_gain
 
-      # HP growth: randomized around class modifier
-      hp_mod = GameData.class_hp_mod(class_id)
-      hp_gain = max(trunc(hp_mod * (0.8 + :rand.uniform() * 0.4)), 1)
-      new_max_hp = entity.max_hp + hp_gain
+        entity = %{
+          entity
+          | level: gains.new_level,
+            xp: gains.remaining_xp,
+            max_hp: new_max_hp,
+            hp: new_max_hp,
+            max_mana: new_max_mana,
+            mana: new_max_mana,
+            max_stamina: new_max_stamina,
+            stamina: new_max_stamina,
+            min_hit: gains.min_hit,
+            max_hit: gains.max_hit,
+            skill_points: entity.skill_points + gains.skill_points
+        }
 
-      # Mana growth: int * class multiplier (0 for non-casters)
-      mana_mult = GameData.class_mana_mult(class_id)
-      mana_gain = trunc(entity.int * mana_mult)
-      new_max_mana = entity.max_mana + mana_gain
+        # Level-up packet
+        Helpers.send_to_session(sessions, char_id, {:send_raw, Encoder.encode({:level_up, %{level: gains.new_level}})})
 
-      # Stamina growth
-      sta_growth = GameData.class_stamina_growth(class_id)
-      sta_gain = max(trunc(sta_growth * entity.agi / 33), 1)
-      new_max_stamina = entity.max_stamina + sta_gain
+        # Full stat refresh
+        Helpers.send_to_session(
+          sessions,
+          char_id,
+          {:send_raw,
+           Encoder.encode(
+             {:update_user_stats,
+              %{
+                max_hp: entity.max_hp,
+                min_hp: entity.hp,
+                shield: 0,
+                max_mana: entity.max_mana,
+                min_mana: entity.mana,
+                max_sta: entity.max_stamina,
+                min_sta: entity.stamina,
+                gold: entity.gold,
+                gold_cap: 1_000_000,
+                level: entity.level,
+                exp_next_level: GameData.exp_for_level(entity.level + 1) || 0,
+                exp: entity.xp,
+                class: Helpers.class_atom_to_id(entity.class)
+              }}
+           )}
+        )
 
-      # Skill points
-      skill_pts = GameData.class_skill_points(class_id)
+        Helpers.send_to_session(
+          sessions,
+          char_id,
+          {:send_raw,
+           Encoder.encode({:console_msg, %{message: "Has alcanzado el nivel #{gains.new_level}!", font_index: 0}})}
+        )
 
-      # Base damage for new level
-      {new_min_hit, new_max_hit} = Combat.base_user_damage(new_level, class_id)
+        # Recursive check for multiple level ups
+        check_level_up(entity, sessions, char_id)
 
-      entity = %{
+      :no_level_up ->
         entity
-        | level: new_level,
-          xp: entity.xp - next_xp,
-          max_hp: new_max_hp,
-          hp: new_max_hp,
-          max_mana: new_max_mana,
-          mana: new_max_mana,
-          max_stamina: new_max_stamina,
-          stamina: new_max_stamina,
-          min_hit: new_min_hit,
-          max_hit: new_max_hit,
-          skill_points: entity.skill_points + skill_pts
-      }
-
-      # Level-up packet
-      Helpers.send_to_session(sessions, char_id, {:send_raw, Encoder.encode({:level_up, %{level: new_level}})})
-
-      # Full stat refresh
-      Helpers.send_to_session(
-        sessions,
-        char_id,
-        {:send_raw,
-         Encoder.encode(
-           {:update_user_stats,
-            %{
-              max_hp: entity.max_hp,
-              min_hp: entity.hp,
-              shield: 0,
-              max_mana: entity.max_mana,
-              min_mana: entity.mana,
-              max_sta: entity.max_stamina,
-              min_sta: entity.stamina,
-              gold: entity.gold,
-              gold_cap: 1_000_000,
-              level: entity.level,
-              exp_next_level: GameData.exp_for_level(entity.level + 1) || 0,
-              exp: entity.xp,
-              class: Helpers.class_atom_to_id(entity.class)
-            }}
-         )}
-      )
-
-      Helpers.send_to_session(
-        sessions,
-        char_id,
-        {:send_raw, Encoder.encode({:console_msg, %{message: "Has alcanzado el nivel #{new_level}!", font_index: 0}})}
-      )
-
-      # Recursive check for multiple level ups
-      check_level_up(entity, sessions, char_id)
-    else
-      entity
     end
   end
 
@@ -939,9 +863,8 @@ defmodule Arena.Map.CombatHandlers do
 
       {xp_gained, state} =
         if npc_live != nil and xp_gained > 0 do
-          available = npc_live.exp_count
-          capped = min(xp_gained, available)
-          npc_live = %{npc_live | exp_count: available - capped}
+          {capped, new_pool} = Combat.cap_xp_to_pool(xp_gained, npc_live.exp_count)
+          npc_live = %{npc_live | exp_count: new_pool}
           state = put_in(state.npcs_live[instance_id], npc_live)
           {capped, state}
         else

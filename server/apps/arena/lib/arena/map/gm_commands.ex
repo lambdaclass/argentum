@@ -705,26 +705,7 @@ defmodule Arena.Map.GmCommands do
             npc_def = GameData.get_npc(npc.npc_id)
             npc_name = if npc_def, do: npc_def.name, else: "NPC #{npc.npc_id}"
 
-            # Mark NPC as dead with respawn (same as combat death)
-            dead_npc = %{
-              npc
-              | alive: false,
-                respawn_at:
-                  System.monotonic_time(:millisecond) +
-                    if(npc_def, do: npc_def.intervalo_respawn, else: 60) * 1000
-            }
-
-            npcs_live = Map.put(state.npcs_live, instance_id, dead_npc)
-            occupancy = Helpers.clear_occupancy(state.occupancy, npc.x, npc.y)
-
-            # Broadcast removal
-            raw = Encoder.encode({:character_remove, %{char_index: npc.char_index}})
-
-            Visibility.broadcast_visible_all(state, npc.x, npc.y, fn pid ->
-              send(pid, {:send_raw, raw})
-            end)
-
-            state = %{state | npcs_live: npcs_live, occupancy: occupancy}
+            state = Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :gm)
             gm_console(state, char_id, "Killed NPC #{npc_name} (respawn enabled).")
             {:noreply, state}
         end
@@ -750,18 +731,7 @@ defmodule Arena.Map.GmCommands do
             npc_def = GameData.get_npc(npc.npc_id)
             npc_name = if npc_def, do: npc_def.name, else: "NPC #{npc.npc_id}"
 
-            # Remove NPC entirely (no respawn)
-            npcs_live = Map.delete(state.npcs_live, instance_id)
-            occupancy = Helpers.clear_occupancy(state.occupancy, npc.x, npc.y)
-
-            # Broadcast removal
-            raw = Encoder.encode({:character_remove, %{char_index: npc.char_index}})
-
-            Visibility.broadcast_visible_all(state, npc.x, npc.y, fn pid ->
-              send(pid, {:send_raw, raw})
-            end)
-
-            state = %{state | npcs_live: npcs_live, occupancy: occupancy}
+            state = Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :gm, permanent: true)
             gm_console(state, char_id, "Killed NPC #{npc_name} permanently (no respawn).")
             {:noreply, state}
         end
@@ -780,16 +750,8 @@ defmodule Arena.Map.GmCommands do
     {killed, state} =
       Enum.reduce(state.npcs_live, {0, state}, fn {inst_id, npc}, {count, st} ->
         if npc.alive and abs(npc.x - entity.x) <= aoi_x and abs(npc.y - entity.y) <= aoi_y do
-          npcs_live = Map.delete(st.npcs_live, inst_id)
-          occupancy = Helpers.clear_occupancy(st.occupancy, npc.x, npc.y)
-
-          raw = Encoder.encode({:character_remove, %{char_index: npc.char_index}})
-
-          Visibility.broadcast_visible_all(st, npc.x, npc.y, fn pid ->
-            send(pid, {:send_raw, raw})
-          end)
-
-          {count + 1, %{st | npcs_live: npcs_live, occupancy: occupancy}}
+          st = Arena.Map.NpcDeath.resolve_npc_death(st, inst_id, npc, source: :gm, permanent: true)
+          {count + 1, st}
         else
           {count, st}
         end

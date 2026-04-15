@@ -2,8 +2,9 @@ defmodule Arena.Map.State do
   @moduledoc """
   Struct representing the state of a single map GenServer.
 
-  Replaces the raw map that was previously used, providing compile-time
-  key safety — any typo in a field name will be caught at compile time.
+  Provides compile-time key safety and update helpers that eliminate
+  the repeated `Map.put(state.players, id, entity)` / `%{state | players: ...}`
+  boilerplate across handler modules.
   """
 
   @enforce_keys [:map_id]
@@ -41,4 +42,54 @@ defmodule Arena.Map.State do
     gm_blocked_tiles: MapSet.new(),
     triggers: %{}
   ]
+
+  # -- Player helpers --
+
+  def put_player(state, char_id, entity) do
+    %{state | players: Map.put(state.players, char_id, entity)}
+  end
+
+  def update_player(state, char_id, fun) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} -> %{state | players: Map.put(state.players, char_id, fun.(entity))}
+      :error -> state
+    end
+  end
+
+  def delete_player(state, char_id) do
+    %{state | players: Map.delete(state.players, char_id)}
+  end
+
+  # -- NPC helpers --
+
+  def put_npc(state, instance_id, npc) do
+    %{state | npcs_live: Map.put(state.npcs_live, instance_id, npc)}
+  end
+
+  def update_npc(state, instance_id, fun) do
+    case Map.fetch(state.npcs_live, instance_id) do
+      {:ok, npc} -> %{state | npcs_live: Map.put(state.npcs_live, instance_id, fun.(npc))}
+      :error -> state
+    end
+  end
+
+  def delete_npc(state, instance_id) do
+    %{state | npcs_live: Map.delete(state.npcs_live, instance_id)}
+  end
+
+  # -- Meta helpers --
+
+  def put_meta(state, key, value) do
+    %{state | meta: Map.put(state.meta, key, value)}
+  end
+
+  # -- Ground items helpers --
+
+  def put_ground_item(state, pos, item) do
+    %{state | ground_items: Map.put(state.ground_items, pos, item)}
+  end
+
+  def delete_ground_item(state, pos) do
+    %{state | ground_items: Map.delete(state.ground_items, pos)}
+  end
 end
