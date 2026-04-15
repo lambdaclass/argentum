@@ -185,58 +185,8 @@ defmodule Arena.Map.SpellEffects do
     case target do
       {:npc, instance_id} ->
         case Map.get(state.npcs_live, instance_id) do
-          nil ->
-            players = Map.put(state.players, char_id, entity)
-            %{state | players: players}
-
-          npc when npc.alive ->
-            npc_def = GameData.get_npc(npc.npc_id)
-            magic_res = if npc_def, do: npc_def.magic_resistance, else: 0
-            final_damage = Arena.Combat.apply_magic_resistance(damage, magic_res)
-            new_hp = max(npc.hp - final_damage, 0)
-            npc = %{npc | hp: new_hp}
-
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw, Encoder.encode({:user_hitted_user, %{char_index: npc.char_index, damage: final_damage}})}
-            )
-
-            if new_hp <= 0 do
-              # NPC died — delegate to consolidated death handler
-              {entity, state} =
-                Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc,
-                  killer_char_id: char_id,
-                  killer_entity: entity,
-                  final_damage: final_damage,
-                  source: :spell,
-                  send_mana_update: true
-                )
-
-              players = Map.put(state.players, char_id, entity)
-              state = %{state | players: players}
-              state
-            else
-              npc = %{npc | target_id: char_id}
-              state = put_in(state.npcs_live[instance_id], npc)
-
-              # VB6: per-hit proportional XP (no XP for hitting pets)
-              {entity, state} =
-                if npc.owner_id == nil do
-                  Arena.Map.CombatHandlers.award_hit_xp(state, char_id, entity, final_damage, npc_def, instance_id)
-                else
-                  {entity, state}
-                end
-
-              Helpers.send_to_session(
-                state.sessions,
-                char_id,
-                {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
-              )
-
-              players = Map.put(state.players, char_id, entity)
-              %{state | players: players}
-            end
+          npc when is_map(npc) and npc.alive ->
+            apply_spell_damage_to_npc(state, char_id, entity, damage, instance_id, npc)
 
           _ ->
             players = Map.put(state.players, char_id, entity)
@@ -250,145 +200,7 @@ defmodule Arena.Map.SpellEffects do
             %{state | players: players}
 
           defender ->
-            # VB6 parity: faction/duel exceptions for safe zone (same as physical attacks)
-            duel_pvp_exception =
-              Map.get(entity, :in_duel, false) and Map.get(defender, :in_duel, false) and
-                Map.get(entity, :duel_opponent_id) == target_id and Map.get(defender, :duel_opponent_id) == char_id
-
-            cond do
-              # VB6: safe zone blocks offensive spells on players (PuedeAtacar)
-              Map.get(state.meta, :safe_zone, false) and
-                  not Arena.Map.CombatHandlers.faction_pvp_exception?(state.map_id, entity, defender) and
-                  not duel_pvp_exception ->
-                Helpers.send_to_session(
-                  state.sessions,
-                  char_id,
-                  {:send_raw, Encoder.encode({:console_msg, %{message: "Zona segura.", font_index: 0}})}
-                )
-
-                Helpers.send_to_session(
-                  state.sessions,
-                  char_id,
-                  {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
-                )
-
-                players = Map.put(state.players, char_id, entity)
-                %{state | players: players}
-
-              Arena.Map.CombatHandlers.same_faction?(entity, defender) ->
-                Helpers.send_to_session(
-                  state.sessions,
-                  char_id,
-                  {:send_raw,
-                   Encoder.encode(
-                     {:console_msg, %{message: "No puedes atacar a un miembro de tu faccion.", font_index: 0}}
-                   )}
-                )
-
-                Helpers.send_to_session(
-                  state.sessions,
-                  char_id,
-                  {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
-                )
-
-                players = Map.put(state.players, char_id, entity)
-                %{state | players: players}
-
-              Arena.Map.CombatHandlers.party_safe_block?(char_id, defender) ->
-                Helpers.send_to_session(
-                  state.sessions,
-                  char_id,
-                  {:send_raw,
-                   Encoder.encode(
-                     {:console_msg, %{message: "No puedes atacar a un miembro de tu grupo.", font_index: 0}}
-                   )}
-                )
-
-                Helpers.send_to_session(
-                  state.sessions,
-                  char_id,
-                  {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
-                )
-
-                players = Map.put(state.players, char_id, entity)
-                %{state | players: players}
-
-              true ->
-                # VB6: apply magic resistance in PvP (resistance skill as percentage)
-                resist_pct = Map.get(defender.skills, :resistance, 0)
-                final_damage = Arena.Combat.apply_magic_resistance(damage, resist_pct)
-                new_hp = max(defender.hp - final_damage, 0)
-                defender = %{defender | hp: new_hp}
-
-                Helpers.send_to_session(
-                  state.sessions,
-                  char_id,
-                  {:send_raw,
-                   Encoder.encode({:user_hitted_user, %{char_index: defender.char_index, damage: final_damage}})}
-                )
-
-                Helpers.send_to_session(
-                  state.sessions,
-                  target_id,
-                  {:send_raw,
-                   Encoder.encode({:user_hitted_by_user, %{char_index: entity.char_index, damage: final_damage}})}
-                )
-
-                Helpers.send_to_session(
-                  state.sessions,
-                  target_id,
-                  {:send_raw, Encoder.encode({:update_hp, %{min_hp: new_hp}})}
-                )
-
-                Helpers.send_to_session(
-                  state.sessions,
-                  char_id,
-                  {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
-                )
-
-                # Guild war: no criminal flag when attacking enemy guild members
-                guild_war = Arena.GuildServer.players_at_war?(char_id, target_id)
-                entity = if not defender.criminal and not guild_war, do: %{entity | criminal: true}, else: entity
-
-                {defender, state} =
-                  if new_hp <= 0 do
-                    Helpers.send_to_session(
-                      state.sessions,
-                      target_id,
-                      {:send_raw, Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})}
-                    )
-
-                    Arena.Map.PlayerDeath.handle_player_death(state, target_id, defender)
-                  else
-                    {defender, state}
-                  end
-
-                # Faction score + kill counters + guild XP on PvP spell kill
-                entity =
-                  if defender.dead do
-                    score = Arena.Map.Faction.faction_score_for_kill(entity, defender)
-                    entity = if score > 0, do: %{entity | faction_score: entity.faction_score + score}, else: entity
-                    entity = Arena.Map.PlayerDeath.update_pvp_kill_counters(entity, defender)
-
-                    case Arena.GuildServer.guild_id_for(char_id) do
-                      nil -> :ok
-                      gid -> Arena.GuildServer.add_guild_exp(gid, 50)
-                    end
-
-                    entity
-                  else
-                    entity
-                  end
-
-                players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, defender)
-                state = %{state | players: players}
-
-                if defender.dead do
-                  Helpers.broadcast_character_change(state, defender)
-                end
-
-                state
-            end
+            apply_spell_damage_to_player(state, char_id, entity, damage, target_id, defender)
         end
 
       _ ->
@@ -400,6 +212,198 @@ defmodule Arena.Map.SpellEffects do
 
         players = Map.put(state.players, char_id, entity)
         %{state | players: players}
+    end
+  end
+
+  defp apply_spell_damage_to_npc(state, char_id, entity, damage, instance_id, npc) do
+    npc_def = GameData.get_npc(npc.npc_id)
+    magic_res = if npc_def, do: npc_def.magic_resistance, else: 0
+    final_damage = Arena.Combat.apply_magic_resistance(damage, magic_res)
+    new_hp = max(npc.hp - final_damage, 0)
+    npc = %{npc | hp: new_hp}
+
+    Helpers.send_to_session(
+      state.sessions,
+      char_id,
+      {:send_raw, Encoder.encode({:user_hitted_user, %{char_index: npc.char_index, damage: final_damage}})}
+    )
+
+    if new_hp <= 0 do
+      # NPC died — delegate to consolidated death handler
+      {entity, state} =
+        Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc,
+          killer_char_id: char_id,
+          killer_entity: entity,
+          final_damage: final_damage,
+          source: :spell,
+          send_mana_update: true
+        )
+
+      players = Map.put(state.players, char_id, entity)
+      state = %{state | players: players}
+      state
+    else
+      npc = %{npc | target_id: char_id}
+      state = put_in(state.npcs_live[instance_id], npc)
+
+      # VB6: per-hit proportional XP (no XP for hitting pets)
+      {entity, state} =
+        if npc.owner_id == nil do
+          Arena.Map.CombatHandlers.award_hit_xp(state, char_id, entity, final_damage, npc_def, instance_id)
+        else
+          {entity, state}
+        end
+
+      Helpers.send_to_session(
+        state.sessions,
+        char_id,
+        {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+      )
+
+      players = Map.put(state.players, char_id, entity)
+      %{state | players: players}
+    end
+  end
+
+  defp apply_spell_damage_to_player(state, char_id, entity, damage, defender_id, defender) do
+    # VB6 parity: faction/duel exceptions for safe zone (same as physical attacks)
+    duel_pvp_exception =
+      Map.get(entity, :in_duel, false) and Map.get(defender, :in_duel, false) and
+        Map.get(entity, :duel_opponent_id) == defender_id and Map.get(defender, :duel_opponent_id) == char_id
+
+    cond do
+      # VB6: safe zone blocks offensive spells on players (PuedeAtacar)
+      Map.get(state.meta, :safe_zone, false) and
+          not Arena.Map.CombatHandlers.faction_pvp_exception?(state.map_id, entity, defender) and
+          not duel_pvp_exception ->
+        Helpers.send_to_session(
+          state.sessions,
+          char_id,
+          {:send_raw, Encoder.encode({:console_msg, %{message: "Zona segura.", font_index: 0}})}
+        )
+
+        Helpers.send_to_session(
+          state.sessions,
+          char_id,
+          {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+        )
+
+        players = Map.put(state.players, char_id, entity)
+        %{state | players: players}
+
+      Arena.Map.CombatHandlers.same_faction?(entity, defender) ->
+        Helpers.send_to_session(
+          state.sessions,
+          char_id,
+          {:send_raw,
+           Encoder.encode(
+             {:console_msg, %{message: "No puedes atacar a un miembro de tu faccion.", font_index: 0}}
+           )}
+        )
+
+        Helpers.send_to_session(
+          state.sessions,
+          char_id,
+          {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+        )
+
+        players = Map.put(state.players, char_id, entity)
+        %{state | players: players}
+
+      Arena.Map.CombatHandlers.party_safe_block?(char_id, defender) ->
+        Helpers.send_to_session(
+          state.sessions,
+          char_id,
+          {:send_raw,
+           Encoder.encode(
+             {:console_msg, %{message: "No puedes atacar a un miembro de tu grupo.", font_index: 0}}
+           )}
+        )
+
+        Helpers.send_to_session(
+          state.sessions,
+          char_id,
+          {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+        )
+
+        players = Map.put(state.players, char_id, entity)
+        %{state | players: players}
+
+      true ->
+        # VB6: apply magic resistance in PvP (resistance skill as percentage)
+        resist_pct = Map.get(defender.skills, :resistance, 0)
+        final_damage = Arena.Combat.apply_magic_resistance(damage, resist_pct)
+        new_hp = max(defender.hp - final_damage, 0)
+        defender = %{defender | hp: new_hp}
+
+        Helpers.send_to_session(
+          state.sessions,
+          char_id,
+          {:send_raw,
+           Encoder.encode({:user_hitted_user, %{char_index: defender.char_index, damage: final_damage}})}
+        )
+
+        Helpers.send_to_session(
+          state.sessions,
+          defender_id,
+          {:send_raw,
+           Encoder.encode({:user_hitted_by_user, %{char_index: entity.char_index, damage: final_damage}})}
+        )
+
+        Helpers.send_to_session(
+          state.sessions,
+          defender_id,
+          {:send_raw, Encoder.encode({:update_hp, %{min_hp: new_hp}})}
+        )
+
+        Helpers.send_to_session(
+          state.sessions,
+          char_id,
+          {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
+        )
+
+        # Guild war: no criminal flag when attacking enemy guild members
+        guild_war = Arena.GuildServer.players_at_war?(char_id, defender_id)
+        entity = if not defender.criminal and not guild_war, do: %{entity | criminal: true}, else: entity
+
+        {defender, state} =
+          if new_hp <= 0 do
+            Helpers.send_to_session(
+              state.sessions,
+              defender_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})}
+            )
+
+            Arena.Map.PlayerDeath.handle_player_death(state, defender_id, defender)
+          else
+            {defender, state}
+          end
+
+        # Faction score + kill counters + guild XP on PvP spell kill
+        entity =
+          if defender.dead do
+            score = Arena.Map.Faction.faction_score_for_kill(entity, defender)
+            entity = if score > 0, do: %{entity | faction_score: entity.faction_score + score}, else: entity
+            entity = Arena.Map.PlayerDeath.update_pvp_kill_counters(entity, defender)
+
+            case Arena.GuildServer.guild_id_for(char_id) do
+              nil -> :ok
+              gid -> Arena.GuildServer.add_guild_exp(gid, 50)
+            end
+
+            entity
+          else
+            entity
+          end
+
+        players = state.players |> Map.put(char_id, entity) |> Map.put(defender_id, defender)
+        state = %{state | players: players}
+
+        if defender.dead do
+          Helpers.broadcast_character_change(state, defender)
+        end
+
+        state
     end
   end
 
