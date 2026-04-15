@@ -58,7 +58,10 @@ defmodule Arena.Map.PlayerDeath do
       Enum.reduce(pet_ids, state, fn instance_id, st ->
         case Map.get(st.npcs_live, instance_id) do
           nil -> st
-          npc -> Arena.NpcAi.despawn_pet(st, instance_id, npc)
+          npc ->
+            {st, effects} = Arena.NpcAi.despawn_pet(st, instance_id, npc)
+            Arena.NpcAi.dispatch_effects(st, effects)
+            st
         end
       end)
 

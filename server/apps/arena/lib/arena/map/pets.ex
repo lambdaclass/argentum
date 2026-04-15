@@ -55,7 +55,8 @@ defmodule Arena.Map.Pets do
                   {:noreply, state}
 
                 npc ->
-                  state = Arena.NpcAi.despawn_pet(state, first_pet, npc)
+                  {state, effects} = Arena.NpcAi.despawn_pet(state, first_pet, npc)
+                  Arena.NpcAi.dispatch_effects(state, effects)
                   entity = %{entity | pet_ids: rest_pets}
                   state = %{state | players: Map.put(state.players, char_id, entity)}
                   msg(state, char_id, "Has liberado una mascota.")
@@ -84,7 +85,10 @@ defmodule Arena.Map.Pets do
             Enum.reduce(entity.pet_ids || [], state, fn instance_id, st ->
               case Map.get(st.npcs_live, instance_id) do
                 nil -> st
-                npc -> Arena.NpcAi.despawn_pet(st, instance_id, npc)
+                npc ->
+                  {st, effects} = Arena.NpcAi.despawn_pet(st, instance_id, npc)
+                  Arena.NpcAi.dispatch_effects(st, effects)
+                  st
               end
             end)
 

@@ -215,7 +215,7 @@ defmodule Arena.InvisibilityNpcSpellAuditTest do
         player_invisible: true
       )
 
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
       npc = state.npcs_live[1]
 
       assert npc.target_id == nil,
@@ -234,7 +234,7 @@ defmodule Arena.InvisibilityNpcSpellAuditTest do
         target_id: 7
       )
 
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
       npc = state.npcs_live[1]
 
       assert npc.target_id == nil,
@@ -253,7 +253,7 @@ defmodule Arena.InvisibilityNpcSpellAuditTest do
         player_dead: true
       )
 
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
       npc = state.npcs_live[1]
 
       assert npc.target_id == nil,
@@ -271,7 +271,7 @@ defmodule Arena.InvisibilityNpcSpellAuditTest do
         target_id: 7
       )
 
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
       npc = state.npcs_live[1]
 
       assert npc.target_id == nil,
@@ -289,7 +289,7 @@ defmodule Arena.InvisibilityNpcSpellAuditTest do
         player_y: 50
       )
 
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
       npc = state.npcs_live[1]
 
       assert npc.target_id == nil,
@@ -305,7 +305,7 @@ defmodule Arena.InvisibilityNpcSpellAuditTest do
         player_y: 50
       )
 
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
       npc = state.npcs_live[1]
 
       assert npc.target_id == 7,
@@ -357,7 +357,7 @@ defmodule Arena.InvisibilityNpcSpellAuditTest do
         next_attack_at: future
       )
 
-      state_after = NpcAi.tick(state)
+      {state_after, _effects} = NpcAi.tick(state)
       # Player HP should be unchanged (no attack happened)
       player = state_after.players[7]
       assert player.hp == 100, "NPC should not attack during cooldown"
@@ -368,7 +368,7 @@ defmodule Arena.InvisibilityNpcSpellAuditTest do
     test "tick with no players only processes respawns" do
       state = make_npc_ai_state(no_players: true)
       # Should not crash and NPC should keep same state
-      state_after = NpcAi.tick(state)
+      {state_after, _effects} = NpcAi.tick(state)
       assert state_after.npcs_live[1].target_id == nil
     end
   end

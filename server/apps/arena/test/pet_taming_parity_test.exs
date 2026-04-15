@@ -103,7 +103,7 @@ defmodule Arena.PetTamingParityTest do
       owner = make_player(x: 50, y: 50)
       state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
 
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
 
       # Pet should still exist
       assert Map.has_key?(state.npcs_live, 1), "Pet should remain alive when owner is on map"
@@ -115,7 +115,7 @@ defmodule Arena.PetTamingParityTest do
       owner = make_player(x: 50, y: 50)
       state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
 
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
 
       # Pet should be removed from npcs_live
       refute Map.has_key?(state.npcs_live, 1), "Pet should be despawned when owner is not on map"
@@ -126,7 +126,7 @@ defmodule Arena.PetTamingParityTest do
       owner = make_player(x: 52, y: 50, dead: true)
       state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
 
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
 
       # Pet should remain in place (no movement toward dead owner)
       npc_after = state.npcs_live[1]
@@ -140,7 +140,7 @@ defmodule Arena.PetTamingParityTest do
       owner = make_player(x: 60, y: 50, dead: false)
       state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
 
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
 
       npc_after = state.npcs_live[1]
       assert npc_after.x == 50, "Pet in :stand mode should not move"
@@ -161,7 +161,7 @@ defmodule Arena.PetTamingParityTest do
       owner = make_player(x: 50, y: 50)
       state = make_state(players: %{7 => owner}, npcs: %{1 => dead_pet})
 
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
 
       # Pet should NOT have been respawned — owner_id != nil skips respawn
       npc_after = state.npcs_live[1]
@@ -191,7 +191,7 @@ defmodule Arena.PetTamingParityTest do
         npc_char_indices: %{100 => 1, 200 => 2}
       )
 
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
 
       # Pet's attack cooldown should have been consumed (proves attack path ran).
       # NOTE: the wild NPC's own process_single_npc in the same tick overwrites
@@ -214,7 +214,7 @@ defmodule Arena.PetTamingParityTest do
         npc_char_indices: %{100 => 1, 200 => 2}
       )
 
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
 
       # pet2 should be untouched
       assert state.npcs_live[2].hp == 100, "Pets should not attack other pets"
@@ -236,7 +236,7 @@ defmodule Arena.PetTamingParityTest do
       owner = make_player(x: 60, y: 50)
       state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
 
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
 
       npc_after = state.npcs_live[1]
       # Pet should have attempted to move toward owner (x increased toward 60)
@@ -253,7 +253,7 @@ defmodule Arena.PetTamingParityTest do
       owner = make_player(x: 53, y: 50)
       state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
 
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
 
       npc_after = state.npcs_live[1]
       # When within follow distance AND no wild hostiles nearby, the pet
@@ -385,7 +385,7 @@ defmodule Arena.PetTamingParityTest do
       owner = make_player(pet_ids: [1])
       state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
 
-      state = NpcAi.despawn_pet(state, 1, pet)
+      {state, _effects} = NpcAi.despawn_pet(state, 1, pet)
 
       refute Map.has_key?(state.npcs_live, 1),
              "despawn_pet should remove NPC entirely from npcs_live"
@@ -400,7 +400,7 @@ defmodule Arena.PetTamingParityTest do
       occupancy = Arena.Map.Helpers.set_occupancy(state.occupancy, 10, 10, {:npc, 1})
       state = %{state | occupancy: occupancy}
 
-      state = NpcAi.despawn_pet(state, 1, pet)
+      {state, _effects} = NpcAi.despawn_pet(state, 1, pet)
 
       assert Arena.Map.Helpers.get_occupancy(state.occupancy, 10, 10) == nil,
              "despawn_pet should clear occupancy"
@@ -556,7 +556,7 @@ defmodule Arena.PetTamingParityTest do
 
       # With no players, tick short-circuits to process_respawns only.
       # Pet with owner_id should not respawn, and should not crash.
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
       # Pet remains in npcs_live (respawn logic skips pets)
       assert Map.has_key?(state.npcs_live, 1)
     end
@@ -565,7 +565,7 @@ defmodule Arena.PetTamingParityTest do
       owner = make_player()
       state = make_state(players: %{7 => owner}, npcs: %{})
 
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
       assert state.npcs_live == %{}
     end
 
@@ -580,7 +580,7 @@ defmodule Arena.PetTamingParityTest do
         npc_char_indices: %{100 => 1, 200 => 2}
       )
 
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
 
       # Both pets should have attempted to follow (next_move_at advanced)
       assert state.npcs_live[1].next_move_at > -1_000_000_000_000,
@@ -611,7 +611,7 @@ defmodule Arena.PetTamingParityTest do
         npc_char_indices: %{100 => 1, 200 => 2}
       )
 
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
 
       # Wild NPC should respawn (if tile is free and def exists)
       _wild_after = state.npcs_live[1]

@@ -1,7 +1,14 @@
 defmodule Arena.NpcAi do
   @moduledoc """
-  NPC AI tick logic. Pure function that takes and returns MapServer state.
+  NPC AI tick logic. Pure functions that take MapServer state and return
+  `{state, effects}` where effects is a list of side-effect tuples.
   Called every 500ms from MapServer's :npc_ai_tick handler.
+
+  ## Effect types
+
+  - `{:broadcast_visible, x, y, raw}` — send raw packet to all players who can see (x, y)
+  - `{:send_to_session, char_id, raw}` — send raw packet to a specific player session
+  - `{:broadcast_character_change, entity}` — broadcast a character_change packet for an entity
   """
 
   require Logger
@@ -14,34 +21,61 @@ defmodule Arena.NpcAi do
   @aggro_range 10
   @leash_distance 15
 
-  @doc "Process one AI tick for all NPCs on this map."
+  # ---- Effect Dispatcher ----
+
+  @doc """
+  Dispatch a list of effects produced by AI functions.
+  Each effect is a tuple describing a side-effect to perform.
+  """
+  def dispatch_effects(state, effects) do
+    Enum.each(effects, fn
+      {:broadcast_visible, x, y, raw} ->
+        Helpers.broadcast_visible_all(state, x, y, fn pid -> send(pid, {:send_raw, raw}) end)
+
+      {:send_to_session, char_id, raw} ->
+        Helpers.send_to_session(state.sessions, char_id, {:send_raw, raw})
+
+      {:broadcast_character_change, entity} ->
+        Helpers.broadcast_character_change(state, entity)
+    end)
+  end
+
+  # ---- Public API ----
+
+  @doc "Process one AI tick for all NPCs on this map. Returns `{state, effects}`."
   def tick(state) do
     # Short-circuit if no players on map
     if map_size(state.players) == 0 do
-      process_respawns(state, System.monotonic_time(:millisecond))
+      process_respawns(state, System.monotonic_time(:millisecond), [])
     else
       now = System.monotonic_time(:millisecond)
 
-      state
-      |> process_respawns(now)
-      |> process_alive_npcs(now)
+      {state, effects} = process_respawns(state, now, [])
+      process_alive_npcs(state, now, effects)
     end
+  end
+
+  @doc false
+  def despawn_pet(state, instance_id, npc) do
+    # Delegate to consolidated NPC death handler (pet despawn — no killer, no rewards)
+    state = Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :pet)
+    {state, []}
   end
 
   # --- Respawns ---
 
-  defp process_respawns(state, now) do
-    Enum.reduce(state.npcs_live, state, fn {instance_id, npc}, state ->
+  defp process_respawns(state, now, effects) do
+    Enum.reduce(state.npcs_live, {state, effects}, fn {instance_id, npc}, {state, effects} ->
       # Pets don't respawn — they are removed on death/despawn
       if not npc.alive and npc.respawn_at != nil and now >= npc.respawn_at and npc.owner_id == nil do
-        respawn_npc(state, instance_id, npc)
+        respawn_npc(state, instance_id, npc, effects)
       else
-        state
+        {state, effects}
       end
     end)
   end
 
-  defp respawn_npc(state, instance_id, npc) do
+  defp respawn_npc(state, instance_id, npc, effects) do
     npc_def = GameData.get_npc(npc.npc_id)
     x = npc.spawn_x
     y = npc.spawn_y
@@ -73,69 +107,73 @@ defmodule Arena.NpcAi do
       state = %{state | occupancy: occupancy}
       state = put_in(state.npcs_live[instance_id], npc)
 
-      # Broadcast NPC creation to nearby players
-      if npc_def do
-        raw = Encoder.encode(Arena.Map.Helpers.npc_create_packet(npc, npc_def))
-        broadcast_to_nearby_players(state, x, y, raw)
-      end
+      # Collect broadcast effect for NPC creation
+      effects =
+        if npc_def do
+          raw = Encoder.encode(Arena.Map.Helpers.npc_create_packet(npc, npc_def))
+          effects ++ [{:broadcast_visible, x, y, raw}]
+        else
+          effects
+        end
 
-      state
+      {state, effects}
     else
       # Spawn blocked, try again next tick
-      state
+      {state, effects}
     end
   end
 
   # --- Alive NPC processing ---
 
-  defp process_alive_npcs(state, now) do
-    Enum.reduce(state.npcs_live, state, fn {instance_id, npc}, state ->
+  defp process_alive_npcs(state, now, effects) do
+    Enum.reduce(state.npcs_live, {state, effects}, fn {instance_id, npc}, {state, effects} ->
       if npc.alive do
         npc_def = GameData.get_npc(npc.npc_id)
-        process_single_npc(state, instance_id, npc, npc_def, now)
+        process_single_npc(state, instance_id, npc, npc_def, now, effects)
       else
-        state
+        {state, effects}
       end
     end)
   end
 
   # Pet AI — owner_id is set (must match before nil npc_def catch-all)
-  defp process_single_npc(state, instance_id, %{owner_id: owner_id} = npc, npc_def, now) when owner_id != nil do
-    process_pet_npc(state, instance_id, npc, npc_def, now)
+  defp process_single_npc(state, instance_id, %{owner_id: owner_id} = npc, npc_def, now, effects)
+       when owner_id != nil do
+    process_pet_npc(state, instance_id, npc, npc_def, now, effects)
   end
 
-  defp process_single_npc(state, _instance_id, _npc, nil, _now), do: state
+  defp process_single_npc(state, _instance_id, _npc, nil, _now, effects), do: {state, effects}
 
-  defp process_single_npc(state, instance_id, npc, npc_def, now) do
+  defp process_single_npc(state, instance_id, npc, npc_def, now, effects) do
     # Skip static/non-hostile NPCs with no target
     if npc_def.movement == 1 and not npc_def.hostile and npc.target_id == nil and
          not npc.returning_to_spawn do
-      state
+      {state, effects}
     else
       # Check leash: if NPC is returning to spawn, continue returning
       # If NPC is beyond leash distance from spawn, start returning
-      {state, npc} = check_leash(state, instance_id, npc, npc_def, now)
+      {state, npc, effects} = check_leash(state, instance_id, npc, npc_def, now, effects)
 
       if npc.returning_to_spawn do
         # NPC is returning to spawn — just walk toward spawn, no combat
         state = put_in(state.npcs_live[instance_id], npc)
-        state
+        {state, effects}
       else
         # Acquire or validate target
         npc = acquire_target(state, npc, npc_def)
 
         # Move toward target or random walk
-        {state, npc} = maybe_move_npc(state, instance_id, npc, npc_def, now)
+        {state, npc, effects} = maybe_move_npc(state, instance_id, npc, npc_def, now, effects)
 
         # Cast spell if available (before melee)
-        {state, npc} = maybe_cast_spell(state, instance_id, npc, npc_def, now)
+        {state, npc, effects} = maybe_cast_spell(state, instance_id, npc, npc_def, now, effects)
 
         # Persist npc updates (target_id, spell cooldowns) before attack
         # so maybe_attack's re-read from state sees the current npc
         state = put_in(state.npcs_live[instance_id], npc)
 
         # Attack if adjacent to target
-        maybe_attack(state, instance_id, npc, npc_def, now)
+        maybe_attack(state, instance_id, npc, npc_def, now, effects)
       end
     end
   end
@@ -147,7 +185,7 @@ defmodule Arena.NpcAi do
     max(abs(npc.x - npc.spawn_x), abs(npc.y - npc.spawn_y))
   end
 
-  defp check_leash(state, instance_id, npc, npc_def, now) do
+  defp check_leash(state, instance_id, npc, npc_def, now, effects) do
     cond do
       # Already returning — check if we've reached spawn
       npc.returning_to_spawn ->
@@ -155,17 +193,20 @@ defmodule Arena.NpcAi do
           # Arrived at spawn: heal to full, stop returning
           npc = %{npc | hp: npc.max_hp, returning_to_spawn: false}
           state = put_in(state.npcs_live[instance_id], npc)
-          {state, npc}
+          {state, npc, effects}
         else
           # Keep walking toward spawn
           interval = max(npc_def.intervalo_movimiento, 200)
 
           if now >= npc.next_move_at do
             {dx, dy} = direction_toward(npc.x, npc.y, npc.spawn_x, npc.spawn_y)
-            {state, npc} = move_npc_to(state, instance_id, npc, npc.x + dx, npc.y + dy, now + interval)
-            {state, npc}
+
+            {state, npc, effects} =
+              move_npc_to(state, instance_id, npc, npc.x + dx, npc.y + dy, now + interval, effects)
+
+            {state, npc, effects}
           else
-            {state, npc}
+            {state, npc, effects}
           end
         end
 
@@ -176,16 +217,19 @@ defmodule Arena.NpcAi do
 
         if now >= npc.next_move_at do
           {dx, dy} = direction_toward(npc.x, npc.y, npc.spawn_x, npc.spawn_y)
-          {state, npc} = move_npc_to(state, instance_id, npc, npc.x + dx, npc.y + dy, now + interval)
-          {state, npc}
+
+          {state, npc, effects} =
+            move_npc_to(state, instance_id, npc, npc.x + dx, npc.y + dy, now + interval, effects)
+
+          {state, npc, effects}
         else
           state = put_in(state.npcs_live[instance_id], npc)
-          {state, npc}
+          {state, npc, effects}
         end
 
       # Within leash distance — normal behavior
       true ->
-        {state, npc}
+        {state, npc, effects}
     end
   end
 
@@ -195,16 +239,17 @@ defmodule Arena.NpcAi do
   @pet_idle_range 3
   @pet_aggro_range 8
 
-  defp process_pet_npc(state, instance_id, npc, npc_def, now) do
+  defp process_pet_npc(state, instance_id, npc, npc_def, now, effects) do
     case Map.get(state.players, npc.owner_id) do
       nil ->
         # Owner left the map — despawn the pet
-        despawn_pet(state, instance_id, npc)
+        {state, pet_effects} = despawn_pet(state, instance_id, npc)
+        {state, effects ++ pet_effects}
 
       owner ->
         if owner.dead or npc.pet_mode == :stand do
           # Owner is dead or pet is in stand mode — idle in place
-          state
+          {state, effects}
         else
           dist_x = abs(npc.x - owner.x)
           dist_y = abs(npc.y - owner.y)
@@ -215,10 +260,13 @@ defmodule Arena.NpcAi do
             dist_x > @pet_follow_distance or dist_y > @pet_follow_distance ->
               if now >= npc.next_move_at do
                 {dx, dy} = direction_toward(npc.x, npc.y, owner.x, owner.y)
-                {state, _npc} = move_npc_to(state, instance_id, npc, npc.x + dx, npc.y + dy, now + interval)
-                state
+
+                {state, _npc, effects} =
+                  move_npc_to(state, instance_id, npc, npc.x + dx, npc.y + dy, now + interval, effects)
+
+                {state, effects}
               else
-                state
+                {state, effects}
               end
 
             # Look for nearby hostile wild NPC to attack
@@ -226,18 +274,21 @@ defmodule Arena.NpcAi do
               case find_nearest_wild_npc(state, npc) do
                 nil ->
                   # No enemy nearby — idle with random movement
-                  pet_idle(state, instance_id, npc, owner, now, interval)
+                  pet_idle(state, instance_id, npc, owner, now, interval, effects)
 
                 {target_instance_id, target_npc} ->
                   if adjacent?(npc.x, npc.y, target_npc.x, target_npc.y) do
-                    maybe_pet_attack(state, instance_id, npc, npc_def, now, target_instance_id, target_npc)
+                    maybe_pet_attack(state, instance_id, npc, npc_def, now, target_instance_id, target_npc, effects)
                   else
                     if now >= npc.next_move_at do
                       {dx, dy} = direction_toward(npc.x, npc.y, target_npc.x, target_npc.y)
-                      {state, _npc} = move_npc_to(state, instance_id, npc, npc.x + dx, npc.y + dy, now + interval)
-                      state
+
+                      {state, _npc, effects} =
+                        move_npc_to(state, instance_id, npc, npc.x + dx, npc.y + dy, now + interval, effects)
+
+                      {state, effects}
                     else
-                      state
+                      {state, effects}
                     end
                   end
               end
@@ -246,21 +297,21 @@ defmodule Arena.NpcAi do
     end
   end
 
-  defp pet_idle(state, instance_id, npc, owner, now, interval) do
+  defp pet_idle(state, instance_id, npc, owner, now, interval, effects) do
     if now >= npc.next_move_at and :rand.uniform(4) == 1 do
       {dx, dy} = Enum.random([{0, -1}, {0, 1}, {-1, 0}, {1, 0}])
       nx = npc.x + dx
       ny = npc.y + dy
 
       if abs(nx - owner.x) <= @pet_idle_range and abs(ny - owner.y) <= @pet_idle_range do
-        {state, _npc} = move_npc_to(state, instance_id, npc, nx, ny, now + interval)
-        state
+        {state, _npc, effects} = move_npc_to(state, instance_id, npc, nx, ny, now + interval, effects)
+        {state, effects}
       else
         npc = %{npc | next_move_at: now + interval}
-        put_in(state.npcs_live[instance_id], npc)
+        {put_in(state.npcs_live[instance_id], npc), effects}
       end
     else
-      state
+      {state, effects}
     end
   end
 
@@ -281,9 +332,9 @@ defmodule Arena.NpcAi do
     |> Enum.min_by(fn {_id, n} -> abs(n.x - pet.x) + abs(n.y - pet.y) end, fn -> nil end)
   end
 
-  defp maybe_pet_attack(state, instance_id, npc, npc_def, now, target_instance_id, target_npc) do
+  defp maybe_pet_attack(state, instance_id, npc, npc_def, now, target_instance_id, target_npc, effects) do
     if now < npc.next_attack_at do
-      state
+      {state, effects}
     else
       interval = if npc_def, do: max(npc_def.intervalo_ataque, 500), else: 1500
       npc = %{npc | next_attack_at: now + interval}
@@ -291,7 +342,7 @@ defmodule Arena.NpcAi do
 
       # Broadcast swing
       swing_raw = Encoder.encode({:char_swing, %{char_index: npc.char_index}})
-      broadcast_to_nearby_players(state, npc.x, npc.y, swing_raw)
+      effects = effects ++ [{:broadcast_visible, npc.x, npc.y, swing_raw}]
 
       # Damage calc: use NPC min/max hit from def
       raw_damage =
@@ -309,17 +360,12 @@ defmodule Arena.NpcAi do
 
       if new_hp <= 0 do
         # Target NPC died — delegate to consolidated death handler
-        Arena.Map.NpcDeath.resolve_npc_death(state, target_instance_id, target_npc, source: :pet)
+        state = Arena.Map.NpcDeath.resolve_npc_death(state, target_instance_id, target_npc, source: :pet)
+        {state, effects}
       else
-        put_in(state.npcs_live[target_instance_id], target_npc)
+        {put_in(state.npcs_live[target_instance_id], target_npc), effects}
       end
     end
-  end
-
-  @doc false
-  def despawn_pet(state, instance_id, npc) do
-    # Delegate to consolidated NPC death handler (pet despawn — no killer, no rewards)
-    Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :pet)
   end
 
   # --- Target acquisition ---
@@ -354,7 +400,8 @@ defmodule Arena.NpcAi do
   defp find_nearest_player(state, npc) do
     state.players
     |> Enum.filter(fn {_id, p} ->
-      not p.dead and not p.invisible and not Map.get(p, :oculto, false) and abs(p.x - npc.x) <= @aggro_range and abs(p.y - npc.y) <= @aggro_range
+      not p.dead and not p.invisible and not Map.get(p, :oculto, false) and abs(p.x - npc.x) <= @aggro_range and
+        abs(p.y - npc.y) <= @aggro_range
     end)
     |> Enum.min_by(fn {_id, p} -> abs(p.x - npc.x) + abs(p.y - npc.y) end, fn -> nil end)
     |> case do
@@ -365,25 +412,25 @@ defmodule Arena.NpcAi do
 
   # --- Movement ---
 
-  defp maybe_move_npc(state, instance_id, npc, npc_def, now) do
+  defp maybe_move_npc(state, instance_id, npc, npc_def, now, effects) do
     interval = max(npc_def.intervalo_movimiento, 200)
 
     if now < npc.next_move_at do
-      {state, npc}
+      {state, npc, effects}
     else
       cond do
         # Chase target
         npc.target_id != nil ->
           case Map.get(state.players, npc.target_id) do
             nil ->
-              {state, npc}
+              {state, npc, effects}
 
             target ->
               if adjacent?(npc.x, npc.y, target.x, target.y) do
-                {state, npc}
+                {state, npc, effects}
               else
                 {dx, dy} = direction_toward(npc.x, npc.y, target.x, target.y)
-                move_npc_to(state, instance_id, npc, npc.x + dx, npc.y + dy, now + interval)
+                move_npc_to(state, instance_id, npc, npc.x + dx, npc.y + dy, now + interval, effects)
               end
           end
 
@@ -396,23 +443,23 @@ defmodule Arena.NpcAi do
 
             # Stay near spawn
             if abs(nx - npc.spawn_x) <= 5 and abs(ny - npc.spawn_y) <= 5 do
-              move_npc_to(state, instance_id, npc, nx, ny, now + interval)
+              move_npc_to(state, instance_id, npc, nx, ny, now + interval, effects)
             else
               npc = %{npc | next_move_at: now + interval}
               state = put_in(state.npcs_live[instance_id], npc)
-              {state, npc}
+              {state, npc, effects}
             end
           else
-            {state, npc}
+            {state, npc, effects}
           end
 
         true ->
-          {state, npc}
+          {state, npc, effects}
       end
     end
   end
 
-  defp move_npc_to(state, instance_id, npc, nx, ny, next_move_at) do
+  defp move_npc_to(state, instance_id, npc, nx, ny, next_move_at, effects) do
     if nx >= 1 and nx <= Helpers.map_width() and ny >= 1 and ny <= Helpers.map_height() and
          TileGrid.is_walkable(state.map_id, nx, ny) and
          Helpers.get_occupancy(state.occupancy, nx, ny) == nil do
@@ -423,15 +470,15 @@ defmodule Arena.NpcAi do
       state = %{state | occupancy: occupancy}
       state = put_in(state.npcs_live[instance_id], npc)
 
-      # Broadcast movement to nearby players
+      # Collect broadcast movement effect
       move_raw = Encoder.encode({:character_move, %{char_index: npc.char_index, x: nx, y: ny}})
-      broadcast_to_nearby_players(state, nx, ny, move_raw)
+      effects = effects ++ [{:broadcast_visible, nx, ny, move_raw}]
 
-      {state, npc}
+      {state, npc, effects}
     else
       npc = %{npc | next_move_at: next_move_at}
       state = put_in(state.npcs_live[instance_id], npc)
-      {state, npc}
+      {state, npc, effects}
     end
   end
 
@@ -439,21 +486,21 @@ defmodule Arena.NpcAi do
 
   @npc_spell_range 10
 
-  defp maybe_cast_spell(state, instance_id, npc, npc_def, now) do
+  defp maybe_cast_spell(state, instance_id, npc, npc_def, now, effects) do
     if npc_def.lanza_spells == 0 or npc_def.spells == [] or now < npc.next_spell_at do
-      {state, npc}
+      {state, npc, effects}
     else
       case select_npc_spell(state, npc, npc_def) do
         nil ->
-          {state, npc}
+          {state, npc, effects}
 
         {spell_def, spell_target} ->
           # VB6: cooldown uses NPC's attack interval, not a fixed constant
           cooldown = max(npc_def.intervalo_ataque, 2000)
           npc = %{npc | next_spell_at: now + cooldown}
           state = put_in(state.npcs_live[instance_id], npc)
-          state = apply_npc_spell(state, npc, npc_def, spell_def, spell_target)
-          {state, npc}
+          {state, effects} = apply_npc_spell(state, npc, npc_def, spell_def, spell_target, effects)
+          {state, npc, effects}
       end
     end
   end
@@ -495,33 +542,39 @@ defmodule Arena.NpcAi do
     {:found, spell_def, target} -> {spell_def, target}
   end
 
-  defp apply_npc_spell(state, npc, npc_def, spell_def, target) do
+  defp apply_npc_spell(state, npc, npc_def, spell_def, target, effects) do
     # Broadcast FX
-    if spell_def.fx_grh > 0 do
-      fx_char =
-        case target do
-          {:player, tid} ->
-            case Map.get(state.players, tid) do
-              nil -> npc.char_index
-              p -> p.char_index
-            end
+    effects =
+      if spell_def.fx_grh > 0 do
+        fx_char =
+          case target do
+            {:player, tid} ->
+              case Map.get(state.players, tid) do
+                nil -> npc.char_index
+                p -> p.char_index
+              end
 
-          {:self, _} ->
-            npc.char_index
-        end
+            {:self, _} ->
+              npc.char_index
+          end
 
-      fx_raw =
-        Encoder.encode(
-          {:create_fx, %{char_index: fx_char, fx: spell_def.fx_grh, loops: spell_def.loops, x: npc.x, y: npc.y}}
-        )
+        fx_raw =
+          Encoder.encode(
+            {:create_fx, %{char_index: fx_char, fx: spell_def.fx_grh, loops: spell_def.loops, x: npc.x, y: npc.y}}
+          )
 
-      broadcast_to_nearby_players(state, npc.x, npc.y, fx_raw)
-    end
+        effects ++ [{:broadcast_visible, npc.x, npc.y, fx_raw}]
+      else
+        effects
+      end
 
-    if spell_def.wav > 0 do
-      wav_raw = Encoder.encode({:play_wave, %{wav: spell_def.wav, x: npc.x, y: npc.y}})
-      broadcast_to_nearby_players(state, npc.x, npc.y, wav_raw)
-    end
+    effects =
+      if spell_def.wav > 0 do
+        wav_raw = Encoder.encode({:play_wave, %{wav: spell_def.wav, x: npc.x, y: npc.y}})
+        effects ++ [{:broadcast_visible, npc.x, npc.y, wav_raw}]
+      else
+        effects
+      end
 
     case target do
       {:self, _npc} ->
@@ -533,12 +586,12 @@ defmodule Arena.NpcAi do
 
         npc_now = Map.get(state.npcs_live, npc.instance_id, npc)
         healed = %{npc_now | hp: min(npc_now.hp + heal, npc_now.max_hp)}
-        put_in(state.npcs_live[npc.instance_id], healed)
+        {put_in(state.npcs_live[npc.instance_id], healed), effects}
 
       {:player, target_id} ->
         case Map.get(state.players, target_id) do
           nil ->
-            state
+            {state, effects}
 
           player ->
             cond do
@@ -549,49 +602,60 @@ defmodule Arena.NpcAi do
                 buff = %{type: :paralyzed, expires_at: now + div(duration_ms, 2)}
                 buffs = [buff | Enum.reject(player.buffs, &(&1.type == :paralyzed))]
                 player = %{player | paralyzed: true, buffs: buffs}
-                pid = Map.get(state.sessions, target_id)
 
-                if pid do
-                  send(
-                    pid,
-                    {:send_raw, Encoder.encode({:console_msg, %{message: "Has sido paralizado!", font_index: 5}})}
-                  )
-                end
+                effects =
+                  effects ++
+                    [
+                      {:send_to_session, target_id,
+                       Encoder.encode({:console_msg, %{message: "Has sido paralizado!", font_index: 5}})}
+                    ]
 
                 players = Map.put(state.players, target_id, player)
-                %{state | players: players}
+                {%{state | players: players}, effects}
 
               # Damage spell
               spell_def.sube_hp == 2 ->
                 damage = Combat.spell_damage(spell_def.min_hp, spell_def.max_hp, npc_def_level(npc_def), false)
                 new_hp = max(player.hp - damage, 0)
                 player = %{player | hp: new_hp}
-                pid = Map.get(state.sessions, target_id)
 
-                if pid do
-                  send(pid, {:send_raw, Encoder.encode({:npc_hit_user, %{damage: damage}})})
-                  send(pid, {:send_raw, Encoder.encode({:update_hp, %{min_hp: new_hp}})})
-                end
+                effects =
+                  effects ++
+                    [
+                      {:send_to_session, target_id, Encoder.encode({:npc_hit_user, %{damage: damage}})},
+                      {:send_to_session, target_id, Encoder.encode({:update_hp, %{min_hp: new_hp}})}
+                    ]
 
-                {player, state} =
+                {player, state, effects} =
                   if new_hp <= 0 do
-                    if pid do
-                      send(pid, {:send_raw, Encoder.encode({:npc_kill_user, %{}})})
-                      send(pid, {:send_raw, Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})})
-                    end
+                    effects =
+                      effects ++
+                        [
+                          {:send_to_session, target_id, Encoder.encode({:npc_kill_user, %{}})},
+                          {:send_to_session, target_id,
+                           Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})}
+                        ]
 
-                    Arena.Map.PlayerDeath.handle_player_death(state, target_id, player)
+                    {player, state} = Arena.Map.PlayerDeath.handle_player_death(state, target_id, player)
+                    {player, state, effects}
                   else
-                    {player, state}
+                    {player, state, effects}
                   end
 
                 players = Map.put(state.players, target_id, player)
                 state = %{state | players: players}
-                if player.dead, do: Helpers.broadcast_character_change(state, player)
-                state
+
+                effects =
+                  if player.dead do
+                    effects ++ [{:broadcast_character_change, player}]
+                  else
+                    effects
+                  end
+
+                {state, effects}
 
               true ->
-                state
+                {state, effects}
             end
         end
     end
@@ -604,20 +668,20 @@ defmodule Arena.NpcAi do
 
   # --- Attack ---
 
-  defp maybe_attack(state, instance_id, npc, npc_def, now) do
+  defp maybe_attack(state, instance_id, npc, npc_def, now, effects) do
     # Re-read npc from state (may have been updated by movement)
     npc = Map.get(state.npcs_live, instance_id, npc)
 
     if npc.target_id == nil or not npc.alive or now < npc.next_attack_at do
-      state
+      {state, effects}
     else
       case Map.get(state.players, npc.target_id) do
         nil ->
-          state
+          {state, effects}
 
         player ->
           if not adjacent?(npc.x, npc.y, player.x, player.y) do
-            state
+            {state, effects}
           else
             interval = max(npc_def.intervalo_ataque, 500)
             npc = %{npc | next_attack_at: now + interval}
@@ -625,7 +689,7 @@ defmodule Arena.NpcAi do
 
             # Broadcast swing
             swing_raw = Encoder.encode({:char_swing, %{char_index: npc.char_index}})
-            broadcast_to_nearby_players(state, npc.x, npc.y, swing_raw)
+            effects = effects ++ [{:broadcast_visible, npc.x, npc.y, swing_raw}]
 
             # Hit check
             def_class_id = Helpers.class_atom_to_id(player.class)
@@ -643,35 +707,46 @@ defmodule Arena.NpcAi do
               player = %{player | hp: new_hp}
 
               # Send damage to player
-              pid = Map.get(state.sessions, npc.target_id)
-
-              if pid do
-                send(pid, {:send_raw, Encoder.encode({:npc_hit_user, %{damage: final_damage}})})
-                send(pid, {:send_raw, Encoder.encode({:update_hp, %{min_hp: new_hp}})})
-              end
-
               target_char_id = npc.target_id
 
-              {player, state} =
+              effects =
+                effects ++
+                  [
+                    {:send_to_session, target_char_id, Encoder.encode({:npc_hit_user, %{damage: final_damage}})},
+                    {:send_to_session, target_char_id, Encoder.encode({:update_hp, %{min_hp: new_hp}})}
+                  ]
+
+              {player, state, effects} =
                 if new_hp <= 0 do
-                  if pid do
-                    send(pid, {:send_raw, Encoder.encode({:npc_kill_user, %{}})})
-                    send(pid, {:send_raw, Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})})
-                  end
+                  effects =
+                    effects ++
+                      [
+                        {:send_to_session, target_char_id, Encoder.encode({:npc_kill_user, %{}})},
+                        {:send_to_session, target_char_id,
+                         Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})}
+                      ]
 
                   npc = %{npc | target_id: nil}
                   state = put_in(state.npcs_live[instance_id], npc)
-                  Arena.Map.PlayerDeath.handle_player_death(state, target_char_id, player)
+                  {player, state} = Arena.Map.PlayerDeath.handle_player_death(state, target_char_id, player)
+                  {player, state, effects}
                 else
-                  {player, state}
+                  {player, state, effects}
                 end
 
               players = Map.put(state.players, target_char_id, player)
               state = %{state | players: players}
-              if player.dead, do: Helpers.broadcast_character_change(state, player)
-              state
+
+              effects =
+                if player.dead do
+                  effects ++ [{:broadcast_character_change, player}]
+                else
+                  effects
+                end
+
+              {state, effects}
             else
-              state
+              {state, effects}
             end
           end
       end
@@ -699,9 +774,5 @@ defmodule Arena.NpcAi do
 
     # Prefer the axis with greater distance
     if abs(x2 - x1) >= abs(y2 - y1), do: {dx, 0}, else: {0, dy}
-  end
-
-  defp broadcast_to_nearby_players(state, x, y, raw) do
-    Helpers.broadcast_visible_all(state, x, y, fn pid -> send(pid, {:send_raw, raw}) end)
   end
 end

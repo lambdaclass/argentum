@@ -128,7 +128,7 @@ defmodule Arena.NpcAiTest do
       npc_before = state.npcs_live[1]
       assert npc_before.target_id == 7
 
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
       npc_after = state.npcs_live[1]
 
       assert npc_after.target_id == nil,
@@ -140,7 +140,7 @@ defmodule Arena.NpcAiTest do
       state = make_leashed_state(npc_x: 70, npc_y: 50, spawn_x: 50, spawn_y: 50)
       npc_before = state.npcs_live[1]
 
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
       npc_after = state.npcs_live[1]
 
       # NPC should move toward spawn (x should decrease) or at minimum drop target
@@ -159,7 +159,7 @@ defmodule Arena.NpcAiTest do
       npc_before = state.npcs_live[1]
       assert npc_before.target_id == 7
 
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
       npc_after = state.npcs_live[1]
 
       assert npc_after.target_id == 7,
@@ -174,7 +174,7 @@ defmodule Arena.NpcAiTest do
       # Instead, let's test the full cycle: put NPC beyond leash, tick to start return,
       # then manually place it at spawn and tick again
       state_far = make_leashed_state(npc_x: 70, npc_y: 50, spawn_x: 50, spawn_y: 50, hp: 100, max_hp: 250)
-      state_far = NpcAi.tick(state_far)
+      {state_far, _effects} = NpcAi.tick(state_far)
       npc = state_far.npcs_live[1]
 
       # NPC should have dropped target and be returning
@@ -184,7 +184,7 @@ defmodule Arena.NpcAiTest do
       # Now simulate the NPC having reached spawn position
       npc = %{npc | x: 50, y: 50, returning_to_spawn: true}
       state_far = put_in(state_far.npcs_live[1], npc)
-      state_far = NpcAi.tick(state_far)
+      {state_far, _effects} = NpcAi.tick(state_far)
       npc_final = state_far.npcs_live[1]
 
       assert npc_final.hp == npc_final.max_hp, "NPC should heal to full HP at spawn"
@@ -195,7 +195,7 @@ defmodule Arena.NpcAiTest do
       # NPC at (65,65), spawn at (50,50) => Chebyshev distance = 15, right at boundary
       state = make_leashed_state(npc_x: 65, npc_y: 65, spawn_x: 50, spawn_y: 50, player_x: 67, player_y: 65)
 
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
       npc = state.npcs_live[1]
 
       # At exactly 15 tiles, NPC should still be chasing (leash triggers at > 15)
@@ -204,7 +204,7 @@ defmodule Arena.NpcAiTest do
       # NPC at (66,66), spawn at (50,50) => Chebyshev distance = 16, beyond boundary
       state2 = make_leashed_state(npc_x: 66, npc_y: 66, spawn_x: 50, spawn_y: 50, player_x: 68, player_y: 66)
 
-      state2 = NpcAi.tick(state2)
+      {state2, _effects} = NpcAi.tick(state2)
       npc2 = state2.npcs_live[1]
 
       assert npc2.target_id == nil, "NPC beyond leash distance should drop target"
@@ -221,7 +221,7 @@ defmodule Arena.NpcAiTest do
       assert npc_before.target_id == nil
 
       # Run one tick
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
 
       # NPC should now have the player as target
       npc_after = state.npcs_live[1]
@@ -232,7 +232,7 @@ defmodule Arena.NpcAiTest do
       state = make_state(npc_id: 559, npc_x: 50, npc_y: 50, player_x: 55, player_y: 50)
       npc_before = state.npcs_live[1]
 
-      state = NpcAi.tick(state)
+      {state, _effects} = NpcAi.tick(state)
       npc_after = state.npcs_live[1]
 
       # NPC should have moved toward the player (east, x+1)
@@ -244,7 +244,10 @@ defmodule Arena.NpcAiTest do
       state = make_state(npc_id: 559, npc_x: 50, npc_y: 50, player_x: 55, player_y: 50)
 
       # Run 5 ticks
-      state = Enum.reduce(1..5, state, fn _, s -> NpcAi.tick(s) end)
+      state = Enum.reduce(1..5, state, fn _, s ->
+        {s, _effects} = NpcAi.tick(s)
+        s
+      end)
 
       npc = state.npcs_live[1]
       assert npc.target_id == 7, "Target should persist across ticks"

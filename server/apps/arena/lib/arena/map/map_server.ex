@@ -726,7 +726,8 @@ defmodule Arena.Map.MapServer do
 
   @impl true
   def handle_info(:npc_ai_tick, state) do
-    state = Arena.NpcAi.tick(state)
+    {state, effects} = Arena.NpcAi.tick(state)
+    Arena.NpcAi.dispatch_effects(state, effects)
     Process.send_after(self(), :npc_ai_tick, @npc_ai_tick_ms)
     {:noreply, state}
   end
@@ -907,8 +908,13 @@ defmodule Arena.Map.MapServer do
 
     Enum.reduce(pet_ids, state, fn instance_id, state ->
       case Map.get(state.npcs_live, instance_id) do
-        nil -> state
-        npc -> Arena.NpcAi.despawn_pet(state, instance_id, npc)
+        nil ->
+          state
+
+        npc ->
+          {state, effects} = Arena.NpcAi.despawn_pet(state, instance_id, npc)
+          Arena.NpcAi.dispatch_effects(state, effects)
+          state
       end
     end)
   end
