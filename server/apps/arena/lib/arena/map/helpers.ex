@@ -370,4 +370,26 @@ defmodule Arena.Map.Helpers do
       nil -> :not_found
     end
   end
+
+  # ---- GM shared helpers ----
+
+  @doc "Send a console message to a specific player (GM feedback)."
+  def gm_console(state, char_id, message) do
+    send_to_session(
+      state.sessions,
+      char_id,
+      {:send_raw, Encoder.encode({:console_msg, %{message: message, font_index: 0}})}
+    )
+  end
+
+  @doc "Look up a player on this map by name (case-insensitive)."
+  def find_player_by_name(state, name) do
+    lower_name = String.downcase(name)
+
+    Enum.find_value(state.players, :not_found, fn {id, entity} ->
+      if String.downcase(entity.name) == lower_name do
+        {:ok, id, entity}
+      end
+    end)
+  end
 end

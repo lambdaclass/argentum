@@ -1,0 +1,186 @@
+defmodule Arena.Map.Gm.World do
+  @moduledoc "GM world/environment commands: weather, map flags, tiles, triggers, items, audio, etc."
+
+  alias Arena.Map.Helpers
+  alias Arena.Data.GameData
+  alias AoProtocol.Server.Encoder
+
+  def gm_toggle_weather(state, char_id, weather_type) do
+    label = if weather_type == :snow, do: "Nieve", else: "Niebla"
+    current = Map.get(state.meta, weather_type, false)
+    new_val = !current
+    meta = Map.put(state.meta, weather_type, new_val)
+    state = %{state | meta: meta}
+    status = if new_val, do: "activada", else: "desactivada"
+    Helpers.gm_console(state, char_id, "#{label} #{status} en este mapa.")
+    {:noreply, state}
+  end
+
+  def gm_change_map_flag(state, char_id, flag, value_str) do
+    new_val = value_str == "1"
+    meta = Map.put(state.meta, flag, new_val)
+    state = %{state | meta: meta}
+    status = if new_val, do: "activado", else: "desactivado"
+    Helpers.gm_console(state, char_id, "Map flag #{flag} #{status}.")
+    {:noreply, state}
+  end
+
+  def gm_tile_block_toggle(state, char_id, entity) do
+    {fx, fy} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
+    {blocked_tiles, status} =
+      if MapSet.member?(state.gm_blocked_tiles, {fx, fy}) do
+        {MapSet.delete(state.gm_blocked_tiles, {fx, fy}), "unblocked"}
+      else
+        {MapSet.put(state.gm_blocked_tiles, {fx, fy}), "blocked"}
+      end
+
+    state = %{state | gm_blocked_tiles: blocked_tiles}
+    Helpers.gm_console(state, char_id, "Tile (#{fx},#{fy}) #{status}.")
+    {:noreply, state}
+  end
+
+  def gm_set_trigger(state, char_id, entity, trigger_str) do
+    case Integer.parse(trigger_str) do
+      {trigger, _} ->
+        {fx, fy} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
+
+        triggers = Map.put(state.triggers, {fx, fy}, trigger)
+        state = %{state | triggers: triggers}
+
+        Helpers.gm_console(state, char_id, "Trigger #{trigger} set at (#{fx},#{fy}).")
+        {:noreply, state}
+
+      :error ->
+        Helpers.gm_console(state, char_id, "Invalid trigger value.")
+        {:noreply, state}
+    end
+  end
+
+  def gm_ask_trigger(state, char_id, entity) do
+    {fx, fy} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
+    trigger = Map.get(state.triggers, {fx, fy}, 0)
+    Helpers.gm_console(state, char_id, "Trigger at (#{fx},#{fy}): #{trigger}")
+    {:noreply, state}
+  end
+
+  def gm_items_in_floor(state, char_id) do
+    items = state.ground_items
+    count = map_size(items)
+    Helpers.gm_console(state, char_id, "Items on floor: #{count}")
+
+    Enum.take(items, 20)
+    |> Enum.each(fn {{x, y}, item} ->
+      item_def = GameData.get_item(item.item_id)
+      name = if item_def, do: item_def.name, else: "?"
+      Helpers.gm_console(state, char_id, "(#{x},#{y}): #{name} (#{item.item_id}) x#{item.amount}")
+    end)
+
+    {:noreply, state}
+  end
+
+  def gm_destroy_items(state, char_id, entity) do
+    {fx, fy} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
+    ground_items = Map.delete(state.ground_items, {fx, fy})
+    state = %{state | ground_items: ground_items}
+    Helpers.gm_console(state, char_id, "Items at (#{fx},#{fy}) destroyed.")
+    {:noreply, state}
+  end
+
+  def gm_destroy_all_area(state, char_id, entity) do
+    range = 10
+
+    ground_items =
+      Enum.reject(state.ground_items, fn {{x, y}, _item} ->
+        abs(x - entity.x) <= range and abs(y - entity.y) <= range
+      end)
+      |> Map.new()
+
+    state = %{state | ground_items: ground_items}
+    Helpers.gm_console(state, char_id, "All items in area destroyed.")
+    {:noreply, state}
+  end
+
+  def gm_clean_world(state, char_id) do
+    state = %{state | ground_items: %{}}
+    Helpers.gm_console(state, char_id, "All ground items on this map cleaned.")
+    {:noreply, state}
+  end
+
+  def gm_force_midi_map(state, char_id, midi_str, map_str) do
+    with {midi, _} <- Integer.parse(midi_str),
+         {_map_id, _} <- Integer.parse(map_str) do
+      raw = Encoder.encode({:play_midi, %{midi: midi, loops: -1}})
+      Enum.each(state.sessions, fn {_id, pid} -> send(pid, {:send_raw, raw}) end)
+      Helpers.gm_console(state, char_id, "MIDI #{midi} sent to map.")
+    else
+      _ -> Helpers.gm_console(state, char_id, "Usage: /FORCEMIDIMAP midi map")
+    end
+
+    {:noreply, state}
+  end
+
+  def gm_force_wave_map(state, char_id, wave_str, x_str, y_str, _map_str) do
+    with {wave, _} <- Integer.parse(wave_str),
+         {x, _} <- Integer.parse(x_str),
+         {y, _} <- Integer.parse(y_str) do
+      raw = Encoder.encode({:play_wave, %{wave: wave, x: x, y: y}})
+      Enum.each(state.sessions, fn {_id, pid} -> send(pid, {:send_raw, raw}) end)
+      Helpers.gm_console(state, char_id, "Wave #{wave} sent to map at (#{x},#{y}).")
+    else
+      _ -> Helpers.gm_console(state, char_id, "Usage: /FORCEWAVEMAP wave x y map")
+    end
+
+    {:noreply, state}
+  end
+
+  def gm_invisible(state, char_id, entity) do
+    new_invisible = not entity.invisible
+    entity = %{entity | invisible: new_invisible}
+    players = Map.put(state.players, char_id, entity)
+    state = %{state | players: players}
+
+    msg = if new_invisible, do: "You are now invisible.", else: "You are now visible."
+    Helpers.gm_console(state, char_id, msg)
+    Helpers.broadcast_character_change(state, entity)
+    {:noreply, state}
+  end
+
+  def gm_spawn_item(state, char_id, entity, item_str, amount_str) do
+    with {item_id, ""} <- Integer.parse(item_str),
+         {amount, ""} <- Integer.parse(amount_str),
+         true <- amount > 0 do
+      case Arena.Inventory.add_item(entity.inventory, item_id, amount) do
+        {:ok, new_inventory, slot} ->
+          entity = %{entity | inventory: new_inventory}
+          players = Map.put(state.players, char_id, entity)
+          state = %{state | players: players}
+
+          Helpers.send_inventory_slot(state.sessions, char_id, new_inventory, slot)
+          Helpers.gm_console(state, char_id, "Spawned #{amount}x item #{item_id} in slot #{slot + 1}.")
+          {:noreply, state}
+
+        {:gold, gold_amount} ->
+          entity = %{entity | gold: entity.gold + gold_amount}
+          players = Map.put(state.players, char_id, entity)
+          state = %{state | players: players}
+
+          Helpers.send_to_session(
+            state.sessions,
+            char_id,
+            {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
+          )
+
+          Helpers.gm_console(state, char_id, "Added #{gold_amount} gold.")
+          {:noreply, state}
+
+        {:error, :inventory_full} ->
+          Helpers.gm_console(state, char_id, "Inventory full.")
+          {:noreply, state}
+      end
+    else
+      _ ->
+        Helpers.gm_console(state, char_id, "Usage: /SPAWNITEM item_id [amount]")
+        {:noreply, state}
+    end
+  end
+end
