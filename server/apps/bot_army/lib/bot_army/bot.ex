@@ -54,6 +54,8 @@ defmodule BotArmy.Bot do
       profile: profile,
       min_action_interval: min_interval,
       max_action_interval: max_interval,
+      # Per-command packet counters (anti-cheat requires strictly increasing)
+      packet_counters: %{walk: 0, talk: 0, attack: 0},
       # Benchmark metrics
       packets_in: 0,
       bytes_in: 0,
@@ -94,7 +96,7 @@ defmodule BotArmy.Bot do
       {:ok, socket} ->
         Logger.debug("Bot #{state.char_id} connected")
         send(self(), :login)
-        {:noreply, %{state | socket: socket, connected: true, buffer: <<>>}}
+        {:noreply, %{state | socket: socket, connected: true, buffer: <<>>, packet_counters: %{walk: 0, talk: 0, attack: 0}}}
 
       {:error, reason} ->
         Logger.warning("Bot #{state.char_id} connect failed: #{inspect(reason)}")
@@ -126,7 +128,7 @@ defmodule BotArmy.Bot do
 
   @impl true
   def handle_info(:perform_action, state) do
-    {packet, action_type} = random_action(state)
+    {packet, action_type, state} = random_action(state)
 
     new_state =
       if packet do
@@ -205,9 +207,15 @@ defmodule BotArmy.Bot do
     %{state | map_id: map_id}
   end
 
-  defp handle_server_packet(<<73::little-16, _rest::binary>>, state) do
-    # error_msg from server - log it
-    Logger.debug("Bot #{state.char_id} received error_msg from server")
+  defp handle_server_packet(<<73::little-16, rest::binary>>, state) do
+    # error_msg from server - parse and log the message
+    msg =
+      case rest do
+        <<len::little-signed-16, text::binary-size(len), _::binary>> -> text
+        _ -> "(unparseable)"
+      end
+
+    Logger.warning("Bot #{state.char_id} received error_msg: #{msg}")
     state
   end
 
@@ -235,7 +243,7 @@ defmodule BotArmy.Bot do
   end
 
   # Walk (ID 78): packet_id(Int16) + heading(Int8) + packet_count(Int32)
-  defp build_walk(direction) do
+  defp build_walk(direction, count) do
     heading =
       case direction do
         :north -> 1
@@ -244,17 +252,17 @@ defmodule BotArmy.Bot do
         :west -> 4
       end
 
-    <<78::little-signed-16, heading::unsigned-8, 1::little-signed-32>>
+    <<78::little-signed-16, heading::unsigned-8, count::little-signed-32>>
   end
 
   # Talk (ID 75): packet_id(Int16) + message(String8) + packet_count(Int32)
-  defp build_talk(message) do
-    <<75::little-signed-16>> <> write_string8(message) <> <<1::little-signed-32>>
+  defp build_talk(message, count) do
+    <<75::little-signed-16>> <> write_string8(message) <> <<count::little-signed-32>>
   end
 
   # Attack (ID 80): packet_id(Int16) + packet_count(Int32)
-  defp build_attack do
-    <<80::little-signed-16, 1::little-signed-32>>
+  defp build_attack(count) do
+    <<80::little-signed-16, count::little-signed-32>>
   end
 
   defp write_string8(str) do
@@ -267,27 +275,48 @@ defmodule BotArmy.Bot do
   defp random_action(state) do
     case state.profile do
       :walk_only ->
-        {build_walk(Enum.random([:north, :south, :east, :west])), :walk}
+        next_action(state, :walk)
 
       :walk_chat ->
         if :rand.uniform(100) <= 80 do
-          {build_walk(Enum.random([:north, :south, :east, :west])), :walk}
+          next_action(state, :walk)
         else
-          {build_talk("Bot #{state.char_id} says hello!"), :chat}
+          next_action(state, :chat)
         end
 
       :idle ->
-        {nil, :idle}
+        {nil, :idle, state}
 
       _default ->
         roll = :rand.uniform(100)
         cond do
-          roll <= 50 -> {build_walk(Enum.random([:north, :south, :east, :west])), :walk}
-          roll <= 70 -> {build_talk("Bot #{state.char_id} says hello!"), :chat}
-          roll <= 90 -> {build_attack(), :attack}
-          true -> {nil, :idle}
+          roll <= 50 -> next_action(state, :walk)
+          roll <= 70 -> next_action(state, :chat)
+          roll <= 90 -> next_action(state, :attack)
+          true -> {nil, :idle, state}
         end
     end
+  end
+
+  defp next_action(state, :walk) do
+    counters = state.packet_counters
+    count = counters.walk + 1
+    packet = build_walk(Enum.random([:north, :south, :east, :west]), count)
+    {packet, :walk, %{state | packet_counters: %{counters | walk: count}}}
+  end
+
+  defp next_action(state, :chat) do
+    counters = state.packet_counters
+    count = counters.talk + 1
+    packet = build_talk("Bot #{state.char_id} says hello!", count)
+    {packet, :chat, %{state | packet_counters: %{counters | talk: count}}}
+  end
+
+  defp next_action(state, :attack) do
+    counters = state.packet_counters
+    count = counters.attack + 1
+    packet = build_attack(count)
+    {packet, :attack, %{state | packet_counters: %{counters | attack: count}}}
   end
 
   # --- Helpers ---

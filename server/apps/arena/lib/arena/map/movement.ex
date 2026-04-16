@@ -201,9 +201,11 @@ defmodule Arena.Map.Movement do
       Helpers.send_to_session(state.sessions, char_id, {:send_raw, pos_raw})
     end
 
-    Visibility.broadcast_visible(state, nx, ny, char_id, fn pid ->
+    recipients = Visibility.broadcast_visible(state, nx, ny, char_id, fn pid ->
       send(pid, {:send_raw, move_raw})
     end)
+
+    Arena.Metrics.inc_move(recipients)
 
     # NPC boundary updates: send nearby NPC creates to the mover's session.
     # The client handles duplicate creates as no-ops (same char_index overwrites).

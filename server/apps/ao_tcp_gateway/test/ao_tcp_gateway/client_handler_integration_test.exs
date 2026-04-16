@@ -531,7 +531,7 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
       on_exit(fn -> :gen_tcp.close(socket2) end)
 
       assert {73, error} = find_packet(packets2, 73)
-      assert error.message =~ "already taken"
+      assert error.message =~ "Already connected"
     end
   end
 

@@ -238,7 +238,7 @@ defmodule Mix.Tasks.Bench.Visibility do
 
   defp reset_bot_positions(count, map_id, spawn_mode) do
     start_id = 10_000
-    names = for i <- 0..(count - 1), do: "Player_#{start_id + i}"
+    names = for i <- 0..(count - 1), do: "Bot_#{start_id + i}"
 
     case spawn_mode do
       :center ->
