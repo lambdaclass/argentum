@@ -6,7 +6,6 @@ defmodule Arena.Map.Faction do
   alias AoProtocol.Server.Encoder
 
   @npc_type_enlistador 5
-  @chat_cooldown_ms 1000
 
   defp msg(state, char_id, message), do: Helpers.msg(state, char_id, message)
   defdelegate find_nearby_npc_of_type(state, entity, npc_types), to: Helpers
@@ -302,7 +301,7 @@ defmodule Arena.Map.Faction do
             msg(state, char_id, "No perteneces a ninguna faccion.")
             {:noreply, state}
 
-          now - entity.last_chat_at < @chat_cooldown_ms ->
+          now - entity.last_chat_at < chat_cooldown_ms() ->
             msg(state, char_id, "Estás hablando demasiado rápido.")
             {:noreply, state}
 
@@ -333,6 +332,8 @@ defmodule Arena.Map.Faction do
         {:noreply, state}
     end
   end
+
+  defp chat_cooldown_ms, do: Arena.Settings.get(:chat_cooldown_ms)
 
   defp faction_chat_style(:royal_army), do: {"MENSAJE_ARMADA", 0}
   defp faction_chat_style(:chaos_legion), do: {"MENSAJE_LEGION", 0}

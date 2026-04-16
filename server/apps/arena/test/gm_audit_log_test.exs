@@ -1,11 +1,30 @@
 defmodule Arena.GmAuditLogTest do
   @moduledoc "Tests that all state-modifying GM commands produce audit log entries."
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
   import Arena.Test.MapStateFactory
 
-  alias Arena.Map.Gm.{Moderation, Teleport, CharEdit, World}
+  alias Arena.Data.GameData
+  alias Arena.Map.Gm.{Moderation, Teleport, CharEdit, Events, World}
+
+  setup do
+    Arena.Events.TournamentServer.cancel()
+
+    for type <- [:xp_bonus, :gold_bonus, :drop_bonus, :custom] do
+      Arena.Events.EventManager.stop_event(type)
+    end
+
+    on_exit(fn ->
+      Arena.Events.TournamentServer.cancel()
+
+      for type <- [:xp_bonus, :gold_bonus, :drop_bonus, :custom] do
+        Arena.Events.EventManager.stop_event(type)
+      end
+    end)
+
+    :ok
+  end
 
   # Entity helper — COPY this exact entity map from the test files
   defp make_entity(overrides) do
@@ -75,6 +94,15 @@ defmodule Arena.GmAuditLogTest do
       occupancy: Keyword.get(opts, :occupancy, %{}),
       meta: %{rain: false, snow: false, sin_invi_ocul: false}
     )
+  end
+
+  defp find_valid_npc_id do
+    Enum.find_value(1..10_000, fn npc_id ->
+      case GameData.get_npc(npc_id) do
+        nil -> nil
+        _npc -> npc_id
+      end
+    end) || flunk("expected at least one NPC definition in GameData")
   end
 
   # ── Moderation ──
@@ -379,6 +407,110 @@ defmodule Arena.GmAuditLogTest do
 
       assert log =~ "[AUDIT] gm_action"
       assert log =~ "change_map_flag"
+    end
+  end
+
+  # ── Events ──
+
+  describe "Events audit logging" do
+    test "gm_tournament_start logs audit entry" do
+      gm = make_entity(%{name: "GM_Admin", gm: true})
+      state = make_map_state(%{1 => gm})
+
+      log = capture_log(fn ->
+        Events.gm_tournament_start(state, 1, gm, "8")
+      end)
+
+      assert log =~ "[AUDIT] gm_action"
+      assert log =~ "tournament_start"
+    end
+
+    test "gm_tournament_cancel logs audit entry when a tournament exists" do
+      gm = make_entity(%{name: "GM_Admin", gm: true})
+      state = make_map_state(%{1 => gm})
+      :ok = Arena.Events.TournamentServer.start_tournament(8, gm.name)
+
+      log = capture_log(fn ->
+        Events.gm_tournament_cancel(state, 1)
+      end)
+
+      assert log =~ "[AUDIT] gm_action"
+      assert log =~ "tournament_cancel"
+    end
+
+    test "gm_event_start logs audit entry" do
+      gm = make_entity(%{name: "GM_Admin", gm: true})
+      state = make_map_state(%{1 => gm})
+
+      log = capture_log(fn ->
+        Events.gm_event_start(state, 1, gm, "xp_bonus", "5")
+      end)
+
+      assert log =~ "[AUDIT] gm_action"
+      assert log =~ "event_start"
+    end
+
+    test "gm_event_stop logs audit entry when an event exists" do
+      gm = make_entity(%{name: "GM_Admin", gm: true})
+      state = make_map_state(%{1 => gm})
+      :ok = Arena.Events.EventManager.start_event(:xp_bonus, 5, gm.name)
+
+      log = capture_log(fn ->
+        Events.gm_event_stop(state, 1, "xp_bonus")
+      end)
+
+      assert log =~ "[AUDIT] gm_action"
+      assert log =~ "event_stop"
+    end
+
+    test "gm_faction_message logs audit entry" do
+      gm = make_entity(%{name: "GM_Admin", gm: true})
+      soldier = make_entity(%{name: "Soldier", gm: false, char_index: 2, faction: :royal_army})
+      state = make_map_state(%{1 => gm, 2 => soldier}, sessions: %{1 => self(), 2 => self()})
+
+      log = capture_log(fn ->
+        Events.gm_faction_message(state, 1, :royal_army, "Form up")
+      end)
+
+      assert log =~ "[AUDIT] gm_action"
+      assert log =~ "faction_message"
+    end
+
+    test "gm_talk_as_npc logs audit entry" do
+      gm = make_entity(%{name: "GM_Admin", gm: true})
+      npc_id = find_valid_npc_id()
+
+      npc = %{
+        npc_id: npc_id,
+        char_index: 9,
+        x: gm.x + 1,
+        y: gm.y,
+        alive: true
+      }
+
+      state =
+        make_map_state(%{1 => gm}, sessions: %{1 => self()})
+        |> Map.put(:npcs_live, %{77 => npc})
+
+      log = capture_log(fn ->
+        Events.gm_talk_as_npc(state, 1, gm, "Escuchen")
+      end)
+
+      assert log =~ "[AUDIT] gm_action"
+      assert log =~ "talk_as_npc"
+    end
+
+    test "gm_accept_council logs audit entry" do
+      gm = make_entity(%{name: "GM_Admin", gm: true})
+      target = make_entity(%{name: "CouncilHopeful", gm: false, char_index: 2})
+      state = make_map_state(%{1 => gm, 2 => target})
+
+      log = capture_log(fn ->
+        Events.gm_accept_council(state, 1, "CouncilHopeful", :royal)
+      end)
+
+      assert log =~ "[AUDIT] gm_action"
+      assert log =~ "accept_council"
     end
   end
 end

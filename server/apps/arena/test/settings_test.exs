@@ -32,6 +32,14 @@ defmodule Arena.SettingsTest do
       assert Arena.Settings.get(:nonexistent_setting, 42) == 42
     end
 
+    test "preserves explicit false default for unknown setting" do
+      assert Arena.Settings.get(:nonexistent_flag, false) == false
+    end
+
+    test "preserves explicit zero default for unknown setting" do
+      assert Arena.Settings.get(:nonexistent_counter, 0) == 0
+    end
+
     test "returns overridden value after set" do
       Arena.Settings.set(:xp_multiplier, 2.5)
       assert Arena.Settings.get(:xp_multiplier) == 2.5

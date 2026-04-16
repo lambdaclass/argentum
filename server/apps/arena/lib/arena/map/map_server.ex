@@ -46,7 +46,6 @@ defmodule Arena.Map.MapServer do
 
   @autosave_interval_ms 60_000
   @npc_ai_tick_ms 500
-  @regen_tick_ms 3000
 
   # ---- Public API ----
 
@@ -342,7 +341,7 @@ defmodule Arena.Map.MapServer do
           end
 
           Process.send_after(self(), :buff_tick, 1000)
-          Process.send_after(self(), :regen_tick, @regen_tick_ms)
+          Process.send_after(self(), :regen_tick, regen_tick_ms())
 
           {:noreply, state}
         end
@@ -752,7 +751,7 @@ defmodule Arena.Map.MapServer do
   @impl true
   def handle_info(:regen_tick, state) do
     state = StatusTicks.process_regen_tick(state)
-    Process.send_after(self(), :regen_tick, @regen_tick_ms)
+    Process.send_after(self(), :regen_tick, regen_tick_ms())
     {:noreply, state}
   end
 
@@ -779,6 +778,8 @@ defmodule Arena.Map.MapServer do
 
   @impl true
   def handle_info(_msg, state), do: {:noreply, state}
+
+  defp regen_tick_ms, do: Arena.Settings.get(:regen_tick_ms)
 
   @impl true
   def terminate(reason, state) do

@@ -6,8 +6,6 @@ defmodule Arena.Map.InventoryHandlers do
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
-  @item_use_cooldown_ms 500
-
   # ---- Inventory operations ----
 
   def handle_pick_up(state, char_id) do
@@ -296,7 +294,7 @@ defmodule Arena.Map.InventoryHandlers do
               else
                 case apply_item_use(entity, item_def, slot, state) do
                   {:ok, entity, state} ->
-                    entity = %{entity | next_item_use_at: now + @item_use_cooldown_ms}
+                    entity = %{entity | next_item_use_at: now + item_use_cooldown_ms()}
                     players = Map.put(state.players, char_id, entity)
                     state = %{state | players: players}
                     {:reply, :ok, state}
@@ -350,6 +348,8 @@ defmodule Arena.Map.InventoryHandlers do
         {:error, :not_usable}
     end
   end
+
+  defp item_use_cooldown_ms, do: Arena.Settings.get(:item_use_cooldown_ms)
 
   def apply_potion(entity, item_def) do
     amount = Enum.random(item_def.min_modificador..max(item_def.max_modificador, item_def.min_modificador))

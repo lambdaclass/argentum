@@ -14,7 +14,6 @@ defmodule Arena.Map.CombatHandlers do
   alias Arena.{Combat, CombatStats, Data.GameData}
   alias AoProtocol.Server.Encoder
 
-  @attack_cooldown_ms 1500
   @ranged_max_distance 18
 
   @req_weapon 0x001
@@ -65,7 +64,7 @@ defmodule Arena.Map.CombatHandlers do
               {tx, ty} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
               target = Helpers.get_occupancy(state.occupancy, tx, ty)
 
-              entity = %{entity | next_attack_at: now + @attack_cooldown_ms}
+              entity = %{entity | next_attack_at: now + attack_cooldown_ms()}
 
               swing_raw = Encoder.encode({:char_swing, %{char_index: entity.char_index}})
 
@@ -122,7 +121,7 @@ defmodule Arena.Map.CombatHandlers do
         else
           ammo_def = GameData.get_item(ammo_id)
           entity = consume_ammo(entity, state, char_id, ammo_slot_idx, ammo_id)
-          entity = %{entity | next_attack_at: now + @attack_cooldown_ms}
+          entity = %{entity | next_attack_at: now + attack_cooldown_ms()}
 
           swing_raw = Encoder.encode({:char_swing, %{char_index: entity.char_index}})
 
@@ -182,6 +181,8 @@ defmodule Arena.Map.CombatHandlers do
 
     entity
   end
+
+  defp attack_cooldown_ms, do: Arena.Settings.get(:attack_cooldown_ms)
 
   # Find an inventory slot for an item: existing stack if stackable, or first empty slot
   def find_inventory_slot(entity, item_id, stackable) do

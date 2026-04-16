@@ -4,7 +4,6 @@ defmodule Arena.Map.Chat do
   alias Arena.Map.{Helpers, Visibility}
   alias AoProtocol.Server.Encoder
 
-  @chat_cooldown_ms 1000
   @yell_range_x Application.compile_env(:arena, :aoi_range_x, 11) * 2
   @yell_range_y Application.compile_env(:arena, :aoi_range_y, 9) * 2
 
@@ -30,7 +29,7 @@ defmodule Arena.Map.Chat do
               )
               {:noreply, state}
 
-            now - entity.last_chat_at < @chat_cooldown_ms ->
+            now - entity.last_chat_at < chat_cooldown_ms() ->
               Helpers.send_to_session(
                 state.sessions,
                 char_id,
@@ -98,7 +97,7 @@ defmodule Arena.Map.Chat do
 
             {:noreply, state}
 
-          now - entity.last_chat_at < @chat_cooldown_ms ->
+          now - entity.last_chat_at < chat_cooldown_ms() ->
             Helpers.send_to_session(
               state.sessions,
               char_id,
@@ -146,4 +145,6 @@ defmodule Arena.Map.Chat do
         {:noreply, state}
     end
   end
+
+  defp chat_cooldown_ms, do: Arena.Settings.get(:chat_cooldown_ms)
 end

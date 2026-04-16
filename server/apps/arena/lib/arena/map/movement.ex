@@ -10,9 +10,6 @@ defmodule Arena.Map.Movement do
 
   require Logger
 
-  @base_walk_interval_ms 210
-  @speed_hack_threshold 3.0
-
   # ---- Movement ----
 
   @doc """
@@ -23,7 +20,7 @@ defmodule Arena.Map.Movement do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         now = System.monotonic_time(:millisecond)
-        min_interval = trunc(@base_walk_interval_ms / entity.speeding)
+        min_interval = trunc(base_walk_interval_ms() / entity.speeding)
 
         cond do
           entity.paralyzed or entity.immobilized or entity.penalty > 0 ->
@@ -43,7 +40,7 @@ defmodule Arena.Map.Movement do
                 do: entity.speed_hack_counter + delta,
                 else: max(entity.speed_hack_counter + delta * 5, 0.0)
 
-            if new_counter > @speed_hack_threshold do
+            if new_counter > speed_hack_threshold() do
               # Snap back — reject move, apply penalty
               Logger.warning("[ANTICHEAT] speed_hack char_id=#{char_id} counter=#{Float.round(new_counter, 2)}")
               entity = %{entity | speed_hack_counter: 0.0, next_move_at: now + min_interval * 2}
@@ -232,4 +229,7 @@ defmodule Arena.Map.Movement do
         {state, true}
     end
   end
+
+  defp base_walk_interval_ms, do: Arena.Settings.get(:base_walk_interval_ms)
+  defp speed_hack_threshold, do: Arena.Settings.get(:speed_hack_threshold)
 end

@@ -59,10 +59,10 @@ defmodule Arena.Settings do
   def get(key, default \\ nil) do
     case :ets.lookup(@table, key) do
       [{^key, value}] -> value
-      [] -> default || Map.get(@defaults, key)
+      [] -> fallback_value(key, default)
     end
   rescue
-    ArgumentError -> default || Map.get(@defaults, key)
+    ArgumentError -> fallback_value(key, default)
   end
 
   @doc "Set a runtime setting."
@@ -125,4 +125,7 @@ defmodule Arena.Settings do
     :ets.delete_all_objects(@table)
     {:reply, :ok, state}
   end
+
+  defp fallback_value(key, nil), do: Map.get(@defaults, key)
+  defp fallback_value(_key, default), do: default
 end
