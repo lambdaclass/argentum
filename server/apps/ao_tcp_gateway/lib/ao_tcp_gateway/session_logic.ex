@@ -106,6 +106,13 @@ defmodule AoTcpGateway.SessionLogic do
       entity = GameBackend.Characters.to_entity(character)
       char_id = entity.char_id
 
+      # Populate guild cache on the entity (one RPC per login is fine)
+      entity =
+        case Arena.GuildServer.get_guild(char_id) do
+          {:ok, guild} -> %{entity | guild_id: guild.id, guild_level: guild.level}
+          :not_in_guild -> entity
+        end
+
       case AoSession.register(account_id, char_id, self()) do
         :ok ->
           {state, packets} = enter_world(state, account_id, entity)
@@ -322,17 +329,32 @@ defmodule AoTcpGateway.SessionLogic do
             {state, []}
 
           :guild_accept ->
-            Arena.GuildServer.accept_invite(state.character_id)
+            case Arena.GuildServer.accept_invite(state.character_id) do
+              :ok ->
+                case Arena.GuildServer.get_guild(state.character_id) do
+                  {:ok, guild} ->
+                    Arena.Map.MapServer.update_guild_cache(state.map_id, state.character_id, guild.id, guild.level)
+                  _ -> :ok
+                end
+              _ -> :ok
+            end
             {state, []}
 
           :guild_leave ->
             Arena.GuildServer.leave(state.character_id)
+            Arena.Map.MapServer.update_guild_cache(state.map_id, state.character_id, 0, 0)
             {state, []}
 
           {:guild_kick, target_name} ->
             case AoSession.OnlineDirectory.lookup_by_name(target_name) do
               {:ok, target_id, _info} ->
                 Arena.GuildServer.kick(state.character_id, target_id)
+                # Update kicked player's guild cache
+                case AoSession.OnlineDirectory.lookup_by_id(target_id) do
+                  {:ok, info} ->
+                    Arena.Map.MapServer.update_guild_cache(info.map_id, target_id, 0, 0)
+                  _ -> :ok
+                end
               :not_found ->
                 send_console(state, "Jugador no encontrado.")
             end
@@ -946,12 +968,28 @@ defmodule AoTcpGateway.SessionLogic do
 
   def handle_command(state, {:guild_create, %{name: name, alignment: alignment}})
       when state.character_id != nil do
-    Arena.GuildServer.create_guild(state.character_id, name, alignment)
+    case Arena.GuildServer.create_guild(state.character_id, name, alignment) do
+      :ok ->
+        # Update guild cache on entity after successful creation
+        case Arena.GuildServer.get_guild(state.character_id) do
+          {:ok, guild} ->
+            Arena.Map.MapServer.update_guild_cache(state.map_id, state.character_id, guild.id, guild.level)
+
+          _ ->
+            :ok
+        end
+
+      _ ->
+        :ok
+    end
+
     {state, []}
   end
 
   def handle_command(state, {:guild_leave, _}) when state.character_id != nil do
     Arena.GuildServer.leave(state.character_id)
+    # Clear guild cache on entity after leaving
+    Arena.Map.MapServer.update_guild_cache(state.map_id, state.character_id, 0, 0)
     {state, []}
   end
 
@@ -982,7 +1020,14 @@ defmodule AoTcpGateway.SessionLogic do
 
   def handle_command(state, {:guild_kick_member, %{username: target_name}}) when state.character_id != nil do
     case AoSession.OnlineDirectory.lookup_by_name(target_name) do
-      {:ok, target_id, _info} -> Arena.GuildServer.kick(state.character_id, target_id)
+      {:ok, target_id, _info} ->
+        Arena.GuildServer.kick(state.character_id, target_id)
+        # Update kicked player's guild cache
+        case AoSession.OnlineDirectory.lookup_by_id(target_id) do
+          {:ok, info} ->
+            Arena.Map.MapServer.update_guild_cache(info.map_id, target_id, 0, 0)
+          _ -> :ok
+        end
       :not_found -> send_console(state, "Jugador no encontrado.")
     end
     {state, []}
@@ -1000,7 +1045,24 @@ defmodule AoTcpGateway.SessionLogic do
   end
 
   def handle_command(state, {:guild_accept_new_member, %{username: target_name}}) when state.character_id != nil do
-    Arena.GuildServer.accept_request(state.character_id, target_name)
+    case Arena.GuildServer.accept_request(state.character_id, target_name) do
+      :ok ->
+        # Update new member's guild cache if they're online
+        case AoSession.OnlineDirectory.lookup_by_name(target_name) do
+          {:ok, target_id, _info} ->
+            case Arena.GuildServer.get_guild(target_id) do
+              {:ok, guild} ->
+                case AoSession.OnlineDirectory.lookup_by_id(target_id) do
+                  {:ok, info} ->
+                    Arena.Map.MapServer.update_guild_cache(info.map_id, target_id, guild.id, guild.level)
+                  _ -> :ok
+                end
+              _ -> :ok
+            end
+          _ -> :ok
+        end
+      _ -> :ok
+    end
     {state, []}
   end
 

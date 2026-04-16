@@ -191,6 +191,10 @@ defmodule Arena.Map.MapServer do
 
   def modify_gold(map_id, char_id, amount), do: GenServer.cast(via(map_id), {:modify_gold, char_id, amount})
 
+  @doc "Update cached guild fields on a player entity. Used after guild join/leave/level-up."
+  def update_guild_cache(map_id, char_id, guild_id, guild_level),
+    do: GenServer.cast(via(map_id), {:update_guild_cache, char_id, guild_id, guild_level})
+
   @doc "Atomically deduct gold if player has enough. Returns {:ok, new_gold} or {:error, reason}."
   def deduct_gold(map_id, char_id, amount),
     do: GenServer.call(via(map_id), {:deduct_gold, char_id, amount})
@@ -676,6 +680,18 @@ defmodule Arena.Map.MapServer do
 
   @impl true
   def handle_cast({:modify_gold, char_id, amount}, state), do: Social.handle_modify_gold(state, char_id, amount)
+
+  @impl true
+  def handle_cast({:update_guild_cache, char_id, guild_id, guild_level}, state) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        entity = %{entity | guild_id: guild_id, guild_level: guild_level}
+        {:noreply, %{state | players: Map.put(state.players, char_id, entity)}}
+
+      :error ->
+        {:noreply, state}
+    end
+  end
 
   @impl true
   def handle_cast({:propose_marriage, char_id, target_char_id}, state),

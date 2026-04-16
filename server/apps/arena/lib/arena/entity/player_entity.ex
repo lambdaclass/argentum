@@ -112,6 +112,10 @@ defmodule Arena.Entity.PlayerEntity do
     gm: false,
     faction: :none,
 
+    # Guild cache (populated on login, updated on guild join/leave/level-up)
+    guild_id: 0,
+    guild_level: 0,
+
     # Cooldowns use System.monotonic_time(:millisecond).
     # Default to far-past so first action is always allowed.
     next_move_at: -1_000_000_000_000,
