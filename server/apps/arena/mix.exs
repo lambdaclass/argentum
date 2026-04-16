@@ -14,14 +14,25 @@ defmodule Arena.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
+      # Cross-app runtime calls that cannot be declared as Mix deps.
+      #
+      # GameBackend modules: arena uses game_backend as its persistence layer
+      # but cannot declare {:game_backend, in_umbrella: true} because
+      # game_backend already depends on arena (for Arena.Entity.PlayerEntity
+      # in Characters.to_entity/from_entity). Adding the dep would create a
+      # Mix cycle. TODO: extract PlayerEntity to a shared app to break this.
+      #
+      # AoTcpGateway/AoSession: sibling umbrella apps that arena calls at
+      # runtime (function dispatch, GenServer.call). Declaring them as deps
+      # would also create cycles since they already depend on arena.
       xref: [
         exclude: [
-          AoTcpGateway.BrowserApi,
-          AoSession.OnlineDirectory,
           GameBackend.Account,
           GameBackend.BankItems,
           GameBackend.Characters,
-          GameBackend.Guilds
+          GameBackend.Guilds,
+          AoTcpGateway.BrowserApi,
+          AoSession.OnlineDirectory
         ]
       ]
     ]
