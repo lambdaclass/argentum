@@ -15,13 +15,18 @@ defmodule AoSession do
            transport_pid: transport_pid,
            connected_at: System.monotonic_time(:millisecond)
          }) do
-      {:ok, _} -> :ok
-      {:error, {:already_registered, _}} -> {:error, :already_connected}
+      {:ok, _} ->
+        AoSession.SessionMonitor.monitor(char_id, transport_pid)
+        :ok
+
+      {:error, {:already_registered, _}} ->
+        {:error, :already_connected}
     end
   end
 
   @doc "Unregister a player session."
   def unregister(char_id) do
+    AoSession.SessionMonitor.demonitor(char_id)
     Registry.unregister(SessionRegistry, char_id)
   end
 

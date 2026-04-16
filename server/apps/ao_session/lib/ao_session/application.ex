@@ -7,7 +7,8 @@ defmodule AoSession.Application do
   def start(_type, _args) do
     children = [
       {Registry, keys: :unique, name: AoSession.SessionRegistry},
-      AoSession.OnlineDirectory
+      AoSession.OnlineDirectory,
+      AoSession.SessionMonitor
     ]
 
     opts = [strategy: :one_for_one, name: AoSession.Supervisor]
