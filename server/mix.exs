@@ -6,6 +6,7 @@ defmodule Argentum.MixProject do
       name: "argentum",
       apps_path: "apps",
       apps: [
+        :ao_entities,
         :ao_protocol,
         :ao_session,
         :ao_tcp_gateway,
@@ -21,6 +22,7 @@ defmodule Argentum.MixProject do
       default_release: :all,
       docs: [
         groups_for_modules: [
+          "AO Entities": ~r"AoEntities",
           "AO Protocol": ~r"AoProtocol",
           "AO Session": ~r"AoSession",
           "AO TCP Gateway": ~r"AoTcpGateway",
@@ -51,6 +53,7 @@ defmodule Argentum.MixProject do
     [
       argentum: [
         applications: [
+          ao_entities: :permanent,
           ao_protocol: :permanent,
           ao_session: :permanent,
           ao_tcp_gateway: :permanent,

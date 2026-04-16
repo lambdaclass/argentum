@@ -12,7 +12,7 @@ defmodule Arena.Map.AoiVisibilityTest do
 
   alias Arena.Map.MapServer
   alias Arena.Map.MapSupervisor
-  alias Arena.Entity.PlayerEntity
+  alias AoEntities.PlayerEntity
 
   # Use map 2 to avoid conflicts with map_server_bugs_test (which uses map 1)
   @test_map_id 2

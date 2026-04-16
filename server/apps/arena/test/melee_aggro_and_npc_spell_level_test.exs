@@ -6,7 +6,8 @@ defmodule Arena.MeleeAggroAndNpcSpellLevelTest do
   use ExUnit.Case, async: true
 
   alias Arena.Map.CombatHandlers
-  alias Arena.Entity.{NpcEntity, PlayerEntity}
+  alias AoEntities.PlayerEntity
+  alias Arena.Entity.NpcEntity
   alias Arena.Combat
 
   import Arena.Test.MapStateFactory

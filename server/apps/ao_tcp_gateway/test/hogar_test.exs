@@ -14,7 +14,7 @@ defmodule AoTcpGateway.HogarTest do
   use ExUnit.Case, async: true
 
   alias AoTcpGateway.SessionLogic
-  alias Arena.Entity.PlayerEntity
+  alias AoEntities.PlayerEntity
 
   # ---- Helpers ----
 

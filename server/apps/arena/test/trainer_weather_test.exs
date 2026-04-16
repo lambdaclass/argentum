@@ -10,7 +10,7 @@ defmodule Arena.TrainerWeatherTest do
   use ExUnit.Case, async: true
 
   alias Arena.Map.NpcInteraction
-  alias Arena.Entity.PlayerEntity
+  alias AoEntities.PlayerEntity
 
   import Arena.Test.MapStateFactory
 

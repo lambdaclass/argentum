@@ -1,9 +1,13 @@
-defmodule Arena.Entity.PlayerEntity do
+defmodule AoEntities.PlayerEntity do
   @moduledoc """
   Complete player entity state while online.
 
   Lives in MapServer state as `%{char_id => %PlayerEntity{}}`.
   Exported on map transfer/logout, imported on map enter/login.
+
+  This struct lives in the ao_entities shared app so that both arena
+  (runtime) and game_backend (persistence) can depend on it without
+  creating a circular dependency.
   """
 
   defstruct [

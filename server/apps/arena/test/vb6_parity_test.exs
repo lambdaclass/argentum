@@ -6,7 +6,7 @@ defmodule Arena.VB6ParityTest do
   use ExUnit.Case, async: true
 
   alias Arena.Combat
-  alias Arena.Entity.PlayerEntity
+  alias AoEntities.PlayerEntity
 
   setup_all do
     case Arena.Data.GameData.start_link() do

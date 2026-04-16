@@ -6,7 +6,7 @@ defmodule Arena.CharacterCreation do
   """
 
   alias Arena.Data.GameData
-  alias Arena.Entity.PlayerEntity
+  alias AoEntities.PlayerEntity
 
   @max_name_length 30
   @min_name_length 3

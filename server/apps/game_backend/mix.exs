@@ -34,14 +34,11 @@ defmodule GameBackend.MixProject do
       {:postgrex, ">= 0.0.0"},
       {:jason, "~> 1.2"},
       {:bcrypt_elixir, "~> 3.0"},
-      # KNOWN CIRCULAR DEP: game_backend depends on arena only for the
-      # Arena.Entity.PlayerEntity struct used in Characters.to_entity/1 and
-      # Characters.from_entity/1 (DB <-> in-memory entity conversion).
-      # Arena also depends on game_backend (the persistence layer).
-      # TODO: extract PlayerEntity to a shared app (e.g. ao_core) to break
-      # this cycle cleanly. See apps/arena/test/dependency_boundary_test.exs
-      # for guard-rail tests that prevent this coupling from spreading.
-      {:arena, in_umbrella: true}
+      {:plug_crypto, "~> 2.0"},
+      # PlayerEntity struct used in Characters.to_entity/1 and from_entity/1
+      # (DB <-> in-memory entity conversion). Extracted to ao_entities to
+      # break the former arena <-> game_backend circular dependency.
+      {:ao_entities, in_umbrella: true}
     ]
   end
 end

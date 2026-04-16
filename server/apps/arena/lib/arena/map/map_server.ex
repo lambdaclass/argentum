@@ -37,7 +37,7 @@ defmodule Arena.Map.MapServer do
   require Logger
 
   alias Arena.Map.CsmParser
-  alias Arena.Entity.PlayerEntity
+  alias AoEntities.PlayerEntity
   alias Arena.Entity.NpcEntity
   alias Arena.Map.{Helpers, Visibility, Movement, CombatHandlers, InventoryHandlers, Commerce, Bank, Trade, Social}
   alias Arena.Map.{Chat, Healing, Pets, QuestHandlers, Faction, NpcInteraction, GmCommands, StatusTicks}

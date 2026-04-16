@@ -7,7 +7,7 @@ defmodule Arena.GuildCacheTest do
 
   import Arena.Test.MapStateFactory
 
-  alias Arena.Entity.PlayerEntity
+  alias AoEntities.PlayerEntity
   alias Arena.Map.Helpers
 
   defp make_entity(overrides \\ %{}) do

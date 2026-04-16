@@ -23,7 +23,7 @@ defmodule Arena.IntervalTimerAuditTest do
   use ExUnit.Case
 
   alias Arena.Map.{MapServer, CombatHandlers, StatusTicks}
-  alias Arena.Entity.PlayerEntity
+  alias AoEntities.PlayerEntity
   alias AoProtocol.Server.Encoder
   import Arena.Test.MapStateFactory
 

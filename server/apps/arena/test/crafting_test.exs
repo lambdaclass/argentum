@@ -5,7 +5,7 @@ defmodule Arena.CraftingTest do
   use ExUnit.Case, async: true
 
   alias Arena.Map.Crafting
-  alias Arena.Entity.PlayerEntity
+  alias AoEntities.PlayerEntity
   alias Arena.Data.CraftingRecipes
 
   import Arena.Test.MapStateFactory

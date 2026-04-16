@@ -15,7 +15,8 @@ defmodule Arena.ConcurrentCombatTest do
   @moduletag :integration
 
   alias Arena.Map.MapServer
-  alias Arena.Entity.{PlayerEntity, NpcEntity}
+  alias AoEntities.PlayerEntity
+  alias Arena.Entity.NpcEntity
 
   # Use the benchmark map (999) — no pre-existing NPCs, all tiles walkable.
   @test_map_id 999

@@ -10,7 +10,7 @@ defmodule AoTcpGateway.RainToggleTest do
   use ExUnit.Case
 
   alias AoTcpGateway.SessionLogic
-  alias Arena.Entity.PlayerEntity
+  alias AoEntities.PlayerEntity
 
   # VB6 constants
   @thunder_wave_id 404

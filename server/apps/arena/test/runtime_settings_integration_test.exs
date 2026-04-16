@@ -11,7 +11,7 @@ defmodule Arena.RuntimeSettingsIntegrationTest do
   import Arena.Test.MapStateFactory
 
   alias Arena.Data.GameData
-  alias Arena.Entity.PlayerEntity
+  alias AoEntities.PlayerEntity
   alias Arena.Map.{Chat, CombatHandlers, Faction, InventoryHandlers, MapServer, Movement}
 
   setup do

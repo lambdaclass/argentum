@@ -12,7 +12,7 @@ defmodule AoTcpGateway.GmMessageTest do
   use ExUnit.Case
 
   alias AoTcpGateway.SessionLogic
-  alias Arena.Entity.PlayerEntity
+  alias AoEntities.PlayerEntity
 
   # FONTTYPE_GMMSG = 16 in the VB6 e_FontTypeNames enum (0-based)
   @fonttype_gmmsg 16

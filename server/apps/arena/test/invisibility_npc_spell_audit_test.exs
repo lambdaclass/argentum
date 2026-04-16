@@ -9,7 +9,8 @@ defmodule Arena.InvisibilityNpcSpellAuditTest do
   use ExUnit.Case, async: true
 
   alias Arena.NpcAi
-  alias Arena.Entity.{NpcEntity, PlayerEntity}
+  alias AoEntities.PlayerEntity
+  alias Arena.Entity.NpcEntity
   alias Arena.Map.Helpers
 
   import Arena.Test.MapStateFactory

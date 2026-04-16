@@ -18,9 +18,9 @@ defmodule Arena.MixProject do
       #
       # GameBackend modules: arena uses game_backend as its persistence layer
       # but cannot declare {:game_backend, in_umbrella: true} because
-      # game_backend already depends on arena (for Arena.Entity.PlayerEntity
-      # in Characters.to_entity/from_entity). Adding the dep would create a
-      # Mix cycle. TODO: extract PlayerEntity to a shared app to break this.
+      # game_backend already depends on arena. PlayerEntity has been extracted
+      # to ao_entities to break the compile-time cycle; the runtime calls
+      # below are the remaining cross-app references.
       #
       # AoTcpGateway/AoSession: sibling umbrella apps that arena calls at
       # runtime (function dispatch, GenServer.call). Declaring them as deps
@@ -57,6 +57,7 @@ defmodule Arena.MixProject do
       {:telemetry_poller, "~> 1.0"},
       {:jason, "~> 1.2"},
       {:rustler, "~> 0.36"},
+      {:ao_entities, in_umbrella: true},
       {:ao_protocol, in_umbrella: true},
       {:credo, "~> 1.7.12", only: [:dev, :test], runtime: false},
       {:plug_cowboy, "~> 2.5"}

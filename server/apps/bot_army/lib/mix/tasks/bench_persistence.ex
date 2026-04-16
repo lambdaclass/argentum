@@ -31,7 +31,7 @@ defmodule Mix.Tasks.Bench.Persistence do
 
   alias GameBackend.Characters
   alias GameBackend.Repo
-  alias Arena.Entity.PlayerEntity
+  alias AoEntities.PlayerEntity
 
   @shortdoc "Benchmark autosave throughput"
 

@@ -5,7 +5,7 @@ defmodule AoTcpGateway.StalePositionTest do
   """
   use ExUnit.Case, async: true
 
-  alias Arena.Entity.PlayerEntity
+  alias AoEntities.PlayerEntity
 
   # This tests the design invariant: session state.entity should NOT be
   # used as the source of truth for position data. The authoritative

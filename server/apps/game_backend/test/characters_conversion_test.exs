@@ -6,7 +6,7 @@ defmodule GameBackend.CharactersConversionTest do
   use ExUnit.Case, async: true
 
   alias GameBackend.Characters
-  alias Arena.Entity.PlayerEntity
+  alias AoEntities.PlayerEntity
 
   describe "from_entity/1" do
     test "includes name and account_id required by changeset" do

@@ -12,7 +12,7 @@ defmodule Arena.HungerThirstTest do
   use ExUnit.Case, async: true
 
   alias Arena.Map.StatusTicks
-  alias Arena.Entity.PlayerEntity
+  alias AoEntities.PlayerEntity
   import Arena.Test.MapStateFactory
 
   setup_all do

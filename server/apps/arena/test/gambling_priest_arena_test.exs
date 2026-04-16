@@ -15,7 +15,7 @@ defmodule Arena.GamblingPriestArenaTest do
   """
   use ExUnit.Case, async: true
 
-  alias Arena.Entity.PlayerEntity
+  alias AoEntities.PlayerEntity
   alias Arena.Data.NpcDef
 
   # ---- PlayerEntity gambling fields ----

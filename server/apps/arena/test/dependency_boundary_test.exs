@@ -4,69 +4,84 @@ defmodule Arena.DependencyBoundaryTest do
   from spreading beyond the known boundaries.
 
   Current dependency graph (umbrella level):
+    ao_entities          (shared struct app, no deps)
+    arena       -->  ao_entities   (compile dep for AoEntities.PlayerEntity)
+    game_backend -->  ao_entities  (compile dep for AoEntities.PlayerEntity)
     arena  -.->  game_backend   (runtime calls, suppressed via xref excludes)
     arena  -.->  ao_session     (runtime calls, suppressed via xref excludes)
     arena  -.->  ao_tcp_gateway (runtime calls, suppressed via xref excludes)
-    game_backend  -->  arena    (compile dep for Arena.Entity.PlayerEntity)
     ao_tcp_gateway -->  arena   (compile dep)
 
-  The arena <-> game_backend relationship is a known circular dependency:
-  game_backend depends on arena for the PlayerEntity struct, while arena calls
-  game_backend as its persistence layer. This cannot be expressed as a Mix dep
-  in both directions without creating a cycle.
-
-  TODO: extract PlayerEntity to a shared app (e.g. ao_core) to break the cycle.
-
-  These tests prevent the coupling from growing beyond its current bounds.
+  The former arena <-> game_backend circular dependency has been broken by
+  extracting PlayerEntity to ao_entities. These tests prevent regressions.
   """
   use ExUnit.Case, async: true
 
   @server_root Path.expand("../../../", __DIR__)
 
-  describe "game_backend Arena references are limited to the known coupling points" do
-    test "only GameBackend.Characters code references Arena.Entity.PlayerEntity" do
+  describe "game_backend does NOT depend on arena" do
+    test "game_backend/mix.exs does not list arena as a dependency" do
+      mix_path = Path.join(@server_root, "apps/game_backend/mix.exs")
+      content = File.read!(mix_path)
+
+      # Strip comments so we only check actual dep declarations
+      code_only = strip_comments(content)
+
+      refute code_only =~ ~r/\{:arena\b/,
+             "game_backend/mix.exs should not depend on :arena — use :ao_entities instead"
+    end
+
+    test "game_backend code has no Arena.* module references" do
       game_backend_lib = Path.join(@server_root, "apps/game_backend/lib")
 
-      {output, 0} =
+      {output, status} =
         System.cmd("grep", ["-rn", "Arena\\.", game_backend_lib],
           stderr_to_stdout: true
         )
 
-      lines = String.split(output, "\n", trim: true)
+      if status == 0 do
+        code_lines =
+          output
+          |> String.split("\n", trim: true)
+          |> Enum.reject(&is_doc_or_comment_line?/1)
 
-      # Separate code references from doc/comment references
-      code_lines = Enum.reject(lines, &is_doc_or_comment_line?/1)
-
-      # Every non-doc Arena reference in game_backend must be in characters.ex
-      # and must reference Arena.Entity.PlayerEntity (the known coupling point).
-      for line <- code_lines do
-        assert line =~ "characters.ex",
-               "Unexpected Arena reference outside characters.ex:\n  #{line}"
-
-        assert line =~ "Arena.Entity.PlayerEntity",
-               "Unexpected Arena module referenced in game_backend:\n  #{line}"
+        assert code_lines == [],
+               "game_backend references Arena modules (circular dep regression):\n" <>
+                 Enum.join(code_lines, "\n")
       end
 
-      # There should be no more than 7 code references (currently 6 in entity
-      # functions + 1 struct construction). If this grows, the coupling is
-      # spreading.
-      assert length(code_lines) <= 7,
-             "Arena references in game_backend grew beyond expected 7 " <>
-               "(found #{length(code_lines)}). " <>
-               "Review whether game_backend is accumulating new Arena dependencies."
+      # status == 1 means no matches — that's the expected case
     end
 
-    test "GameBackend.Guilds only mentions Arena in documentation strings" do
-      guilds_path =
-        Path.join(@server_root, "apps/game_backend/lib/game_backend/guilds.ex")
+    test "game_backend depends on ao_entities for PlayerEntity" do
+      mix_path = Path.join(@server_root, "apps/game_backend/mix.exs")
+      content = File.read!(mix_path)
 
-      content = File.read!(guilds_path)
+      assert content =~ "{:ao_entities, in_umbrella: true}",
+             "game_backend should depend on ao_entities"
 
-      # Strip all doc heredocs and comment lines, then check for Arena references
-      code_only = strip_docs_and_comments(content)
+      assert content =~ "PlayerEntity",
+             "game_backend/mix.exs should mention PlayerEntity as the reason for the dep"
+    end
+  end
 
-      refute code_only =~ ~r/Arena\./,
-             "GameBackend.Guilds has a non-documentation Arena reference"
+  describe "arena depends on ao_entities (not game_backend)" do
+    test "arena/mix.exs lists ao_entities as a dependency" do
+      mix_path = Path.join(@server_root, "apps/arena/mix.exs")
+      content = File.read!(mix_path)
+
+      assert content =~ "{:ao_entities, in_umbrella: true}",
+             "arena should depend on ao_entities for PlayerEntity"
+    end
+
+    test "arena/mix.exs does NOT list game_backend as a dependency" do
+      mix_path = Path.join(@server_root, "apps/arena/mix.exs")
+      content = File.read!(mix_path)
+
+      code_only = strip_comments(content)
+
+      refute code_only =~ ~r/\{:game_backend\b/,
+             "arena should not have a compile dep on game_backend (use xref excludes for runtime calls)"
     end
   end
 
@@ -78,10 +93,6 @@ defmodule Arena.DependencyBoundaryTest do
       if content =~ "xref:" do
         assert content =~ ~r/# .*cross-app runtime/i,
                "xref excludes in arena/mix.exs lack explanatory comments"
-
-        # GameBackend excludes should mention the cycle / TODO
-        assert content =~ ~r/# .*cycle/i,
-               "xref excludes should explain the Mix dependency cycle"
       end
     end
 
@@ -89,7 +100,6 @@ defmodule Arena.DependencyBoundaryTest do
       mix_path = Path.join(@server_root, "apps/arena/mix.exs")
       content = File.read!(mix_path)
 
-      # Extract the exclude list
       case Regex.run(~r/exclude:\s*\[([^\]]*)\]/s, content, capture: :all_but_first) do
         [block] ->
           allowed = ~w[
@@ -101,7 +111,6 @@ defmodule Arena.DependencyBoundaryTest do
             AoSession.OnlineDirectory
           ]
 
-          # Extract module names from the exclude block
           modules =
             Regex.scan(~r/([A-Z][\w.]+)/, block)
             |> Enum.map(&List.first/1)
@@ -118,73 +127,42 @@ defmodule Arena.DependencyBoundaryTest do
     end
   end
 
-  describe "known circular dep is documented" do
-    test "game_backend/mix.exs documents the arena dependency reason" do
-      mix_path = Path.join(@server_root, "apps/game_backend/mix.exs")
+  describe "ao_entities is a leaf app with no umbrella deps" do
+    test "ao_entities/mix.exs has no umbrella dependencies" do
+      mix_path = Path.join(@server_root, "apps/ao_entities/mix.exs")
       content = File.read!(mix_path)
 
-      assert content =~ "KNOWN CIRCULAR DEP",
-             "game_backend/mix.exs should document why it depends on arena"
-
-      assert content =~ "PlayerEntity",
-             "game_backend/mix.exs should mention PlayerEntity as the coupling point"
+      refute content =~ "in_umbrella: true",
+             "ao_entities should be a leaf app with no umbrella dependencies"
     end
 
-    test "game_backend only depends on arena for PlayerEntity" do
-      # This is a duplicate check from a different angle: verify at the
-      # source-code level that the only Arena.* usage is PlayerEntity.
-      game_backend_lib = Path.join(@server_root, "apps/game_backend/lib")
+    test "ao_entities defines the PlayerEntity struct" do
+      assert Code.ensure_loaded?(AoEntities.PlayerEntity),
+             "AoEntities.PlayerEntity module should be loadable"
 
-      {output, 0} =
-        System.cmd("grep", ["-rn", "Arena\\.", game_backend_lib],
-          stderr_to_stdout: true
-        )
-
-      code_lines =
-        output
-        |> String.split("\n", trim: true)
-        |> Enum.reject(&is_doc_or_comment_line?/1)
-
-      arena_modules =
-        code_lines
-        |> Enum.flat_map(fn line ->
-          Regex.scan(~r/(Arena\.\w[\w.]*)/, line) |> Enum.map(&List.first/1)
-        end)
-        |> Enum.uniq()
-
-      assert arena_modules == ["Arena.Entity.PlayerEntity"],
-             "game_backend references Arena modules beyond PlayerEntity: #{inspect(arena_modules)}"
+      assert function_exported?(AoEntities.PlayerEntity, :__struct__, 0),
+             "AoEntities.PlayerEntity should define a struct"
     end
   end
 
   # -- Helpers --
 
-  # Returns true if the grep output line is inside a doc string or comment.
   defp is_doc_or_comment_line?(grep_line) do
     case Regex.run(~r/:\d+:\s*(.*)$/, grep_line, capture: :all_but_first) do
       [content] ->
         trimmed = String.trim(content)
 
-        # Matches: comment lines, @moduledoc/@doc attributes, and lines
-        # that are clearly inside a heredoc doc string (indented prose).
         String.starts_with?(trimmed, "#") or
           trimmed =~ ~r/^@(moduledoc|doc)/ or
-          trimmed =~ ~r/^Provides .* `Arena\./ or
-          trimmed =~ ~r/^[A-Z][a-z].*`Arena\./
+          trimmed =~ ~r/^[A-Z][a-z].*`/ or
+          trimmed =~ ~r/^Provides .*`/
 
       _ ->
         false
     end
   end
 
-  # Strip @moduledoc/doc heredocs and comment lines from Elixir source.
-  defp strip_docs_and_comments(source) do
-    source
-    # Remove heredoc docs: @moduledoc """ ... """ and @doc """ ... """
-    |> String.replace(~r/@(?:moduledoc|doc)\s+\"\"\".*?\"\"\"/s, "")
-    # Remove single-line docs: @moduledoc "..." and @doc "..."
-    |> String.replace(~r/@(?:moduledoc|doc)\s+"[^"]*"/, "")
-    # Remove comment lines
-    |> String.replace(~r/^\s*#.*$/m, "")
+  defp strip_comments(source) do
+    String.replace(source, ~r/^\s*#.*$/m, "")
   end
 end

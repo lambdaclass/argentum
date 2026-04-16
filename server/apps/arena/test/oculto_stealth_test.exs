@@ -14,7 +14,7 @@ defmodule Arena.OcultoStealthTest do
   """
   use ExUnit.Case, async: true
 
-  alias Arena.Entity.PlayerEntity
+  alias AoEntities.PlayerEntity
 
   # ---- PlayerEntity struct defaults ----
 

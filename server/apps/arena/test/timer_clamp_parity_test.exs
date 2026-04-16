@@ -36,7 +36,7 @@ defmodule Arena.TimerClampParityTest do
 
   alias Arena.Map.{MapServer, CombatHandlers, StatusTicks}
   alias Arena.Data.{SpellDef, NpcDef}
-  alias Arena.Entity.PlayerEntity
+  alias AoEntities.PlayerEntity
   alias AoProtocol.Server.Encoder
 
   import Arena.Test.MapStateFactory

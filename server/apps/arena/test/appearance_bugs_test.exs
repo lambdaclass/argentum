@@ -14,7 +14,7 @@ defmodule Arena.AppearanceBugsTest do
   use ExUnit.Case, async: true
 
   alias Arena.Map.Helpers
-  alias Arena.Entity.PlayerEntity
+  alias AoEntities.PlayerEntity
   alias AoProtocol.Server.Encoder
 
   # ---- Bug 1: character_create_packet missing equipment fields ----

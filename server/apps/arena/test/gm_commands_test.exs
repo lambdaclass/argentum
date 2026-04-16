@@ -5,7 +5,7 @@ defmodule Arena.GmCommandsTest do
   use ExUnit.Case
 
   alias Arena.Map.MapServer
-  alias Arena.Entity.PlayerEntity
+  alias AoEntities.PlayerEntity
 
   @test_map_id 1
 

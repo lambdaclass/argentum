@@ -59,7 +59,7 @@ defmodule AoTcpGateway.MarriageTest do
         max_hp: 100
       }
 
-      player_a = %Arena.Entity.PlayerEntity{
+      player_a = %AoEntities.PlayerEntity{
         char_id: 1,
         name: "Alice",
         account_id: "acct_a",
@@ -69,7 +69,7 @@ defmodule AoTcpGateway.MarriageTest do
         marriage_proposal_target: nil
       }
 
-      player_b = %Arena.Entity.PlayerEntity{
+      player_b = %AoEntities.PlayerEntity{
         char_id: 2,
         name: "Bob",
         account_id: "acct_b",
@@ -172,7 +172,7 @@ defmodule AoTcpGateway.MarriageTest do
     setup do
       me = self()
 
-      player_a = %Arena.Entity.PlayerEntity{
+      player_a = %AoEntities.PlayerEntity{
         char_id: 1,
         name: "Alice",
         account_id: "acct_a",
@@ -182,7 +182,7 @@ defmodule AoTcpGateway.MarriageTest do
         marriage_proposal_target: nil
       }
 
-      player_b = %Arena.Entity.PlayerEntity{
+      player_b = %AoEntities.PlayerEntity{
         char_id: 2,
         name: "Bob",
         account_id: "acct_b",

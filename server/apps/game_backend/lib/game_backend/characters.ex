@@ -286,7 +286,7 @@ defmodule GameBackend.Characters do
   def to_entity(%__MODULE__{} = c) do
     base_body = Map.get(@naked_body_ids, {c.race, c.gender}, c.body_id)
 
-    %Arena.Entity.PlayerEntity{
+    %AoEntities.PlayerEntity{
       char_id: c.id,
       name: c.name,
       account_id: c.account_id,
@@ -344,7 +344,7 @@ defmodule GameBackend.Characters do
   end
 
   @doc "Convert a PlayerEntity back to DB-saveable attrs (character fields only)."
-  def from_entity(%Arena.Entity.PlayerEntity{} = e) do
+  def from_entity(%AoEntities.PlayerEntity{} = e) do
     %{
       name: e.name,
       account_id: e.account_id,
@@ -396,16 +396,16 @@ defmodule GameBackend.Characters do
   end
 
   @doc "Extract inventory list from entity for saving."
-  def inventory_from_entity(%Arena.Entity.PlayerEntity{} = e), do: e.inventory
+  def inventory_from_entity(%AoEntities.PlayerEntity{} = e), do: e.inventory
 
   @doc "Extract equipment map from entity for saving."
-  def equipment_from_entity(%Arena.Entity.PlayerEntity{} = e), do: e.equipment
+  def equipment_from_entity(%AoEntities.PlayerEntity{} = e), do: e.equipment
 
   @doc "Extract skills map from entity for saving."
-  def skills_from_entity(%Arena.Entity.PlayerEntity{} = e), do: e.skills
+  def skills_from_entity(%AoEntities.PlayerEntity{} = e), do: e.skills
 
   @doc "Extract spells list from entity for saving."
-  def spells_from_entity(%Arena.Entity.PlayerEntity{} = e), do: e.spells
+  def spells_from_entity(%AoEntities.PlayerEntity{} = e), do: e.spells
 
   @doc "Validate a session token for a character. Returns true if valid."
   def valid_token?(%__MODULE__{session_token: stored}, token)

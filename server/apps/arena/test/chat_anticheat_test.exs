@@ -4,7 +4,7 @@ defmodule Arena.ChatAnticheatTest do
 
   import Arena.Test.MapStateFactory
 
-  alias Arena.Entity.PlayerEntity
+  alias AoEntities.PlayerEntity
   alias Arena.Map.Chat
 
   setup do

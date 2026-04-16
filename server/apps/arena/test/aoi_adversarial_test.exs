@@ -14,7 +14,7 @@ defmodule Arena.Map.AoiAdversarialTest do
 
   alias Arena.Map.MapServer
   alias Arena.Map.MapSupervisor
-  alias Arena.Entity.PlayerEntity
+  alias AoEntities.PlayerEntity
 
   # Use map 2 to avoid conflicts with other test files
   @test_map_id 2
