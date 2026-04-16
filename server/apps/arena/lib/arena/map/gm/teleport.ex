@@ -1,6 +1,7 @@
 defmodule Arena.Map.Gm.Teleport do
   @moduledoc "GM teleport commands: teleport, goto."
 
+  alias Arena.AuditLog
   alias Arena.Map.Helpers
 
   def gm_teleport(state, char_id, entity, map_str, x_str, y_str) do
@@ -8,6 +9,7 @@ defmodule Arena.Map.Gm.Teleport do
          {x, ""} <- Integer.parse(x_str),
          {y, ""} <- Integer.parse(y_str) do
       Helpers.send_to_session(state.sessions, char_id, {:transfer, map_id, x, y, entity})
+      AuditLog.log_gm_action(char_id, "teleport", "map #{map_id} (#{x}, #{y})")
       Helpers.gm_console(state, char_id, "Teleporting to map #{map_id} (#{x}, #{y})...")
       {:noreply, state}
     else
@@ -20,6 +22,8 @@ defmodule Arena.Map.Gm.Teleport do
   def gm_goto(state, char_id, entity, target_name) do
     case Helpers.find_player_by_name(state, target_name) do
       {:ok, _target_id, target} ->
+        AuditLog.log_gm_action(char_id, "goto", target.name)
+
         if target.map_id == entity.map_id do
           Helpers.send_to_session(state.sessions, char_id, {:transfer, entity.map_id, target.x, target.y, entity})
           Helpers.gm_console(state, char_id, "Teleporting to #{target.name} at (#{target.x}, #{target.y})...")

@@ -10,6 +10,7 @@ defmodule Arena.Application do
     children = [
       {Registry, keys: :unique, name: Arena.MapRegistry},
       {Phoenix.PubSub, name: Arena.PubSub},
+      Arena.Settings,
       Arena.Data.GameData,
       Arena.WorldWeather,
       Arena.TreasureEvent,

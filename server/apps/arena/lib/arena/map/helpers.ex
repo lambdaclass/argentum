@@ -339,6 +339,7 @@ defmodule Arena.Map.Helpers do
   defdelegate broadcast_visible(state, x, y, exclude_id, fun), to: Arena.Map.Visibility
   defdelegate broadcast_visible_all(state, x, y, fun), to: Arena.Map.Visibility
   defdelegate broadcast_range(state, x, y, range_x, range_y, fun), to: Arena.Map.Visibility
+  defdelegate broadcast_to_map(state, fun), to: Arena.Map.Visibility
 
   # ── Shared helpers (moved from Social) ─────────────────────────────────
 

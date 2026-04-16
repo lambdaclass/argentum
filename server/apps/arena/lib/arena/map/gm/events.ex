@@ -1,6 +1,7 @@
 defmodule Arena.Map.Gm.Events do
   @moduledoc "GM event commands: NPC spawning, invasions, tournaments, events, faction messages, etc."
 
+  alias Arena.AuditLog
   alias Arena.Map.{Helpers, Visibility}
   alias Arena.Entity.NpcEntity
   alias Arena.Data.GameData
@@ -42,6 +43,7 @@ defmodule Arena.Map.Gm.Events do
                 send(pid, {:send_raw, raw})
               end)
 
+              AuditLog.log_gm_action(char_id, "spawn_npc", "#{npc_def.name} at (#{tx},#{ty})")
               Helpers.gm_console(state, char_id, "Spawned NPC #{npc_def.name} (id #{npc_id}) at (#{tx}, #{ty}).")
               {:noreply, state}
             else
@@ -75,6 +77,7 @@ defmodule Arena.Map.Gm.Events do
             npc_name = if npc_def, do: npc_def.name, else: "NPC #{npc.npc_id}"
 
             state = Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :gm)
+            AuditLog.log_gm_action(char_id, "kill_npc", npc_name)
             Helpers.gm_console(state, char_id, "Killed NPC #{npc_name} (respawn enabled).")
             {:noreply, state}
         end
@@ -100,6 +103,7 @@ defmodule Arena.Map.Gm.Events do
             npc_name = if npc_def, do: npc_def.name, else: "NPC #{npc.npc_id}"
 
             state = Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :gm, permanent: true)
+            AuditLog.log_gm_action(char_id, "kill_npc_permanent", npc_name)
             Helpers.gm_console(state, char_id, "Killed NPC #{npc_name} permanently (no respawn).")
             {:noreply, state}
         end
@@ -124,6 +128,7 @@ defmodule Arena.Map.Gm.Events do
         end
       end)
 
+    AuditLog.log_gm_action(char_id, "mass_kill_npcs", "#{killed} NPCs")
     Helpers.gm_console(state, char_id, "Killed #{killed} NPCs nearby.")
     {:noreply, state}
   end
@@ -135,6 +140,7 @@ defmodule Arena.Map.Gm.Events do
          true <- count > 0 and count <= 200 do
       case Arena.Events.InvasionServer.start_invasion(map_id, npc_id, count, entity.name) do
         {:ok, spawned} ->
+          AuditLog.log_gm_action(char_id, "invasion", "map #{map_id} npc #{npc_id} count #{count}")
           Helpers.gm_console(state, char_id, "Invasion started: #{spawned} NPCs spawned on map #{map_id}.")
 
         {:error, :invasion_already_active} ->
@@ -160,8 +166,12 @@ defmodule Arena.Map.Gm.Events do
     case Integer.parse(map_str) do
       {map_id, ""} ->
         case Arena.Events.InvasionServer.stop_invasion(map_id) do
-          :ok -> Helpers.gm_console(state, char_id, "Invasion on map #{map_id} stopped.")
-          {:error, :no_invasion} -> Helpers.gm_console(state, char_id, "No active invasion on map #{map_id}.")
+          :ok ->
+            AuditLog.log_gm_action(char_id, "invasion_stop", "map #{map_id}")
+            Helpers.gm_console(state, char_id, "Invasion on map #{map_id} stopped.")
+
+          {:error, :no_invasion} ->
+            Helpers.gm_console(state, char_id, "No active invasion on map #{map_id}.")
         end
 
       _ ->
@@ -192,8 +202,12 @@ defmodule Arena.Map.Gm.Events do
     end
 
     case Arena.Events.TournamentServer.start_tournament(max_players, entity.name) do
-      :ok -> Helpers.gm_console(state, char_id, "Tournament started (max #{max_players} players).")
-      {:error, :tournament_already_active} -> Helpers.gm_console(state, char_id, "A tournament is already active.")
+      :ok ->
+        AuditLog.log_gm_action(char_id, "tournament_start", "max #{max_players}")
+        Helpers.gm_console(state, char_id, "Tournament started (max #{max_players} players).")
+
+      {:error, :tournament_already_active} ->
+        Helpers.gm_console(state, char_id, "A tournament is already active.")
     end
 
     {:noreply, state}
@@ -201,9 +215,15 @@ defmodule Arena.Map.Gm.Events do
 
   def gm_tournament_begin(state, char_id) do
     case Arena.Events.TournamentServer.begin_matches() do
-      :ok -> Helpers.gm_console(state, char_id, "Tournament matches started.")
-      {:error, :not_enough_players} -> Helpers.gm_console(state, char_id, "Not enough players to start.")
-      {:error, reason} -> Helpers.gm_console(state, char_id, "Error: #{inspect(reason)}")
+      :ok ->
+        AuditLog.log_gm_action(char_id, "tournament_begin", "")
+        Helpers.gm_console(state, char_id, "Tournament matches started.")
+
+      {:error, :not_enough_players} ->
+        Helpers.gm_console(state, char_id, "Not enough players to start.")
+
+      {:error, reason} ->
+        Helpers.gm_console(state, char_id, "Error: #{inspect(reason)}")
     end
 
     {:noreply, state}
@@ -211,8 +231,12 @@ defmodule Arena.Map.Gm.Events do
 
   def gm_tournament_cancel(state, char_id) do
     case Arena.Events.TournamentServer.cancel() do
-      :ok -> Helpers.gm_console(state, char_id, "Tournament cancelled.")
-      {:error, :no_tournament} -> Helpers.gm_console(state, char_id, "No active tournament.")
+      :ok ->
+        AuditLog.log_gm_action(char_id, "tournament_cancel", "")
+        Helpers.gm_console(state, char_id, "Tournament cancelled.")
+
+      {:error, :no_tournament} ->
+        Helpers.gm_console(state, char_id, "No active tournament.")
     end
 
     {:noreply, state}
@@ -242,8 +266,12 @@ defmodule Arena.Map.Gm.Events do
     case Integer.parse(duration_str) do
       {minutes, _} when minutes > 0 ->
         case Arena.Events.EventManager.start_event(type, minutes, entity.name) do
-          :ok -> Helpers.gm_console(state, char_id, "Event #{type} started for #{minutes} minutes.")
-          {:error, :event_already_active} -> Helpers.gm_console(state, char_id, "Event #{type} already active.")
+          :ok ->
+            AuditLog.log_gm_action(char_id, "event_start", "#{type} #{minutes}m")
+            Helpers.gm_console(state, char_id, "Event #{type} started for #{minutes} minutes.")
+
+          {:error, :event_already_active} ->
+            Helpers.gm_console(state, char_id, "Event #{type} already active.")
         end
 
       _ ->
@@ -262,8 +290,12 @@ defmodule Arena.Map.Gm.Events do
     end
 
     case Arena.Events.EventManager.stop_event(type) do
-      :ok -> Helpers.gm_console(state, char_id, "Event #{type} stopped.")
-      {:error, :no_such_event} -> Helpers.gm_console(state, char_id, "No active event of type #{type}.")
+      :ok ->
+        AuditLog.log_gm_action(char_id, "event_stop", "#{type}")
+        Helpers.gm_console(state, char_id, "Event #{type} stopped.")
+
+      {:error, :no_such_event} ->
+        Helpers.gm_console(state, char_id, "No active event of type #{type}.")
     end
 
     {:noreply, state}
@@ -302,6 +334,7 @@ defmodule Arena.Map.Gm.Events do
       end
     end)
 
+    AuditLog.log_gm_action(char_id, "faction_message", "#{faction_name}: #{message}")
     Helpers.gm_console(state, char_id, "Faction message sent to #{faction_name}.")
     {:noreply, state}
   end
@@ -337,7 +370,8 @@ defmodule Arena.Map.Gm.Events do
              }}
           )
 
-        Enum.each(state.sessions, fn {_id, pid} -> send(pid, {:send_raw, chat_raw}) end)
+        Visibility.broadcast_to_map(state, fn pid -> send(pid, {:send_raw, chat_raw}) end)
+        AuditLog.log_gm_action(char_id, "talk_as_npc", message)
         Helpers.gm_console(state, char_id, "#{npc_name} says: #{message}")
         {:noreply, state}
     end
@@ -350,6 +384,7 @@ defmodule Arena.Map.Gm.Events do
         players = Map.put(state.players, target_id, target)
         state = %{state | players: players}
         label = if council_type == :royal, do: "Royal", else: "Chaos"
+        AuditLog.log_gm_action(char_id, "accept_council", "#{target_name} #{label}")
         Helpers.gm_console(state, char_id, "#{target_name} added to #{label} Council.")
         {:noreply, state}
 

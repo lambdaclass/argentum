@@ -1,7 +1,8 @@
 defmodule Arena.Map.Gm.World do
   @moduledoc "GM world/environment commands: weather, map flags, tiles, triggers, items, audio, etc."
 
-  alias Arena.Map.Helpers
+  alias Arena.AuditLog
+  alias Arena.Map.{Helpers, Visibility}
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
@@ -12,6 +13,7 @@ defmodule Arena.Map.Gm.World do
     meta = Map.put(state.meta, weather_type, new_val)
     state = %{state | meta: meta}
     status = if new_val, do: "activada", else: "desactivada"
+    AuditLog.log_gm_action(char_id, "toggle_weather", "#{label} #{status}")
     Helpers.gm_console(state, char_id, "#{label} #{status} en este mapa.")
     {:noreply, state}
   end
@@ -21,6 +23,7 @@ defmodule Arena.Map.Gm.World do
     meta = Map.put(state.meta, flag, new_val)
     state = %{state | meta: meta}
     status = if new_val, do: "activado", else: "desactivado"
+    AuditLog.log_gm_action(char_id, "change_map_flag", "#{flag} #{status}")
     Helpers.gm_console(state, char_id, "Map flag #{flag} #{status}.")
     {:noreply, state}
   end
@@ -35,6 +38,7 @@ defmodule Arena.Map.Gm.World do
       end
 
     state = %{state | gm_blocked_tiles: blocked_tiles}
+    AuditLog.log_gm_action(char_id, "tile_block", "(#{fx},#{fy}) #{status}")
     Helpers.gm_console(state, char_id, "Tile (#{fx},#{fy}) #{status}.")
     {:noreply, state}
   end
@@ -47,6 +51,7 @@ defmodule Arena.Map.Gm.World do
         triggers = Map.put(state.triggers, {fx, fy}, trigger)
         state = %{state | triggers: triggers}
 
+        AuditLog.log_gm_action(char_id, "set_trigger", "#{trigger} at (#{fx},#{fy})")
         Helpers.gm_console(state, char_id, "Trigger #{trigger} set at (#{fx},#{fy}).")
         {:noreply, state}
 
@@ -82,6 +87,7 @@ defmodule Arena.Map.Gm.World do
     {fx, fy} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
     ground_items = Map.delete(state.ground_items, {fx, fy})
     state = %{state | ground_items: ground_items}
+    AuditLog.log_gm_action(char_id, "destroy_items", "(#{fx},#{fy})")
     Helpers.gm_console(state, char_id, "Items at (#{fx},#{fy}) destroyed.")
     {:noreply, state}
   end
@@ -96,12 +102,14 @@ defmodule Arena.Map.Gm.World do
       |> Map.new()
 
     state = %{state | ground_items: ground_items}
+    AuditLog.log_gm_action(char_id, "destroy_all_area", "(#{entity.x},#{entity.y})")
     Helpers.gm_console(state, char_id, "All items in area destroyed.")
     {:noreply, state}
   end
 
   def gm_clean_world(state, char_id) do
     state = %{state | ground_items: %{}}
+    AuditLog.log_gm_action(char_id, "clean_world", "map #{state.map_id}")
     Helpers.gm_console(state, char_id, "All ground items on this map cleaned.")
     {:noreply, state}
   end
@@ -110,7 +118,8 @@ defmodule Arena.Map.Gm.World do
     with {midi, _} <- Integer.parse(midi_str),
          {_map_id, _} <- Integer.parse(map_str) do
       raw = Encoder.encode({:play_midi, %{midi: midi, loops: -1}})
-      Enum.each(state.sessions, fn {_id, pid} -> send(pid, {:send_raw, raw}) end)
+      Visibility.broadcast_to_map(state, fn pid -> send(pid, {:send_raw, raw}) end)
+      AuditLog.log_gm_action(char_id, "force_midi", "#{midi}")
       Helpers.gm_console(state, char_id, "MIDI #{midi} sent to map.")
     else
       _ -> Helpers.gm_console(state, char_id, "Usage: /FORCEMIDIMAP midi map")
@@ -124,7 +133,8 @@ defmodule Arena.Map.Gm.World do
          {x, _} <- Integer.parse(x_str),
          {y, _} <- Integer.parse(y_str) do
       raw = Encoder.encode({:play_wave, %{wave: wave, x: x, y: y}})
-      Enum.each(state.sessions, fn {_id, pid} -> send(pid, {:send_raw, raw}) end)
+      Visibility.broadcast_to_map(state, fn pid -> send(pid, {:send_raw, raw}) end)
+      AuditLog.log_gm_action(char_id, "force_wave", "#{wave}")
       Helpers.gm_console(state, char_id, "Wave #{wave} sent to map at (#{x},#{y}).")
     else
       _ -> Helpers.gm_console(state, char_id, "Usage: /FORCEWAVEMAP wave x y map")
@@ -140,6 +150,7 @@ defmodule Arena.Map.Gm.World do
     state = %{state | players: players}
 
     msg = if new_invisible, do: "You are now invisible.", else: "You are now visible."
+    AuditLog.log_gm_action(char_id, "invisible", msg)
     Helpers.gm_console(state, char_id, msg)
     Helpers.broadcast_character_change(state, entity)
     {:noreply, state}
@@ -156,6 +167,7 @@ defmodule Arena.Map.Gm.World do
           state = %{state | players: players}
 
           Helpers.send_inventory_slot(state.sessions, char_id, new_inventory, slot)
+          AuditLog.log_gm_action(char_id, "spawn_item", "#{amount}x #{item_id}")
           Helpers.gm_console(state, char_id, "Spawned #{amount}x item #{item_id} in slot #{slot + 1}.")
           {:noreply, state}
 
@@ -170,6 +182,7 @@ defmodule Arena.Map.Gm.World do
             {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
           )
 
+          AuditLog.log_gm_action(char_id, "spawn_item", "#{gold_amount}x gold")
           Helpers.gm_console(state, char_id, "Added #{gold_amount} gold.")
           {:noreply, state}
 

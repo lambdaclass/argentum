@@ -1,6 +1,7 @@
 defmodule Arena.Map.Gm.CharEdit do
   @moduledoc "GM character editing commands: give items, edit stats, rename, revive, etc."
 
+  alias Arena.AuditLog
   alias Arena.Map.Helpers
   alias AoProtocol.Server.Encoder
 
@@ -16,6 +17,7 @@ defmodule Arena.Map.Gm.CharEdit do
               players = Map.put(state.players, target_id, target)
               state = %{state | players: players}
               Helpers.send_inventory_slot(state.sessions, target_id, new_inventory, slot)
+              AuditLog.log_gm_action(char_id, "give_item", "#{amount}x #{item_id} to #{target.name}")
               Helpers.gm_console(state, char_id, "Gave #{amount}x item #{item_id} to #{target.name}.")
               {:noreply, state}
 
@@ -30,6 +32,7 @@ defmodule Arena.Map.Gm.CharEdit do
                 {:send_raw, Encoder.encode({:update_gold, %{gold: target.gold}})}
               )
 
+              AuditLog.log_gm_action(char_id, "give_gold", "#{gold_amount} to #{target.name}")
               Helpers.gm_console(state, char_id, "Gave #{gold_amount} gold to #{target.name}.")
               {:noreply, state}
 
@@ -64,6 +67,7 @@ defmodule Arena.Map.Gm.CharEdit do
               {:send_raw, Encoder.encode({:update_gold, %{gold: target.gold}})}
             )
 
+            AuditLog.log_gm_action(char_id, "edit_char", "#{target.name} option=gold value=#{target.gold}")
             Helpers.gm_console(state, char_id, "Set #{target.name} gold to #{target.gold}.")
             {:noreply, state}
 
@@ -71,6 +75,7 @@ defmodule Arena.Map.Gm.CharEdit do
             target = %{target | level: max(min(value, 50), 1)}
             players = Map.put(state.players, target_id, target)
             state = %{state | players: players}
+            AuditLog.log_gm_action(char_id, "edit_char", "#{target.name} option=level value=#{target.level}")
             Helpers.gm_console(state, char_id, "Set #{target.name} level to #{target.level}.")
             {:noreply, state}
 
@@ -78,6 +83,7 @@ defmodule Arena.Map.Gm.CharEdit do
             target = %{target | xp: max(value, 0)}
             players = Map.put(state.players, target_id, target)
             state = %{state | players: players}
+            AuditLog.log_gm_action(char_id, "edit_char", "#{target.name} option=xp value=#{target.xp}")
             Helpers.gm_console(state, char_id, "Set #{target.name} XP to #{target.xp}.")
             {:noreply, state}
 
@@ -92,6 +98,7 @@ defmodule Arena.Map.Gm.CharEdit do
               {:send_raw, Encoder.encode({:update_hp, %{min_hp: target.hp, shield: 0}})}
             )
 
+            AuditLog.log_gm_action(char_id, "edit_char", "#{target.name} option=hp value=#{target.hp}")
             Helpers.gm_console(state, char_id, "Set #{target.name} HP to #{target.hp}.")
             {:noreply, state}
 
@@ -106,6 +113,7 @@ defmodule Arena.Map.Gm.CharEdit do
               {:send_raw, Encoder.encode({:update_mana, %{min_mana: target.mana}})}
             )
 
+            AuditLog.log_gm_action(char_id, "edit_char", "#{target.name} option=mana value=#{target.mana}")
             Helpers.gm_console(state, char_id, "Set #{target.name} mana to #{target.mana}.")
             {:noreply, state}
 
@@ -128,6 +136,7 @@ defmodule Arena.Map.Gm.CharEdit do
         players = Map.put(state.players, target_id, target)
         state = %{state | players: players}
         Helpers.broadcast_character_change(state, target)
+        AuditLog.log_gm_action(char_id, "alter_name", "#{old_name} -> #{new_name}")
         Helpers.gm_console(state, char_id, "Renamed #{old_name} to #{new_name}.")
         {:noreply, state}
 
@@ -164,6 +173,7 @@ defmodule Arena.Map.Gm.CharEdit do
           )
 
           Helpers.broadcast_character_change(state, target)
+          AuditLog.log_gm_action(char_id, "revive", target.name)
           Helpers.gm_console(state, char_id, "#{target.name} ha sido resucitado.")
           {:noreply, state}
         end
@@ -180,6 +190,7 @@ defmodule Arena.Map.Gm.CharEdit do
     players = Map.put(state.players, char_id, entity)
     state = %{state | players: players}
     status = if show, do: "visible", else: "hidden"
+    AuditLog.log_gm_action(char_id, "show_name", status)
     Helpers.gm_console(state, char_id, "Name #{status}.")
     {:noreply, state}
   end
@@ -188,6 +199,7 @@ defmodule Arena.Map.Gm.CharEdit do
     entity = Map.put(entity, :description, desc)
     players = Map.put(state.players, char_id, entity)
     state = %{state | players: players}
+    AuditLog.log_gm_action(char_id, "set_description", desc)
     Helpers.gm_console(state, char_id, "Description set to: #{desc}")
     {:noreply, state}
   end
@@ -198,6 +210,7 @@ defmodule Arena.Map.Gm.CharEdit do
         entity = Map.put(entity, :speed_mod, speed)
         players = Map.put(state.players, char_id, entity)
         state = %{state | players: players}
+        AuditLog.log_gm_action(char_id, "set_speed", "#{speed}")
         Helpers.gm_console(state, char_id, "Speed set to #{speed}.")
         {:noreply, state}
 

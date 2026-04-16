@@ -146,6 +146,12 @@ defmodule Arena.Map.Visibility do
     broadcast_visible(state, origin_x, origin_y, nil, fun)
   end
 
+  # Broadcast to ALL sessions on the map (weather, audio, announcements).
+  # Unlike broadcast_visible_all, this ignores AoI and always reaches everyone.
+  def broadcast_to_map(state, fun) do
+    for {_cid, pid} <- state.sessions, do: fun.(pid)
+  end
+
   # Broadcast to a custom range (used for yell)
   def broadcast_range(state, origin_x, origin_y, range_x, range_y, fun) do
     case state.visibility_mode do

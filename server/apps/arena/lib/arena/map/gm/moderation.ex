@@ -3,6 +3,7 @@ defmodule Arena.Map.Gm.Moderation do
 
   require Logger
 
+  alias Arena.AuditLog
   alias Arena.Map.Helpers
   alias AoProtocol.Server.Encoder
 
@@ -20,6 +21,7 @@ defmodule Arena.Map.Gm.Moderation do
         )
 
         Helpers.send_to_session(state.sessions, target_id, :disconnect)
+        AuditLog.log_gm_action(char_id, "kick", target_name)
         Helpers.gm_console(state, char_id, "#{target_name} has been kicked.")
         {:noreply, state}
 
@@ -88,6 +90,7 @@ defmodule Arena.Map.Gm.Moderation do
                )}
             )
 
+            AuditLog.log_gm_action(char_id, "mute", "#{target.name} for #{minutes} min")
             Helpers.gm_console(state, char_id, "#{target.name} muted for #{minutes} minute(s).")
             {:noreply, state}
 
@@ -115,6 +118,7 @@ defmodule Arena.Map.Gm.Moderation do
           {:send_raw, Encoder.encode({:console_msg, %{message: "Ya no estás silenciado.", font_index: 0}})}
         )
 
+        AuditLog.log_gm_action(char_id, "unmute", target.name)
         Helpers.gm_console(state, char_id, "#{target.name} has been unmuted.")
         {:noreply, state}
 
@@ -141,6 +145,7 @@ defmodule Arena.Map.Gm.Moderation do
         )
 
         Helpers.send_to_session(state.sessions, target_id, {:transfer, @jail_map_id, @jail_x, @jail_y, target})
+        AuditLog.log_gm_action(char_id, "jail", "#{target.name} for #{minutes} min")
         Helpers.gm_console(state, char_id, "#{target.name} jailed for #{minutes} min (map #{@jail_map_id}).")
         {:noreply, state}
 
@@ -174,6 +179,7 @@ defmodule Arena.Map.Gm.Moderation do
           )
 
           Helpers.broadcast_character_change(state, target)
+          AuditLog.log_gm_action(char_id, "kill", target.name)
           Helpers.gm_console(state, char_id, "#{target.name} has been killed.")
           {:noreply, state}
         end
@@ -192,6 +198,7 @@ defmodule Arena.Map.Gm.Moderation do
           _ -> :ok
         end
 
+        AuditLog.log_gm_action(char_id, "ban_cuenta", "#{target_name}: #{reason}")
         Helpers.gm_console(state, char_id, "Account for #{target_name} banned: #{reason}")
 
       {:error, err} ->
@@ -220,6 +227,7 @@ defmodule Arena.Map.Gm.Moderation do
               _ -> :ok
             end
 
+            AuditLog.log_gm_action(char_id, "ban_temporal", "#{target_name} #{days}d: #{reason}")
             Helpers.gm_console(state, char_id, "#{target_name} banned for #{days} days: #{reason}")
 
           {:error, err} ->
@@ -244,6 +252,7 @@ defmodule Arena.Map.Gm.Moderation do
         target = Map.put(target, :council, false)
         players = Map.put(state.players, target_id, target)
         state = %{state | players: players}
+        AuditLog.log_gm_action(char_id, "council_kick", target_name)
         Helpers.gm_console(state, char_id, "#{target_name} removed from council.")
         {:noreply, state}
 
@@ -260,6 +269,7 @@ defmodule Arena.Map.Gm.Moderation do
         players = Map.put(state.players, target_id, target)
         state = %{state | players: players}
         label = if faction == :royal_army, do: "Armada Real", else: "Legion Oscura"
+        AuditLog.log_gm_action(char_id, "faction_kick", "#{target_name} from #{label}")
         Helpers.gm_console(state, char_id, "#{target_name} expelled from #{label}.")
         {:noreply, state}
 

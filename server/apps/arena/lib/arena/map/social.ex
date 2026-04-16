@@ -1,7 +1,7 @@
 defmodule Arena.Map.Social do
   @moduledoc "Chat, social commands, stat requests, and NPC interaction."
 
-  alias Arena.Map.Helpers
+  alias Arena.Map.{Helpers, Visibility}
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
@@ -531,8 +531,8 @@ defmodule Arena.Map.Social do
         # Broadcast marriage announcement (VB6: SendData ToAll)
         announce = "El sacerdote celebra el casamiento entre #{entity.name} y #{target_entity.name}."
 
-        Enum.each(state.sessions, fn {_cid, session_pid} ->
-          send(session_pid, {:send_packet, {:console_msg, %{message: announce, font_index: 0}}})
+        Visibility.broadcast_to_map(state, fn pid ->
+          send(pid, {:send_packet, {:console_msg, %{message: announce, font_index: 0}}})
         end)
 
         # Congratulations to both (VB6: Msg1414/1415)
