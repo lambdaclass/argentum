@@ -12,6 +12,11 @@ defmodule AoTcpGateway.SessionSplitTest do
   alias AoTcpGateway.SessionPersistence
   alias AoTcpGateway.SessionLogic
 
+  # Ensure modules are loaded before checking exports
+  for mod <- [SessionLogin, SessionWorld, SessionTransfer, SessionPersistence, SessionLogic] do
+    Code.ensure_loaded!(mod)
+  end
+
   describe "SessionLogin module" do
     test "exists and exports login_new/2" do
       assert function_exported?(SessionLogin, :login_new, 2)
