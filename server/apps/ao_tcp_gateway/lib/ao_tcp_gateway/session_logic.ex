@@ -5,274 +5,39 @@ defmodule AoTcpGateway.SessionLogic do
   Functions operate on a session state map and return `{state, [packet_commands]}`
   where packet_commands are tuples that `AoProtocol.Server.Encoder` understands.
   Transport-specific concerns (sending bytes, framing) stay in each handler.
+
+  This module acts as the public API and command router. Implementation is
+  split across focused sub-modules:
+  - `SessionLogin` — login, account/character creation
+  - `SessionWorld` — world entry, bootstrap packets, map readiness
+  - `SessionTransfer` — map transfer, /HOGAR home travel
+  - `SessionPersistence` — autosave, cleanup
   """
 
   require Logger
 
-  @default_map_id 1
+  alias AoTcpGateway.SessionLogin
+  alias AoTcpGateway.SessionWorld
+  alias AoTcpGateway.SessionTransfer
+  alias AoTcpGateway.SessionPersistence
 
-  # ---- Login ----
+  # ---- Login (delegated to SessionLogin) ----
 
-  def login_existing(state, char_id, token) do
-    case GameBackend.Characters.get(char_id) do
-      nil ->
-        {state, [{:error_msg, %{message: "Character not found."}}]}
+  defdelegate login_existing(state, char_id, token), to: SessionLogin
+  defdelegate login_new(state, params), to: SessionLogin
 
-      character ->
-        if GameBackend.Characters.valid_token?(character, token) do
-          do_login(state, character.account_id, character)
-        else
-          Logger.warning("Invalid session token for char_id #{char_id}")
-          {state, [{:error_msg, %{message: "Invalid session token."}}]}
-        end
-    end
-  end
+  # ---- Enter world (delegated to SessionWorld) ----
 
-  def login_new(state, params) do
-    name = params.username
-    password = params.session_token
+  defdelegate enter_world(state, account_id, entity), to: SessionWorld
 
-    case GameBackend.Account.get_or_create(name, password) do
-      {:error, :wrong_password} ->
-        {state, [{:error_msg, %{message: "Wrong password."}}]}
+  # ---- Map transfer (delegated to SessionTransfer) ----
 
-      {:error, changeset} ->
-        Logger.error("Account creation failed: #{inspect(changeset)}")
-        {state, [{:error_msg, %{message: "Failed to create account."}}]}
-
-      {:ok, account} ->
-        case GameBackend.Characters.get_by_name(name) do
-          %{account_id: aid} = existing when aid == account.id ->
-            # Character exists and belongs to this account — log in as existing
-            do_login(state, account.id, existing)
-
-          nil ->
-            create_new_character(state, account, params)
-
-          _other ->
-            {state, [{:error_msg, %{message: "Character name already taken."}}]}
-        end
-    end
-  end
-
-  defp create_new_character(state, account, params) do
-    case Arena.CharacterCreation.create(%{
-      name: params.username,
-      race: params.race,
-      gender: params.gender,
-      class: params.class,
-      head: params.head,
-      home_city: params.home_city,
-      account_id: account.id
-    }) do
-      {:ok, entity} ->
-        attrs = GameBackend.Characters.from_entity(entity)
-        inventory = GameBackend.Characters.inventory_from_entity(entity)
-        equipment = GameBackend.Characters.equipment_from_entity(entity)
-        skills = GameBackend.Characters.skills_from_entity(entity)
-        spells = GameBackend.Characters.spells_from_entity(entity)
-
-        case GameBackend.Characters.create(attrs,
-               inventory: inventory,
-               equipment: equipment,
-               skills: skills,
-               spells: spells
-             ) do
-          {:ok, character} ->
-            do_login(state, account.id, character)
-
-          {:error, changeset} ->
-            Logger.error("Failed to save new character: #{inspect(changeset)}")
-            {state, [{:error_msg, %{message: "Failed to create character."}}]}
-        end
-
-      {:error, reason} ->
-        {state, [{:error_msg, %{message: creation_error_message(reason)}}]}
-    end
-  end
-
-  defp do_login(state, account_id, character) do
-    account = GameBackend.Repo.get(GameBackend.Account, account_id)
-
-    if account != nil and GameBackend.Account.banned?(account) do
-      formatted = Calendar.strftime(account.banned_until, "%Y-%m-%d %H:%M UTC")
-
-      {state,
-       [
-         {:console_msg, %{message: "Tu cuenta está baneada hasta #{formatted}.", font_index: 0}},
-         {:error_msg, %{message: "Account banned."}}
-       ]}
-    else
-      entity = GameBackend.Characters.to_entity(character)
-      char_id = entity.char_id
-
-      # Populate guild cache on the entity (one RPC per login is fine)
-      entity =
-        case Arena.GuildServer.get_guild(char_id) do
-          {:ok, guild} -> %{entity | guild_id: guild.id, guild_level: guild.level}
-          :not_in_guild -> entity
-        end
-
-      case AoSession.register(account_id, char_id, self()) do
-        :ok ->
-          {state, packets} = enter_world(state, account_id, entity)
-
-          if state.character_id do
-            {state, packets}
-          else
-            AoSession.unregister(char_id)
-            {state, packets}
-          end
-
-        {:error, :already_connected} ->
-          Logger.warning("char_id #{char_id} already connected")
-          {state, [{:error_msg, %{message: "Already connected."}}]}
-      end
-    end
-  end
-
-  # ---- Enter world ----
-
-  def enter_world(state, account_id, entity) do
-    map_id = entity.map_id || @default_map_id
-
-    with :ok <- ensure_map_started(map_id),
-         {:ok, char_index, all_players, weather} <-
-           Arena.Map.MapServer.enter(map_id, entity, position: {entity.x, entity.y}) do
-      entity = Map.get(all_players, entity.char_id)
-
-      Logger.info(
-        "#{entity.name} entered map #{map_id} at (#{entity.x}, #{entity.y}) index=#{char_index}"
-      )
-
-      state = %{
-        state
-        | account_id: account_id,
-          character_id: entity.char_id,
-          char_index: char_index,
-          map_id: map_id,
-          entity: entity,
-          is_gm: entity.gm == true
-      }
-
-      global_rain = try do Arena.WorldWeather.raining?() rescue _ -> weather.rain catch :exit, _ -> weather.rain end
-      global_snow = try do Arena.WorldWeather.snowing?() rescue _ -> weather.snow catch :exit, _ -> weather.snow end
-      weather_packets =
-        (if global_rain, do: [{:rain_toggle, %{raining: true}}], else: []) ++
-        (if global_snow, do: [{:snow_toggle, %{snowing: true}}], else: [])
-
-      packets =
-        [
-          {:logged, %{new_user: false}},
-          {:user_index_in_server, %{user_index: 1}},
-          {:change_map, %{map_id: map_id, version: 0}},
-          {:user_char_index_in_server, %{char_index: char_index}},
-          Arena.Map.Helpers.character_create_packet(entity),
-          {:pos_update, %{x: entity.x, y: entity.y}},
-          {:intervals, %{walk: 210}},
-          {:update_hp, %{min_hp: entity.hp}},
-          {:update_mana, %{min_mana: entity.mana}},
-          {:update_stamina, %{min_sta: entity.stamina}},
-          {:update_gold, %{gold: entity.gold}},
-          {:update_hunger_and_thirst, %{
-            max_hunger: 100,
-            min_hunger: entity.hunger,
-            max_thirst: 100,
-            min_thirst: entity.thirst
-          }}
-        ] ++
-          weather_packets ++
-          exp_login_packets(entity) ++
-          inventory_login_packets(entity) ++
-          spell_login_packets(entity) ++
-          skill_login_packets(entity) ++
-          for {cid, other} <- all_players, cid != entity.char_id do
-            Arena.Map.Helpers.character_create_packet(other)
-          end ++
-          [{:console_msg, %{message: "Welcome to Argentum Online!", font_index: 0}}]
-
-      AoSession.OnlineDirectory.register(entity.char_id, entity.name, map_id, self(),
-        is_gm: state.is_gm,
-        faction: entity.faction
-      )
-
-      # Send party snapshot if player is in a party
-      party_snapshot_packets =
-        case Arena.PartyServer.get_party(entity.char_id) do
-          {:ok, party} ->
-            leader_id = party.leader
-            ordered = [leader_id | Enum.filter(party.members, &(&1 != leader_id))]
-
-            names =
-              Enum.map(ordered, fn mid ->
-                case AoSession.OnlineDirectory.lookup_by_id(mid) do
-                  {:ok, info} -> info.name
-                  :not_found -> "ID:#{mid}"
-                end
-              end)
-
-            [{:datos_grupo, %{en_grupo: true, members: names, leader_index: 0}}]
-
-          :not_in_party ->
-            [{:datos_grupo, %{en_grupo: false, members: []}}]
-        end
-
-      {state, packets ++ party_snapshot_packets}
-    else
-      {:error, reason} ->
-        Logger.error("Failed to enter map #{map_id}: #{inspect(reason)}")
-        {state, [{:error_msg, %{message: "Map not available. Try again later."}}]}
-    end
-  end
-
-  # ---- Map transfer ----
-
-  def transfer(state, dest_map, dest_x, dest_y, entity) do
-    source_map = state.map_id
-
-    with :ok <- ensure_map_started(dest_map),
-         {:ok, char_index, all_players, weather} <-
-           Arena.Map.MapServer.enter(dest_map, entity, position: {dest_x, dest_y}) do
-      # Destination entry succeeded — now remove from source
-      Arena.Map.MapServer.leave(source_map, entity.char_id)
-
-      entity = Map.get(all_players, entity.char_id)
-
-      Logger.info("#{entity.name} transferred to map #{dest_map} at (#{dest_x}, #{dest_y})")
-
-      state = %{state | map_id: dest_map, char_index: char_index, entity: entity}
-
-      global_rain = try do Arena.WorldWeather.raining?() rescue _ -> weather.rain catch :exit, _ -> weather.rain end
-      global_snow = try do Arena.WorldWeather.snowing?() rescue _ -> weather.snow catch :exit, _ -> weather.snow end
-      weather_packets =
-        (if global_rain, do: [{:rain_toggle, %{raining: true}}], else: [{:rain_toggle, %{raining: false}}]) ++
-        (if global_snow, do: [{:snow_toggle, %{snowing: true}}], else: [{:snow_toggle, %{snowing: false}}])
-
-      packets =
-        [
-          {:change_map, %{map_id: dest_map, version: 0}},
-          {:user_char_index_in_server, %{char_index: char_index}},
-          Arena.Map.Helpers.character_create_packet(entity),
-          {:pos_update, %{x: entity.x, y: entity.y}}
-        ] ++
-          weather_packets ++
-          for {cid, other} <- all_players, cid != entity.char_id do
-            Arena.Map.Helpers.character_create_packet(other)
-          end
-
-      AoSession.OnlineDirectory.update_map(state.character_id, dest_map)
-      {state, packets}
-    else
-      {:error, reason} ->
-        Logger.error("Failed to transfer to map #{dest_map}: #{inspect(reason)}")
-        {state, [{:error_msg, %{message: "Destination map not available."}}]}
-    end
-  end
+  defdelegate transfer(state, dest_map, dest_x, dest_y, entity), to: SessionTransfer
 
   # ---- Game commands ----
 
   def handle_command(state, {:walk, %{direction: direction}}) when state.character_id != nil do
-    {state, cancel_packets} = maybe_cancel_hogar(state)
+    {state, cancel_packets} = SessionTransfer.maybe_cancel_hogar(state)
     Arena.Map.MapServer.move_character(state.map_id, state.character_id, direction)
     {state, cancel_packets}
   end
@@ -480,7 +245,7 @@ defmodule AoTcpGateway.SessionLogic do
                             upper = String.upcase(String.trim(message))
                             cond do
                               upper == "/HOGAR" ->
-                                handle_hogar(state)
+                                SessionTransfer.handle_hogar(state)
 
                               upper == "/TOURNAMENT JOIN" ->
                                 name = state.entity.name
@@ -572,7 +337,7 @@ defmodule AoTcpGateway.SessionLogic do
   end
 
   def handle_command(state, {:attack, _}) when state.character_id != nil do
-    {state, cancel_packets} = maybe_cancel_hogar(state)
+    {state, cancel_packets} = SessionTransfer.maybe_cancel_hogar(state)
 
     case Arena.Map.MapServer.attack(state.map_id, state.character_id, state.target_x, state.target_y) do
       {:error, :dead} ->
@@ -601,7 +366,7 @@ defmodule AoTcpGateway.SessionLogic do
   end
 
   def handle_command(state, {:cast_spell, %{spell_slot: slot}}) when state.character_id != nil do
-    {state, cancel_packets} = maybe_cancel_hogar(state)
+    {state, cancel_packets} = SessionTransfer.maybe_cancel_hogar(state)
 
     case Arena.Map.MapServer.cast_spell(state.map_id, state.character_id, slot, state.target_x, state.target_y) do
       {:error, :dead} ->
@@ -1210,7 +975,7 @@ defmodule AoTcpGateway.SessionLogic do
 
   # Home binary packet (ID 264) → same as /HOGAR text command
   def handle_command(state, {:home, _}) when state.character_id != nil do
-    handle_hogar(state)
+    SessionTransfer.handle_hogar(state)
   end
 
   # Leave faction binary packet
@@ -2272,316 +2037,19 @@ defmodule AoTcpGateway.SessionLogic do
     base ++ offer_msgs ++ [time_msg]
   end
 
-  # ---- /HOGAR — VB6 home travel (dead-only, delayed with timer bar) ----
-  #
-  # VB6 Protocol.bas HandleHome exact flow:
-  #   1. IsInMapCarcelRestrictedArea → reject
-  #   2. Alive (Muerto=0) → reject "Debes estar muerto"
-  #   3. NEWBIE zone or CARCEL trigger → reject "No puedes viajar a tu hogar desde este mapa"
-  #   4. Penalty > 0 → reject "No puedes usar este comando en prisión"
-  #   5. EnReto → reject "No podés regresar desde un reto"
-  #   6. If not traveling:
-  #      - If not on home map: charge gold, start delayed timer (goHome)
-  #      - If on home map: "Ya te encuentras en tu hogar"
-  #   7. If already traveling: cancel, "Ya hay un viaje en curso"
-  #
-  # goHome sets a timer bar; when it expires, HomeArrival teleports the player.
 
-  # VB6 e_Ciudad enum order (reverse of character_creation @home_city_atom)
-  @home_city_ids %{
-    ullathorpe: 1, nix: 2, banderbill: 3, lindos: 4,
-    arghal: 5, arkhein: 6, forgat: 7, eldoria: 8, penthar: 9
-  }
+  # ---- /HOGAR and map transfer (delegated to SessionTransfer) ----
 
-  @jail_map_id 66
-  @hogar_travel_delay_ms 10_000
+  defdelegate handle_hogar_check(state, entity), to: SessionTransfer
+  defdelegate handle_hogar_check(state, entity, map_zone), to: SessionTransfer
+  defdelegate cancel_hogar(state), to: SessionTransfer
+  defdelegate maybe_cancel_hogar(state), to: SessionTransfer
+  defdelegate handle_hogar_arrive(state, entity), to: SessionTransfer
 
-  defp handle_hogar(state) do
-    case Arena.Map.MapServer.snapshot_entity(state.map_id, state.character_id) do
-      {:ok, entity} ->
-        handle_hogar_check(state, entity)
+  # ---- Cleanup & autosave (delegated to SessionPersistence) ----
 
-      _ ->
-        {state, []}
-    end
-  end
-
-  # Pure-logic /HOGAR handler, public for unit testing without MapServer.
-  # Matches VB6 HandleHome exactly: dead-only, delayed travel with timer bar.
-  @doc false
-  def handle_hogar_check(state, entity) do
-    handle_hogar_check(state, entity, nil)
-  end
-
-  @doc false
-  def handle_hogar_check(state, entity, map_zone) do
-    hogar_ref = Map.get(state, :hogar_timer_ref)
-
-    # Resolve zone lazily — only call MapServer when not passed explicitly (tests pass it)
-    zone = map_zone || try_get_map_zone(state.map_id)
-
-    cond do
-      # VB6 step 1: IsInMapCarcelRestrictedArea — jail map blocked
-      state.map_id == @jail_map_id ->
-        {state, [{:console_msg, %{message: "No puedes usar /HOGAR en la cárcel.", font_index: 0}}]}
-
-      # VB6 step 2: must be dead
-      not entity.dead ->
-        {state, [{:console_msg, %{message: "Debes estar muerto para poder utilizar este comando.", font_index: 0}}]}
-
-      # VB6 step 3: NEWBIE zone restriction
-      zone == "NEWBIE" ->
-        {state, [{:console_msg, %{message: "No puedes viajar a tu hogar desde este mapa.", font_index: 0}}]}
-
-      # VB6 step 4: penalty (prison sentence)
-      (entity.penalty || 0) > 0 ->
-        {state, [{:console_msg, %{message: "No puedes usar este comando en prisión.", font_index: 0}}]}
-
-      # VB6 step 7: already traveling — cancel the travel
-      hogar_ref != nil ->
-        Process.cancel_timer(hogar_ref)
-        state = Map.put(state, :hogar_timer_ref, nil)
-        {state, [{:console_msg, %{message: "Ya hay un viaje en curso.", font_index: 0}}]}
-
-      # VB6 step 6: not traveling — check home map then start
-      true ->
-        city_id = Map.get(@home_city_ids, entity.home_city, 1)
-        spawn = Arena.Data.GameData.city_spawn(city_id)
-
-        if state.map_id == spawn.map do
-          {state, [{:console_msg, %{message: "Ya te encuentras en tu hogar.", font_index: 0}}]}
-        else
-          cost = hogar_gold_cost(entity.level)
-
-          if entity.gold < cost do
-            {state, [{:console_msg, %{message: "Para utilizar este comando necesitas #{cost} monedas de oro.", font_index: 0}}]}
-          else
-            # Deduct gold (async cast — also sends :update_gold packet to client)
-            Arena.Map.MapServer.modify_gold(state.map_id, state.character_id, -cost)
-
-            ref = Process.send_after(self(), :hogar_arrive, @hogar_travel_delay_ms)
-            state = Map.put(state, :hogar_timer_ref, ref)
-
-            {state, [
-              {:console_msg, %{message: "Volverás a tu hogar en unos segundos.", font_index: 0}}
-            ]}
-          end
-        end
-    end
-  end
-
-  @doc """
-  Cancel an in-progress /HOGAR travel. Returns `{state, packets}`.
-  Called when the player walks, attacks, casts, gets hit, or dies.
-  """
-  def cancel_hogar(state) do
-    case Map.get(state, :hogar_timer_ref) do
-      nil ->
-        {state, []}
-
-      ref ->
-        Process.cancel_timer(ref)
-        state = Map.put(state, :hogar_timer_ref, nil)
-        {state, [{:console_msg, %{message: "Has cancelado el viaje a casa.", font_index: 0}}]}
-    end
-  end
-
-  @doc """
-  Convenience: cancel hogar and return just `{state, cancel_packets}`.
-  Used by walk/attack/spell handlers that need to prepend cancel packets.
-  """
-  def maybe_cancel_hogar(state) do
-    cancel_hogar(state)
-  end
-
-  @doc """
-  Handle the :hogar_arrive timer message. Teleports the player to their
-  home city if the timer wasn't cancelled (hogar_timer_ref still set).
-  Returns either `{:transfer, map, x, y, entity}` tuple (for handler to process)
-  or `{state, []}` if cancelled.
-  """
-  def handle_hogar_arrive(state, entity) do
-    case Map.get(state, :hogar_timer_ref) do
-      nil ->
-        # Timer was cancelled
-        {state, []}
-
-      _ref ->
-        city_id = Map.get(@home_city_ids, entity.home_city, 1)
-        spawn = Arena.Data.GameData.city_spawn(city_id)
-
-        {:transfer, spawn.map, spawn.x, spawn.y, entity}
-    end
-  end
-
-  defp hogar_gold_cost(level) when level > 24, do: level * level
-  defp hogar_gold_cost(level), do: level * 15 + trunc(:math.pow(level, 1.5))
-
-  defp try_get_map_zone(map_id) do
-    Arena.Map.MapServer.map_zone(map_id)
-  rescue
-    _ -> nil
-  catch
-    :exit, _ -> nil
-  end
-
-  # ---- Cleanup & autosave ----
-
-  def cleanup(state) do
-    if state.character_id && state.map_id do
-      case Arena.Map.MapServer.leave(state.map_id, state.character_id) do
-        {:ok, entity} ->
-          try do
-            attrs = GameBackend.Characters.from_entity(entity)
-            inventory = GameBackend.Characters.inventory_from_entity(entity)
-            equipment = GameBackend.Characters.equipment_from_entity(entity)
-            skills = GameBackend.Characters.skills_from_entity(entity)
-            spells = GameBackend.Characters.spells_from_entity(entity)
-
-            case GameBackend.Characters.save_snapshot(entity.char_id, attrs,
-                   inventory: inventory,
-                   equipment: equipment,
-                   skills: skills,
-                   spells: spells
-                 ) do
-              {:ok, _} -> :ok
-              {:error, reason} -> Logger.error("Cleanup save failed for #{entity.char_id}: #{inspect(reason)}")
-            end
-          rescue
-            e -> Logger.error("Cleanup save error for #{entity.char_id}: #{inspect(e)}")
-          end
-
-        :not_found ->
-          :ok
-      end
-    end
-
-    if state.character_id do
-      Arena.PartyServer.leave(state.character_id)
-      AoSession.OnlineDirectory.unregister(state.character_id)
-      AoSession.unregister(state.character_id)
-    end
-
-    :ok
-  end
-
-  def autosave(entity) do
-    Task.start(fn ->
-      attrs = GameBackend.Characters.from_entity(entity)
-      inventory = GameBackend.Characters.inventory_from_entity(entity)
-      equipment = GameBackend.Characters.equipment_from_entity(entity)
-      skills = GameBackend.Characters.skills_from_entity(entity)
-      spells = GameBackend.Characters.spells_from_entity(entity)
-
-      case GameBackend.Characters.save_snapshot(entity.char_id, attrs,
-             inventory: inventory,
-             equipment: equipment,
-             skills: skills,
-             spells: spells
-           ) do
-        {:ok, _} -> :ok
-        {:error, reason} -> Logger.error("Autosave failed for #{entity.char_id}: #{inspect(reason)}")
-      end
-    end)
-  end
-
-  # ---- Map readiness ----
-
-  def ensure_map_started(map_id) do
-    case Registry.lookup(Arena.MapRegistry, map_id) do
-      [{_pid, _}] -> :ok
-      [] -> Arena.Map.MapSupervisor.start_map(map_id)
-    end
-
-    wait_for_map_ready(map_id, 50)
-  end
-
-  defp wait_for_map_ready(_map_id, 0), do: {:error, :map_not_ready}
-
-  defp wait_for_map_ready(map_id, retries) do
-    case Registry.lookup(Arena.MapRegistry, map_id) do
-      [] ->
-        {:error, :map_not_found}
-
-      _ ->
-        if Arena.Map.MapServer.ready?(map_id) do
-          :ok
-        else
-          Process.sleep(100)
-          wait_for_map_ready(map_id, retries - 1)
-        end
-    end
-  end
-
-  # ---- Packet builders ----
-
-  def inventory_login_packets(entity) do
-    entity.inventory
-    |> Enum.with_index()
-    |> Enum.flat_map(fn
-      {nil, _idx} ->
-        []
-
-      {%{item_id: item_id, amount: amount, equipped: equipped}, idx} ->
-        item_def = Arena.Data.GameData.get_item(item_id)
-        valor = if item_def, do: item_def.valor, else: 0
-
-        [
-          {:change_inventory_slot,
-           %{
-             slot: idx + 1,
-             obj_index: item_id,
-             amount: amount,
-             equipped: equipped,
-             valor: valor / 1
-           }}
-        ]
-    end)
-  end
-
-  def exp_login_packets(entity) do
-    level = max(entity.level || 1, 1)
-    current_xp = max(entity.xp || 0, 0)
-
-    next_xp =
-      case Arena.Data.GameData.exp_for_level(level) do
-        value when is_integer(value) and value > current_xp ->
-          value
-
-        _ ->
-          case Arena.Data.GameData.exp_for_level(level + 1) do
-            value when is_integer(value) and value > 0 -> value
-            _ -> max(current_xp, 1)
-          end
-      end
-
-    [
-      {:level_up, %{level: level}},
-      {:update_exp, %{current_xp: current_xp, next_xp: next_xp}}
-    ]
-  end
-
-  def spell_login_packets(entity) do
-    (entity.spells || [])
-    |> Enum.with_index(1)
-    |> Enum.flat_map(fn
-      {spell_id, slot} when is_integer(spell_id) and spell_id > 0 ->
-        [
-          {:change_spell_slot,
-           %{
-             slot: slot,
-             spell_id: spell_id
-           }}
-        ]
-
-      _ ->
-        []
-    end)
-  end
-
-  def skill_login_packets(entity) do
-    [{:send_skills, %{skills: entity.skills || %{}}}]
-  end
+  defdelegate cleanup(state), to: SessionPersistence
+  defdelegate autosave(entity), to: SessionPersistence
 
   # ---- Heading conversion ----
 
@@ -2590,20 +2058,6 @@ defmodule AoTcpGateway.SessionLogic do
   def int_to_heading(3), do: :south
   def int_to_heading(4), do: :west
   def int_to_heading(_), do: :south
-
-  # ---- Creation error messages ----
-
-  defp creation_error_message(:name_too_short), do: "Name too short (min 3 characters)."
-  defp creation_error_message(:name_too_long), do: "Name too long (max 30 characters)."
-  defp creation_error_message(:name_invalid_chars), do: "Name contains invalid characters."
-  defp creation_error_message(:name_invalid), do: "Invalid name."
-  defp creation_error_message(:invalid_head), do: "Invalid head selection."
-  defp creation_error_message(:name_taken), do: "Character name already taken."
-  defp creation_error_message({:invalid_race, _}), do: "Invalid race."
-  defp creation_error_message({:invalid_gender, _}), do: "Invalid gender."
-  defp creation_error_message({:invalid_class, _}), do: "Invalid class."
-  defp creation_error_message({:invalid_home_city, _}), do: "Invalid home city."
-  defp creation_error_message(_), do: "Character creation failed."
 
   # ---- Party chat commands ----
 
