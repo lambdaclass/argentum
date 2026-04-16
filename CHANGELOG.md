@@ -42,7 +42,7 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 - Fixture replay harness and `mix capture.packets` workflow added, with a
   synthetic seed fixture corpus pending replacement by real VB6 captures.
 - Manual VB6 smoke checklist added in
-  [server/VB6_SMOKE_CHECKLIST.md](/Users/unbalancedparen/projects/argentum/server/VB6_SMOKE_CHECKLIST.md).
+  [server/docs/VB6_SMOKE_CHECKLIST.md](server/docs/VB6_SMOKE_CHECKLIST.md).
 - Supported backend environment verified: the `server/` Nix/dev shell compiles
   and tests cleanly.
 - Recent migrations verified on clean Postgres and on an upgrade path.

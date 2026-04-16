@@ -1,5 +1,5 @@
 # Test script: connects to the AO TCP server using AO20 protocol, sends login, reads responses.
-# Usage: mix run --no-start test_tcp_login.exs
+# Usage: mix run --no-start scripts/test_tcp_login.exs
 #
 # Make sure the server is running first with: mix run --no-halt
 
