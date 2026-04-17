@@ -4,6 +4,35 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **Guild server hardening and DB-first reordering (2026-04-17):**
+  - Fixed accept_invite authority bug: now checks expires_at and verifies
+    the inviter still leads the guild before proceeding. Invite is only
+    deleted after DB success; on failure the invite is preserved for retry.
+  - Fixed accept_request authority bug: now verifies a pending request
+    exists before adding a member. Added `Guilds.request_exists?/2`.
+  - Reordered all guild ETS mutations to DB-first: set_news, set_description,
+    set_website, declare_war, propose_peace, propose_alliance, add_exp/level_up,
+    and leader succession now only mutate ETS after the DB write succeeds.
+  - Wrapped all remaining raw `Guilds.*` calls in try/rescue: create_guild,
+    add_member, remove_member, delete_guild, create_request, delete_request,
+    list_requests. GuildServer can no longer crash on DB exceptions.
+  - Made leader succession transactional via `Guilds.remove_member_and_set_leader/3`
+    using `Repo.transaction`. DB cannot end up pointing at a departed leader.
+  - Converted `leave/1` and `kick/2` from `GenServer.cast` to `GenServer.call`
+    so callers get commit results. Updated 4 callers in session_commands/guild.ex.
+  - Updated guild persistence tests for DB-first semantics (ETS unchanged on
+    failure). Updated authority tests for call-based kick.
+- **AutosaveWriter + cleanup hardening (2026-04-17):**
+  - Added `Process.monitor` on autosave task PIDs. If a task crashes before
+    sending `{:write_done, ...}`, the `{:DOWN, ...}` handler clears in_flight,
+    emits error telemetry, and resolves flush waiters — preventing stuck chars
+    and hanging flushes.
+  - Wrapped `Task.start` in try/rescue. On start failure, flush waiters are
+    resolved immediately instead of silently losing pending data.
+  - Session cleanup now logs a warning (with stale-autosave risk note) on
+    flush timeout instead of silently swallowing. Final save failures emit
+    `[:arena, :persistence, :cleanup_save_failed]` telemetry and log with
+    data-loss-risk context instead of silent continuation.
 - **Sync-first persistence: bank boundary (2026-04-17):**
   - Reordered all bank operations to DB-first: deposit/extract items and
     gold now write to DB before modifying in-memory state. On DB failure,

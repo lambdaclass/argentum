@@ -17,7 +17,12 @@ defmodule AoTcpGateway.SessionPersistence do
       try do
         AutosaveWriter.flush(state.character_id, 5_000)
       catch
-        :exit, _ -> :ok
+        kind, reason ->
+          Logger.warning(
+            "AutosaveWriter.flush timed out or failed for char #{state.character_id}: " <>
+              "#{inspect(kind)} #{inspect(reason)}. " <>
+              "A stale autosave may still be in-flight and could overwrite the cleanup snapshot."
+          )
       end
 
       case Arena.Map.MapServer.leave(state.map_id, state.character_id) do
@@ -41,14 +46,26 @@ defmodule AoTcpGateway.SessionPersistence do
                 :telemetry.execute([:arena, :persistence, :cleanup],
                   %{duration: System.monotonic_time() - start},
                   %{char_id: entity.char_id, result: :error})
-                Logger.error("Cleanup save failed for #{entity.char_id}: #{inspect(reason)}")
+                :telemetry.execute([:arena, :persistence, :cleanup_save_failed],
+                  %{},
+                  %{char_id: entity.char_id})
+                Logger.error(
+                  "Final save failed for char #{entity.char_id}, " <>
+                    "session cleanup proceeding with data loss risk: #{inspect(reason)}"
+                )
             end
           rescue
             e ->
               :telemetry.execute([:arena, :persistence, :cleanup],
                 %{duration: System.monotonic_time() - start},
                 %{char_id: entity.char_id, result: :error})
-              Logger.error("Cleanup save error for #{entity.char_id}: #{inspect(e)}")
+              :telemetry.execute([:arena, :persistence, :cleanup_save_failed],
+                %{},
+                %{char_id: entity.char_id})
+              Logger.error(
+                "Final save failed for char #{entity.char_id}, " <>
+                  "session cleanup proceeding with data loss risk: #{inspect(e)}"
+              )
           end
 
         :not_found ->
