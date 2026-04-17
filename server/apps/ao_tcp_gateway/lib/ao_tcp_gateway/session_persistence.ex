@@ -2,29 +2,35 @@ defmodule AoTcpGateway.SessionPersistence do
   @moduledoc """
   Autosave and cleanup: persist entity state, unregister sessions.
 
-  Extracted from SessionLogic as a pure structural refactor.
+  Autosave is a best-effort snapshot path via `AutosaveWriter` (async,
+  coalescing, one in-flight write per character). Cleanup is the
+  authoritative save boundary — synchronous, flush-then-save.
   """
 
   require Logger
 
+  alias AoTcpGateway.AutosaveWriter
+
   def cleanup(state) do
     if state.character_id && state.map_id do
+      # Drain any pending autosave before the authoritative cleanup save
+      try do
+        AutosaveWriter.flush(state.character_id, 5_000)
+      catch
+        :exit, _ -> :ok
+      end
+
       case Arena.Map.MapServer.leave(state.map_id, state.character_id) do
         {:ok, entity} ->
           start = System.monotonic_time()
+          snapshot = AutosaveWriter.snapshot_from_entity(entity)
 
           try do
-            attrs = GameBackend.Characters.from_entity(entity)
-            inventory = GameBackend.Characters.inventory_from_entity(entity)
-            equipment = GameBackend.Characters.equipment_from_entity(entity)
-            skills = GameBackend.Characters.skills_from_entity(entity)
-            spells = GameBackend.Characters.spells_from_entity(entity)
-
-            case GameBackend.Characters.save_snapshot(entity.char_id, attrs,
-                   inventory: inventory,
-                   equipment: equipment,
-                   skills: skills,
-                   spells: spells
+            case GameBackend.Characters.save_snapshot(entity.char_id, snapshot.attrs,
+                   inventory: snapshot.inventory,
+                   equipment: snapshot.equipment,
+                   skills: snapshot.skills,
+                   spells: snapshot.spells
                  ) do
               {:ok, _} ->
                 :telemetry.execute([:arena, :persistence, :cleanup],
@@ -60,31 +66,6 @@ defmodule AoTcpGateway.SessionPersistence do
   end
 
   def autosave(entity) do
-    Task.start(fn ->
-      start = System.monotonic_time()
-      attrs = GameBackend.Characters.from_entity(entity)
-      inventory = GameBackend.Characters.inventory_from_entity(entity)
-      equipment = GameBackend.Characters.equipment_from_entity(entity)
-      skills = GameBackend.Characters.skills_from_entity(entity)
-      spells = GameBackend.Characters.spells_from_entity(entity)
-
-      case GameBackend.Characters.save_snapshot(entity.char_id, attrs,
-             inventory: inventory,
-             equipment: equipment,
-             skills: skills,
-             spells: spells
-           ) do
-        {:ok, _} ->
-          :telemetry.execute([:arena, :persistence, :autosave],
-            %{duration: System.monotonic_time() - start},
-            %{char_id: entity.char_id, result: :ok})
-
-        {:error, reason} ->
-          :telemetry.execute([:arena, :persistence, :autosave],
-            %{duration: System.monotonic_time() - start},
-            %{char_id: entity.char_id, result: :error})
-          Logger.error("Autosave failed for #{entity.char_id}: #{inspect(reason)}")
-      end
-    end)
+    AutosaveWriter.submit(entity)
   end
 end

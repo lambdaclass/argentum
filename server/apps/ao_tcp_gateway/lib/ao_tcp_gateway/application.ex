@@ -20,6 +20,7 @@ defmodule AoTcpGateway.Application do
     ])
 
     children = [
+      AoTcpGateway.AutosaveWriter,
       {AoTcpGateway.Listener, port: tcp_port},
       %{
         id: :ao_ws_listener,
