@@ -638,9 +638,21 @@ defmodule Arena.GuildServer do
                 notify(guild.leader, "Hay una nueva solicitud de ingreso al clan. Usa /SOLICITUDES para verlas.")
                 {:reply, :ok, state}
 
+              {:error, %Ecto.Changeset{} = cs} ->
+                # Unique constraint violation = genuinely already requested
+                if has_unique_constraint_error?(cs) do
+                  notify(char_id, "Ya tienes una solicitud pendiente en ese clan.")
+                  {:reply, {:error, :already_requested}, state}
+                else
+                  Logger.error("Guild create_request failed for char #{char_id}: #{inspect(cs)}")
+                  notify(char_id, "Error al enviar la solicitud. Intenta de nuevo.")
+                  {:reply, {:error, :db_error}, state}
+                end
+
               {:error, _} ->
-                notify(char_id, "Ya tienes una solicitud pendiente en ese clan.")
-                {:reply, {:error, :already_requested}, state}
+                Logger.error("Guild create_request failed for char #{char_id} in guild #{guild_id}")
+                notify(char_id, "Error al enviar la solicitud. Intenta de nuevo.")
+                {:reply, {:error, :db_error}, state}
             end
 
           :not_found ->
@@ -656,31 +668,38 @@ defmodule Arena.GuildServer do
       {:ok, guild_id, _guild} ->
         requests =
           try do
-            Guilds.list_requests(guild_id)
+            {:ok, Guilds.list_requests(guild_id)}
           rescue
             e ->
-              Logger.error("Guild list_requests raised: #{inspect(e)}")
-              []
+              Logger.error("Guild list_requests raised for guild #{guild_id}: #{inspect(e)}")
+              {:error, :db_error}
           end
 
-        request_names =
-          for req <- requests do
-            case OnlineDirectory.lookup_by_id(req.char_id) do
-              {:ok, info} -> info.name
-              :not_found -> "ID:#{req.char_id}"
+        case requests do
+          {:error, :db_error} ->
+            notify(char_id, "Error al obtener las solicitudes. Intenta de nuevo.")
+            {:reply, {:error, :db_error}, state}
+
+          {:ok, reqs} ->
+            request_names =
+              for req <- reqs do
+                case OnlineDirectory.lookup_by_id(req.char_id) do
+                  {:ok, info} -> info.name
+                  :not_found -> "ID:#{req.char_id}"
+                end
+              end
+
+            if reqs == [] do
+              notify(char_id, "No hay solicitudes pendientes.")
+            else
+              for {req, name} <- Enum.zip(reqs, request_names) do
+                desc = if req.description != "", do: " - #{req.description}", else: ""
+                notify(char_id, "Solicitud: #{name}#{desc}")
+              end
             end
-          end
 
-        if requests == [] do
-          notify(char_id, "No hay solicitudes pendientes.")
-        else
-          for {req, name} <- Enum.zip(requests, request_names) do
-            desc = if req.description != "", do: " - #{req.description}", else: ""
-            notify(char_id, "Solicitud: #{name}#{desc}")
-          end
+            {:reply, {:ok, request_names}, state}
         end
-
-        {:reply, {:ok, request_names}, state}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -1203,6 +1222,12 @@ defmodule Arena.GuildServer do
   end
 
   # ---- Sync persistence helpers ----
+
+  defp has_unique_constraint_error?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn {_field, {_msg, opts}} ->
+      Keyword.get(opts, :constraint) == :unique
+    end)
+  end
 
   defp persist_guild_update(guild_id, attrs) do
     try do

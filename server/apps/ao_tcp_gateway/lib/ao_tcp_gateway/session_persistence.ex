@@ -2,9 +2,26 @@ defmodule AoTcpGateway.SessionPersistence do
   @moduledoc """
   Autosave and cleanup: persist entity state, unregister sessions.
 
-  Autosave is a best-effort snapshot path via `AutosaveWriter` (async,
-  coalescing, one in-flight write per character). Cleanup is the
-  authoritative save boundary — synchronous, flush-then-save.
+  ## Persistence policy
+
+  **Autosave** is a best-effort snapshot path via `AutosaveWriter` (async,
+  coalescing, one in-flight write per character). It is not an authoritative
+  boundary — loss of an autosave is acceptable.
+
+  **Cleanup** (on disconnect or logout) is the authoritative save boundary:
+  synchronous flush-then-save. If the final save fails (DB down, constraint
+  error, timeout), cleanup logs the failure, emits
+  `[:arena, :persistence, :cleanup_save_failed]` telemetry, and proceeds
+  with session teardown. This is an **accepted data-loss risk**: the player's
+  state reverts to the last successful autosave or authoritative write (e.g.
+  trade commit, bank operation). Retrying is not viable because the session
+  is already terminating, and blocking teardown would create ghost sessions
+  in the online directory.
+
+  **Authoritative writes** (trade, bank, guild) persist synchronously at the
+  point of action. These are the true commit boundaries — cleanup save is a
+  catch-all for position, HP, mana, and other soft state that changes
+  between authoritative writes.
   """
 
   require Logger
