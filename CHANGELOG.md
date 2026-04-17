@@ -23,16 +23,20 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
   - Updated guild persistence tests for DB-first semantics (ETS unchanged on
     failure). Updated authority tests for call-based kick.
 - **AutosaveWriter + cleanup hardening (2026-04-17):**
-  - Added `Process.monitor` on autosave task PIDs. If a task crashes before
-    sending `{:write_done, ...}`, the `{:DOWN, ...}` handler clears in_flight,
-    emits error telemetry, and resolves flush waiters — preventing stuck chars
-    and hanging flushes.
-  - Wrapped `Task.start` in try/rescue. On start failure, flush waiters are
-    resolved immediately instead of silently losing pending data.
+  - Replaced `Task.start` + `Process.monitor` with `spawn_monitor/1` (unlinked
+    + monitored in one call). Worker has internal try/rescue; {:DOWN} handler
+    covers truly unexpected crashes. Clears in_flight, emits error telemetry,
+    resolves flush waiters — preventing stuck chars and hanging flushes.
   - Session cleanup now logs a warning (with stale-autosave risk note) on
     flush timeout instead of silently swallowing. Final save failures emit
     `[:arena, :persistence, :cleanup_save_failed]` telemetry and log with
     data-loss-risk context instead of silent continuation.
+  - Fixed kick/leave `{0, nil}` bug: `Repo.delete_all` returning zero deleted
+    rows is now treated as an error, preventing ETS mutation when the DB row
+    doesn't exist.
+  - Added 7 failure-path tests: guild accept_invite/accept_request/kick/leave
+    DB failure, autosave worker-death recovery (with and without pending
+    snapshot), and cleanup_save_failed telemetry emission.
 - **Sync-first persistence: bank boundary (2026-04-17):**
   - Reordered all bank operations to DB-first: deposit/extract items and
     gold now write to DB before modifying in-memory state. On DB failure,

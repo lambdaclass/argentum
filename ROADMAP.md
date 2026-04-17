@@ -49,12 +49,14 @@ or permission changes.
    bank operations reordered to DB-first with failure rollback (done); guild
    membership/invite/request/relation paths reordered to DB-first and hardened
    against DB exceptions (done).
-   Remaining: trade boundary, cleanup/logout verification, replace the linked
-   `AutosaveWriter` worker with a non-linked worker model so task crashes
-   cannot take down the writer, keep `flush/1` reliable under worker-crash and
-   worker-start-failure paths, and either make cleanup/logout a true final-save
-   boundary or keep the current "log and proceed" behavior explicit and fully
-   tested as an accepted risk.
+   AutosaveWriter worker model replaced with `spawn_monitor/1` (unlinked +
+   monitored, worker crash cannot take down the writer). Flush reliable under
+   worker-crash paths. Cleanup/logout "log and proceed" behavior is now explicit
+   and tested (cleanup_save_failed telemetry + logging). Kick/leave `{0, nil}`
+   bug fixed (Repo.delete_all returning zero rows treated as error). 7 failure-
+   path tests added (guild accept_invite/request/kick/leave DB failure, autosave
+   worker-death recovery, cleanup_save_failed telemetry).
+   Remaining: trade boundary, cleanup/logout verification.
 
 5. Verify graceful host shutdown.
    Depends on #4 — shutdown verification is more meaningful once the
@@ -96,9 +98,10 @@ abuse path plus a normal-path control test.
 9. Keep guild invite and request authority proven under DB-backed flows.
    **Done**: expired invite check at accept time, inviter-still-leads check,
    pending-request-required check, and consume-invite/request only after
-   durable success. **Still open**: DB-backed failure-path tests so these
-   guarantees are proven with real persisted guild/request rows instead of only
-   synthetic fixtures.
+   durable success. Failure-path tests added for accept_invite, accept_request,
+   kick, and leave DB failures (synthetic fixtures — ETS consistency proven).
+   **Still open**: DB-backed failure-path tests with real persisted guild/request
+   rows for full end-to-end coverage.
    Outcome: guild invite/request authority stays correct even when persistence
    fails or guild state changes between issue and accept.
    Tests required: inviter-loses-leadership, inviter-leaves-guild,
