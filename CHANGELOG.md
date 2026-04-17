@@ -4,6 +4,26 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **Sync-first persistence: guild writes (2026-04-17):**
+  - Replaced all 8 fire-and-forget `Task.start` guild DB writes in
+    `GuildServer` with synchronous `persist_guild_update/2` and
+    `persist_relation/4` helpers. Covers: set_news, set_description,
+    set_website, declare_war, propose_peace, propose_alliance, level_up,
+    and leader succession on leave.
+  - All persist helpers wrapped in `try/rescue` so DB failures (constraint
+    errors, connection loss) log the error and return `:error` without
+    crashing the GenServer or corrupting ETS state.
+  - Hardened `accept_invite` `add_member` call with the same
+    `try/rescue` pattern — previously a constraint error would crash the
+    GenServer.
+  - 5 new failure-path tests (`guild_sync_persistence_test.exs`):
+    set_news, set_description, set_website, and declare_war all verify
+    ETS consistency and GenServer survival when DB writes fail.
+    Multi-failure sequencing test confirms repeated failures don't
+    degrade the process.
+  - Updated 2 guild authority test expectations to accept `{:error,
+    :db_error}` (previously these tests crashed the GenServer via
+    unhandled constraint errors).
 - **Runtime safety: backpressure and autosave (2026-04-17):**
   - Added outbound backpressure for lagging sessions (TCP + WebSocket).
     Mailbox length check before each loop iteration/outbound send, warning

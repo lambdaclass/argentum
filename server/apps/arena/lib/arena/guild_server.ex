@@ -380,7 +380,16 @@ defmodule Arena.GuildServer do
                     {:reply, {:error, :alignment_mismatch}, state}
 
                   true ->
-                    case Guilds.add_member(guild_id, char_id) do
+                    result =
+                      try do
+                        Guilds.add_member(guild_id, char_id)
+                      rescue
+                        e ->
+                          Logger.error("Guild add_member raised for char #{char_id}: #{inspect(e)}")
+                          {:error, :exception}
+                      end
+
+                    case result do
                       {:ok, _member} ->
                         new_members = guild.members ++ [char_id]
                         :ets.insert(@table, {{:guild, guild_id}, %{guild | members: new_members}})
@@ -419,7 +428,7 @@ defmodule Arena.GuildServer do
         news = String.slice(news, 0..1023)
         guild = %{guild | news: news}
         :ets.insert(@table, {{:guild, guild_id}, guild})
-        Task.start(fn -> Guilds.update_guild(guild_id, %{news: news}) end)
+        persist_guild_update(guild_id, %{news: news})
         notify(char_id, "Noticias del clan actualizadas.")
         {:reply, :ok, state}
 
@@ -435,7 +444,7 @@ defmodule Arena.GuildServer do
         description = String.slice(description, 0..255)
         guild = %{guild | description: description}
         :ets.insert(@table, {{:guild, guild_id}, guild})
-        Task.start(fn -> Guilds.update_guild(guild_id, %{description: description}) end)
+        persist_guild_update(guild_id, %{description: description})
         notify(char_id, "Descripcion del clan actualizada.")
         {:reply, :ok, state}
 
@@ -451,7 +460,7 @@ defmodule Arena.GuildServer do
         url = String.slice(url, 0..255)
         guild = %{guild | url: url}
         :ets.insert(@table, {{:guild, guild_id}, guild})
-        Task.start(fn -> Guilds.update_guild(guild_id, %{url: url}) end)
+        persist_guild_update(guild_id, %{url: url})
         {:reply, :ok, state}
 
       {:error, reason} ->
@@ -470,7 +479,7 @@ defmodule Arena.GuildServer do
 
           {:ok, target_guild_id, target_guild} ->
             set_relation_ets(my_guild_id, target_guild_id, "war")
-            Task.start(fn -> Guilds.set_relation(my_guild_id, target_guild_id, "war") end)
+            persist_relation(my_guild_id, target_guild_id, :set, "war")
             broadcast_guild(my_guild.members, "Se ha declarado la guerra contra '#{target_guild.name}'!")
             broadcast_guild(target_guild.members, "El clan '#{my_guild.name}' les ha declarado la guerra!")
             {:reply, :ok, state}
@@ -493,7 +502,7 @@ defmodule Arena.GuildServer do
           {:ok, target_guild_id, target_guild} ->
             if at_war?(my_guild_id, target_guild_id) do
               delete_relation_ets(my_guild_id, target_guild_id)
-              Task.start(fn -> Guilds.delete_relation(my_guild_id, target_guild_id) end)
+              persist_relation(my_guild_id, target_guild_id, :delete, nil)
               broadcast_guild(my_guild.members, "Se ha establecido la paz con '#{target_guild.name}'.")
               broadcast_guild(target_guild.members, "El clan '#{my_guild.name}' ha propuesto la paz.")
               {:reply, :ok, state}
@@ -523,7 +532,7 @@ defmodule Arena.GuildServer do
 
           {:ok, target_guild_id, target_guild} ->
             set_relation_ets(my_guild_id, target_guild_id, "alliance")
-            Task.start(fn -> Guilds.set_relation(my_guild_id, target_guild_id, "alliance") end)
+            persist_relation(my_guild_id, target_guild_id, :set, "alliance")
             broadcast_guild(my_guild.members, "Se ha formado una alianza con '#{target_guild.name}'.")
             broadcast_guild(target_guild.members, "El clan '#{my_guild.name}' les ha propuesto una alianza.")
             {:reply, :ok, state}
@@ -718,10 +727,7 @@ defmodule Arena.GuildServer do
             )
           end
 
-          # Async DB persist
-          Task.start(fn ->
-            Guilds.update_guild(guild_id, %{level: new_level, current_exp: final_exp})
-          end)
+          persist_guild_update(guild_id, %{level: new_level, current_exp: final_exp})
 
           {:noreply, state}
         end
@@ -764,10 +770,7 @@ defmodule Arena.GuildServer do
               guild = %{guild | leader: new_leader, members: remaining}
               :ets.insert(@table, {{:guild, guild_id}, guild})
               Guilds.remove_member(guild_id, char_id)
-
-              Task.start(fn ->
-                Guilds.update_guild(guild_id, %{leader_id: new_leader})
-              end)
+              persist_guild_update(guild_id, %{leader_id: new_leader})
 
               leader_name =
                 case OnlineDirectory.lookup_by_id(new_leader) do
@@ -991,6 +994,49 @@ defmodule Arena.GuildServer do
     case OnlineDirectory.lookup_by_id(char_id) do
       {:ok, %{session_pid: pid}} -> send(pid, {:send_raw, raw})
       _ -> :ok
+    end
+  end
+
+  # ---- Sync persistence helpers ----
+
+  defp persist_guild_update(guild_id, attrs) do
+    try do
+      case Guilds.update_guild(guild_id, attrs) do
+        {:ok, _} -> :ok
+        {:error, reason} ->
+          Logger.error("Guild DB update failed for guild #{guild_id}: #{inspect(reason)}")
+          :error
+      end
+    rescue
+      e ->
+        Logger.error("Guild DB update failed for guild #{guild_id}: #{inspect(e)}")
+        :error
+    end
+  end
+
+  defp persist_relation(guild_a, guild_b, :set, type) do
+    try do
+      case Guilds.set_relation(guild_a, guild_b, type) do
+        {:ok, _} -> :ok
+        {:error, reason} ->
+          Logger.error("Guild relation set failed (#{guild_a}↔#{guild_b} #{type}): #{inspect(reason)}")
+          :error
+      end
+    rescue
+      e ->
+        Logger.error("Guild relation set failed (#{guild_a}↔#{guild_b} #{type}): #{inspect(e)}")
+        :error
+    end
+  end
+
+  defp persist_relation(guild_a, guild_b, :delete, _type) do
+    try do
+      Guilds.delete_relation(guild_a, guild_b)
+      :ok
+    rescue
+      e ->
+        Logger.error("Guild relation delete failed (#{guild_a}↔#{guild_b}): #{inspect(e)}")
+        :error
     end
   end
 

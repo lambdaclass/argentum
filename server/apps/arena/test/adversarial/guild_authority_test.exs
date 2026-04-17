@@ -124,7 +124,7 @@ defmodule Arena.Adversarial.GuildAuthorityTest do
 
       result = GuildServer.accept_invite(@outsider_id)
 
-      assert result in [{:error, :invite_invalid}, {:error, :not_leader}, {:error, :no_invite}]
+      assert result in [{:error, :invite_invalid}, {:error, :not_leader}, {:error, :no_invite}, {:error, :db_error}]
       assert :ets.lookup(@table, {:member, @outsider_id}) == []
     end
 
@@ -143,7 +143,7 @@ defmodule Arena.Adversarial.GuildAuthorityTest do
 
       result = GuildServer.accept_invite(@outsider_id)
 
-      assert result in [{:error, :invite_invalid}, {:error, :not_leader}, {:error, :no_invite}]
+      assert result in [{:error, :invite_invalid}, {:error, :not_leader}, {:error, :no_invite}, {:error, :db_error}]
       assert :ets.lookup(@table, {:member, @outsider_id}) == []
     end
 

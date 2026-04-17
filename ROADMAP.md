@@ -24,6 +24,10 @@ These items address live data-loss risks and production crash risks. They
 take priority over feature work, parity, and observability.
 Authoritative gameplay and economy writes stay sync-first. Existing async DB
 writes are temporary exceptions to contain, not a model to expand.
+While a player is online, in-memory state stays authoritative; the DB is the
+offline source of truth and the target of explicit durable commit boundaries.
+Autosave remains a best-effort snapshot path, not the commit point for economy
+or permission changes.
 
 4. Implement the sync-first persistence boundary (broader architecture).
    Audit all `GameBackend.*` write sites. Keep authoritative writes explicit
@@ -41,6 +45,8 @@ writes are temporary exceptions to contain, not a model to expand.
    Tests required: authoritative persistence regressions for logout/cleanup,
    bank, trade, inventory/equipment, guild membership/invites, and failure
    cases that must leave in-memory and durable state consistent.
+   Progress: guild fire-and-forget writes replaced with sync helpers (done).
+   Remaining: bank boundary, trade boundary, cleanup/logout verification.
 
 5. Verify graceful host shutdown.
    Depends on #4 — shutdown verification is more meaningful once the
