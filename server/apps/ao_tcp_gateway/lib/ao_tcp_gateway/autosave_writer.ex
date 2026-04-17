@@ -140,12 +140,14 @@ defmodule AoTcpGateway.AutosaveWriter do
     :telemetry.execute([:arena, :persistence, :autosave], %{count: 1},
       %{char_id: char_id, event: :started})
 
-    try do
-      {:ok, pid} =
-        Task.start(fn ->
-          start = System.monotonic_time()
+    # spawn_monitor: unlinked + monitored in one call.
+    # Worker crash cannot take down AutosaveWriter; {:DOWN, ...} clears in_flight.
+    {_pid, monitor_ref} =
+      spawn_monitor(fn ->
+        start = System.monotonic_time()
 
-          result =
+        result =
+          try do
             case GameBackend.Characters.save_snapshot(char_id, snapshot.attrs,
                    inventory: snapshot.inventory,
                    equipment: snapshot.equipment,
@@ -155,27 +157,19 @@ defmodule AoTcpGateway.AutosaveWriter do
               {:ok, _} -> :ok
               {:error, reason} -> {:error, reason}
             end
+          rescue
+            e -> {:error, e}
+          end
 
-          duration = System.monotonic_time() - start
-          send(parent, {:write_done, char_id, result, duration})
-        end)
+        duration = System.monotonic_time() - start
+        send(parent, {:write_done, char_id, result, duration})
+      end)
 
-      monitor_ref = Process.monitor(pid)
-      state = %{state |
-        in_flight: Map.put(state.in_flight, char_id, true),
-        task_monitors: Map.put(state.task_monitors, monitor_ref, char_id)
-      }
-      {:noreply, state}
-    rescue
-      e ->
-        Logger.error("Failed to start autosave task for #{char_id}: #{inspect(e)}")
-
-        :telemetry.execute([:arena, :persistence, :autosave], %{count: 1},
-          %{char_id: char_id, event: :error})
-
-        # Resolve flush waiters since the write won't happen
-        notify_and_clear_waiters(state, char_id)
-    end
+    state = %{state |
+      in_flight: Map.put(state.in_flight, char_id, true),
+      task_monitors: Map.put(state.task_monitors, monitor_ref, char_id)
+    }
+    {:noreply, state}
   end
 
   defp demonitor_for_char(state, char_id) do

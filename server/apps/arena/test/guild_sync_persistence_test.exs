@@ -21,6 +21,7 @@ defmodule Arena.GuildSyncPersistenceTest do
   @leader_id 70_001
   @member_id 70_002
   @leader2_id 70_003
+  @outsider_id 70_004
 
   setup do
     case GuildServer.start_link([]) do
@@ -157,6 +158,98 @@ defmodule Arena.GuildSyncPersistenceTest do
 
       # Multiple failure logs
       assert length(Regex.scan(~r/Guild DB update failed/, log)) >= 4
+    end
+  end
+
+  describe "accept_invite with DB failure" do
+    test "invite is preserved in ETS when Guilds.add_member fails" do
+      # Insert a valid invite for @outsider_id (not a member of any guild)
+      invite = %{
+        guild_id: @guild_id,
+        from: @leader_id,
+        expires_at: System.monotonic_time(:millisecond) + 60_000
+      }
+
+      :ets.insert(@table, {{:invite, @outsider_id}, invite})
+
+      log =
+        capture_log(fn ->
+          assert {:error, :db_error} == GuildServer.accept_invite(@outsider_id)
+        end)
+
+      # Invite must still be in ETS (not deleted) so the player can retry
+      assert :ets.lookup(@table, {:invite, @outsider_id}) != []
+
+      # Outsider must NOT have been registered as a member
+      assert :ets.lookup(@table, {:member, @outsider_id}) == []
+
+      # Guild members list must be unchanged
+      [{_, guild}] = :ets.lookup(@table, {:guild, @guild_id})
+      refute @outsider_id in guild.members
+
+      # Failure should be logged
+      assert log =~ "Failed to persist guild join"
+    end
+  end
+
+  describe "accept_request with no pending request" do
+    test "rejects when target is not found in online directory" do
+      # @outsider_id is NOT registered in OnlineDirectory and has no request.
+      # resolve_char_id will return :not_found since the outsider is not online.
+      result = GuildServer.accept_request(@leader_id, "OutsiderName")
+
+      assert {:error, :not_found} == result
+
+      # Outsider must NOT be added as a member
+      assert :ets.lookup(@table, {:member, @outsider_id}) == []
+
+      # Guild members list must be unchanged
+      [{_, guild}] = :ets.lookup(@table, {:guild, @guild_id})
+      refute @outsider_id in guild.members
+    end
+  end
+
+  describe "kick with DB failure" do
+    test "member remains in guild ETS when Guilds.remove_member fails" do
+      log =
+        capture_log(fn ->
+          assert {:error, :db_error} == GuildServer.kick(@leader_id, @member_id)
+        end)
+
+      # Member must still be in the guild's member list
+      [{_, guild}] = :ets.lookup(@table, {:guild, @guild_id})
+      assert @member_id in guild.members
+
+      # {:member, @member_id} must still exist in ETS
+      assert :ets.lookup(@table, {:member, @member_id}) != []
+
+      # Failure should be logged
+      assert log =~ "Failed to persist kick"
+
+      # GenServer should still be alive
+      assert Process.whereis(GuildServer) != nil
+    end
+  end
+
+  describe "leave with DB failure" do
+    test "non-leader member remains in guild ETS when Guilds.remove_member fails" do
+      log =
+        capture_log(fn ->
+          assert {:error, :db_error} == GuildServer.leave(@member_id)
+        end)
+
+      # Member must still be in the guild's member list
+      [{_, guild}] = :ets.lookup(@table, {:guild, @guild_id})
+      assert @member_id in guild.members
+
+      # {:member, @member_id} must still exist in ETS
+      assert :ets.lookup(@table, {:member, @member_id}) != []
+
+      # Failure should be logged
+      assert log =~ "Guild remove_member raised"
+
+      # GenServer should still be alive
+      assert Process.whereis(GuildServer) != nil
     end
   end
 end

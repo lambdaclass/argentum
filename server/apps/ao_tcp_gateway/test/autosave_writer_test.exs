@@ -274,6 +274,90 @@ defmodule AoTcpGateway.AutosaveWriterTest do
     assert saved.gold == 200
   end
 
+  test "worker process death clears in_flight and resolves flush" do
+    # Test the {:DOWN, ...} handler directly by injecting fake state and
+    # sending a synthetic DOWN message. This verifies that if the spawned
+    # worker process crashes (not caught by try/rescue), the GenServer
+    # properly clears in_flight and unblocks any pending flush waiters.
+
+    char_id = -7777
+    fake_ref = make_ref()
+
+    # Inject fake in_flight + task_monitors entries into the GenServer state
+    :sys.replace_state(AutosaveWriter, fn state ->
+      %{state |
+        in_flight: Map.put(state.in_flight, char_id, true),
+        task_monitors: Map.put(state.task_monitors, fake_ref, char_id)
+      }
+    end)
+
+    # Attach telemetry to verify the error event fires
+    test_pid = self()
+    handler_id = "asw_down_#{System.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      handler_id,
+      [:arena, :persistence, :autosave],
+      fn _event, _measurements, metadata, _config ->
+        if metadata.char_id == char_id and metadata.event == :error do
+          send(test_pid, {:down_error, char_id})
+        end
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+
+    # Start a flush in a separate task — it should block because in_flight is set
+    flush_task = Task.async(fn -> AutosaveWriter.flush(char_id) end)
+
+    # Give the flush call time to register as a waiter
+    Process.sleep(50)
+
+    # Send a synthetic DOWN message as if the worker process crashed
+    send(Process.whereis(AutosaveWriter), {:DOWN, fake_ref, :process, self(), :killed})
+
+    # Flush must complete (not hang) — the DOWN handler clears in_flight
+    assert :ok == Task.await(flush_task, 5_000)
+
+    # Verify error telemetry was emitted
+    assert_received {:down_error, ^char_id}
+
+    # Verify state is clean — no leftover in_flight or task_monitors
+    state = :sys.get_state(AutosaveWriter)
+    refute Map.has_key?(state.in_flight, char_id)
+    refute Enum.any?(state.task_monitors, fn {_ref, cid} -> cid == char_id end)
+  end
+
+  test "worker process death with pending snapshot retries the write" do
+    # If a worker crashes but there's a pending (coalesced) snapshot, the DOWN
+    # handler should start a new write for that pending snapshot.
+    {char_id, entity} = create_test_character("ASW_DownRetry_#{System.unique_integer([:positive])}")
+    on_exit(fn -> cleanup_char(char_id) end)
+
+    fake_ref = make_ref()
+    snapshot = AutosaveWriter.snapshot_from_entity(%{entity | gold: 4242})
+
+    # Inject: in_flight write + a pending coalesced snapshot
+    :sys.replace_state(AutosaveWriter, fn state ->
+      %{state |
+        in_flight: Map.put(state.in_flight, char_id, true),
+        task_monitors: Map.put(state.task_monitors, fake_ref, char_id),
+        pending: Map.put(state.pending, char_id, snapshot)
+      }
+    end)
+
+    # Send synthetic DOWN — should trigger retry of the pending snapshot
+    send(Process.whereis(AutosaveWriter), {:DOWN, fake_ref, :process, self(), :killed})
+
+    # Flush to wait for the retry write to complete
+    assert :ok == AutosaveWriter.flush(char_id)
+
+    # The pending snapshot should have been written
+    saved = GameBackend.Characters.get(char_id)
+    assert saved.gold == 4242
+  end
+
   test "GenServer survives a write failure and continues serving" do
     # Submit a failing write (non-existent char_id)
     fake = %AoEntities.PlayerEntity{char_id: -42, name: "Bad", inventory: [], equipment: %{}, skills: %{}, spells: []}
@@ -289,6 +373,74 @@ defmodule AoTcpGateway.AutosaveWriterTest do
 
     saved = GameBackend.Characters.get(char_id)
     assert saved.gold == 555
+  end
+
+  # ---- Cleanup / SessionPersistence failure-path tests ----
+
+  test "cleanup emits cleanup_save_failed telemetry when final save fails" do
+    # Create a character and enter it on the map so MapServer.leave returns {:ok, entity}
+    {char_id, entity} = create_test_character("ASW_CleanupFail_#{System.unique_integer([:positive])}")
+
+    # Enter the character on map 1 (setup_all ensures it's running)
+    Arena.Map.MapServer.enter(1, entity)
+
+    # Delete the character from the DB so save_snapshot will fail with :not_found
+    character = GameBackend.Characters.get(char_id)
+    GameBackend.Repo.delete(character)
+
+    # Attach telemetry handler for cleanup_save_failed
+    test_pid = self()
+    handler_id = "cleanup_fail_#{System.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      handler_id,
+      [:arena, :persistence, :cleanup_save_failed],
+      fn _event, _measurements, metadata, _config ->
+        send(test_pid, {:cleanup_save_failed, metadata.char_id})
+      end,
+      nil
+    )
+
+    on_exit(fn ->
+      :telemetry.detach(handler_id)
+      # Character already deleted; cleanup any leftover session/online state
+      AoSession.OnlineDirectory.unregister(char_id)
+      AoSession.unregister(char_id)
+    end)
+
+    # Also attach handler for the general cleanup event to verify it fires with :error
+    cleanup_handler_id = "cleanup_result_#{System.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      cleanup_handler_id,
+      [:arena, :persistence, :cleanup],
+      fn _event, _measurements, metadata, _config ->
+        if metadata.char_id == char_id do
+          send(test_pid, {:cleanup_result, metadata.result})
+        end
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(cleanup_handler_id) end)
+
+    # Build a fake session state with just the fields cleanup needs
+    fake_state = %{character_id: char_id, map_id: 1}
+
+    # Call cleanup — save_snapshot should fail because the character is deleted
+    import ExUnit.CaptureLog
+    log = capture_log(fn ->
+      assert :ok == AoTcpGateway.SessionPersistence.cleanup(fake_state)
+    end)
+
+    # Verify the failure was logged
+    assert log =~ "Final save failed for char #{char_id}"
+
+    # Verify cleanup_save_failed telemetry was emitted
+    assert_received {:cleanup_save_failed, ^char_id}
+
+    # Verify general cleanup telemetry reported :error
+    assert_received {:cleanup_result, :error}
   end
 
   # ---- Helpers ----

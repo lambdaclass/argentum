@@ -818,6 +818,10 @@ defmodule Arena.GuildServer do
                   Logger.error("Failed to persist kick for char #{target_id}")
                   {:reply, {:error, :db_error}, state}
 
+                {0, _} ->
+                  Logger.error("Failed to persist kick for char #{target_id}")
+                  {:reply, {:error, :db_error}, state}
+
                 {_count, _} ->
                   new_members = List.delete(guild.members, target_id)
                   :ets.insert(@table, {{:guild, guild_id}, %{guild | members: new_members}})
@@ -966,6 +970,10 @@ defmodule Arena.GuildServer do
 
             case result do
               {:error, _} ->
+                {:error, :db_error}
+
+              {0, _} ->
+                Logger.error("Guild remove_member raised for char #{char_id}: no rows deleted")
                 {:error, :db_error}
 
               {_count, _} ->

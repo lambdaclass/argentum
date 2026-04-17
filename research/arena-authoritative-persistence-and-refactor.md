@@ -10,6 +10,41 @@ preserve that model. The main objective is not to make everything async. The
 objective is to keep the game loop responsive while preserving authoritative,
 durable player state.
 
+## Current Decision
+
+The current direction is intentionally conservative:
+
+- While a player is online, live in-memory state is authoritative.
+- The database is authoritative when a player is offline, and at explicit
+  durable commit boundaries while they are online.
+- Autosave is a best-effort snapshot path, not the commit point for economy or
+  permission changes.
+- Graceful cleanup/logout is the strongest save boundary.
+- Bank, trade, inventory/equipment durability, guild membership/invites/
+  leadership/relations, and other economy-sensitive or permission-sensitive
+  writes stay sync-first by default.
+- Do not introduce write-behind caches for money, items, or permissions.
+- Ordered async writers, ledgers, or stronger queueing are later options only
+  if telemetry proves the sync-first design is too slow.
+
+## VB6 Reference
+
+The original VB6 server is useful as a reference for authority boundaries, but
+not as a template for durability guarantees:
+
+- `modUserAutoSave.MaybeRunUserAutoSave` periodically scanned logged users and
+  attempted saves within a time budget.
+- `SaveUser` and `SaveCharacterDB` persisted main character state, spells,
+  inventory, bank, skills, pets, quests, and related durable fields on save and
+  logout.
+- `modDatabase.Execute` and `ExecutePreparedBankSave` used
+  `Command.Execute(..., adAsyncExecute)`, which reduced blocking but did not
+  guarantee DB completion when the call returned.
+
+So the part worth preserving is: online gameplay authority lived in memory. The
+part we do not need to copy is: important DB writes being dispatched
+asynchronously without strong completion semantics.
+
 ## Current Baseline
 
 What is already good:
@@ -40,19 +75,25 @@ What still creates risk:
 - MapServer decides whether an action is legal and applies the in-memory state
   transition in mailbox order.
 
-3. Do not block the map loop on infrastructure when avoidable.
+3. Avoid blocking the map loop on infrastructure where the semantics allow it.
 - DB latency, retries, and transient outages should not freeze combat, movement,
-  NPC ticks, or chat for everyone on the map.
+  NPC ticks, or chat for everyone on the map. But explicit synchronous commit
+  points are still correct for authoritative economy and permission changes.
 
-4. Do not use naive async write-behind for economy state.
-- Bank, inventory, gold, trade, auction, and guild/faction rewards need ordered,
-  idempotent, observable persistence.
+4. Keep authoritative writes sync-first.
+- Logout/cleanup, bank, trade, inventory/equipment durability, guild
+  membership/invites/leadership/relations, and other economy-sensitive writes
+  should commit explicitly and synchronously by default.
 
-5. Make failure explicit.
-- Failed saves should become retry state, metrics, logs, and operator-visible
-  alerts, not silent task failures.
+5. Async is for snapshots and other intentional best-effort paths.
+- Autosave can be async and coalesced because it is a snapshot path. It is not
+  the authoritative commit boundary for money, items, or permissions.
 
-6. Preserve VB6 parity.
+6. Make failure explicit.
+- Failed saves should become logs, telemetry, and operator-visible state, not
+  silent task failures.
+
+7. Preserve VB6 parity.
 - Refactors should not change legal gameplay behavior unless a deliberate
   parity decision is made.
 
@@ -61,10 +102,10 @@ What still creates risk:
 1. Which state is live-authoritative only, and which state must be durable before
    crossing a boundary?
 
-2. Which DB writes are safe as snapshots, and which must be persisted as
-   idempotent operations?
+2. Which DB writes are true authoritative commit points, and which are only
+   snapshots?
 
-3. What boundaries require a flush barrier?
+3. Which boundaries require a synchronous save or flush barrier?
 
 4. How can handler modules return state transitions plus effects without a large
    rewrite?
@@ -87,34 +128,34 @@ deposit succeeds in memory but the DB write disappears, the player can lose an
 item. If the write is retried without idempotency, the player can duplicate an
 item.
 
-The target is stronger:
+The target is clearer:
 
-- MapServer remains the live authority.
-- Persistence is ordered per character or account.
-- Every sensitive operation has an idempotency key.
-- Failed writes retry with backoff.
-- Logout, transfer, trade completion, and shutdown can wait for pending writes.
-- Operators can see pending, failed, and retrying persistence work.
+- MapServer remains the live authority while a player is online.
+- The DB is authoritative when a player is offline, and at explicit durable
+  boundaries while they are online.
+- Autosave remains a snapshot path.
+- Cleanup/logout remains the strongest explicit save boundary.
+- Critical economy or permission changes commit explicitly and synchronously.
+- Operators can see persistence latency, failures, and shutdown/flush behavior.
 
 ## Persistence Options
 
-### Option A: Keep Inline DB Writes
+### Option A: Sync-First Authoritative Boundaries
 
 Pros:
 
-- Simple control flow.
-- DB confirmation happens before the handler returns.
-- Easy to reason about in small cases.
+- Clear commit point.
+- Easy to reason about when correctness matters.
+- Failure can reject or roll back the action immediately.
+- Matches the desired boundary for economy and permission changes.
 
 Cons:
 
-- Slow DB writes freeze the entire map.
-- DB outages turn gameplay handlers into backpressure points.
-- Retries and failure tracking are usually ad hoc.
-- Testing handlers requires DB setup or mocks.
+- If left inline in hot map handlers, slow DB writes can still stall maps.
+- Requires careful extraction of persistence modules so correctness does not rely
+  on ad hoc `Repo` calls spread through gameplay code.
 
-Use only for operations that truly must synchronously consult durable state
-before the live state can proceed.
+This is the recommended near-term model for authoritative writes.
 
 ### Option B: Fire-And-Forget Tasks
 
@@ -131,26 +172,29 @@ Cons:
 - Retries can duplicate effects unless every write is idempotent.
 - Shutdown can drop in-flight writes.
 
-This should not be used for bank, inventory, gold, trade, auction, or character
-ownership changes.
+This should not be used for bank, inventory, gold, trade, auction, guild
+membership/permission changes, or character ownership changes.
 
-### Option C: Ordered Character Writer
+### Option C: Ordered Writers For Snapshot Or Later Optimization
 
 Pros:
 
-- One writer process per character gives per-character ordering.
-- MapServer enqueue stays fast.
-- Flush barriers are possible.
-- Retries and queue depth are observable.
+- Good fit for coalesced autosave snapshots.
+- Can reduce repeated write pressure for non-authoritative save paths.
+- Provides a cleaner later upgrade path if sync-first critical writes prove too
+  slow under real telemetry.
 
 Cons:
 
-- Requires supervision, registry, retry logic, and lifecycle management.
-- Cross-character operations still need explicit transaction design.
+- Adds lifecycle and supervision complexity.
+- Can blur authority if introduced too early or used for economy state by
+  default.
+- Still does not solve cross-character atomicity on its own.
 
-This is a good first production target.
+This is acceptable for autosave or other explicitly best-effort paths. It is
+not the first answer for economy writes.
 
-### Option D: Idempotent Operation Ledger
+### Option D: Idempotent Operation Ledger Later
 
 Pros:
 
@@ -165,8 +209,8 @@ Cons:
 - Requires deciding operation granularity.
 - More work than simple snapshot saves.
 
-This should be combined with ordered character writers for economy-sensitive
-state.
+This is a later option if sync-first boundaries plus telemetry show a real need
+for more durable replay/retry infrastructure.
 
 ### Option E: Full Event Sourcing
 
@@ -186,86 +230,46 @@ This is not the recommended near-term move.
 
 ## Recommended Persistence Architecture
 
-Use ordered per-character writers plus an idempotent operation ledger.
+Start with explicit sync-first boundaries and one clearly scoped snapshot path.
 
-Core components:
+Core rules:
 
-- `Arena.Persistence.CharacterWriterSupervisor`
-- `Arena.Persistence.CharacterWriterRegistry`
-- `Arena.Persistence.CharacterWriter`
-- `GameBackend.CharacterOps`
-- `character_persistence_ops` table
+- Load durable state from DB at login/reconnect.
+- While the player is online, use live in-memory entity state as authority.
+- Do not consult the DB on every gameplay action.
+- Validate actions in memory first.
+- For authoritative economy and permission changes, commit through an explicit
+  persistence boundary before finalizing the durable transition.
+- Keep autosave separate as a coalesced best-effort snapshot path.
+- Keep graceful cleanup/logout as the strongest save boundary.
 
-Recommended API:
+Recommended module boundaries:
 
-```elixir
-CharacterWriter.enqueue(character_id, op)
-CharacterWriter.flush(character_id, timeout)
-CharacterWriter.status(character_id)
-```
+- `AoTcpGateway.SessionPersistence.cleanup/1`
+  - authoritative final save on graceful disconnect
+- `AoTcpGateway.AutosaveWriter`
+  - coalesced snapshot path only
+- `Arena.BankPersistence`
+  - explicit bank load and commit APIs
+- `Arena.TradePersistence`
+  - explicit trade commit APIs
+- `Arena.GuildPersistence`
+  - explicit durable guild membership/leadership/relation writes
 
-Operation shape:
-
-```elixir
-%{
-  id: op_id,
-  character_id: character_id,
-  type: :bank_deposit,
-  payload: %{
-    inventory_slot: slot,
-    bank_slot: bank_slot,
-    item_id: item_id,
-    amount: amount
-  },
-  map_id: map_id,
-  inserted_at: now
-}
-```
-
-Ledger table shape:
-
-```text
-character_persistence_ops
-- op_id uuid primary key
-- character_id bigint not null
-- type text not null
-- payload jsonb not null
-- status text not null
-- attempts integer not null default 0
-- inserted_at timestamp not null
-- applied_at timestamp
-- last_error text
-```
-
-Persistence transaction:
+Recommended boundary shape:
 
 ```elixir
-Repo.transaction(fn ->
-  insert_operation_if_absent!(op)
-
-  unless operation_applied?(op.id) do
-    apply_operation!(op)
-    mark_operation_applied!(op.id)
-  end
-end)
+{:ok, result} = BankPersistence.deposit_item(...)
+{:ok, result} = TradePersistence.commit(...)
+{:ok, result} = GuildPersistence.update_membership(...)
 ```
 
-MapServer state extension:
+Optional later additions, only if telemetry proves the sync-first design is too
+slow:
 
-```elixir
-%Arena.Map.State{
-  pending_persistence: %{
-    character_id => MapSet.new([op_id])
-  }
-}
-```
-
-Writer notifications:
-
-```elixir
-{:persistence_committed, character_id, op_id}
-{:persistence_failed, character_id, op_id, reason}
-```
+- ordered autosave writers with stronger flush/queue visibility
+- idempotent operation ledger for especially sensitive multi-step economy flows
+- more advanced recovery/replay infrastructure
 
 ## Persistence Invariants
 
@@ -290,7 +294,7 @@ Recommended barriers:
 - logout
 - map transfer
 - trade completion
-- bank close, if bank state is persisted operation-by-operation
+- bank close, if a bank session holds dirty in-memory bank state
 - auction commit
 - guild/faction rank or reward changes
 - character deletion
@@ -315,54 +319,46 @@ Classify each write as:
 
 Expected result: a table of write sites, risks, and target persistence pattern.
 
-### Phase 2: Bank First
+### Phase 2: Lock The Hard Sync Boundaries
 
-Bank is the best starting point because it is economy-sensitive and currently
-easy to reason about.
-
-Target:
-
-- deposit emits a `:bank_deposit` operation
-- withdraw emits a `:bank_withdraw` operation
-- gold deposit emits a `:bank_gold_deposit` operation
-- gold withdraw emits a `:bank_gold_withdraw` operation
-- operations are idempotent
-- logout flushes pending bank ops
-
-### Phase 3: Inventory And Ground Items
-
-Migrate pickup, drop, equip, unequip, consume, loot, and stack split/merge.
-
-Important rule: persistence should represent the operation that happened, not
-only the final bag snapshot, for economy-sensitive paths.
-
-### Phase 4: Trade And Auction
-
-Trade and auction require cross-character or global ordering.
-
-Trade target:
-
-- trade commit emits one atomic operation containing both sides
-- either both players receive the exchange or neither does
-- retrying the trade op does not duplicate either side
-
-Auction target:
-
-- bids and settlement use idempotent operations
-- item ownership changes exactly once
-- failed settlement is visible and recoverable
-
-### Phase 5: Autosave And Character Snapshots
-
-Autosave can be snapshot-based.
+Start with the operations where ambiguity is unacceptable.
 
 Target:
 
-- supervised save worker
-- retry with backoff
-- dirty character tracking
-- telemetry for save latency and failure
-- graceful shutdown drain
+- graceful cleanup/logout is the strongest save point
+- guild membership/invite/leadership/relation writes stop using
+  fire-and-forget tasks
+- bank persistence moves behind explicit sync APIs
+- trade durability gets a single explicit commit boundary
+- inventory/equipment durability paths are classified and made explicit
+
+### Phase 3: Extract Persistence Modules
+
+Extract small persistence boundaries before adding more infrastructure:
+
+- `BankPersistence`
+- `TradePersistence`
+- `GuildPersistence`
+- any remaining inventory/equipment durability helpers
+
+### Phase 4: Autosave As Snapshot
+
+Autosave can stay async because it is not the authoritative commit point.
+
+Target:
+
+- one coalesced snapshot writer per character at most
+- latest-snapshot-wins semantics
+- explicit telemetry for submit/start/ok/error/flush
+- cleanup flushes pending snapshots before the final save
+
+### Phase 5: Consider Stronger Async Only If Needed
+
+Only after sync-first boundaries and telemetry are in place:
+
+- decide whether ordered writers are still needed outside autosave
+- decide whether any economy path truly needs an idempotent operation ledger
+- keep these as explicit upgrades, not the default model
 
 ## Full Refactor Roadmap
 
@@ -496,7 +492,8 @@ Effect examples:
 
 - send packet
 - broadcast packet
-- enqueue persistence operation
+- request persistence boundary
+- enqueue autosave snapshot
 - emit audit event
 - schedule timer
 - notify session state
@@ -555,7 +552,7 @@ Shutdown should:
 - record unflushed work if the deadline expires
 - stop maps cleanly
 
-This work depends on explicit dirty state and persistence queues.
+This work depends on explicit persistence boundaries and snapshot flush points.
 
 ### Workstream 9: Supervision And Recovery
 
@@ -592,27 +589,29 @@ should remain explicit and tested.
 2. Remove old map-state fixture fields and root-level meta assertions. DONE.
 3. Add `Arena.Map.State` helper functions.
 4. Audit all DB write sites.
-5. Add telemetry around current DB write latency and map tick duration.
-6. Implement ordered character writer infrastructure.
-7. Add idempotent operation ledger.
-8. Migrate bank persistence first.
-9. Add logout and shutdown flush barriers.
-10. Migrate inventory, trade, and auction persistence.
-11. Introduce gateway session state struct.
-12. Split gateway command handling.
-13. Add handler effects only for low-frequency control-plane paths where they
+5. Classify each write as authoritative commit, snapshot, or audit/event.
+6. Add telemetry around current DB write latency, failure, and map tick
+   duration.
+7. Replace fire-and-forget guild writes with explicit sync persistence.
+8. Define bank persistence boundary.
+9. Define trade persistence boundary.
+10. Verify logout, cleanup, transfer, and shutdown boundaries.
+11. Keep autosave as a coalesced snapshot path.
+12. Introduce gateway session state struct.
+13. Split gateway command handling.
+14. Add handler effects only for low-frequency control-plane paths where they
     remove persistence, audit, or packet-send coupling.
-14. Introduce `Arena.Map.Meta`.
-15. Harden supervision and recovery.
+15. Introduce `Arena.Map.Meta`.
+16. Harden supervision and recovery.
+17. Only then reconsider ordered writers or an operation ledger if telemetry
+    proves they are needed.
 
 ## Verification Strategy
 
 Required test categories:
 
 - unit tests for state helpers
-- unit tests for character writer ordering
-- idempotency tests for duplicate operation replay
-- crash/restart tests for pending operations
+- explicit persistence-boundary tests for bank, trade, and guild critical paths
 - bank deposit/withdraw conservation tests
 - trade atomicity tests
 - logout flush barrier tests
@@ -625,7 +624,6 @@ Required invariants:
 - total gold is conserved except legal mint/burn paths
 - item stacks are conserved across inventory, bank, ground, trade, and auction
 - a character is present in exactly one map after transfer
-- retrying a persistence operation cannot duplicate effects
 - failed persistence cannot silently disappear
 - map tick latency remains bounded when DB writes are slow
 
@@ -644,11 +642,13 @@ Required invariants:
 
 The recommended path is conservative:
 
-1. Make tests use the same map state shape as production.
-2. Keep MapServer as the live gameplay authority.
-3. Move sensitive persistence behind ordered, idempotent writers.
-4. Use flush barriers at boundaries where durable state must catch up.
-5. Add telemetry and graceful shutdown so failures are visible and recoverable.
+1. Keep online gameplay authority in memory.
+2. Treat autosave as a snapshot path, not the economy commit path.
+3. Make logout/cleanup, bank, trade, inventory/equipment durability, and guild
+   permission changes explicit sync-first boundaries.
+4. Add telemetry and graceful shutdown so failures are visible and recoverable.
+5. Consider stronger async or ledger machinery only after the sync-first model
+   is correct and measurable.
 
 This gives the backend stronger correctness and better operational behavior
 without changing the core arena runtime model.
