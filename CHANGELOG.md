@@ -4,6 +4,18 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **Security and observability hardening (2026-04-17):**
+  - Added adversarial tests (114 tests) for party, trade, guild, bank/NPC, and
+    faction authority. Fixed 7 security gaps: party leader-only invite, expired
+    invite rejection, kick cooldown, leader-only safe_toggle, and
+    meditating/navigating/paralyzed trade blocks.
+  - Added telemetry event emission for map ticks, movement, broadcasts, combat
+    (attack/spell), persistence (cleanup/autosave), and sessions
+    (login/crash). PromEx/Grafana wiring still pending.
+  - Added session-recovery regression tests (crash→re-login, double crash,
+    online directory cleanup, graceful vs crash save). Replaced
+    `Process.sleep(500)` with poll-based waits across lifecycle tests.
+  - Party invites are now authoritative and leader-only (old roadmap #50).
 - **Backend modernization, gateway split, and dependency cleanup (2026-04-15/16):**
   - Added `Arena.Map.State` update helpers, extracted pure combat/progression
     seams, consolidated NPC/player death resolution, split
