@@ -59,10 +59,14 @@ or permission changes.
    Trade boundary done: `execute_trade` now persists both players atomically
    via `save_trade_snapshots/2` before mutating in-memory state; on DB failure
    both players stay unchanged. 5 trade persistence tests added.
-   Remaining: cleanup/logout verification and explicit final-save policy;
-   remaining guild failure-path semantics where DB outage must not masquerade
-   as normal authority results (`request_membership` looking like
-   `already_requested`, `list_requests` looking like no pending requests).
+   Guild DB-failure semantics fixed: `request_membership` returns `:db_error`
+   (not `:already_requested`) on DB failure; `list_requests` returns
+   `{:error, :db_error}` (not empty list). Cleanup/logout final-save policy
+   documented as accepted best-effort under DB failure, with telemetry and
+   logging. Authoritative writes (trade, bank, guild) are the true commit
+   boundaries.
+   **#4 is done.** All authoritative write paths (guild, bank, trade) are
+   sync-first. Cleanup is documented best-effort with observability.
 
 5. Verify graceful host shutdown.
    Depends on #4 — shutdown verification is more meaningful once the

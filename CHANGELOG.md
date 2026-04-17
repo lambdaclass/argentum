@@ -4,6 +4,15 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **Guild DB-failure semantics and cleanup policy (2026-04-18):**
+  - Fixed `request_membership`: DB failure now returns `:db_error` instead of
+    masquerading as `:already_requested`. Uses `has_unique_constraint_error?/1`
+    to distinguish genuine duplicate from DB outage.
+  - Fixed `list_requests`: DB failure now returns `{:error, :db_error}` instead
+    of silently returning an empty list.
+  - Documented cleanup/logout final-save policy: accepted best-effort under DB
+    failure. Authoritative writes (trade, bank, guild) are the true commit
+    boundaries; cleanup save is the soft-state catch-all.
 - **Sync-first persistence: trade boundary (2026-04-18):**
   - Trade `execute_trade` now writes both players' gold and inventory to DB
     atomically (single `Repo.transaction` via `save_trade_snapshots/2`) before
