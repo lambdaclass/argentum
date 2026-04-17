@@ -13,6 +13,9 @@ defmodule AoTcpGateway.ClientHandler do
   alias AoProtocol.Server.Encoder
   alias AoTcpGateway.{FloodGuard, PacketCounter, SessionLogic}
 
+  @backpressure_warn Application.compile_env(:ao_tcp_gateway, :backpressure_warn, 500)
+  @backpressure_disconnect Application.compile_env(:ao_tcp_gateway, :backpressure_disconnect, 1000)
+
   @impl :ranch_protocol
   def start_link(ref, socket, transport, _opts) do
     pid = :proc_lib.spawn_link(__MODULE__, :init, [ref, socket, transport])
@@ -21,7 +24,7 @@ defmodule AoTcpGateway.ClientHandler do
 
   def init(ref, socket, transport) do
     :ok = :ranch.accept_ack(ref)
-    transport.setopts(socket, active: :once, nodelay: true)
+    transport.setopts(socket, active: :once, nodelay: true, send_timeout: 5_000, send_timeout_close: true)
 
     Logger.info("Client connected")
 
@@ -49,6 +52,13 @@ defmodule AoTcpGateway.ClientHandler do
   end
 
   defp loop(state) do
+    case check_backpressure(state) do
+      :disconnect -> :ok
+      :ok -> do_loop(state)
+    end
+  end
+
+  defp do_loop(state) do
     receive do
       {:tcp, socket, data} ->
         state.transport.setopts(socket, active: :once)
@@ -61,6 +71,15 @@ defmodule AoTcpGateway.ClientHandler do
 
       {:tcp_error, _socket, reason} ->
         Logger.warning("Client TCP error: #{inspect(reason)}")
+
+        if reason == :timeout do
+          :telemetry.execute(
+            [:arena, :session, :backpressure],
+            %{mailbox_len: 0},
+            %{character_id: state.character_id, action: :disconnect, transport: :tcp, cause: :send_timeout}
+          )
+        end
+
         SessionLogic.cleanup(state)
 
       {:send_packet, command} ->
@@ -108,6 +127,37 @@ defmodule AoTcpGateway.ClientHandler do
             state = Map.put(state, :hogar_timer_ref, nil)
             loop(state)
         end
+    end
+  end
+
+  defp check_backpressure(state) do
+    {:message_queue_len, len} = Process.info(self(), :message_queue_len)
+
+    cond do
+      len >= @backpressure_disconnect ->
+        Logger.warning("Backpressure disconnect: mailbox=#{len} char=#{inspect(state.character_id)}")
+
+        :telemetry.execute(
+          [:arena, :session, :backpressure],
+          %{mailbox_len: len},
+          %{character_id: state.character_id, action: :disconnect, transport: :tcp, cause: :mailbox_overflow}
+        )
+
+        SessionLogic.cleanup(state)
+        state.transport.close(state.socket)
+        :disconnect
+
+      len >= @backpressure_warn ->
+        :telemetry.execute(
+          [:arena, :session, :backpressure],
+          %{mailbox_len: len},
+          %{character_id: state.character_id, action: :warn, transport: :tcp, cause: :mailbox_overflow}
+        )
+
+        :ok
+
+      true ->
+        :ok
     end
   end
 

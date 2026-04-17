@@ -17,6 +17,9 @@ defmodule AoTcpGateway.WsHandler do
   @ws_idle_timeout 90_000
   @ping_interval 30_000
 
+  @backpressure_warn Application.compile_env(:ao_tcp_gateway, :backpressure_warn, 500)
+  @backpressure_disconnect Application.compile_env(:ao_tcp_gateway, :backpressure_disconnect, 1000)
+
   # ---- Cowboy callbacks ----
 
   def init(req, state) do
@@ -59,12 +62,18 @@ defmodule AoTcpGateway.WsHandler do
 
   # Direct sends from MapServer
   def websocket_info({:send_packet, command}, state) do
-    {:reply, {:binary, Encoder.encode(command)}, state}
+    case check_backpressure(state) do
+      :disconnect -> {:reply, {:close, 1008, "backpressure"}, state}
+      :ok -> {:reply, {:binary, Encoder.encode(command)}, state}
+    end
   end
 
   # Pre-encoded raw bytes from MapServer
   def websocket_info({:send_raw, binary}, state) do
-    {:reply, {:binary, binary}, state}
+    case check_backpressure(state) do
+      :disconnect -> {:reply, {:close, 1008, "backpressure"}, state}
+      :ok -> {:reply, {:binary, binary}, state}
+    end
   end
 
   def websocket_info(:trade_started, state) do
@@ -119,6 +128,38 @@ defmodule AoTcpGateway.WsHandler do
     Logger.info("WebSocket client disconnected")
     SessionLogic.cleanup(state)
     :ok
+  end
+
+  # ---- Backpressure ----
+
+  defp check_backpressure(state) do
+    {:message_queue_len, len} = Process.info(self(), :message_queue_len)
+
+    cond do
+      len >= @backpressure_disconnect ->
+        Logger.warning("WS backpressure disconnect: mailbox=#{len} char=#{inspect(state.character_id)}")
+
+        :telemetry.execute(
+          [:arena, :session, :backpressure],
+          %{mailbox_len: len},
+          %{character_id: state.character_id, action: :disconnect, transport: :websocket, cause: :mailbox_overflow}
+        )
+
+        SessionLogic.cleanup(state)
+        :disconnect
+
+      len >= @backpressure_warn ->
+        :telemetry.execute(
+          [:arena, :session, :backpressure],
+          %{mailbox_len: len},
+          %{character_id: state.character_id, action: :warn, transport: :websocket, cause: :mailbox_overflow}
+        )
+
+        :ok
+
+      true ->
+        :ok
+    end
   end
 
   # ---- Decode loop ----
