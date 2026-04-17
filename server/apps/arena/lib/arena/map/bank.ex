@@ -143,21 +143,7 @@ defmodule Arena.Map.Bank do
 
                 {:reply, {:error, :untradeable}, state}
               else
-                # Remove from inventory
-                new_amount = inv_item.amount - amount
-
-                inventory =
-                  if new_amount <= 0 do
-                    List.replace_at(entity.inventory, inv_idx, nil)
-                  else
-                    List.replace_at(entity.inventory, inv_idx, %{inv_item | amount: new_amount})
-                  end
-
-                entity = %{entity | inventory: inventory}
-                players = Map.put(state.players, char_id, entity)
-                state = %{state | players: players}
-
-                # Upsert into bank DB
+                # DB write first — only modify inventory on success
                 inv_tags = Map.get(inv_item, :elemental_tags, 0)
 
                 bank_slot =
@@ -165,37 +151,65 @@ defmodule Arena.Map.Bank do
                     do: slot_destino,
                     else: find_bank_slot(entity.char_id, inv_item.item_id, inv_tags)
 
-                upsert_bank_item(entity.char_id, bank_slot, inv_item.item_id, amount, inv_tags)
+                case upsert_bank_item(entity.char_id, bank_slot, inv_item.item_id, amount, inv_tags) do
+                  {:ok, _} ->
+                    # DB succeeded — now update in-memory inventory
+                    new_amount = inv_item.amount - amount
 
-                # Send updated inventory slot
-                Helpers.send_inventory_slot(state.sessions, char_id, inventory, inv_idx)
+                    inventory =
+                      if new_amount <= 0 do
+                        List.replace_at(entity.inventory, inv_idx, nil)
+                      else
+                        List.replace_at(entity.inventory, inv_idx, %{inv_item | amount: new_amount})
+                      end
 
-                # Send updated bank slot
-                bank_item =
-                  GameBackend.BankItems.get_bank(entity.char_id)
-                  |> Enum.find(fn bi -> bi.slot == bank_slot end)
+                    entity = %{entity | inventory: inventory}
+                    players = Map.put(state.players, char_id, entity)
+                    state = %{state | players: players}
 
-                if bank_item do
-                  valor = if item_def, do: item_def.valor, else: 0
+                    # Send updated inventory slot
+                    Helpers.send_inventory_slot(state.sessions, char_id, inventory, inv_idx)
 
-                  Helpers.send_to_session(
-                    state.sessions,
-                    char_id,
-                    {:send_raw,
-                     Encoder.encode(
-                       {:change_bank_slot,
-                        %{
-                          slot: bank_slot,
-                          obj_index: bank_item.item_id,
-                          amount: bank_item.amount,
-                          valor: valor,
-                          elemental_tags: bank_item.elemental_tags || 0
-                        }}
-                     )}
-                  )
+                    # Send updated bank slot
+                    bank_item =
+                      GameBackend.BankItems.get_bank(entity.char_id)
+                      |> Enum.find(fn bi -> bi.slot == bank_slot end)
+
+                    if bank_item do
+                      valor = if item_def, do: item_def.valor, else: 0
+
+                      Helpers.send_to_session(
+                        state.sessions,
+                        char_id,
+                        {:send_raw,
+                         Encoder.encode(
+                           {:change_bank_slot,
+                            %{
+                              slot: bank_slot,
+                              obj_index: bank_item.item_id,
+                              amount: bank_item.amount,
+                              valor: valor,
+                              elemental_tags: bank_item.elemental_tags || 0
+                            }}
+                         )}
+                      )
+                    end
+
+                    {:reply, :ok, state}
+
+                  {:error, reason} ->
+                    require Logger
+                    Logger.error("Bank deposit failed for char #{char_id}: #{inspect(reason)}")
+
+                    Helpers.send_to_session(
+                      state.sessions,
+                      char_id,
+                      {:send_raw,
+                       Encoder.encode({:console_msg, %{message: "Error al depositar. Intenta de nuevo.", font_index: 0}})}
+                    )
+
+                    {:reply, {:error, :db_error}, state}
                 end
-
-                {:reply, :ok, state}
               end
           end
         end
@@ -230,82 +244,95 @@ defmodule Arena.Map.Bank do
                 {:reply, {:error, :not_enough}, state}
 
               true ->
-                # Add to inventory
-                case Inventory.add_item(entity.inventory, bank_item.item_id, amount, bank_item.elemental_tags || 0) do
-                  {:ok, new_inventory, inv_slot} ->
-                    entity = %{entity | inventory: new_inventory}
-                    players = Map.put(state.players, char_id, entity)
-                    state = %{state | players: players}
-
-                    # Update bank DB
-                    GameBackend.BankItems.withdraw(entity.char_id, slot, amount)
+                # DB withdraw first — only modify inventory on success
+                case bank_withdraw(entity.char_id, slot, amount) do
+                  {:ok, _} ->
                     new_bank_amount = bank_item.amount - amount
 
-                    if new_bank_amount <= 0 do
-                      Helpers.send_to_session(
-                        state.sessions,
-                        char_id,
-                        {:send_raw, Encoder.encode({:change_bank_slot, %{slot: slot, obj_index: 0, amount: 0, valor: 0}})}
-                      )
-                    else
-                      item_def = GameData.get_item(bank_item.item_id)
-                      valor = if item_def, do: item_def.valor, else: 0
+                    # Now add to inventory (DB already committed)
+                    case Inventory.add_item(entity.inventory, bank_item.item_id, amount, bank_item.elemental_tags || 0) do
+                      {:ok, new_inventory, inv_slot} ->
+                        entity = %{entity | inventory: new_inventory}
+                        players = Map.put(state.players, char_id, entity)
+                        state = %{state | players: players}
 
-                      Helpers.send_to_session(
-                        state.sessions,
-                        char_id,
-                        {:send_raw,
-                         Encoder.encode(
-                           {:change_bank_slot,
-                            %{
-                              slot: slot,
-                              obj_index: bank_item.item_id,
-                              amount: new_bank_amount,
-                              valor: valor,
-                              elemental_tags: bank_item.elemental_tags || 0
-                            }}
-                         )}
-                      )
+                        if new_bank_amount <= 0 do
+                          Helpers.send_to_session(
+                            state.sessions,
+                            char_id,
+                            {:send_raw, Encoder.encode({:change_bank_slot, %{slot: slot, obj_index: 0, amount: 0, valor: 0}})}
+                          )
+                        else
+                          item_def = GameData.get_item(bank_item.item_id)
+                          valor = if item_def, do: item_def.valor, else: 0
+
+                          Helpers.send_to_session(
+                            state.sessions,
+                            char_id,
+                            {:send_raw,
+                             Encoder.encode(
+                               {:change_bank_slot,
+                                %{
+                                  slot: slot,
+                                  obj_index: bank_item.item_id,
+                                  amount: new_bank_amount,
+                                  valor: valor,
+                                  elemental_tags: bank_item.elemental_tags || 0
+                                }}
+                             )}
+                          )
+                        end
+
+                        # Send updated inventory slot
+                        Helpers.send_inventory_slot(state.sessions, char_id, new_inventory, inv_slot)
+                        {:reply, :ok, state}
+
+                      {:gold, gold_amount} ->
+                        # VB6 parity: gold items (item_id 12) should not be in bank storage.
+                        entity = %{entity | gold: entity.gold + gold_amount}
+                        players = Map.put(state.players, char_id, entity)
+                        state = %{state | players: players}
+
+                        Helpers.send_to_session(
+                          state.sessions,
+                          char_id,
+                          {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
+                        )
+
+                        Helpers.send_to_session(
+                          state.sessions,
+                          char_id,
+                          {:send_raw, Encoder.encode({:change_bank_slot, %{slot: slot, obj_index: 0, amount: 0, valor: 0}})}
+                        )
+
+                        {:reply, :ok, state}
+
+                      {:error, :inventory_full} ->
+                        # DB already withdrew — re-deposit to restore bank state
+                        upsert_bank_item(entity.char_id, slot, bank_item.item_id, amount, bank_item.elemental_tags || 0)
+
+                        Helpers.send_to_session(
+                          state.sessions,
+                          char_id,
+                          {:send_raw,
+                           Encoder.encode({:console_msg, %{message: "No tienes espacio en tu inventario.", font_index: 0}})}
+                        )
+
+                        {:reply, {:error, :inventory_full}, state}
                     end
 
-                    # Send updated inventory slot
-                    Helpers.send_inventory_slot(state.sessions, char_id, new_inventory, inv_slot)
-                    {:reply, :ok, state}
+                  {:error, reason} ->
+                    require Logger
+                    Logger.error("Bank withdraw failed for char #{char_id}: #{inspect(reason)}")
 
-                  {:gold, gold_amount} ->
-                    # VB6 parity: gold items (item_id 12) should not be in bank storage.
-                    # If one somehow exists, convert to gold AND withdraw from bank.
-                    entity = %{entity | gold: entity.gold + gold_amount}
-                    players = Map.put(state.players, char_id, entity)
-                    state = %{state | players: players}
-
-                    # Remove from bank DB (was missing before — infinite gold bug)
-                    GameBackend.BankItems.withdraw(entity.char_id, slot, amount)
-
-                    Helpers.send_to_session(
-                      state.sessions,
-                      char_id,
-                      {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
-                    )
-
-                    # Clear the bank slot on client
-                    Helpers.send_to_session(
-                      state.sessions,
-                      char_id,
-                      {:send_raw, Encoder.encode({:change_bank_slot, %{slot: slot, obj_index: 0, amount: 0, valor: 0}})}
-                    )
-
-                    {:reply, :ok, state}
-
-                  {:error, :inventory_full} ->
                     Helpers.send_to_session(
                       state.sessions,
                       char_id,
                       {:send_raw,
-                       Encoder.encode({:console_msg, %{message: "No tienes espacio en tu inventario.", font_index: 0}})}
+                       Encoder.encode({:console_msg, %{message: "Error al retirar. Intenta de nuevo.", font_index: 0}})}
                     )
 
-                    {:reply, {:error, :inventory_full}, state}
+                    {:reply, {:error, :db_error}, state}
                 end
             end
         end
@@ -329,25 +356,41 @@ defmodule Arena.Map.Bank do
             {:reply, {:error, :not_enough_gold}, state}
 
           true ->
-            entity = %{entity | gold: entity.gold - amount, bank_gold: entity.bank_gold + amount}
-            players = Map.put(state.players, char_id, entity)
-            state = %{state | players: players}
+            new_bank_gold = entity.bank_gold + amount
 
-            save_bank_gold(entity.char_id, entity.bank_gold)
+            case save_bank_gold(entity.char_id, new_bank_gold) do
+              {:ok, _} ->
+                entity = %{entity | gold: entity.gold - amount, bank_gold: new_bank_gold}
+                players = Map.put(state.players, char_id, entity)
+                state = %{state | players: players}
 
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
-            )
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
+                )
 
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw, Encoder.encode({:update_bank_gold, %{bank_gold: entity.bank_gold}})}
-            )
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw, Encoder.encode({:update_bank_gold, %{bank_gold: entity.bank_gold}})}
+                )
 
-            {:reply, :ok, state}
+                {:reply, :ok, state}
+
+              {:error, reason} ->
+                require Logger
+                Logger.error("Bank gold deposit failed for char #{char_id}: #{inspect(reason)}")
+
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw,
+                   Encoder.encode({:console_msg, %{message: "Error al depositar oro. Intenta de nuevo.", font_index: 0}})}
+                )
+
+                {:reply, {:error, :db_error}, state}
+            end
         end
         end
 
@@ -369,25 +412,41 @@ defmodule Arena.Map.Bank do
             {:reply, {:error, :not_enough_gold}, state}
 
           true ->
-            entity = %{entity | gold: entity.gold + amount, bank_gold: entity.bank_gold - amount}
-            players = Map.put(state.players, char_id, entity)
-            state = %{state | players: players}
+            new_bank_gold = entity.bank_gold - amount
 
-            save_bank_gold(entity.char_id, entity.bank_gold)
+            case save_bank_gold(entity.char_id, new_bank_gold) do
+              {:ok, _} ->
+                entity = %{entity | gold: entity.gold + amount, bank_gold: new_bank_gold}
+                players = Map.put(state.players, char_id, entity)
+                state = %{state | players: players}
 
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
-            )
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
+                )
 
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw, Encoder.encode({:update_bank_gold, %{bank_gold: entity.bank_gold}})}
-            )
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw, Encoder.encode({:update_bank_gold, %{bank_gold: entity.bank_gold}})}
+                )
 
-            {:reply, :ok, state}
+                {:reply, :ok, state}
+
+              {:error, reason} ->
+                require Logger
+                Logger.error("Bank gold extract failed for char #{char_id}: #{inspect(reason)}")
+
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw,
+                   Encoder.encode({:console_msg, %{message: "Error al retirar oro. Intenta de nuevo.", font_index: 0}})}
+                )
+
+                {:reply, {:error, :db_error}, state}
+            end
         end
         end
 
@@ -440,7 +499,10 @@ defmodule Arena.Map.Bank do
   end
 
   def save_bank_gold(char_id, amount) do
-    GameBackend.Characters.save_snapshot(char_id, %{bank_gold: amount})
+    case GameBackend.Characters.save_snapshot(char_id, %{bank_gold: amount}) do
+      {:ok, _} = ok -> ok
+      {:error, _} = err -> err
+    end
   end
 
   def find_bank_slot(char_id, item_id, elemental_tags \\ 0) do
@@ -458,6 +520,21 @@ defmodule Arena.Map.Bank do
   end
 
   def upsert_bank_item(char_id, bank_slot, item_id, amount, elemental_tags \\ 0) do
-    GameBackend.BankItems.upsert(char_id, bank_slot, item_id, amount, elemental_tags)
+    try do
+      GameBackend.BankItems.upsert(char_id, bank_slot, item_id, amount, elemental_tags)
+    rescue
+      e -> {:error, e}
+    end
+  end
+
+  defp bank_withdraw(char_id, slot, amount) do
+    try do
+      case GameBackend.BankItems.withdraw(char_id, slot, amount) do
+        {:ok, _} = ok -> ok
+        {:error, _} = err -> err
+      end
+    rescue
+      e -> {:error, e}
+    end
   end
 end

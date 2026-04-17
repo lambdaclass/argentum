@@ -4,6 +4,23 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **Sync-first persistence: bank boundary (2026-04-17):**
+  - Reordered all bank operations to DB-first: deposit/extract items and
+    gold now write to DB before modifying in-memory state. On DB failure,
+    in-memory state stays unchanged and the player gets an error message.
+  - Item deposit: `upsert_bank_item` checked before inventory mutation.
+  - Item extract: `bank_withdraw` checked before inventory add. If
+    inventory is full after DB withdraw, compensating re-deposit restores
+    the bank slot.
+  - Gold deposit/extract: `save_bank_gold` return value checked; rollback
+    on failure.
+  - All DB wrappers (`upsert_bank_item`, `bank_withdraw`, `save_bank_gold`)
+    use `try/rescue` to catch raises from constraint errors or connection
+    loss.
+  - 5 new failure-path tests (`bank_persistence_test.exs`): gold deposit,
+    gold extract, item deposit, item extract, and sequential multi-failure
+    all verify in-memory state stays pristine on DB error.
+  - 37 total bank tests passing (32 existing + 5 new), 0 regressions.
 - **Sync-first persistence: guild writes (2026-04-17):**
   - Replaced all 8 fire-and-forget `Task.start` guild DB writes in
     `GuildServer` with synchronous `persist_guild_update/2` and

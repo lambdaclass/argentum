@@ -45,15 +45,30 @@ or permission changes.
    Tests required: authoritative persistence regressions for logout/cleanup,
    bank, trade, inventory/equipment, guild membership/invites, and failure
    cases that must leave in-memory and durable state consistent.
-   Progress: guild fire-and-forget writes replaced with sync helpers (done).
-   Remaining: bank boundary, trade boundary, cleanup/logout verification.
+   Progress: guild fire-and-forget writes replaced with sync helpers (done);
+   bank operations reordered to DB-first with failure rollback (done).
+   Remaining: trade boundary, cleanup/logout verification,
+   harden `AutosaveWriter` so task crash/start-failure cannot wedge or lose
+   pending work, prevent stale autosave completion from overwriting a newer
+   cleanup save, make cleanup/logout behave like a real final-save boundary
+   instead of logging and unregistering anyway, finish the remaining raw guild
+   persistence paths (`create_request`, `delete_request`, `accept_request`,
+   `kick`, `leave`, `delete_guild`, `remove_member`) so DB exceptions cannot
+   still crash `GuildServer`, stop mutating ETS or returning success before
+   durable guild updates/relations succeed, stop using `cast` for
+   authoritative guild membership changes, and make leader succession durable
+   as one explicit boundary instead of separate member-removal/leader-update
+   writes.
 
 5. Verify graceful host shutdown.
    Depends on #4 — shutdown verification is more meaningful once the
    persistence path is less ad hoc.
    Outcome: shutdown does not lose player state or corrupt runtime processes.
    Tests required: graceful-shutdown drain tests, crash-vs-shutdown
-   persistence boundary checks, and reconnect-after-shutdown recovery tests.
+   persistence boundary checks, reconnect-after-shutdown recovery tests,
+   cleanup-save failure tests, and autosave-flush-timeout/worker-crash tests
+   that prove graceful shutdown and graceful disconnect do not silently
+   degrade into best-effort persistence.
 
 ## Phase 3. Security And Authority
 
@@ -82,11 +97,18 @@ abuse path plus a normal-path control test.
     Tests required: safe-zone trade-initiation abuse tests and trade-accept
     visibility/map-drift revalidation tests.
 
-9. Revalidate guild invite authority on accept.
-    Outcome: a stale invite cannot still be accepted after the inviter loses
-    leadership or the guild state changes.
-    Tests required: inviter-loses-leadership, inviter-leaves-guild,
-    guild-deleted, and guild-state-changed acceptance attempts.
+9. Revalidate guild invite and request authority on accept.
+   Outcome: a stale invite cannot still be accepted after the inviter loses
+   leadership or the guild state changes, expired invites are rejected at
+   accept time instead of only by background cleanup, a leader cannot accept a
+   guild request unless a real pending request exists, and invites/requests
+   are only consumed after the durable membership change succeeds.
+   Tests required: inviter-loses-leadership, inviter-leaves-guild,
+   guild-deleted, expired-invite-without-cleanup, guild-state-changed
+   acceptance attempts, accept-request-without-request, request/invite
+   preserved on DB failure, and DB-backed revalidation tests that fail only on
+   missing authority checks, not because synthetic fixtures return
+   `{:error, :db_error}` first.
 
 10. Restore VB6 `leave_faction` restrictions.
     Outcome: faction leave requires the correct enlistador interaction and
@@ -119,11 +141,14 @@ abuse path plus a normal-path control test.
     trading, and stale-session/radius-drift regressions.
 
 14. Keep the exploit and parity audit executable.
-    Outcome: every bug above has a regression test in the adversarial/parity
-    suites, and roadmap comments are updated when a gap is fixed so audit
-    notes do not become stale folklore.
-    Tests required: keep the adversarial suites runnable in CI and update them
-    whenever a security or authority fix lands.
+   Outcome: every bug above has a regression test in the adversarial/parity
+   suites, and roadmap comments are updated when a gap is fixed so audit
+   notes do not become stale folklore.
+   Tests required: keep the adversarial suites runnable in CI and update them
+   whenever a security or authority fix lands, including guild
+   invite/request-consumption failures, guild DB-failure survival on the
+   remaining membership paths, cleanup final-save failure, and autosave
+   worker/flush failure regressions.
 
 15. Add anti-cheat hardening: movement anomaly scoring, rate validation,
     state-machine validation, economy invariants, structured anti-cheat
@@ -196,10 +221,12 @@ abuse path plus a normal-path control test.
     assuming single-session happy paths.
 
 29. Expand lifecycle tests for login/autosave/logout/crash cleanup/transfer.
-    **Partial**: crash-then-re-login, double crash, online directory cleanup,
-    and graceful-vs-crash save semantics are covered. Still open: map transfer
-    edge cases, autosave timing under load, multi-map transfer chains.
-    Outcome: persistence and ownership transitions stay correct under failure.
+   **Partial**: crash-then-re-login, double crash, online directory cleanup,
+   and graceful-vs-crash save semantics are covered. Still open: map transfer
+   edge cases, autosave timing under load, multi-map transfer chains,
+   cleanup DB failure behavior, autosave flush timeout behavior, and stale
+   autosave-vs-cleanup ordering.
+   Outcome: persistence and ownership transitions stay correct under failure.
 
 30. Expand guild/faction/ban/mute persistence coverage.
     Outcome: shared cross-map state survives restart and migration.
