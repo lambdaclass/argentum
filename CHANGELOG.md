@@ -4,6 +4,23 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **Runtime safety: backpressure and autosave (2026-04-17):**
+  - Added outbound backpressure for lagging sessions (TCP + WebSocket).
+    Mailbox length check before each loop iteration/outbound send, warning
+    at 500 messages, hard disconnect at 1000 (config-backed via
+    `Application.compile_env`). TCP send_timeout of 5s prevents stuck sends.
+    Telemetry event `[:arena, :session, :backpressure]` with cause metadata
+    (`:mailbox_overflow` vs `:send_timeout`). Two regression tests: lagging
+    client disconnect and healthy noisy session control.
+  - Replaced naked `Task.start` autosave with coalescing `AutosaveWriter`
+    GenServer. One in-flight DB write per character, latest-snapshot-wins
+    coalescing, `flush/1` for synchronous drain on cleanup/disconnect.
+    Shared `snapshot_from_entity/1` builder for autosave and cleanup paths.
+    Telemetry events: submitted, coalesced, started, ok, error. Cleanup is
+    the authoritative persistence boundary (synchronous flush-then-save).
+    12 tests including 7 adversarial: stale overwrite, concurrent flush,
+    rapid-fire 50x coalesce, cross-char isolation, GenServer survival after
+    write failure.
 - **Security and observability hardening (2026-04-17):**
   - Added adversarial tests (114 tests) for party, trade, guild, bank/NPC, and
     faction authority. Fixed 7 security gaps: party leader-only invite, expired
