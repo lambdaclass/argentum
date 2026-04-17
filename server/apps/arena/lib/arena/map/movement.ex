@@ -17,6 +17,24 @@ defmodule Arena.Map.Movement do
   Returns `{:reply, term, state}`.
   """
   def handle_move(state, char_id, direction) do
+    start = System.monotonic_time()
+    result = do_handle_move(state, char_id, direction)
+    duration = System.monotonic_time() - start
+
+    move_result =
+      case result do
+        {:reply, :ok, _} -> :ok
+        {:reply, {:ok, _}, _} -> :ok
+        {:reply, {:error, reason}, _} -> reason
+      end
+
+    :telemetry.execute([:arena, :map, :move], %{duration: duration},
+      %{map_id: state.map_id, result: move_result})
+
+    result
+  end
+
+  defp do_handle_move(state, char_id, direction) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         now = System.monotonic_time(:millisecond)

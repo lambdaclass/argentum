@@ -137,7 +137,12 @@ defmodule Arena.Map.Visibility do
           end
       end
 
-    length(List.wrap(results))
+    recipients = length(List.wrap(results))
+
+    :telemetry.execute([:arena, :map, :broadcast], %{recipients: recipients},
+      %{map_id: state.map_id})
+
+    recipients
   end
 
   # Broadcast to all visible players including origin (for chat).

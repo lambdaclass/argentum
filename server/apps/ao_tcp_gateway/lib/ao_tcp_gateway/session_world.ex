@@ -23,6 +23,9 @@ defmodule AoTcpGateway.SessionWorld do
         "#{entity.name} entered map #{map_id} at (#{entity.x}, #{entity.y}) index=#{char_index}"
       )
 
+      :telemetry.execute([:arena, :session, :login], %{count: 1},
+        %{char_id: entity.char_id, map_id: map_id})
+
       state = %{
         state
         | account_id: account_id,

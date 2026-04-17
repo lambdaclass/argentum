@@ -80,6 +80,7 @@ defmodule AoSession.SessionMonitor do
         Logger.info("SessionMonitor: transport died for char_id #{char_id}, auto-cleaning session")
         AoSession.unregister(char_id)
         AoSession.OnlineDirectory.unregister(char_id)
+        :telemetry.execute([:arena, :session, :crash_cleanup], %{count: 1}, %{char_id: char_id})
         {:noreply, %{state | refs: refs, pids: Map.delete(state.pids, char_id)}}
     end
   end

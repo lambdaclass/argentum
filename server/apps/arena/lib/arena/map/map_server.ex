@@ -741,14 +741,24 @@ defmodule Arena.Map.MapServer do
 
   @impl true
   def handle_info(:npc_ai_tick, state) do
+    start = System.monotonic_time()
     {state, effects} = Arena.NpcAi.tick(state)
     Arena.NpcAi.dispatch_effects(state, effects)
+    duration = System.monotonic_time() - start
+
+    {:message_queue_len, queue_len} = Process.info(self(), :message_queue_len)
+
+    :telemetry.execute([:arena, :map, :tick], %{duration: duration, queue_len: queue_len,
+      players: map_size(state.players), npcs: map_size(state.npcs_live)},
+      %{map_id: state.map_id, tick_type: :npc_ai})
+
     Process.send_after(self(), :npc_ai_tick, @npc_ai_tick_ms)
     {:noreply, state}
   end
 
   @impl true
   def handle_info(:buff_tick, state) do
+    start = System.monotonic_time()
     now = System.monotonic_time(:millisecond)
 
     state =
@@ -760,13 +770,26 @@ defmodule Arena.Map.MapServer do
         end
       end)
 
+    duration = System.monotonic_time() - start
+
+    :telemetry.execute([:arena, :map, :tick], %{duration: duration, queue_len: 0,
+      players: map_size(state.players), npcs: map_size(state.npcs_live)},
+      %{map_id: state.map_id, tick_type: :buff})
+
     Process.send_after(self(), :buff_tick, 1000)
     {:noreply, state}
   end
 
   @impl true
   def handle_info(:regen_tick, state) do
+    start = System.monotonic_time()
     state = StatusTicks.process_regen_tick(state)
+    duration = System.monotonic_time() - start
+
+    :telemetry.execute([:arena, :map, :tick], %{duration: duration, queue_len: 0,
+      players: map_size(state.players), npcs: map_size(state.npcs_live)},
+      %{map_id: state.map_id, tick_type: :regen})
+
     Process.send_after(self(), :regen_tick, regen_tick_ms())
     {:noreply, state}
   end

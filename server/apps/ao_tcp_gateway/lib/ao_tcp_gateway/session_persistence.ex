@@ -11,6 +11,8 @@ defmodule AoTcpGateway.SessionPersistence do
     if state.character_id && state.map_id do
       case Arena.Map.MapServer.leave(state.map_id, state.character_id) do
         {:ok, entity} ->
+          start = System.monotonic_time()
+
           try do
             attrs = GameBackend.Characters.from_entity(entity)
             inventory = GameBackend.Characters.inventory_from_entity(entity)
@@ -24,11 +26,23 @@ defmodule AoTcpGateway.SessionPersistence do
                    skills: skills,
                    spells: spells
                  ) do
-              {:ok, _} -> :ok
-              {:error, reason} -> Logger.error("Cleanup save failed for #{entity.char_id}: #{inspect(reason)}")
+              {:ok, _} ->
+                :telemetry.execute([:arena, :persistence, :cleanup],
+                  %{duration: System.monotonic_time() - start},
+                  %{char_id: entity.char_id, result: :ok})
+
+              {:error, reason} ->
+                :telemetry.execute([:arena, :persistence, :cleanup],
+                  %{duration: System.monotonic_time() - start},
+                  %{char_id: entity.char_id, result: :error})
+                Logger.error("Cleanup save failed for #{entity.char_id}: #{inspect(reason)}")
             end
           rescue
-            e -> Logger.error("Cleanup save error for #{entity.char_id}: #{inspect(e)}")
+            e ->
+              :telemetry.execute([:arena, :persistence, :cleanup],
+                %{duration: System.monotonic_time() - start},
+                %{char_id: entity.char_id, result: :error})
+              Logger.error("Cleanup save error for #{entity.char_id}: #{inspect(e)}")
           end
 
         :not_found ->
@@ -47,6 +61,7 @@ defmodule AoTcpGateway.SessionPersistence do
 
   def autosave(entity) do
     Task.start(fn ->
+      start = System.monotonic_time()
       attrs = GameBackend.Characters.from_entity(entity)
       inventory = GameBackend.Characters.inventory_from_entity(entity)
       equipment = GameBackend.Characters.equipment_from_entity(entity)
@@ -59,8 +74,16 @@ defmodule AoTcpGateway.SessionPersistence do
              skills: skills,
              spells: spells
            ) do
-        {:ok, _} -> :ok
-        {:error, reason} -> Logger.error("Autosave failed for #{entity.char_id}: #{inspect(reason)}")
+        {:ok, _} ->
+          :telemetry.execute([:arena, :persistence, :autosave],
+            %{duration: System.monotonic_time() - start},
+            %{char_id: entity.char_id, result: :ok})
+
+        {:error, reason} ->
+          :telemetry.execute([:arena, :persistence, :autosave],
+            %{duration: System.monotonic_time() - start},
+            %{char_id: entity.char_id, result: :error})
+          Logger.error("Autosave failed for #{entity.char_id}: #{inspect(reason)}")
       end
     end)
   end

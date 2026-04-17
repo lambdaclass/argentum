@@ -34,6 +34,23 @@ defmodule Arena.Map.CombatHandlers do
   # ==================================================================
 
   def handle_attack(state, char_id, target_x, target_y) do
+    start = System.monotonic_time()
+    result = do_handle_attack(state, char_id, target_x, target_y)
+    duration = System.monotonic_time() - start
+
+    attack_result =
+      case result do
+        {:reply, :ok, _} -> :ok
+        {:reply, {:error, reason}, _} -> reason
+      end
+
+    :telemetry.execute([:arena, :combat, :attack], %{duration: duration},
+      %{map_id: state.map_id, result: attack_result})
+
+    result
+  end
+
+  defp do_handle_attack(state, char_id, target_x, target_y) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         now = System.monotonic_time(:millisecond)
@@ -544,6 +561,23 @@ defmodule Arena.Map.CombatHandlers do
   # ==================================================================
 
   def handle_cast_spell(state, char_id, spell_slot, target_x, target_y) do
+    start = System.monotonic_time()
+    result = do_handle_cast_spell(state, char_id, spell_slot, target_x, target_y)
+    duration = System.monotonic_time() - start
+
+    spell_result =
+      case result do
+        {:reply, :ok, _} -> :ok
+        {:reply, {:error, reason}, _} -> reason
+      end
+
+    :telemetry.execute([:arena, :combat, :spell], %{duration: duration},
+      %{map_id: state.map_id, result: spell_result})
+
+    result
+  end
+
+  defp do_handle_cast_spell(state, char_id, spell_slot, target_x, target_y) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         now = System.monotonic_time(:millisecond)
