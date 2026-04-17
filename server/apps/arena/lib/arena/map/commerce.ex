@@ -19,6 +19,15 @@ defmodule Arena.Map.Commerce do
           entity.trade_partner_id != nil ->
             {:reply, {:error, :already_trading}, state}
 
+          entity.meditating ->
+            {:reply, {:error, :meditating}, state}
+
+          entity.navigating ->
+            {:reply, {:error, :navigating}, state}
+
+          entity.paralyzed ->
+            {:reply, {:error, :paralyzed}, state}
+
           true ->
         case target_occ do
           # VB6: target is a player -> user-to-user trade request

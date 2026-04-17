@@ -13,6 +13,7 @@ defmodule Arena.PartyServer do
   @table :ao_parties
   @max_members 5
   @invite_ttl_ms 30_000
+  @kick_cooldown_ms 60_000
 
   # ---- Public API (reads go straight to ETS) ----
 
@@ -123,28 +124,33 @@ defmodule Arena.PartyServer do
 
       case :ets.lookup(@table, {:party, party_id}) do
         [{_, party}] ->
-          if length(party.members) >= @max_members do
-            notify(leader_id, "El grupo esta lleno.")
-            {:reply, {:error, :full}, state}
-          else
-            # Check target not already in a party
-            case :ets.lookup(@table, {:member, target_id}) do
-              [{_, _}] ->
-                notify(leader_id, "Ese jugador ya esta en un grupo.")
-                {:reply, {:error, :already_in_party}, state}
+          cond do
+            party.leader != leader_id ->
+              {:reply, {:error, :not_leader}, state}
 
-              [] ->
-                now = System.monotonic_time(:millisecond)
+            length(party.members) >= @max_members ->
+              notify(leader_id, "El grupo esta lleno.")
+              {:reply, {:error, :full}, state}
 
-                :ets.insert(
-                  @table,
-                  {{:invite, target_id}, %{from: leader_id, party_id: party_id, expires_at: now + @invite_ttl_ms}}
-                )
+            true ->
+              # Check target not already in a party
+              case :ets.lookup(@table, {:member, target_id}) do
+                [{_, _}] ->
+                  notify(leader_id, "Ese jugador ya esta en un grupo.")
+                  {:reply, {:error, :already_in_party}, state}
 
-                notify(target_id, "Has sido invitado a un grupo. Escribe /ACEPTARGRUPO para unirte.")
-                notify(leader_id, "Invitacion enviada.")
-                {:reply, :ok, state}
-            end
+                [] ->
+                  now = System.monotonic_time(:millisecond)
+
+                  :ets.insert(
+                    @table,
+                    {{:invite, target_id}, %{from: leader_id, party_id: party_id, expires_at: now + @invite_ttl_ms}}
+                  )
+
+                  notify(target_id, "Has sido invitado a un grupo. Escribe /ACEPTARGRUPO para unirte.")
+                  notify(leader_id, "Invitacion enviada.")
+                  {:reply, :ok, state}
+              end
           end
 
         [] ->
@@ -156,8 +162,15 @@ defmodule Arena.PartyServer do
   @impl true
   def handle_call({:accept, char_id}, _from, state) do
     case :ets.lookup(@table, {:invite, char_id}) do
-      [{_, %{party_id: party_id}}] ->
+      [{_, %{party_id: party_id, expires_at: expires_at}}] ->
         :ets.delete(@table, {:invite, char_id})
+
+        now = System.monotonic_time(:millisecond)
+
+        if now > expires_at do
+          notify(char_id, "La invitacion ha expirado.")
+          {:reply, {:error, :invite_expired}, state}
+        else
 
         case :ets.lookup(@table, {:member, char_id}) do
           [{_, _}] ->
@@ -171,19 +184,28 @@ defmodule Arena.PartyServer do
                   notify(char_id, "El grupo esta lleno.")
                   {:reply, {:error, :full}, state}
                 else
-                  new_members = party.members ++ [char_id]
-                  updated_party = %{party | members: new_members}
-                  :ets.insert(@table, {{:party, party_id}, updated_party})
-                  :ets.insert(@table, {{:member, char_id}, party_id})
-                  broadcast_party(new_members, "Un jugador se ha unido al grupo. Miembros: #{length(new_members)}")
-                  broadcast_datos_grupo(updated_party)
-                  {:reply, :ok, state}
+                  kick_time = Map.get(state, {:kick_time, char_id})
+
+                  if kick_time && now - kick_time < @kick_cooldown_ms do
+                    notify(char_id, "Debes esperar para volver a unirte.")
+                    {:reply, {:error, :kick_cooldown}, state}
+                  else
+                    state = Map.delete(state, {:kick_time, char_id})
+                    new_members = party.members ++ [char_id]
+                    updated_party = %{party | members: new_members}
+                    :ets.insert(@table, {{:party, party_id}, updated_party})
+                    :ets.insert(@table, {{:member, char_id}, party_id})
+                    broadcast_party(new_members, "Un jugador se ha unido al grupo. Miembros: #{length(new_members)}")
+                    broadcast_datos_grupo(updated_party)
+                    {:reply, :ok, state}
+                  end
                 end
 
               [] ->
                 notify(char_id, "El grupo ya no existe.")
                 {:reply, {:error, :party_gone}, state}
             end
+        end
         end
 
       [] ->
@@ -203,7 +225,7 @@ defmodule Arena.PartyServer do
     case :ets.lookup(@table, {:member, char_id}) do
       [{_, party_id}] ->
         case :ets.lookup(@table, {:party, party_id}) do
-          [{_, party}] ->
+          [{_, %{leader: ^char_id} = party}] ->
             new_safe = not Map.get(party, :safe, false)
             :ets.insert(@table, {{:party, party_id}, Map.put(party, :safe, new_safe)})
             msg = if new_safe, do: "Seguro de grupo activado.", else: "Seguro de grupo desactivado."
@@ -220,6 +242,9 @@ defmodule Arena.PartyServer do
               _ ->
                 :ok
             end
+
+          [{_, _party}] ->
+            notify(char_id, "Solo el lider puede cambiar el modo seguro.")
 
           [] ->
             :ok
@@ -247,17 +272,19 @@ defmodule Arena.PartyServer do
               send_not_in_party(target_id)
               broadcast_party(new_members, "Un jugador fue expulsado del grupo.")
               broadcast_datos_grupo(updated_party)
+              now = System.monotonic_time(:millisecond)
+              {:noreply, Map.put(state, {:kick_time, target_id}, now)}
+            else
+              {:noreply, state}
             end
 
           _ ->
-            :ok
+            {:noreply, state}
         end
 
       [] ->
-        :ok
+        {:noreply, state}
     end
-
-    {:noreply, state}
   end
 
   @impl true
