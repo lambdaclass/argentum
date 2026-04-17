@@ -14,7 +14,132 @@ This file lists remaining work only. Completed work lives in `CHANGELOG.md`. Rea
 3. Update the top-level roadmap status after every large merge.
    Outcome: the roadmap remains accurate instead of becoming historical fiction.
 
-## Phase 2. Parity Proof
+## Phase 2. Critical Runtime Safety
+
+These items address live data-loss risks and production crash risks. They
+take priority over feature work, parity, and observability.
+
+62. Add outbound backpressure for lagging sessions.
+    Outcome: a slow client cannot grow process memory without bound.
+
+200. Supervise existing background writes (immediate safety patch).
+     Replace fire-and-forget `Task.start` with `Task.Supervisor` for autosave
+     and guild writes. This is a minimal change to the existing write paths —
+     no new architecture, just supervision and failure logging.
+     Outcome: background persistence writes are supervised, logged on failure,
+     and do not silently drop data.
+
+71. Implement the sync-first persistence boundary (broader architecture).
+    Audit all `GameBackend.*` write sites. Remove synchronous bank DB work
+    from `MapServer` hot paths. Replace ad hoc write triggers with explicit
+    ordered persistence boundaries. Keep the implementation sync-first until
+    metrics prove an async writer is necessary. Then introduce ordered
+    per-character writers, an idempotent operation ledger, and flush barriers
+    where they still pay for themselves.
+    See [research/arena-authoritative-persistence-and-refactor.md](research/arena-authoritative-persistence-and-refactor.md).
+    Outcome: autosave, logout, bank, inventory, trade, auction, and guild
+    writes are authoritative, ordered, retryable, observable, and no longer
+    depend on ad hoc blocking calls from the map loop.
+
+86. Verify graceful host shutdown.
+    Depends on #71 — shutdown verification is more meaningful once the
+    persistence path is less ad hoc.
+    Outcome: shutdown does not lose player state or corrupt runtime processes.
+
+## Phase 3. Security And Authority
+
+Items that protect gameplay integrity. #50 (party authority) is done and
+removed. #53 is narrowed to remaining gaps.
+
+51. Enforce mute/dead/cooldown rules on guild and party chat.
+    Outcome: all social chat paths follow the same moderation and spam rules,
+    not just normal chat and faction chat.
+
+52. Rate-limit `question_gm` and `role_master_request`.
+    Outcome: support/admin channels cannot be flooded even when packet replay
+    protection is already in place.
+
+53. Finish remaining trade-start validation gaps.
+    **Done**: meditating, navigating, paralyzed checks; distance, target-dead,
+    target-busy, already-trading checks. **Still open**: safe-zone
+    restrictions on player-to-player trade initiation, same-map visibility
+    recheck after request is accepted.
+    Outcome: player-trade start matches the inspected VB6 safety rules.
+
+54. Revalidate guild invite authority on accept.
+    Outcome: a stale invite cannot still be accepted after the inviter loses
+    leadership or the guild state changes.
+
+55. Restore VB6 `leave_faction` restrictions.
+    Outcome: faction leave requires the correct enlistador interaction and
+    preserves the old aligned-clan restrictions/side effects instead of the
+    current looser behavior.
+
+56. Restore selected-NPC semantics for account-state and reward flows.
+    Outcome: banker, timbero, and enlistador requests use the actual targeted
+    NPC and correct faction-side checks instead of any nearby NPC of the right
+    type.
+
+57. Align the remaining merchant/account-state behavior with the inspected VB6
+    backend.
+    Outcome: merchant sell restrictions such as the remaining old item rules,
+    and the timbero account-state text/value semantics, stop drifting from the
+    VB6 baseline.
+
+58. Close the remaining interaction-radius and bank-open guard drifts.
+    Outcome: NPC interaction radii and the old "already trading" bank-open
+    rule match the inspected VB6 behavior instead of stricter or looser
+    approximations.
+
+59. Keep the exploit and parity audit executable.
+    Outcome: every bug above has a regression test in the adversarial/parity
+    suites, and roadmap comments are updated when a gap is fixed so audit
+    notes do not become stale folklore.
+
+88. Add post-parity anti-cheat hardening: movement anomaly scoring, rate
+    validation, state-machine validation, economy invariants, structured
+    anti-cheat events, and operator visibility.
+    Outcome: speed hacking, packet abuse, duping, and botting signals are
+    detected, logged, and acted on systematically without changing legal
+    gameplay behavior.
+
+## Phase 4. Observability And Ops
+
+63. Finish telemetry wiring and make emitted events operationally useful.
+    **Partial**: events emit for map ticks, movement, broadcasts, combat
+    (attack/spell), persistence (cleanup/autosave), session (login/crash).
+    **Still open**: PromEx/Prometheus reporter initialization, Grafana
+    dashboard wiring, bank and guild_write events, per-map cardinality
+    strategy.
+    Outcome: the telemetry stack is live and feeding real dashboards, not just
+    emitting events into the void.
+
+79. Add metrics and dashboards.
+    Outcome: Prometheus and Grafana reflect real telemetry for map ticks,
+    movement, broadcasts, persistence latency/failure, crash cleanup, and
+    reconnect behavior instead of placeholder dashboards with no backing
+    events.
+
+80. Add alerts and release artifacts.
+    Outcome: the project is releaseable and operationally monitorable.
+
+74. Add runtime admin tools for map/process inspection and control.
+    Outcome: operators can inspect mailboxes, player counts, force save, and
+    restart maps cleanly.
+
+75. Add admin lookup for accounts, characters, and online players.
+    Outcome: operators can inspect live and persisted entities.
+
+76. Add admin moderation actions: kick, ban, mute, jail.
+    Outcome: basic live moderation exists outside raw gameplay commands.
+
+77. Add admin world actions: item/NPC spawn, teleport, locate.
+    Outcome: operator world control exists in one supported surface.
+
+78. Add admin logs and health views.
+    Outcome: operators can inspect recent actions and system state quickly.
+
+## Phase 5. Parity Proof
 
 4. Expand the current formula golden coverage to the remaining VB6 formulas and
    edge cases.
@@ -87,7 +212,7 @@ This file lists remaining work only. Completed work lives in `CHANGELOG.md`. Rea
     Outcome: the remaining social/economy/session packet flows are proven
     against captured traffic.
 
-## Phase 3. Parity-Required Backend Behavior
+## Phase 6. Parity-Required Backend Behavior
 
 26. Audit remaining invisibility, NPC AI, and spell-selection edge cases
     against VB6.
@@ -128,136 +253,11 @@ This file lists remaining work only. Completed work lives in `CHANGELOG.md`. Rea
     first.
     Outcome: no undocumented "close enough" backend differences remain.
 
-## Phase 4. Critical Runtime Safety
-
-These items address live data-loss risks and production crash risks. They
-take priority over feature work and observability.
-
-62. Add outbound backpressure for lagging sessions.
-    Outcome: a slow client cannot grow process memory without bound.
-
-200. Supervise existing background writes (immediate safety patch).
-     Replace fire-and-forget `Task.start` with `Task.Supervisor` for autosave
-     and guild writes. This is a minimal change to the existing write paths —
-     no new architecture, just supervision and failure logging.
-     Outcome: background persistence writes are supervised, logged on failure,
-     and do not silently drop data.
-
-71. Implement the sync-first persistence boundary (broader architecture).
-    Audit all `GameBackend.*` write sites. Remove synchronous bank DB work
-    from `MapServer` hot paths. Replace ad hoc write triggers with explicit
-    ordered persistence boundaries. Keep the implementation sync-first until
-    metrics prove an async writer is necessary. Then introduce ordered
-    per-character writers, an idempotent operation ledger, and flush barriers
-    where they still pay for themselves.
-    See [research/arena-authoritative-persistence-and-refactor.md](research/arena-authoritative-persistence-and-refactor.md).
-    Outcome: autosave, logout, bank, inventory, trade, auction, and guild
-    writes are authoritative, ordered, retryable, observable, and no longer
-    depend on ad hoc blocking calls from the map loop.
-
-86. Verify graceful host shutdown.
-    Depends on #71 — shutdown verification is more meaningful once the
-    persistence path is less ad hoc.
-    Outcome: shutdown does not lose player state or corrupt runtime processes.
-
-## Phase 5. Security And Authority
-
-Items that protect gameplay integrity. #50 (party authority) is done and
-removed. #53 is narrowed to remaining gaps.
-
-51. Enforce mute/dead/cooldown rules on guild and party chat.
-    Outcome: all social chat paths follow the same moderation and spam rules,
-    not just normal chat and faction chat.
-
-52. Rate-limit `question_gm` and `role_master_request`.
-    Outcome: support/admin channels cannot be flooded even when packet replay
-    protection is already in place.
-
-53. Finish remaining trade-start validation gaps.
-    **Done**: meditating, navigating, paralyzed checks; distance, target-dead,
-    target-busy, already-trading checks. **Still open**: safe-zone
-    restrictions on player-to-player trade initiation, same-map visibility
-    recheck after request is accepted.
-    Outcome: player-trade start matches the inspected VB6 safety rules.
-
-54. Revalidate guild invite authority on accept.
-    Outcome: a stale invite cannot still be accepted after the inviter loses
-    leadership or the guild state changes.
-
-55. Restore VB6 `leave_faction` restrictions.
-    Outcome: faction leave requires the correct enlistador interaction and
-    preserves the old aligned-clan restrictions/side effects instead of the
-    current looser behavior.
-
-56. Restore selected-NPC semantics for account-state and reward flows.
-    Outcome: banker, timbero, and enlistador requests use the actual targeted
-    NPC and correct faction-side checks instead of any nearby NPC of the right
-    type.
-
-57. Align the remaining merchant/account-state behavior with the inspected VB6
-    backend.
-    Outcome: merchant sell restrictions such as the remaining old item rules,
-    and the timbero account-state text/value semantics, stop drifting from the
-    VB6 baseline.
-
-58. Close the remaining interaction-radius and bank-open guard drifts.
-    Outcome: NPC interaction radii and the old "already trading" bank-open
-    rule match the inspected VB6 behavior instead of stricter or looser
-    approximations.
-
-59. Keep the exploit and parity audit executable.
-    Outcome: every bug above has a regression test in the adversarial/parity
-    suites, and roadmap comments are updated when a gap is fixed so audit
-    notes do not become stale folklore.
-
-88. Add post-parity anti-cheat hardening: movement anomaly scoring, rate
-    validation, state-machine validation, economy invariants, structured
-    anti-cheat events, and operator visibility.
-    Outcome: speed hacking, packet abuse, duping, and botting signals are
-    detected, logged, and acted on systematically without changing legal
-    gameplay behavior.
-
-## Phase 6. Observability And Ops
-
-63. Finish telemetry wiring and make emitted events operationally useful.
-    **Partial**: events emit for map ticks, movement, broadcasts, combat
-    (attack/spell), persistence (cleanup/autosave), session (login/crash).
-    **Still open**: PromEx/Prometheus reporter initialization, Grafana
-    dashboard wiring, bank and guild_write events, per-map cardinality
-    strategy.
-    Outcome: the telemetry stack is live and feeding real dashboards, not just
-    emitting events into the void.
-
-79. Add metrics and dashboards.
-    Outcome: Prometheus and Grafana reflect real telemetry for map ticks,
-    movement, broadcasts, persistence latency/failure, crash cleanup, and
-    reconnect behavior instead of placeholder dashboards with no backing
-    events.
-
-80. Add alerts and release artifacts.
-    Outcome: the project is releaseable and operationally monitorable.
-
-74. Add runtime admin tools for map/process inspection and control.
-    Outcome: operators can inspect mailboxes, player counts, force save, and
-    restart maps cleanly.
-
-75. Add admin lookup for accounts, characters, and online players.
-    Outcome: operators can inspect live and persisted entities.
-
-76. Add admin moderation actions: kick, ban, mute, jail.
-    Outcome: basic live moderation exists outside raw gameplay commands.
-
-77. Add admin world actions: item/NPC spawn, teleport, locate.
-    Outcome: operator world control exists in one supported surface.
-
-78. Add admin logs and health views.
-    Outcome: operators can inspect recent actions and system state quickly.
-
 ## Phase 7. Backend Architecture
 
 Code quality and performance improvements that do not affect correctness.
-These can proceed in parallel with observability work once runtime safety
-is resolved.
+These can proceed in parallel with parity work once runtime safety is
+resolved.
 
 60. Replace NPC aggro full scans with spatial-grid queries.
     Outcome: hostile NPC target acquisition scales with local visibility, not
