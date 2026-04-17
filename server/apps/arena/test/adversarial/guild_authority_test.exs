@@ -191,10 +191,9 @@ defmodule Arena.Adversarial.GuildAuthorityTest do
 
   describe "non-leader kick" do
     test "a regular member cannot kick another member" do
-      # kick is a cast, so we check state after
-      GuildServer.kick(@member_id, @leader_id)
-      # Allow the cast to be processed
-      Process.sleep(50)
+      # kick is now a call, so we get the result directly
+      result = GuildServer.kick(@member_id, @leader_id)
+      assert result == {:error, :not_leader}
 
       # Leader should still be a member
       assert :ets.lookup(@table, {:member, @leader_id}) == [{{:member, @leader_id}, @guild_id}]
@@ -288,8 +287,8 @@ defmodule Arena.Adversarial.GuildAuthorityTest do
 
   describe "leader self-kick" do
     test "leader kicking themselves is silently rejected" do
-      GuildServer.kick(@leader_id, @leader_id)
-      Process.sleep(50)
+      result = GuildServer.kick(@leader_id, @leader_id)
+      assert result == {:error, :invalid_target}
 
       # Leader should still be in the guild
       assert :ets.lookup(@table, {:member, @leader_id}) == [{{:member, @leader_id}, @guild_id}]

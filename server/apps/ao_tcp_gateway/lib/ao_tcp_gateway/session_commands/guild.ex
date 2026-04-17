@@ -47,18 +47,23 @@ defmodule AoTcpGateway.SessionCommands.Guild do
   end
 
   def handle_talk_guild(state, :guild_leave) do
-    Arena.GuildServer.leave(state.character_id)
-    Arena.Map.MapServer.update_guild_cache(state.map_id, state.character_id, 0, 0)
+    case Arena.GuildServer.leave(state.character_id) do
+      :ok -> Arena.Map.MapServer.update_guild_cache(state.map_id, state.character_id, 0, 0)
+      _ -> :ok
+    end
     {state, []}
   end
 
   def handle_talk_guild(state, {:guild_kick, target_name}) do
     case AoSession.OnlineDirectory.lookup_by_name(target_name) do
       {:ok, target_id, _info} ->
-        Arena.GuildServer.kick(state.character_id, target_id)
-        case AoSession.OnlineDirectory.lookup_by_id(target_id) do
-          {:ok, info} ->
-            Arena.Map.MapServer.update_guild_cache(info.map_id, target_id, 0, 0)
+        case Arena.GuildServer.kick(state.character_id, target_id) do
+          :ok ->
+            case AoSession.OnlineDirectory.lookup_by_id(target_id) do
+              {:ok, info} ->
+                Arena.Map.MapServer.update_guild_cache(info.map_id, target_id, 0, 0)
+              _ -> :ok
+            end
           _ -> :ok
         end
       :not_found ->
@@ -163,8 +168,10 @@ defmodule AoTcpGateway.SessionCommands.Guild do
   end
 
   def handle_command(state, {:guild_leave, _}) do
-    Arena.GuildServer.leave(state.character_id)
-    Arena.Map.MapServer.update_guild_cache(state.map_id, state.character_id, 0, 0)
+    case Arena.GuildServer.leave(state.character_id) do
+      :ok -> Arena.Map.MapServer.update_guild_cache(state.map_id, state.character_id, 0, 0)
+      _ -> :ok
+    end
     {state, []}
   end
 
@@ -195,10 +202,13 @@ defmodule AoTcpGateway.SessionCommands.Guild do
   def handle_command(state, {:guild_kick_member, %{username: target_name}}) do
     case AoSession.OnlineDirectory.lookup_by_name(target_name) do
       {:ok, target_id, _info} ->
-        Arena.GuildServer.kick(state.character_id, target_id)
-        case AoSession.OnlineDirectory.lookup_by_id(target_id) do
-          {:ok, info} ->
-            Arena.Map.MapServer.update_guild_cache(info.map_id, target_id, 0, 0)
+        case Arena.GuildServer.kick(state.character_id, target_id) do
+          :ok ->
+            case AoSession.OnlineDirectory.lookup_by_id(target_id) do
+              {:ok, info} ->
+                Arena.Map.MapServer.update_guild_cache(info.map_id, target_id, 0, 0)
+              _ -> :ok
+            end
           _ -> :ok
         end
       :not_found -> send_console("Jugador no encontrado.")

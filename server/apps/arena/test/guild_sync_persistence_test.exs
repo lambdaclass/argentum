@@ -5,7 +5,7 @@ defmodule Arena.GuildSyncPersistenceTest do
 
   Uses synthetic guild IDs in ETS that have no DB backing, so all
   persist_guild_update / persist_relation calls will fail — verifying
-  that the GenServer survives and ETS remains consistent.
+  that the GenServer survives and ETS remains consistent (unchanged on failure).
   """
   use ExUnit.Case, async: false
 
@@ -71,15 +71,15 @@ defmodule Arena.GuildSyncPersistenceTest do
   end
 
   describe "set_news with DB failure" do
-    test "ETS is updated and GenServer survives when persist fails" do
+    test "ETS is NOT updated when persist fails and GenServer survives" do
       log =
         capture_log(fn ->
-          assert :ok == GuildServer.set_guild_news(@leader_id, "New guild news!")
+          assert {:error, :db_error} == GuildServer.set_guild_news(@leader_id, "New guild news!")
         end)
 
-      # ETS should have the updated news despite DB failure
+      # ETS should NOT have the updated news because DB failed
       [{_, guild}] = :ets.lookup(@table, {:guild, @guild_id})
-      assert guild.news == "New guild news!"
+      assert guild.news == ""
 
       # DB failure should be logged
       assert log =~ "Guild DB update failed"
@@ -87,51 +87,51 @@ defmodule Arena.GuildSyncPersistenceTest do
       # GenServer should still be alive and responsive
       assert Process.whereis(GuildServer) != nil
       {:ok, info, _} = GuildServer.guild_info(@leader_id)
-      assert info.news == "New guild news!"
+      assert info.news == ""
     end
   end
 
   describe "set_description with DB failure" do
-    test "ETS is updated and GenServer survives when persist fails" do
+    test "ETS is NOT updated when persist fails and GenServer survives" do
       log =
         capture_log(fn ->
-          assert :ok == GuildServer.set_guild_description(@leader_id, "A test description")
+          assert {:error, :db_error} == GuildServer.set_guild_description(@leader_id, "A test description")
         end)
 
       [{_, guild}] = :ets.lookup(@table, {:guild, @guild_id})
-      assert guild.description == "A test description"
+      assert guild.description == ""
       assert log =~ "Guild DB update failed"
 
       # Still alive
-      assert :ok == GuildServer.set_guild_description(@leader_id, "Second update")
+      assert {:error, :db_error} == GuildServer.set_guild_description(@leader_id, "Second update")
       [{_, guild}] = :ets.lookup(@table, {:guild, @guild_id})
-      assert guild.description == "Second update"
+      assert guild.description == ""
     end
   end
 
   describe "set_website with DB failure" do
-    test "ETS is updated and GenServer survives when persist fails" do
+    test "ETS is NOT updated when persist fails and GenServer survives" do
       log =
         capture_log(fn ->
-          assert :ok == GuildServer.update_website(@leader_id, "https://example.com")
+          assert {:error, :db_error} == GuildServer.update_website(@leader_id, "https://example.com")
         end)
 
       [{_, guild}] = :ets.lookup(@table, {:guild, @guild_id})
-      assert guild.url == "https://example.com"
+      assert guild.url == ""
       assert log =~ "Guild DB update failed"
     end
   end
 
   describe "declare_war with DB failure" do
-    test "ETS relation is set and GenServer survives when persist fails" do
+    test "ETS relation is NOT set when persist fails and GenServer survives" do
       log =
         capture_log(fn ->
-          assert :ok == GuildServer.declare_war(@leader_id, "SyncRivalGuild")
+          assert {:error, :db_error} == GuildServer.declare_war(@leader_id, "SyncRivalGuild")
         end)
 
-      # ETS should have the war relation
+      # ETS should NOT have the war relation because DB failed
       {a, b} = if @guild_id <= @guild2_id, do: {@guild_id, @guild2_id}, else: {@guild2_id, @guild_id}
-      assert [{_, "war"}] = :ets.lookup(@table, {:relation, a, b})
+      assert [] == :ets.lookup(@table, {:relation, a, b})
 
       assert log =~ "Guild relation set failed"
 
@@ -144,16 +144,16 @@ defmodule Arena.GuildSyncPersistenceTest do
     test "GenServer handles repeated failures without crashing" do
       log =
         capture_log(fn ->
-          assert :ok == GuildServer.set_guild_news(@leader_id, "News 1")
-          assert :ok == GuildServer.set_guild_news(@leader_id, "News 2")
-          assert :ok == GuildServer.set_guild_description(@leader_id, "Desc 1")
-          assert :ok == GuildServer.update_website(@leader_id, "https://site.com")
+          assert {:error, :db_error} == GuildServer.set_guild_news(@leader_id, "News 1")
+          assert {:error, :db_error} == GuildServer.set_guild_news(@leader_id, "News 2")
+          assert {:error, :db_error} == GuildServer.set_guild_description(@leader_id, "Desc 1")
+          assert {:error, :db_error} == GuildServer.update_website(@leader_id, "https://site.com")
         end)
 
       [{_, guild}] = :ets.lookup(@table, {:guild, @guild_id})
-      assert guild.news == "News 2"
-      assert guild.description == "Desc 1"
-      assert guild.url == "https://site.com"
+      assert guild.news == ""
+      assert guild.description == ""
+      assert guild.url == ""
 
       # Multiple failure logs
       assert length(Regex.scan(~r/Guild DB update failed/, log)) >= 4

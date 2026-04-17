@@ -143,4 +143,34 @@ defmodule GameBackend.Guilds do
     )
     |> Repo.delete_all()
   end
+
+  @doc "Check if a pending request exists for a given char in a guild."
+  def request_exists?(guild_id, char_id) do
+    from(r in GameBackend.GuildRequest,
+      where: r.guild_id == ^guild_id and r.char_id == ^char_id,
+      select: true
+    )
+    |> Repo.exists?()
+  end
+
+  @doc """
+  Atomically remove a member and update the guild leader in a single transaction.
+  Used for leader succession when the leader leaves.
+  """
+  def remove_member_and_set_leader(guild_id, departing_char_id, new_leader_id) do
+    Repo.transaction(fn ->
+      remove_member(guild_id, departing_char_id)
+
+      case Repo.get(Guild, guild_id) do
+        nil ->
+          Repo.rollback(:not_found)
+
+        guild ->
+          case guild |> Guild.changeset(%{leader_id: new_leader_id}) |> Repo.update() do
+            {:ok, updated} -> updated
+            {:error, changeset} -> Repo.rollback(changeset)
+          end
+      end
+    end)
+  end
 end
