@@ -335,59 +335,88 @@ defmodule Arena.Map.Trade do
         end_user_trade(state, char_id)
 
       true ->
-        # Transfer gold
-        entity = %{entity | gold: entity.gold - entity.trade_offer_gold + partner.trade_offer_gold}
-        partner = %{partner | gold: partner.gold - partner.trade_offer_gold + entity.trade_offer_gold}
+        # Compute post-trade state (in local vars, not yet applied)
+        new_entity = %{entity | gold: entity.gold - entity.trade_offer_gold + partner.trade_offer_gold}
+        new_partner = %{partner | gold: partner.gold - partner.trade_offer_gold + entity.trade_offer_gold}
 
-        # Transfer items: remove from offerer, add to receiver
-        {entity, partner} = transfer_trade_items(entity, partner)
-        {partner, entity} = transfer_trade_items(partner, entity)
+        {new_entity, new_partner} = transfer_trade_items(new_entity, new_partner)
+        {new_partner, new_entity} = transfer_trade_items(new_partner, new_entity)
 
-        # Clear trade state
-        entity = %{
-          entity
-          | trade_partner_id: nil,
-            trade_request_target: nil,
-            trade_offer_gold: 0,
-            trade_offer_items: [],
-            trade_accepted: false
-        }
+        # Persist both players atomically BEFORE mutating in-memory state.
+        # On failure, leave both players unchanged and end the trade.
+        persist_result =
+          try do
+            GameBackend.Characters.save_trade_snapshots(new_entity, new_partner)
+          rescue
+            e ->
+              require Logger
+              Logger.error("Trade commit raised for #{char_id} <-> #{partner_id}: #{inspect(e)}")
+              {:error, :exception}
+          end
 
-        partner = %{
-          partner
-          | trade_partner_id: nil,
-            trade_request_target: nil,
-            trade_offer_gold: 0,
-            trade_offer_items: [],
-            trade_accepted: false
-        }
+        case persist_result do
+          :ok ->
+            # DB committed — now apply to in-memory state
+            new_entity = clear_trade_state(new_entity)
+            new_partner = clear_trade_state(new_partner)
 
-        # Notify both
-        Helpers.send_to_session(state.sessions, char_id, {:send_raw, Encoder.encode({:user_commerce_end, %{}})})
-        Helpers.send_to_session(state.sessions, partner_id, {:send_raw, Encoder.encode({:user_commerce_end, %{}})})
+            notify_trade_complete(state, char_id, partner_id, new_entity, new_partner)
 
-        # Send updated gold
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
-        )
+            players = state.players |> Map.put(char_id, new_entity) |> Map.put(partner_id, new_partner)
+            %{state | players: players}
 
-        Helpers.send_to_session(
-          state.sessions,
-          partner_id,
-          {:send_raw, Encoder.encode({:update_gold, %{gold: partner.gold}})}
-        )
+          {:error, reason} ->
+            require Logger
+            Logger.error("Trade commit failed for #{char_id} <-> #{partner_id}: #{inspect(reason)}")
 
-        # Send full inventory updates
-        Enum.each(0..23, fn slot ->
-          Helpers.send_inventory_slot(state.sessions, char_id, entity.inventory, slot)
-          Helpers.send_inventory_slot(state.sessions, partner_id, partner.inventory, slot)
-        end)
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "Comercio fallido, intente nuevamente.", font_index: 0}})}
+            )
 
-        players = state.players |> Map.put(char_id, entity) |> Map.put(partner_id, partner)
-        %{state | players: players}
+            Helpers.send_to_session(
+              state.sessions,
+              partner_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "Comercio fallido, intente nuevamente.", font_index: 0}})}
+            )
+
+            # End trade without modifying gold or inventory
+            end_user_trade(state, char_id)
+        end
     end
+  end
+
+  defp clear_trade_state(entity) do
+    %{entity |
+      trade_partner_id: nil,
+      trade_request_target: nil,
+      trade_offer_gold: 0,
+      trade_offer_items: [],
+      trade_accepted: false
+    }
+  end
+
+  defp notify_trade_complete(state, char_id, partner_id, entity, partner) do
+    Helpers.send_to_session(state.sessions, char_id, {:send_raw, Encoder.encode({:user_commerce_end, %{}})})
+    Helpers.send_to_session(state.sessions, partner_id, {:send_raw, Encoder.encode({:user_commerce_end, %{}})})
+
+    Helpers.send_to_session(
+      state.sessions,
+      char_id,
+      {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
+    )
+
+    Helpers.send_to_session(
+      state.sessions,
+      partner_id,
+      {:send_raw, Encoder.encode({:update_gold, %{gold: partner.gold}})}
+    )
+
+    Enum.each(0..23, fn slot ->
+      Helpers.send_inventory_slot(state.sessions, char_id, entity.inventory, slot)
+      Helpers.send_inventory_slot(state.sessions, partner_id, partner.inventory, slot)
+    end)
   end
 
   def transfer_trade_items(giver, receiver) do

@@ -236,6 +236,38 @@ defmodule GameBackend.Characters do
   defp preload_associations(nil), do: nil
   defp preload_associations(character), do: Repo.preload(character, @preload_associations)
 
+  @doc """
+  Atomically save two players' gold and inventory in a single DB transaction.
+  Used by the trade commit boundary so that either both players' state is
+  persisted or neither is. Returns :ok or {:error, reason}.
+  """
+  def save_trade_snapshots(entity_a, entity_b) do
+    Repo.transaction(fn ->
+      for entity <- [entity_a, entity_b] do
+        case get(entity.char_id) do
+          nil ->
+            Repo.rollback({:not_found, entity.char_id})
+
+          character ->
+            attrs = from_entity(entity)
+
+            case character |> changeset(attrs) |> Repo.update() do
+              {:ok, character} ->
+                save_inventory_slots(character.id, inventory_from_entity(entity))
+                :ok
+
+              {:error, changeset} ->
+                Repo.rollback({:update_failed, entity.char_id, changeset})
+            end
+        end
+      end
+    end)
+    |> case do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   @doc "Save a snapshot of online player state back to DB."
   def save_snapshot(char_id, attrs, opts \\ []) do
     inventory = Keyword.get(opts, :inventory, [])
