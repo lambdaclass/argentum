@@ -191,6 +191,28 @@ defmodule AoTcpGateway.LifecyclePersistenceTest do
 
   defp unique_name, do: "LCT_#{System.unique_integer([:positive])}"
 
+  # Poll until the session for char_id is unregistered, or timeout.
+  # Replaces fixed Process.sleep(500) to avoid flaky timing on slow CI.
+  defp await_session_cleanup(char_id, timeout_ms \\ 3000) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    do_await_session_cleanup(char_id, deadline)
+  end
+
+  defp do_await_session_cleanup(char_id, deadline) do
+    case AoSession.lookup(char_id) do
+      {:error, :not_found} ->
+        :ok
+
+      _ ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          flunk("Timed out waiting for session cleanup of char_id #{char_id}")
+        else
+          Process.sleep(20)
+          do_await_session_cleanup(char_id, deadline)
+        end
+    end
+  end
+
   defp find_packet(packets, id) do
     Enum.find(packets, fn {pid, _} -> pid == id end)
   end
@@ -488,7 +510,7 @@ defmodule AoTcpGateway.LifecyclePersistenceTest do
 
       # Disconnect (triggers cleanup save)
       :gen_tcp.close(socket)
-      Process.sleep(500)
+      await_session_cleanup(char_id)
 
       # Verify DB has the updated position
       db_char = GameBackend.Characters.get(char_id)
@@ -512,7 +534,7 @@ defmodule AoTcpGateway.LifecyclePersistenceTest do
 
       # Disconnect
       :gen_tcp.close(socket1)
-      Process.sleep(500)
+      await_session_cleanup(char_id)
 
       # Reconnect via Packet 73
       token = GameBackend.Characters.get(char_id).session_token
@@ -548,7 +570,7 @@ defmodule AoTcpGateway.LifecyclePersistenceTest do
 
       # Disconnect
       :gen_tcp.close(socket1)
-      Process.sleep(500)
+      await_session_cleanup(char_id)
 
       # Reconnect
       token = GameBackend.Characters.get(char_id).session_token
@@ -593,7 +615,7 @@ defmodule AoTcpGateway.LifecyclePersistenceTest do
 
       # Disconnect
       :gen_tcp.close(socket1)
-      Process.sleep(500)
+      await_session_cleanup(char_id)
 
       # Reconnect via Packet 73
       token = GameBackend.Characters.get(char_id).session_token
@@ -626,7 +648,7 @@ defmodule AoTcpGateway.LifecyclePersistenceTest do
 
       # Kill the session process (simulate crash)
       Process.exit(session_pid, :kill)
-      Process.sleep(500)
+      await_session_cleanup(char_id)
 
       # Close the socket (may already be dead)
       :gen_tcp.close(socket)
@@ -721,7 +743,7 @@ defmodule AoTcpGateway.LifecyclePersistenceTest do
 
       # Disconnect
       :gen_tcp.close(socket)
-      Process.sleep(500)
+      await_session_cleanup(char_id)
 
       # Reconnect
       ensure_map_started(exit_tile.dest_map)
@@ -762,7 +784,8 @@ defmodule AoTcpGateway.LifecyclePersistenceTest do
       :gen_tcp.close(socket_b)
 
       # Wait for cleanup to complete
-      Process.sleep(500)
+      await_session_cleanup(char_id_a)
+      await_session_cleanup(char_id_b)
 
       # Both sessions should be unregistered
       assert {:error, :not_found} = AoSession.lookup(char_id_a)
@@ -788,7 +811,7 @@ defmodule AoTcpGateway.LifecyclePersistenceTest do
 
       # Disconnect first session
       :gen_tcp.close(socket1)
-      Process.sleep(500)
+      await_session_cleanup(char_id)
 
       # Directly set the character as dead in DB (simulating death that was saved)
       char = GameBackend.Characters.get(char_id)
@@ -836,7 +859,7 @@ defmodule AoTcpGateway.LifecyclePersistenceTest do
 
       # Disconnect
       :gen_tcp.close(socket)
-      Process.sleep(500)
+      await_session_cleanup(char_id)
 
       # Online directory should be cleared
       assert :not_found = AoSession.OnlineDirectory.lookup_by_id(char_id)
@@ -852,7 +875,7 @@ defmodule AoTcpGateway.LifecyclePersistenceTest do
 
       # Disconnect first session
       :gen_tcp.close(socket1)
-      Process.sleep(500)
+      await_session_cleanup(char_id)
 
       # Try to reconnect with a bogus token
       socket2 = connect(port)
@@ -930,7 +953,7 @@ defmodule AoTcpGateway.LifecyclePersistenceTest do
       # Kill session (no graceful cleanup → no DB save)
       {:ok, session_pid, _} = AoSession.lookup(char_id)
       Process.exit(session_pid, :kill)
-      Process.sleep(500)
+      await_session_cleanup(char_id)
       :gen_tcp.close(socket1)
 
       # Session and map should be cleaned up
@@ -971,7 +994,7 @@ defmodule AoTcpGateway.LifecyclePersistenceTest do
       # --- First crash ---
       {:ok, pid1, _} = AoSession.lookup(char_id)
       Process.exit(pid1, :kill)
-      Process.sleep(500)
+      await_session_cleanup(char_id)
       :gen_tcp.close(socket1)
 
       assert {:error, :not_found} = AoSession.lookup(char_id)
@@ -991,7 +1014,7 @@ defmodule AoTcpGateway.LifecyclePersistenceTest do
       # --- Second crash ---
       {:ok, pid2, _} = AoSession.lookup(char_id)
       Process.exit(pid2, :kill)
-      Process.sleep(500)
+      await_session_cleanup(char_id)
       :gen_tcp.close(socket2)
 
       assert {:error, :not_found} = AoSession.lookup(char_id)
@@ -1024,7 +1047,7 @@ defmodule AoTcpGateway.LifecyclePersistenceTest do
       # Crash
       {:ok, pid, _} = AoSession.lookup(char_id)
       Process.exit(pid, :kill)
-      Process.sleep(500)
+      await_session_cleanup(char_id)
       :gen_tcp.close(socket1)
 
       # Online directory should be cleared
@@ -1056,7 +1079,7 @@ defmodule AoTcpGateway.LifecyclePersistenceTest do
       {_heading_a, walked_pos_a} = result_a
 
       :gen_tcp.close(socket_a)
-      Process.sleep(500)
+      await_session_cleanup(char_id_a)
 
       db_a = GameBackend.Characters.get(char_id_a)
       assert db_a.pos_x == walked_pos_a.x
@@ -1076,7 +1099,7 @@ defmodule AoTcpGateway.LifecyclePersistenceTest do
 
       {:ok, pid_b, _} = AoSession.lookup(char_id_b)
       Process.exit(pid_b, :kill)
-      Process.sleep(500)
+      await_session_cleanup(char_id_b)
       :gen_tcp.close(socket_b)
 
       # DB should still have original spawn position (crash = no save)
