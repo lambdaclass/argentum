@@ -194,7 +194,8 @@ defmodule Arena.Map.Social do
           a = Enum.at(spells, idx)
           b = Enum.at(spells, swap_idx)
           spells = spells |> List.replace_at(idx, b) |> List.replace_at(swap_idx, a)
-          entity = %{entity | spells: spells}
+          spell_cooldowns = swap_spell_cooldowns(entity.spell_cooldowns, idx + 1, swap_idx + 1)
+          entity = %{entity | spells: spells, spell_cooldowns: spell_cooldowns}
           players = Map.put(state.players, char_id, entity)
           state = %{state | players: players}
 
@@ -216,6 +217,18 @@ defmodule Arena.Map.Social do
     packet = Encoder.encode({:change_spell_slot, %{slot: idx + 1, spell_id: spell_id}})
     Helpers.send_to_session(sessions, char_id, {:send_raw, packet})
   end
+
+  defp swap_spell_cooldowns(cooldowns, slot_a, slot_b) do
+    cooldown_a = Map.get(cooldowns, slot_a)
+    cooldown_b = Map.get(cooldowns, slot_b)
+
+    cooldowns
+    |> put_or_delete_cooldown(slot_a, cooldown_b)
+    |> put_or_delete_cooldown(slot_b, cooldown_a)
+  end
+
+  defp put_or_delete_cooldown(cooldowns, slot, nil), do: Map.delete(cooldowns, slot)
+  defp put_or_delete_cooldown(cooldowns, slot, value), do: Map.put(cooldowns, slot, value)
 
   # ==================================================================
   # Modify skills (VB6: distribute skill points from stats screen)
