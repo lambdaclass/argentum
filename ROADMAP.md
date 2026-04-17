@@ -56,7 +56,13 @@ or permission changes.
    bug fixed (Repo.delete_all returning zero rows treated as error). 7 failure-
    path tests added (guild accept_invite/request/kick/leave DB failure, autosave
    worker-death recovery, cleanup_save_failed telemetry).
-   Remaining: trade boundary, cleanup/logout verification.
+   Trade boundary done: `execute_trade` now persists both players atomically
+   via `save_trade_snapshots/2` before mutating in-memory state; on DB failure
+   both players stay unchanged. 5 trade persistence tests added.
+   Remaining: cleanup/logout verification and explicit final-save policy;
+   remaining guild failure-path semantics where DB outage must not masquerade
+   as normal authority results (`request_membership` looking like
+   `already_requested`, `list_requests` looking like no pending requests).
 
 5. Verify graceful host shutdown.
    Depends on #4 — shutdown verification is more meaningful once the
@@ -101,14 +107,17 @@ abuse path plus a normal-path control test.
    durable success. Failure-path tests added for accept_invite, accept_request,
    kick, and leave DB failures (synthetic fixtures — ETS consistency proven).
    **Still open**: DB-backed failure-path tests with real persisted guild/request
-   rows for full end-to-end coverage.
+   rows for full end-to-end coverage, plus the remaining DB-failure semantics
+   on `request_membership` and `list_requests` so persistence outage does not
+   look like a normal authority rejection or an empty request queue.
    Outcome: guild invite/request authority stays correct even when persistence
    fails or guild state changes between issue and accept.
    Tests required: inviter-loses-leadership, inviter-leaves-guild,
    guild-deleted, expired-invite-without-cleanup, accept-request-without-
-   request, request/invite preserved on DB failure, and DB-backed
-   revalidation tests that fail only on missing authority checks, not because
-   synthetic fixtures return `{:error, :db_error}` first.
+   request, request/invite preserved on DB failure, `request_membership`
+   DB-failure-not-`already_requested`, `list_requests` DB-failure-not-empty,
+   and DB-backed revalidation tests that fail only on missing authority
+   checks, not because synthetic fixtures return `{:error, :db_error}` first.
 
 10. Restore VB6 `leave_faction` restrictions.
     Outcome: faction leave requires the correct enlistador interaction and
@@ -225,8 +234,8 @@ abuse path plus a normal-path control test.
    and graceful-vs-crash save semantics are covered. Still open: map transfer
    edge cases, autosave timing under load, multi-map transfer chains,
    cleanup DB failure behavior, autosave flush timeout behavior, autosave
-   worker-crash/start-failure behavior, and stale autosave-vs-cleanup
-   ordering.
+   worker-crash/start-failure behavior, stale autosave-vs-cleanup ordering,
+   and explicit graceful-disconnect behavior under final-save failure.
    Outcome: persistence and ownership transitions stay correct under failure.
 
 30. Expand guild/faction/ban/mute persistence coverage.

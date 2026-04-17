@@ -4,6 +4,16 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **Sync-first persistence: trade boundary (2026-04-18):**
+  - Trade `execute_trade` now writes both players' gold and inventory to DB
+    atomically (single `Repo.transaction` via `save_trade_snapshots/2`) before
+    mutating in-memory state. On DB failure, both players' state stays unchanged
+    and the trade ends with an error message.
+  - Added `GameBackend.Characters.save_trade_snapshots/2`: atomic two-player
+    save in a single transaction.
+  - 5 persistence tests: one-side DB failure, both-fail commit, successful trade
+    persists immediately, replay/double-accept, and reconnect shows pre-trade
+    state after failed commit.
 - **Guild server hardening and DB-first reordering (2026-04-17):**
   - Fixed accept_invite authority bug: now checks expires_at and verifies
     the inviter still leads the guild before proceeding. Invite is only
