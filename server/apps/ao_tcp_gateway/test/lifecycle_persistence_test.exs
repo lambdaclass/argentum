@@ -906,4 +906,183 @@ defmodule AoTcpGateway.LifecyclePersistenceTest do
       assert error.message =~ "Already connected"
     end
   end
+
+  # ============================================================
+  # Session-recovery regression tests
+  # ============================================================
+
+  describe "crash recovery: re-login after crash" do
+    test "killing session allows re-login and restores last saved state", %{port: port} do
+      name = unique_name()
+      {socket1, packets1, char_id} = login_new(port, name)
+      on_exit(fn -> cleanup_char(char_id) end)
+
+      assert char_id != nil
+      {27, hp1} = find_packet(packets1, 27)
+      {31, pos1} = find_packet(packets1, 31)
+
+      # Walk to a new position so DB save captures it on graceful close...
+      # but we'll crash instead, so position reverts to creation spawn.
+      result = walk_any_direction(socket1)
+      assert result != nil
+      {_heading, _walked_pos} = result
+
+      # Kill session (no graceful cleanup → no DB save)
+      {:ok, session_pid, _} = AoSession.lookup(char_id)
+      Process.exit(session_pid, :kill)
+      Process.sleep(500)
+      :gen_tcp.close(socket1)
+
+      # Session and map should be cleaned up
+      assert {:error, :not_found} = AoSession.lookup(char_id)
+      assert {:error, :not_on_map} = Arena.Map.MapServer.snapshot_entity(1, char_id)
+
+      # Re-login should succeed
+      token = GameBackend.Characters.get(char_id).session_token
+      socket2 = connect(port)
+      send_login_existing(socket2, char_id, token)
+      data2 = recv_all(socket2)
+      packets2 = decode_all_packets(data2)
+      on_exit(fn -> :gen_tcp.close(socket2) end)
+
+      # Should get a full login sequence (logged packet)
+      assert find_packet(packets2, 2) != nil
+
+      # HP should match initial (no save happened during crash)
+      {27, hp2} = find_packet(packets2, 27)
+      assert hp2.min_hp == hp1.min_hp
+
+      # Position should be the creation spawn, NOT the walked position,
+      # because the crash prevented a DB save
+      {31, pos2} = find_packet(packets2, 31)
+      assert pos2.x == pos1.x
+      assert pos2.y == pos1.y
+    end
+  end
+
+  describe "crash recovery: double crash" do
+    test "crash, re-login, crash again, re-login again — no corruption", %{port: port} do
+      name = unique_name()
+      {socket1, _packets1, char_id} = login_new(port, name)
+      on_exit(fn -> cleanup_char(char_id) end)
+
+      assert char_id != nil
+
+      # --- First crash ---
+      {:ok, pid1, _} = AoSession.lookup(char_id)
+      Process.exit(pid1, :kill)
+      Process.sleep(500)
+      :gen_tcp.close(socket1)
+
+      assert {:error, :not_found} = AoSession.lookup(char_id)
+      assert {:error, :not_on_map} = Arena.Map.MapServer.snapshot_entity(1, char_id)
+
+      # --- First re-login ---
+      token = GameBackend.Characters.get(char_id).session_token
+      socket2 = connect(port)
+      send_login_existing(socket2, char_id, token)
+      data2 = recv_all(socket2)
+      packets2 = decode_all_packets(data2)
+      assert find_packet(packets2, 2) != nil
+
+      # Verify on map again
+      assert {:ok, _} = Arena.Map.MapServer.snapshot_entity(1, char_id)
+
+      # --- Second crash ---
+      {:ok, pid2, _} = AoSession.lookup(char_id)
+      Process.exit(pid2, :kill)
+      Process.sleep(500)
+      :gen_tcp.close(socket2)
+
+      assert {:error, :not_found} = AoSession.lookup(char_id)
+      assert {:error, :not_on_map} = Arena.Map.MapServer.snapshot_entity(1, char_id)
+
+      # --- Second re-login ---
+      token2 = GameBackend.Characters.get(char_id).session_token
+      socket3 = connect(port)
+      send_login_existing(socket3, char_id, token2)
+      data3 = recv_all(socket3)
+      packets3 = decode_all_packets(data3)
+      on_exit(fn -> :gen_tcp.close(socket3) end)
+
+      # Full login sequence works
+      assert find_packet(packets3, 2) != nil
+      assert {:ok, _} = Arena.Map.MapServer.snapshot_entity(1, char_id)
+    end
+  end
+
+  describe "crash recovery: online directory cleared on crash" do
+    test "crash clears online directory, re-login repopulates it", %{port: port} do
+      name = unique_name()
+      {socket1, _packets1, char_id} = login_new(port, name)
+      on_exit(fn -> cleanup_char(char_id) end)
+
+      # Verify in online directory
+      assert {:ok, info} = AoSession.OnlineDirectory.lookup_by_id(char_id)
+      assert info.name == name
+
+      # Crash
+      {:ok, pid, _} = AoSession.lookup(char_id)
+      Process.exit(pid, :kill)
+      Process.sleep(500)
+      :gen_tcp.close(socket1)
+
+      # Online directory should be cleared
+      assert :not_found = AoSession.OnlineDirectory.lookup_by_id(char_id)
+      assert :not_found = AoSession.OnlineDirectory.lookup_by_name(name)
+
+      # Re-login
+      token = GameBackend.Characters.get(char_id).session_token
+      socket2 = connect(port)
+      send_login_existing(socket2, char_id, token)
+      _data2 = recv_all(socket2)
+      on_exit(fn -> :gen_tcp.close(socket2) end)
+
+      # Online directory should be repopulated
+      assert {:ok, info2} = AoSession.OnlineDirectory.lookup_by_id(char_id)
+      assert info2.name == name
+    end
+  end
+
+  describe "crash recovery: graceful disconnect after walk saves position" do
+    test "walk then graceful close saves position, crash after walk does not", %{port: port} do
+      # --- Session A: walk + graceful close (saves) ---
+      name_a = unique_name()
+      {socket_a, _packets_a, char_id_a} = login_new(port, name_a)
+      on_exit(fn -> cleanup_char(char_id_a) end)
+
+      result_a = walk_any_direction(socket_a)
+      assert result_a != nil
+      {_heading_a, walked_pos_a} = result_a
+
+      :gen_tcp.close(socket_a)
+      Process.sleep(500)
+
+      db_a = GameBackend.Characters.get(char_id_a)
+      assert db_a.pos_x == walked_pos_a.x
+      assert db_a.pos_y == walked_pos_a.y
+
+      # --- Session B: walk + crash (does NOT save) ---
+      name_b = unique_name()
+      {socket_b, packets_b, char_id_b} = login_new(port, name_b)
+      on_exit(fn -> cleanup_char(char_id_b) end)
+
+      {31, spawn_pos_b} = find_packet(packets_b, 31)
+
+      result_b = walk_any_direction(socket_b)
+      assert result_b != nil
+      {_heading_b, walked_pos_b} = result_b
+      assert {walked_pos_b.x, walked_pos_b.y} != {spawn_pos_b.x, spawn_pos_b.y}
+
+      {:ok, pid_b, _} = AoSession.lookup(char_id_b)
+      Process.exit(pid_b, :kill)
+      Process.sleep(500)
+      :gen_tcp.close(socket_b)
+
+      # DB should still have original spawn position (crash = no save)
+      db_b = GameBackend.Characters.get(char_id_b)
+      assert db_b.pos_x == spawn_pos_b.x
+      assert db_b.pos_y == spawn_pos_b.y
+    end
+  end
 end
