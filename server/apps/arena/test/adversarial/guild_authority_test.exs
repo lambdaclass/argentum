@@ -109,6 +109,60 @@ defmodule Arena.Adversarial.GuildAuthorityTest do
       result = GuildServer.accept_invite(@outsider_id)
       assert result == {:error, :no_invite}
     end
+
+    test "accepting an invite after the inviter loses leadership is rejected" do
+      now = System.monotonic_time(:millisecond)
+
+      :ets.insert(
+        @table,
+        {{:invite, @outsider_id},
+         %{from: @leader_id, guild_id: @guild_id, expires_at: now + 60_000}}
+      )
+
+      [{_, guild}] = :ets.lookup(@table, {:guild, @guild_id})
+      :ets.insert(@table, {{:guild, @guild_id}, %{guild | leader: @member_id}})
+
+      result = GuildServer.accept_invite(@outsider_id)
+
+      assert result in [{:error, :invite_invalid}, {:error, :not_leader}, {:error, :no_invite}]
+      assert :ets.lookup(@table, {:member, @outsider_id}) == []
+    end
+
+    test "accepting an invite after the inviter leaves the guild is rejected" do
+      now = System.monotonic_time(:millisecond)
+
+      :ets.insert(
+        @table,
+        {{:invite, @outsider_id},
+         %{from: @leader_id, guild_id: @guild_id, expires_at: now + 60_000}}
+      )
+
+      :ets.delete(@table, {:member, @leader_id})
+      [{_, guild}] = :ets.lookup(@table, {:guild, @guild_id})
+      :ets.insert(@table, {{:guild, @guild_id}, %{guild | leader: @member_id, members: [@member_id]}})
+
+      result = GuildServer.accept_invite(@outsider_id)
+
+      assert result in [{:error, :invite_invalid}, {:error, :not_leader}, {:error, :no_invite}]
+      assert :ets.lookup(@table, {:member, @outsider_id}) == []
+    end
+
+    test "accepting an invite after the guild is deleted returns :guild_gone" do
+      now = System.monotonic_time(:millisecond)
+
+      :ets.insert(
+        @table,
+        {{:invite, @outsider_id},
+         %{from: @leader_id, guild_id: @guild_id, expires_at: now + 60_000}}
+      )
+
+      :ets.delete(@table, {:guild, @guild_id})
+
+      result = GuildServer.accept_invite(@outsider_id)
+
+      assert result == {:error, :guild_gone}
+      assert :ets.lookup(@table, {:member, @outsider_id}) == []
+    end
   end
 
   # ── 3. Accept invite meant for a different player ──────────────────────

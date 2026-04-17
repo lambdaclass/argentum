@@ -4,6 +4,26 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **Backend modernization, gateway split, and dependency cleanup (2026-04-15/16):**
+  - Added `Arena.Map.State` update helpers, extracted pure combat/progression
+    seams, consolidated NPC/player death resolution, split
+    `apply_spell_damage`, and made NPC AI return `{state, effects}` where it
+    materially improves tests.
+  - Split `gm_commands.ex` into focused `Gm.Moderation`, `Gm.Teleport`,
+    `Gm.Inspection`, `Gm.World`, `Gm.Events`, and `Gm.Faction` modules.
+  - Split `SessionLogic` twice: first by lifecycle phase
+    (`SessionLogin` / `SessionWorld` / `SessionTransfer` /
+    `SessionPersistence`), then by command domain
+    (`SessionCommands.Chat` / `Commerce` / `Guild` / `Gm`) so gateway command
+    routing is no longer one giant module.
+  - Added `AoSession.SessionMonitor` and stale-session crash-cleanup coverage,
+    cached guild display info on `PlayerEntity`, and broke the compile-time
+    `arena` ↔ `game_backend` cycle by extracting `AoEntities.PlayerEntity`
+    into a shared `ao_entities` umbrella app.
+  - Cleaned the `server/` root: parity/smoke docs moved under `server/docs/`,
+    monitoring assets under `server/docs/monitoring/`, helper scripts under
+    `server/scripts/`, orphaned `package-lock.json` removed, and ignore rules
+    updated for local cache noise.
 - **Arena internal boundaries refactor (2026-04-14/15):**
   - Split `social.ex` (4,192 → 772 lines) into 8 focused modules: Chat,
     Healing, Pets, QuestHandlers, Faction, NpcInteraction, GmCommands, Social.
