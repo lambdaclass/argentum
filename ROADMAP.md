@@ -76,28 +76,19 @@ or permission changes.
    Depends on #4 — shutdown verification is more meaningful once the
    persistence path is less ad hoc.
    Outcome: shutdown does not lose player state or corrupt runtime processes.
-   **Partial**: coordinated drain landed via `prep_stop/1`: listeners stop,
-   sessions receive `:shutdown_drain`, telemetry covers all drain phases,
-   `AutosaveWriter.terminate/2` waits up to 10s for in-flight writes, and TCP
-   `ClientHandler` / WS `WsHandler` handle `:shutdown_drain` with cleanup +
-   close.
-   Current contract: must-finish (authoritative writes, registry cleanup),
-   best-effort (autosave), may-drop (new connections after shutdown).
-   **Still open**: add a shutdown-in-progress gate so commands arriving after
-   drain starts are rejected or dropped instead of executing normally; decide
-   and implement the exact shutdown contract for coalesced pending autosave
-   snapshots (drain them too, or explicitly drop them with matching docs and
-   telemetry).
-   Tests required: graceful-shutdown drain tests, crash-vs-shutdown
-   persistence boundary checks, reconnect-after-shutdown recovery tests,
-   cleanup-save failure tests, autosave-flush-timeout/worker-crash tests,
-   shutdown-with-in-flight-autosave tests, shutdown-with-pending-coalesced-
-   autosave tests, and post-shutdown-start command-race tests that prove
-   graceful shutdown and graceful disconnect do not silently degrade into
-   best-effort persistence.
-   Telemetry is already wired for all 6 shutdown phases. Existing tests cover:
-   empty drain, session drain, in-flight autosave, terminate flush, telemetry
-   contract, and crash-vs-graceful contrast.
+   **#5 is done.** Coordinated shutdown drain via `prep_stop/1`:
+   ShutdownDrain stops TCP/WS listeners, sends `:shutdown_drain` to all
+   transport pids, polls until sessions drain or timeout. AutosaveWriter
+   `terminate/2` waits up to 10s for in-flight writes and drains pending
+   coalesced snapshots. TCP ClientHandler and WS WsHandler handle
+   `:shutdown_drain` with cleanup + close. Global `shutdown_in_progress?`
+   gate via `:persistent_term` rejects commands arriving after drain starts.
+   Contract: must-finish (authoritative writes, registry cleanup),
+   best-effort (autosave including pending coalesced snapshots),
+   may-drop (new connections/commands after shutdown begins).
+   Telemetry for all 6 shutdown phases. 9 tests: empty drain, session drain,
+   in-flight autosave, terminate flush, pending autosave drain, shutdown gate,
+   telemetry contract (2), crash-vs-graceful contrast.
 
 ## Phase 3. Parity-Required Rules And Backend Behavior
 
@@ -235,9 +226,9 @@ the game behave like the inspected VB6 baseline.
    edge cases, autosave timing under load, multi-map transfer chains,
    cleanup DB failure behavior, autosave flush timeout behavior, autosave
    worker-crash/start-failure behavior, stale autosave-vs-cleanup ordering,
-   explicit graceful-disconnect behavior under final-save failure,
-   shutdown-started command races, and pending-autosave behavior during
-   graceful shutdown.
+   and explicit graceful-disconnect behavior under final-save failure.
+   Shutdown-started command races and pending-autosave behavior during
+   graceful shutdown are now covered by shutdown drain tests (#5).
    Outcome: persistence and ownership transitions stay correct under failure.
 
 27. Expand guild/faction/ban/mute persistence coverage.
