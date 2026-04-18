@@ -35,13 +35,11 @@ These items come before modern hardening because the first priority is to make
 the game behave like the inspected VB6 baseline.
 
 4. Finish remaining trade-start validation gaps.
-    **Done**: meditating, navigating, paralyzed checks; distance, target-dead,
-    target-busy, already-trading checks. **Still open**: safe-zone
-    restrictions on player-to-player trade initiation, same-map visibility
-    recheck after request is accepted.
+    **#4 is done.** Safe-zone block on player-to-player trade initiation added
+    in commerce.ex. Distance recheck (<=3 tiles) before trade execution added
+    in trade.ex. 4 new adversarial tests (safe-zone block, safe-zone allow,
+    walk-apart reject, in-range accept).
     Outcome: player-trade start matches the inspected VB6 safety rules.
-    Tests required: safe-zone trade-initiation abuse tests and trade-accept
-    visibility/map-drift revalidation tests.
 
 5. Keep guild invite and request authority proven under DB-backed flows.
    **Done**: expired invite check at accept time, inviter-still-leads check,
@@ -62,11 +60,13 @@ the game behave like the inspected VB6 baseline.
    checks, not because synthetic fixtures return `{:error, :db_error}` first.
 
 6. Restore VB6 `leave_faction` restrictions.
+    **#6 is done.** `handle_leave_faction` now calls `find_nearby_enlistador`
+    with the player's faction instead of generic `find_nearby_npc_of_type`.
+    Aligned guild check added: players in armada/caotica guilds cannot leave
+    faction. 7 new adversarial tests (wrong enlistador Royal/Chaos, correct
+    enlistador, aligned guild Royal/Chaos, neutral guild, no guild).
     Outcome: faction leave requires the correct enlistador interaction and
-    preserves the old aligned-clan restrictions/side effects instead of the
-    current looser behavior.
-    Tests required: leave without enlistador, leave with wrong enlistador,
-    aligned-clan restriction cases, and no-side-effect regressions on reject.
+    preserves the old aligned-clan restrictions.
 
 7. Restore selected-NPC semantics for account-state and reward flows.
     **Done**: `last_clicked_npc_type` set on NPC double-click for banker,
@@ -139,6 +139,11 @@ the game behave like the inspected VB6 baseline.
 
 18. Fix map-transfer and reconnect edge cases uncovered by lifecycle and
     replay tests.
+    **Partial**: `MapServer.leave()` result now checked and logged in
+    session_transfer.ex (ghost session prevention). Transient session state
+    (commerce, bank, trade, meditation, quest NPC) cleared on transfer.
+    5 new tests. **Still open**: mid-transfer disconnect, destination
+    unavailable, hogar timer cancellation, rapid consecutive transfers.
     Outcome: map transfer, mid-transfer disconnect, and reconnect-after-transfer
     work correctly instead of leaving ghost sessions or losing player state.
 
