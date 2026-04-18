@@ -297,7 +297,7 @@ defmodule Arena.Map.Commerce do
   def handle_commerce_end(state, char_id) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
-        entity = %{entity | commerce_npc_id: nil}
+        entity = %{entity | commerce_npc_id: nil, commerce_npc_instance_id: nil}
         Helpers.send_to_session(state.sessions, char_id, {:send_raw, Encoder.encode({:commerce_end, %{}})})
         players = Map.put(state.players, char_id, entity)
         {:reply, :ok, %{state | players: players}}
@@ -322,7 +322,7 @@ defmodule Arena.Map.Commerce do
         {:reply, {:error, :too_far}, state}
 
       true ->
-        entity = %{entity | commerce_npc_id: npc.npc_id}
+        entity = %{entity | commerce_npc_id: npc.npc_id, commerce_npc_instance_id: npc.instance_id}
 
         Helpers.send_to_session(
           state.sessions,
@@ -362,9 +362,21 @@ defmodule Arena.Map.Commerce do
   # Private helpers
 
   defp merchant_still_valid?(state, entity, npc_id) do
-    case Enum.find(state.npcs_live, fn {_inst, npc} -> npc.npc_id == npc_id end) do
-      nil -> false
-      {_inst, npc} -> abs(entity.x - npc.x) <= 3 and abs(entity.y - npc.y) <= 3
+    case Map.get(entity, :commerce_npc_instance_id) do
+      nil ->
+        case Enum.find(state.npcs_live, fn {_inst, npc} -> npc.npc_id == npc_id end) do
+          nil -> false
+          {_inst, npc} -> abs(entity.x - npc.x) <= 3 and abs(entity.y - npc.y) <= 3
+        end
+
+      inst_id ->
+        case Map.get(state.npcs_live, inst_id) do
+          %{npc_id: ^npc_id} = npc ->
+            abs(entity.x - npc.x) <= 3 and abs(entity.y - npc.y) <= 3
+
+          _ ->
+            false
+        end
     end
   end
 

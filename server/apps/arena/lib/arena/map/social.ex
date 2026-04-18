@@ -684,6 +684,29 @@ defmodule Arena.Map.Social do
     end
   end
 
+  defp selected_npc(state, entity) do
+    case Map.get(entity, :last_clicked_npc_instance_id) do
+      nil ->
+        {:error, :no_selection}
+
+      instance_id ->
+        case Map.get(state.npcs_live, instance_id) do
+          nil ->
+            {:error, :stale_selection}
+
+          npc ->
+            case GameData.get_npc(npc.npc_id) do
+              nil -> {:error, :stale_selection}
+              npc_def -> {:ok, npc, npc_def}
+            end
+        end
+    end
+  end
+
+  defp within_selected_npc_range?(entity, npc, max_distance) do
+    abs(entity.x - npc.x) <= max_distance and abs(entity.y - npc.y) <= max_distance
+  end
+
   # ==================================================================
   # Account state — VB6: HandleRequestAccountState
   # Banker shows bank gold, Timbero shows gambling stats.
@@ -696,24 +719,35 @@ defmodule Arena.Map.Social do
         {:noreply, state}
 
       {:ok, entity} ->
-        # VB6: requires the player to have explicitly clicked on a banker/timbero.
-        # last_clicked_npc_type is set by handle_npc_double_click.
-        clicked_type = Map.get(entity, :last_clicked_npc_type)
+        case selected_npc(state, entity) do
+          {:ok, npc, npc_def} ->
+            cond do
+              npc_def.npc_type == @npc_type_banquero and within_selected_npc_range?(entity, npc, 3) ->
+                bank_gold = Map.get(entity, :bank_gold, 0)
+                msg(state, char_id, "Tenes #{bank_gold} monedas de oro en tu cuenta.")
+                {:noreply, state}
 
-        cond do
-          clicked_type == @npc_type_banquero ->
-            bank_gold = Map.get(entity, :bank_gold, 0)
-            msg(state, char_id, "Tenes #{bank_gold} monedas de oro en tu cuenta.")
+              npc_def.npc_type == @npc_type_timbero and within_selected_npc_range?(entity, npc, 3) ->
+                wins = Map.get(entity, :gamble_wins, 0)
+                losses = Map.get(entity, :gamble_losses, 0)
+                earnings = wins - losses
+                msg(state, char_id, "Ganancias: #{earnings} monedas de oro.")
+                {:noreply, state}
+
+              npc_def.npc_type in [@npc_type_banquero, @npc_type_timbero] ->
+                msg(state, char_id, "Estas demasiado lejos.")
+                {:noreply, state}
+
+              true ->
+                msg(state, char_id, "Primero debes seleccionar un personaje, haz click izquierdo sobre el.")
+                {:noreply, state}
+            end
+
+          {:error, :stale_selection} ->
+            msg(state, char_id, "Primero debes seleccionar un personaje, haz click izquierdo sobre el.")
             {:noreply, state}
 
-          clicked_type == @npc_type_timbero ->
-            wins = Map.get(entity, :gamble_wins, 0)
-            losses = Map.get(entity, :gamble_losses, 0)
-            earnings = wins - losses
-            msg(state, char_id, "Ganancias: #{earnings} monedas de oro.")
-            {:noreply, state}
-
-          true ->
+          {:error, :no_selection} ->
             msg(state, char_id, "Primero debes seleccionar un personaje, haz click izquierdo sobre el.")
             {:noreply, state}
         end
@@ -734,23 +768,34 @@ defmodule Arena.Map.Social do
         {:noreply, state}
 
       {:ok, entity} ->
-        # VB6: requires the player to have explicitly clicked on an enlistador.
-        # last_clicked_npc_type is set by handle_npc_double_click.
-        clicked_type = Map.get(entity, :last_clicked_npc_type)
+        case selected_npc(state, entity) do
+          {:ok, npc, npc_def} ->
+            cond do
+              npc_def.npc_type != @npc_type_enlistador ->
+                msg(state, char_id, "Primero debes seleccionar un personaje, haz click izquierdo sobre el.")
+                {:noreply, state}
 
-        cond do
-          clicked_type != @npc_type_enlistador ->
+              not within_selected_npc_range?(entity, npc, 4) ->
+                msg(state, char_id, "Estas demasiado lejos.")
+                {:noreply, state}
+
+              entity.faction == :none ->
+                msg(state, char_id, "No perteneces a ninguna faccion.")
+                {:noreply, state}
+
+              true ->
+                # VB6: checks faction_score vs rank requirements, then awards items.
+                # TODO: Implement rank thresholds and reward items when faction data is loaded.
+                msg(state, char_id, "No hay recompensas disponibles en este momento.")
+                {:noreply, state}
+            end
+
+          {:error, :stale_selection} ->
             msg(state, char_id, "Primero debes seleccionar un personaje, haz click izquierdo sobre el.")
             {:noreply, state}
 
-          entity.faction == :none ->
-            msg(state, char_id, "No perteneces a ninguna faccion.")
-            {:noreply, state}
-
-          true ->
-            # VB6: checks faction_score vs rank requirements, then awards items.
-            # TODO: Implement rank thresholds and reward items when faction data is loaded.
-            msg(state, char_id, "No hay recompensas disponibles en este momento.")
+          {:error, :no_selection} ->
+            msg(state, char_id, "Primero debes seleccionar un personaje, haz click izquierdo sobre el.")
             {:noreply, state}
         end
 

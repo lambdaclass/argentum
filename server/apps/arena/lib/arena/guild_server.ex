@@ -712,65 +712,70 @@ defmodule Arena.GuildServer do
       {:ok, guild_id, guild} ->
         case resolve_char_id(target_name) do
           {:ok, target_id} ->
-            # Verify a pending request exists before proceeding
-            request_exists? =
+            request_exists =
               try do
-                Guilds.request_exists?(guild_id, target_id)
+                {:ok, Guilds.request_exists?(guild_id, target_id)}
               rescue
                 e ->
                   Logger.error("Guild request_exists? raised: #{inspect(e)}")
-                  false
+                  {:error, :db_error}
               end
 
-            if not request_exists? do
-              notify(leader_id, "No hay solicitud pendiente de ese jugador.")
-              {:reply, {:error, :no_request}, state}
-            else
-              cond do
-                :ets.lookup(@table, {:member, target_id}) != [] ->
-                  try do
-                    Guilds.delete_request(guild_id, target_id)
-                  rescue
-                    e -> Logger.error("Guild delete_request raised: #{inspect(e)}")
-                  end
+            case request_exists do
+              {:error, :db_error} ->
+                notify(leader_id, "Error al verificar la solicitud. Intenta de nuevo.")
+                {:reply, {:error, :db_error}, state}
 
-                  notify(leader_id, "Ese jugador ya pertenece a un clan.")
-                  {:reply, {:error, :already_in_guild}, state}
+              {:ok, false} ->
+                notify(leader_id, "No hay solicitud pendiente de ese jugador.")
+                {:reply, {:error, :no_request}, state}
 
-                length(guild.members) >= @max_members ->
-                  notify(leader_id, "El clan esta lleno.")
-                  {:reply, {:error, :full}, state}
-
-                true ->
-                  result =
+              {:ok, true} ->
+                cond do
+                  :ets.lookup(@table, {:member, target_id}) != [] ->
                     try do
-                      Guilds.add_member(guild_id, target_id)
+                      Guilds.delete_request(guild_id, target_id)
                     rescue
-                      e ->
-                        Logger.error("Guild add_member raised for char #{target_id}: #{inspect(e)}")
-                        {:error, :exception}
+                      e -> Logger.error("Guild delete_request raised: #{inspect(e)}")
                     end
 
-                  case result do
-                    {:ok, _} ->
+                    notify(leader_id, "Ese jugador ya pertenece a un clan.")
+                    {:reply, {:error, :already_in_guild}, state}
+
+                  length(guild.members) >= @max_members ->
+                    notify(leader_id, "El clan esta lleno.")
+                    {:reply, {:error, :full}, state}
+
+                  true ->
+                    result =
                       try do
-                        Guilds.delete_request(guild_id, target_id)
+                        Guilds.add_member(guild_id, target_id)
                       rescue
-                        e -> Logger.error("Guild delete_request raised: #{inspect(e)}")
+                        e ->
+                          Logger.error("Guild add_member raised for char #{target_id}: #{inspect(e)}")
+                          {:error, :exception}
                       end
 
-                      new_members = guild.members ++ [target_id]
-                      :ets.insert(@table, {{:guild, guild_id}, %{guild | members: new_members}})
-                      :ets.insert(@table, {{:member, target_id}, guild_id})
-                      notify(target_id, "Tu solicitud al clan '#{guild.name}' fue aceptada!")
-                      broadcast_guild(new_members, "Un jugador se ha unido al clan. Miembros: #{length(new_members)}")
-                      {:reply, :ok, state}
+                    case result do
+                      {:ok, _} ->
+                        try do
+                          Guilds.delete_request(guild_id, target_id)
+                        rescue
+                          e -> Logger.error("Guild delete_request raised: #{inspect(e)}")
+                        end
 
-                    {:error, _} ->
-                      notify(leader_id, "Error al aceptar la solicitud.")
-                      {:reply, {:error, :db_error}, state}
-                  end
-              end
+                        new_members = guild.members ++ [target_id]
+                        :ets.insert(@table, {{:guild, guild_id}, %{guild | members: new_members}})
+                        :ets.insert(@table, {{:member, target_id}, guild_id})
+                        notify(target_id, "Tu solicitud al clan '#{guild.name}' fue aceptada!")
+                        broadcast_guild(new_members, "Un jugador se ha unido al clan. Miembros: #{length(new_members)}")
+                        {:reply, :ok, state}
+
+                      {:error, _} ->
+                        notify(leader_id, "Error al aceptar la solicitud.")
+                        {:reply, {:error, :db_error}, state}
+                    end
+                end
             end
 
           :not_found ->

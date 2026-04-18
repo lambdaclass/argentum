@@ -42,22 +42,14 @@ the game behave like the inspected VB6 baseline.
     Outcome: player-trade start matches the inspected VB6 safety rules.
 
 5. Keep guild invite and request authority proven under DB-backed flows.
-   **Done**: expired invite check at accept time, inviter-still-leads check,
-   pending-request-required check, and consume-invite/request only after
-   durable success. Failure-path tests added for accept_invite, accept_request,
-   kick, and leave DB failures (synthetic fixtures — ETS consistency proven).
-   **Still open**: DB-backed failure-path tests with real persisted guild/request
-   rows for full end-to-end coverage, plus the remaining DB-failure semantics
-   on `request_membership` and `list_requests` so persistence outage does not
-   look like a normal authority rejection or an empty request queue.
+   **#5 is done.** Invite expiry, inviter-still-leads, request-exists, and
+   consume-invite/request-only-after-durable-success are now covered both by
+   synthetic failure-path tests and DB-backed persisted-row tests. DB outage
+   semantics for `request_membership`, `list_requests`, and `accept_request`
+   now return explicit `:db_error` instead of looking like normal authority
+   rejection or an empty queue.
    Outcome: guild invite/request authority stays correct even when persistence
    fails or guild state changes between issue and accept.
-   Tests required: inviter-loses-leadership, inviter-leaves-guild,
-   guild-deleted, expired-invite-without-cleanup, accept-request-without-
-   request, request/invite preserved on DB failure, `request_membership`
-   DB-failure-not-`already_requested`, `list_requests` DB-failure-not-empty,
-   and DB-backed revalidation tests that fail only on missing authority
-   checks, not because synthetic fixtures return `{:error, :db_error}` first.
 
 6. Restore VB6 `leave_faction` restrictions.
     **#6 is done.** `handle_leave_faction` now calls `find_nearby_enlistador`
@@ -69,22 +61,21 @@ the game behave like the inspected VB6 baseline.
     preserves the old aligned-clan restrictions.
 
 7. Restore selected-NPC semantics for account-state and reward flows.
-    **Done**: `last_clicked_npc_type` set on NPC double-click for banker,
-    timbero, and enlistador. `handle_request_account_state` and
-    `handle_request_reward` check clicked type instead of proximity scan.
-    Adversarial tests pass (3 tests: nearby-banker, nearby-timbero,
-    nearby-enlistador all correctly rejected without explicit click).
-    **Still open**: wrong-NPC, stale-selection, out-of-range, and spoofed
-    selected-NPC attempts for account-state and reward requests.
+    **#7 is done.** Account-state and reward flows now bind to the actual
+    selected NPC instance, reject stale or spoofed selection state, and enforce
+    the VB6 distance checks after selection. Adversarial coverage includes
+    no-click, wrong-NPC, stale-selection, out-of-range, and spoofed-selection
+    cases for banker, timbero, and enlistador flows.
     Outcome: banker, timbero, and enlistador requests use the actual targeted
     NPC and correct faction-side checks instead of any nearby NPC of the right
     type.
 
 8. Align the remaining merchant/account-state behavior with the inspected VB6
     backend.
-    **Partial**: `merchant_still_valid?/3` validates NPC is still alive in
-    `npcs_live` and player within 3 tiles before buy/sell. 4 adversarial tests
-    pass (MerchantSessionAuthorityTest: despawned buy/sell, far-away buy/sell).
+    **Partial**: merchant sessions are now bound to the original merchant
+    instance, not just the base `npc_id`, so despawned-session and same-`npc_id`
+    replacement abuse no longer slips through. 6 adversarial tests pass
+    (despawned buy/sell, far-away buy/sell, replacement merchant buy/sell).
     **Still open**: remaining old item rules, timbero account-state text/value
     semantics drift.
     Outcome: merchant sell restrictions such as the remaining old item rules,

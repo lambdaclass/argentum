@@ -142,8 +142,13 @@ defmodule AoEntities.PlayerEntity do
 
     # Transient: NPC id of open shop (not persisted)
     commerce_npc_id: nil,
+    # Transient: NPC instance id of open shop (not persisted)
+    commerce_npc_instance_id: nil,
     # Transient: NPC id of open bank (not persisted)
     bank_npc_id: nil,
+    # Transient: NPC instance/type last selected with double-click (not persisted)
+    last_clicked_npc_instance_id: nil,
+    last_clicked_npc_type: nil,
     # Transient: bank gold loaded during bank session
     bank_gold: 0,
     # Transient: user-to-user trade state (not persisted)

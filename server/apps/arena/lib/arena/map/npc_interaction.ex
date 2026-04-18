@@ -78,101 +78,105 @@ defmodule Arena.Map.NpcInteraction do
       npc ->
         npc_def = GameData.get_npc(npc.npc_id)
 
-        cond do
-          npc_def == nil ->
-            {:noreply, state}
+        if npc_def == nil do
+          {:noreply, state}
+        else
+          entity = remember_selected_npc(entity, instance_id, npc_def.npc_type)
+          state = %{state | players: Map.put(state.players, char_id, entity)}
 
-          npc_def.comercia ->
-            GenServer.cast(self(), {:open_commerce_internal, char_id, entity.x, entity.y, npc, npc_def})
-            {:noreply, state}
+          cond do
+            npc_def.comercia ->
+              GenServer.cast(self(), {:open_commerce_internal, char_id, entity.x, entity.y, npc, npc_def})
+              {:noreply, state}
 
-          npc_def.npc_type in [@npc_type_revividor, @npc_type_resucitador_newbie] ->
-            if entity.dead do
+            npc_def.npc_type in [@npc_type_revividor, @npc_type_resucitador_newbie] ->
+              if entity.dead do
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw,
+                   Encoder.encode(
+                     {:console_msg,
+                      %{message: "#{npc_def.name} dice: Puedo resucitarte. Usa el comando /resucitar.", font_index: 0}}
+                   )}
+                )
+              else
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw,
+                   Encoder.encode(
+                     {:console_msg,
+                      %{message: "#{npc_def.name} dice: Puedo curarte. Usa el comando /curar.", font_index: 0}}
+                   )}
+                )
+              end
+
+              {:noreply, state}
+
+            npc_def.npc_type == @npc_type_enlistador ->
+              Faction.handle_enlistador_click(state, char_id, entity, npc_def)
+
+            npc_def.npc_type == @npc_type_banquero ->
+              case Arena.Map.Bank.handle_open_bank(state, char_id, npc.x, npc.y) do
+                {:reply, _result, new_state} -> {:noreply, new_state}
+                _ -> {:noreply, state}
+              end
+
+            npc_def.npc_type == @npc_type_entrenador ->
               Helpers.send_to_session(
                 state.sessions,
                 char_id,
                 {:send_raw,
                  Encoder.encode(
                    {:console_msg,
-                    %{message: "#{npc_def.name} dice: Puedo resucitarte. Usa el comando /resucitar.", font_index: 0}}
+                    %{message: "#{npc_def.name} dice: Puedo entrenarte. Usa el boton Entrenar.", font_index: 0}}
                  )}
               )
-            else
+
+              {:noreply, state}
+
+            npc_def.npc_type == @npc_type_entrega_pesca ->
+              handle_fish_delivery(state, char_id, entity, npc_def)
+
+            npc_def.npc_type == @npc_type_timbero ->
+              msg(state, char_id, "#{npc_def.name} dice: Haz tu apuesta con /APOSTAR cantidad (1-5000 monedas).")
+              {:noreply, state}
+
+            npc_def.npc_type == @npc_type_arena_guard ->
+              fee = Map.get(npc_def, :arena_price, 0)
+
+              if fee > 0 do
+                msg(state, char_id, "#{npc_def.name} dice: La entrada a la arena cuesta #{fee} monedas de oro.")
+              else
+                msg(state, char_id, "#{npc_def.name} dice: Bienvenido a la arena.")
+              end
+
+              {:noreply, state}
+
+            npc_def.npc_type == @npc_type_subastador ->
+              handle_subastador_click(state, char_id, entity, npc_def)
+
+            npc_def.npc_type == @npc_type_quest ->
+              handle_quest_npc_click(state, char_id, entity, instance_id, npc_def)
+
+            true ->
               Helpers.send_to_session(
                 state.sessions,
                 char_id,
-                {:send_raw,
-                 Encoder.encode(
-                   {:console_msg,
-                    %{message: "#{npc_def.name} dice: Puedo curarte. Usa el comando /curar.", font_index: 0}}
-                 )}
+                {:send_raw, Encoder.encode({:console_msg, %{message: "Ves a #{npc_def.name}.", font_index: 0}})}
               )
-            end
 
-            {:noreply, state}
-
-          npc_def.npc_type == @npc_type_enlistador ->
-            entity = Map.put(entity, :last_clicked_npc_type, @npc_type_enlistador)
-            state = %{state | players: Map.put(state.players, char_id, entity)}
-            Faction.handle_enlistador_click(state, char_id, entity, npc_def)
-
-          npc_def.npc_type == @npc_type_banquero ->
-            entity = Map.put(entity, :last_clicked_npc_type, @npc_type_banquero)
-            state = %{state | players: Map.put(state.players, char_id, entity)}
-            case Arena.Map.Bank.handle_open_bank(state, char_id, npc.x, npc.y) do
-              {:reply, _result, new_state} -> {:noreply, new_state}
-              _ -> {:noreply, state}
-            end
-
-          npc_def.npc_type == @npc_type_entrenador ->
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw,
-               Encoder.encode(
-                 {:console_msg,
-                  %{message: "#{npc_def.name} dice: Puedo entrenarte. Usa el boton Entrenar.", font_index: 0}}
-               )}
-            )
-
-            {:noreply, state}
-
-          npc_def.npc_type == @npc_type_entrega_pesca ->
-            handle_fish_delivery(state, char_id, entity, npc_def)
-
-          npc_def.npc_type == @npc_type_timbero ->
-            entity = Map.put(entity, :last_clicked_npc_type, @npc_type_timbero)
-            state = %{state | players: Map.put(state.players, char_id, entity)}
-            msg(state, char_id, "#{npc_def.name} dice: Haz tu apuesta con /APOSTAR cantidad (1-5000 monedas).")
-            {:noreply, state}
-
-          npc_def.npc_type == @npc_type_arena_guard ->
-            fee = Map.get(npc_def, :arena_price, 0)
-
-            if fee > 0 do
-              msg(state, char_id, "#{npc_def.name} dice: La entrada a la arena cuesta #{fee} monedas de oro.")
-            else
-              msg(state, char_id, "#{npc_def.name} dice: Bienvenido a la arena.")
-            end
-
-            {:noreply, state}
-
-          npc_def.npc_type == @npc_type_subastador ->
-            handle_subastador_click(state, char_id, entity, npc_def)
-
-          npc_def.npc_type == @npc_type_quest ->
-            handle_quest_npc_click(state, char_id, entity, instance_id, npc_def)
-
-          true ->
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: "Ves a #{npc_def.name}.", font_index: 0}})}
-            )
-
-            {:noreply, state}
+              {:noreply, state}
+          end
         end
     end
+  end
+
+  defp remember_selected_npc(entity, instance_id, npc_type) do
+    entity
+    |> Map.put(:last_clicked_npc_instance_id, instance_id)
+    |> Map.put(:last_clicked_npc_type, npc_type)
   end
 
   def handle_train_skill(state, char_id, skill_index) do

@@ -86,12 +86,40 @@ defmodule Arena.Adversarial.MerchantSessionAuthorityTest do
       assert merchant_id != nil
 
       merchant = %{npc_id: merchant_id, x: 51, y: 50, instance_id: :merchant}
-      entity = make_entity(%{commerce_npc_id: merchant_id, x: 60, y: 50, gold: 50_000})
+      entity = make_entity(%{
+        commerce_npc_id: merchant_id,
+        commerce_npc_instance_id: :merchant,
+        x: 60,
+        y: 50,
+        gold: 50_000
+      })
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
       {:reply, result, _new_state} = Commerce.handle_commerce_buy(state, :player, 1, 1)
 
       assert result in [{:error, :too_far}, {:error, :merchant_gone}, {:error, :no_commerce}]
+    end
+
+    test "buy is rejected when the original merchant despawns but another merchant with the same npc_id is nearby" do
+      merchant_id = find_merchant_npc_id()
+      assert merchant_id != nil
+
+      replacement_merchant = %{npc_id: merchant_id, x: 51, y: 50, instance_id: :replacement}
+
+      entity =
+        make_entity(%{
+          commerce_npc_id: merchant_id,
+          commerce_npc_instance_id: :original,
+          x: 50,
+          y: 50,
+          gold: 50_000
+        })
+
+      state = make_map_state(entity, npcs_live: %{replacement: replacement_merchant})
+
+      {:reply, result, _new_state} = Commerce.handle_commerce_buy(state, :player, 1, 1)
+
+      assert result in [{:error, :merchant_gone}, {:error, :too_far}, {:error, :no_commerce}]
     end
   end
 
@@ -105,6 +133,7 @@ defmodule Arena.Adversarial.MerchantSessionAuthorityTest do
       entity =
         make_entity(%{
           commerce_npc_id: merchant_id,
+          commerce_npc_instance_id: :merchant,
           gold: 100,
           inventory: List.replace_at(List.duplicate(nil, 24), 0, %{item_id: item_id, amount: 1, equipped: false})
         })
@@ -129,6 +158,7 @@ defmodule Arena.Adversarial.MerchantSessionAuthorityTest do
       entity =
         make_entity(%{
           commerce_npc_id: merchant_id,
+          commerce_npc_instance_id: :merchant,
           x: 60,
           y: 50,
           gold: 100,
@@ -140,6 +170,33 @@ defmodule Arena.Adversarial.MerchantSessionAuthorityTest do
       {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
       assert result in [{:error, :too_far}, {:error, :merchant_gone}, {:error, :no_commerce}]
+      assert new_state.players[:player].gold == 100
+      assert new_state.players[:player].inventory |> Enum.at(0) != nil
+    end
+
+    test "sell is rejected when the original merchant despawns but another merchant with the same npc_id is nearby" do
+      merchant_id = find_merchant_npc_id()
+      item_id = find_sellable_item_id()
+      assert merchant_id != nil
+      assert item_id != nil
+
+      replacement_merchant = %{npc_id: merchant_id, x: 51, y: 50, instance_id: :replacement}
+
+      entity =
+        make_entity(%{
+          commerce_npc_id: merchant_id,
+          commerce_npc_instance_id: :original,
+          x: 50,
+          y: 50,
+          gold: 100,
+          inventory: List.replace_at(List.duplicate(nil, 24), 0, %{item_id: item_id, amount: 1, equipped: false})
+        })
+
+      state = make_map_state(entity, npcs_live: %{replacement: replacement_merchant})
+
+      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+
+      assert result in [{:error, :merchant_gone}, {:error, :too_far}, {:error, :no_commerce}]
       assert new_state.players[:player].gold == 100
       assert new_state.players[:player].inventory |> Enum.at(0) != nil
     end
