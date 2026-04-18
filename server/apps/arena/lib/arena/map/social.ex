@@ -696,30 +696,17 @@ defmodule Arena.Map.Social do
         {:noreply, state}
 
       {:ok, entity} ->
-        # Find nearby banker or timbero NPC (within 3 tiles, like VB6)
-        nearby_npc =
-          Enum.find_value(state.npcs_live, fn {_id, npc} ->
-            npc_def = GameData.get_npc(npc.npc_id)
-
-            if npc_def != nil and
-                 npc_def.npc_type in [@npc_type_banquero, @npc_type_timbero] and
-                 abs(npc.x - entity.x) <= 3 and
-                 abs(npc.y - entity.y) <= 3 do
-              npc_def
-            end
-          end)
+        # VB6: requires the player to have explicitly clicked on a banker/timbero.
+        # last_clicked_npc_type is set by handle_npc_double_click.
+        clicked_type = Map.get(entity, :last_clicked_npc_type)
 
         cond do
-          nearby_npc == nil ->
-            msg(state, char_id, "Primero debes seleccionar un personaje, haz click izquierdo sobre el.")
-            {:noreply, state}
-
-          nearby_npc.npc_type == @npc_type_banquero ->
+          clicked_type == @npc_type_banquero ->
             bank_gold = Map.get(entity, :bank_gold, 0)
             msg(state, char_id, "Tenes #{bank_gold} monedas de oro en tu cuenta.")
             {:noreply, state}
 
-          nearby_npc.npc_type == @npc_type_timbero ->
+          clicked_type == @npc_type_timbero ->
             wins = Map.get(entity, :gamble_wins, 0)
             losses = Map.get(entity, :gamble_losses, 0)
             earnings = wins - losses
@@ -727,6 +714,7 @@ defmodule Arena.Map.Social do
             {:noreply, state}
 
           true ->
+            msg(state, char_id, "Primero debes seleccionar un personaje, haz click izquierdo sobre el.")
             {:noreply, state}
         end
 
@@ -746,21 +734,12 @@ defmodule Arena.Map.Social do
         {:noreply, state}
 
       {:ok, entity} ->
-        # Find nearby enlistador NPC (within 4 tiles, like VB6)
-        enlistador =
-          Enum.find_value(state.npcs_live, fn {_id, npc} ->
-            npc_def = GameData.get_npc(npc.npc_id)
-
-            if npc_def != nil and
-                 npc_def.npc_type == @npc_type_enlistador and
-                 abs(npc.x - entity.x) <= 4 and
-                 abs(npc.y - entity.y) <= 4 do
-              npc_def
-            end
-          end)
+        # VB6: requires the player to have explicitly clicked on an enlistador.
+        # last_clicked_npc_type is set by handle_npc_double_click.
+        clicked_type = Map.get(entity, :last_clicked_npc_type)
 
         cond do
-          enlistador == nil ->
+          clicked_type != @npc_type_enlistador ->
             msg(state, char_id, "Primero debes seleccionar un personaje, haz click izquierdo sobre el.")
             {:noreply, state}
 

@@ -605,7 +605,15 @@ defmodule GameBackend.Characters do
 
   # ---- Spells ----
 
-  defp save_spells(_character_id, spells) when spells == [] or spells == nil, do: :ok
+  defp save_spells(_character_id, nil), do: :ok
+
+  defp save_spells(character_id, []) do
+    # Empty spell list — delete all spells for this character
+    from(s in CharacterSpell, where: s.character_id == ^character_id)
+    |> Repo.delete_all()
+
+    :ok
+  end
 
   defp save_spells(character_id, spells) do
     now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)

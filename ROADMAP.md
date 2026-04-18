@@ -8,24 +8,215 @@ reducer, contract, E2E, or visual coverage as appropriate.
 
 ## Phase 1. Maintenance
 
-1. Keep the branch clean and fix the currently known failing bug/regression
-   suites before new work.
-   Open failures currently tracked: `SpellAuthority`, `MerchantSession`,
-   `SelectedNpcAccountReward`, `ChatAuthority`, `SupportRequestRateLimit`, and
-   `SessionLifecycle`.
-   Outcome: no stray generated files, half-finished migrations, untracked
-   parity tests, or known red suites remain on the main line.
+Execution order is literal at the top of the file: clear the known red suites
+first, then finish or isolate half-finished active patches, then continue into
+the parity phases below.
+
+1. Fix the currently known failing bug/regression suites before any new
+   parity, hardening, or feature work.
+   Fixed: `SpellAuthority`, `MerchantSession`,
+   `SelectedNpcAccountReward`, `ChatAuthority`, `SupportRequestRateLimit`.
+   Remaining: `SessionLifecycle`.
+   Outcome: the main line is green again on the currently known red suites, so
+   new parity work starts from a trustworthy baseline.
 
 2. Finish or isolate any active gameplay patch before unrelated work starts.
    Outcome: parity work does not overlap with half-integrated gameplay edits.
 
-3. Update the top-level roadmap status after every large merge.
-   Outcome: the roadmap remains accurate instead of becoming historical fiction.
+3. Keep the branch clean and update the top-level roadmap status after every
+   large merge.
+   Outcome: no stray generated files, half-finished migrations, or untracked
+   parity tests remain on the main line, and the roadmap stays accurate instead
+   of becoming historical fiction.
 
-## Phase 2. Critical Runtime Safety
+## Phase 2. Parity-Required Rules And Backend Behavior
+
+These items come before modern hardening because the first priority is to make
+the game behave like the inspected VB6 baseline.
+
+4. Finish remaining trade-start validation gaps.
+    **Done**: meditating, navigating, paralyzed checks; distance, target-dead,
+    target-busy, already-trading checks. **Still open**: safe-zone
+    restrictions on player-to-player trade initiation, same-map visibility
+    recheck after request is accepted.
+    Outcome: player-trade start matches the inspected VB6 safety rules.
+    Tests required: safe-zone trade-initiation abuse tests and trade-accept
+    visibility/map-drift revalidation tests.
+
+5. Keep guild invite and request authority proven under DB-backed flows.
+   **Done**: expired invite check at accept time, inviter-still-leads check,
+   pending-request-required check, and consume-invite/request only after
+   durable success. Failure-path tests added for accept_invite, accept_request,
+   kick, and leave DB failures (synthetic fixtures — ETS consistency proven).
+   **Still open**: DB-backed failure-path tests with real persisted guild/request
+   rows for full end-to-end coverage, plus the remaining DB-failure semantics
+   on `request_membership` and `list_requests` so persistence outage does not
+   look like a normal authority rejection or an empty request queue.
+   Outcome: guild invite/request authority stays correct even when persistence
+   fails or guild state changes between issue and accept.
+   Tests required: inviter-loses-leadership, inviter-leaves-guild,
+   guild-deleted, expired-invite-without-cleanup, accept-request-without-
+   request, request/invite preserved on DB failure, `request_membership`
+   DB-failure-not-`already_requested`, `list_requests` DB-failure-not-empty,
+   and DB-backed revalidation tests that fail only on missing authority
+   checks, not because synthetic fixtures return `{:error, :db_error}` first.
+
+6. Restore VB6 `leave_faction` restrictions.
+    Outcome: faction leave requires the correct enlistador interaction and
+    preserves the old aligned-clan restrictions/side effects instead of the
+    current looser behavior.
+    Tests required: leave without enlistador, leave with wrong enlistador,
+    aligned-clan restriction cases, and no-side-effect regressions on reject.
+
+7. Restore selected-NPC semantics for account-state and reward flows.
+    Outcome: banker, timbero, and enlistador requests use the actual targeted
+    NPC and correct faction-side checks instead of any nearby NPC of the right
+    type.
+    Tests required: wrong-NPC, stale-selection, out-of-range, and spoofed
+    selected-NPC attempts for account-state and reward requests.
+
+8. Align the remaining merchant/account-state behavior with the inspected VB6
+    backend.
+    Outcome: merchant sell restrictions such as the remaining old item rules,
+    and the timbero account-state text/value semantics, stop drifting from the
+    VB6 baseline.
+    Tests required: stale merchant-session abuse, wrong-NPC-type access,
+    remaining merchant item-rule exploits, and timbero/account-state drift
+    checks.
+
+9. Close the remaining interaction-radius and bank-open guard drifts.
+    Outcome: NPC interaction radii and the old "already trading" bank-open
+    rule match the inspected VB6 behavior instead of stricter or looser
+    approximations.
+    Tests required: boundary-radius adversarial cases, bank-open while
+    trading, and stale-session/radius-drift regressions.
+
+10. Audit remaining invisibility, NPC AI, and spell-selection edge cases
+    against VB6.
+    Outcome: the remaining known semantic edge cases are either matched or
+    explicitly documented as out of scope.
+
+11. Finish the remaining info/service/NPC-request window semantics.
+    Outcome: help, MOTD, uptime, punishments, reward, account-state, banker,
+    timbero, priest, enlistador, and related old request/response windows stop
+    using placeholder text and match VB6 behavior.
+
+12. Decide the old GM/admin binary packet target.
+    Outcome: the exact packet compatibility target is explicit instead of
+    implicit.
+
+13. Implement the remaining GM/admin binary packet behavior for that target.
+    Outcome: the supported old GM/admin packet family works end-to-end.
+
+14. Implement events / tournaments / lobby events / capture events /
+    invasions / global world-event announcements.
+    Outcome: server-side event systems match the selected old-server feature
+    set, including the old event-lobby protocol where that baseline depends on
+    it.
+
+15. Decide whether the old AO20-era account/lobby/control packet surfaces are
+    still in scope.
+    Outcome: the old lobby, anti-cheat session packets, feature toggles,
+    hotkeys, skin/reset/delete-item flows, and premium/shop or publication
+    control surfaces are either explicitly required for parity or explicitly
+    cut from scope.
+
+16. If those old AO20-era packet surfaces remain in scope, implement them.
+    Outcome: the selected old account/lobby/control packet families exist as
+    parity features instead of staying as decoder-only or completely absent
+    protocol surfaces.
+
+17. Close any remaining backend drift only by adding a failing parity test
+    first.
+    Outcome: no undocumented "close enough" backend differences remain.
+
+18. Fix map-transfer and reconnect edge cases uncovered by lifecycle and
+    replay tests.
+    Outcome: map transfer, mid-transfer disconnect, and reconnect-after-transfer
+    work correctly instead of leaving ghost sessions or losing player state.
+
+## Phase 3. Parity Proof
+
+19. Expand the current formula golden coverage to the remaining VB6 formulas
+    and edge cases.
+    Outcome: combat, XP, regen, prices, training, and remaining formula edge
+    cases are checked against VB6 outputs.
+
+20. Add `ao_session` unit tests for session-state transitions and protocol
+    invariants.
+    Outcome: session-level packet handling and state transitions are covered
+    below the TCP smoke layer.
+
+21. Add spell-effect golden tests for legacy spells and their edge cases.
+    Outcome: individual spell outputs and side effects are checked against the
+    VB6 baseline instead of only broad combat formulas.
+
+22. Add pet/taming parity tests.
+    Outcome: pet follow/attack/taming behavior is proven under the same parity
+    gate as player combat and movement.
+
+23. Add concurrent combat integration tests with multiple live clients.
+    Outcome: two-client and multi-actor combat ordering is verified instead of
+    assuming single-session happy paths.
+
+24. Expand lifecycle tests for login/autosave/logout/crash cleanup/transfer.
+   **Partial**: crash-then-re-login, double crash, online directory cleanup,
+   and graceful-vs-crash save semantics are covered. Still open: map transfer
+   edge cases, autosave timing under load, multi-map transfer chains,
+   cleanup DB failure behavior, autosave flush timeout behavior, autosave
+   worker-crash/start-failure behavior, stale autosave-vs-cleanup ordering,
+   and explicit graceful-disconnect behavior under final-save failure.
+   Shutdown-started command races and pending-autosave behavior during
+   graceful shutdown are now covered by shutdown drain tests (#35).
+   Outcome: persistence and ownership transitions stay correct under failure.
+
+25. Expand guild/faction/ban/mute persistence coverage.
+    Outcome: shared cross-map state survives restart and migration.
+
+26. Add a high-load bot benchmark as part of the load/soak gate.
+    Outcome: the parity gate includes an explicit many-session benchmark, not
+    just ad hoc long-running tests.
+
+27. Add a load/soak gate.
+    Outcome: long-running many-session behavior is tested before public use.
+
+28. Define the exact parity-gate required suites.
+    Outcome: "parity gate green" means a concrete, documented set of passing
+    suites instead of a vague status label.
+
+29. **BLOCKED on Windows/VB6 environment.** Build and version a real VB6
+    packet-capture corpus using `mix capture.packets` against an unmodified
+    VB6 client.
+    Outcome: replay tests have captured byte fixtures from the real old client
+    instead of ad hoc locally built packet sequences, and the capture workflow
+    is part of the normal parity toolchain.
+    **Cannot proceed until a Windows environment with VB6 toolchain is
+    available.**
+
+30. **BLOCKED on #29.** Add packet replay coverage for login, character
+    creation, and session bootstrap.
+    Outcome: authentication and initial game-state delivery are proven against
+    captured traffic.
+
+31. **BLOCKED on #29.** Add packet replay coverage for movement, map transfer,
+    chat, and info/service requests.
+    Outcome: common non-combat session flows are proven against captured
+    traffic.
+
+32. **BLOCKED on #29.** Add packet replay coverage for inventory, equip/use,
+    combat, spells, and death.
+    Outcome: the core gameplay packet loops are proven against captured
+    traffic.
+
+33. **BLOCKED on #29.** Add packet replay coverage for bank, trade, party,
+    guild, faction, reconnect, and logout.
+    Outcome: the remaining social/economy/session packet flows are proven
+    against captured traffic.
+
+## Phase 4. Critical Runtime Safety
 
 These items address live data-loss risks and production crash risks. They
-take priority over feature work, parity, and observability.
+remain important infrastructure work, but the roadmap puts VB6 parity first.
 Authoritative gameplay and economy writes stay sync-first. Existing async DB
 writes are temporary exceptions to contain, not a model to expand.
 While a player is online, in-memory state stays authoritative; the DB is the
@@ -33,7 +224,7 @@ offline source of truth and the target of explicit durable commit boundaries.
 Autosave remains a best-effort snapshot path, not the commit point for economy
 or permission changes.
 
-4. Implement the sync-first persistence boundary (broader architecture).
+34. Implement the sync-first persistence boundary (broader architecture).
    Audit all `GameBackend.*` write sites. Keep authoritative writes explicit
    and synchronous by default: logout/cleanup, bank, trade,
    inventory/equipment, guild membership/invites, and other economy-affecting
@@ -69,14 +260,14 @@ or permission changes.
    documented as accepted best-effort under DB failure, with telemetry and
    logging. Authoritative writes (trade, bank, guild) are the true commit
    boundaries.
-   **#4 is done.** All authoritative write paths (guild, bank, trade) are
+   **#34 is done.** All authoritative write paths (guild, bank, trade) are
    sync-first. Cleanup is documented best-effort with observability.
 
-5. Verify graceful host shutdown.
-   Depends on #4 — shutdown verification is more meaningful once the
+35. Verify graceful host shutdown.
+   Depends on #34 — shutdown verification is more meaningful once the
    persistence path is less ad hoc.
    Outcome: shutdown does not lose player state or corrupt runtime processes.
-   **#5 is done.** Coordinated shutdown drain via `prep_stop/1`:
+   **#35 is done.** Coordinated shutdown drain via `prep_stop/1`:
    ShutdownDrain stops TCP/WS listeners, sends `:shutdown_drain` to all
    transport pids, polls until sessions drain or timeout. AutosaveWriter
    `terminate/2` waits up to 10s for in-flight writes and drains pending
@@ -89,190 +280,6 @@ or permission changes.
    Telemetry for all 6 shutdown phases. 9 tests: empty drain, session drain,
    in-flight autosave, terminate flush, pending autosave drain, shutdown gate,
    telemetry contract (2), crash-vs-graceful contrast.
-
-## Phase 3. Parity-Required Rules And Backend Behavior
-
-These items come before modern hardening because the first priority is to make
-the game behave like the inspected VB6 baseline.
-
-6. Finish remaining trade-start validation gaps.
-    **Done**: meditating, navigating, paralyzed checks; distance, target-dead,
-    target-busy, already-trading checks. **Still open**: safe-zone
-    restrictions on player-to-player trade initiation, same-map visibility
-    recheck after request is accepted.
-    Outcome: player-trade start matches the inspected VB6 safety rules.
-    Tests required: safe-zone trade-initiation abuse tests and trade-accept
-    visibility/map-drift revalidation tests.
-
-7. Keep guild invite and request authority proven under DB-backed flows.
-   **Done**: expired invite check at accept time, inviter-still-leads check,
-   pending-request-required check, and consume-invite/request only after
-   durable success. Failure-path tests added for accept_invite, accept_request,
-   kick, and leave DB failures (synthetic fixtures — ETS consistency proven).
-   **Still open**: DB-backed failure-path tests with real persisted guild/request
-   rows for full end-to-end coverage, plus the remaining DB-failure semantics
-   on `request_membership` and `list_requests` so persistence outage does not
-   look like a normal authority rejection or an empty request queue.
-   Outcome: guild invite/request authority stays correct even when persistence
-   fails or guild state changes between issue and accept.
-   Tests required: inviter-loses-leadership, inviter-leaves-guild,
-   guild-deleted, expired-invite-without-cleanup, accept-request-without-
-   request, request/invite preserved on DB failure, `request_membership`
-   DB-failure-not-`already_requested`, `list_requests` DB-failure-not-empty,
-   and DB-backed revalidation tests that fail only on missing authority
-   checks, not because synthetic fixtures return `{:error, :db_error}` first.
-
-8. Restore VB6 `leave_faction` restrictions.
-    Outcome: faction leave requires the correct enlistador interaction and
-    preserves the old aligned-clan restrictions/side effects instead of the
-    current looser behavior.
-    Tests required: leave without enlistador, leave with wrong enlistador,
-    aligned-clan restriction cases, and no-side-effect regressions on reject.
-
-9. Restore selected-NPC semantics for account-state and reward flows.
-    Outcome: banker, timbero, and enlistador requests use the actual targeted
-    NPC and correct faction-side checks instead of any nearby NPC of the right
-    type.
-    Tests required: wrong-NPC, stale-selection, out-of-range, and spoofed
-    selected-NPC attempts for account-state and reward requests.
-
-10. Align the remaining merchant/account-state behavior with the inspected VB6
-    backend.
-    Outcome: merchant sell restrictions such as the remaining old item rules,
-    and the timbero account-state text/value semantics, stop drifting from the
-    VB6 baseline.
-    Tests required: stale merchant-session abuse, wrong-NPC-type access,
-    remaining merchant item-rule exploits, and timbero/account-state drift
-    checks.
-
-11. Close the remaining interaction-radius and bank-open guard drifts.
-    Outcome: NPC interaction radii and the old "already trading" bank-open
-    rule match the inspected VB6 behavior instead of stricter or looser
-    approximations.
-    Tests required: boundary-radius adversarial cases, bank-open while
-    trading, and stale-session/radius-drift regressions.
-
-12. Audit remaining invisibility, NPC AI, and spell-selection edge cases
-    against VB6.
-    Outcome: the remaining known semantic edge cases are either matched or
-    explicitly documented as out of scope.
-
-13. Finish the remaining info/service/NPC-request window semantics.
-    Outcome: help, MOTD, uptime, punishments, reward, account-state, banker,
-    timbero, priest, enlistador, and related old request/response windows stop
-    using placeholder text and match VB6 behavior.
-
-14. Decide the old GM/admin binary packet target.
-    Outcome: the exact packet compatibility target is explicit instead of
-    implicit.
-
-15. Implement the remaining GM/admin binary packet behavior for that target.
-    Outcome: the supported old GM/admin packet family works end-to-end.
-
-16. Implement events / tournaments / lobby events / capture events /
-    invasions / global world-event announcements.
-    Outcome: server-side event systems match the selected old-server feature
-    set, including the old event-lobby protocol where that baseline depends on
-    it.
-
-17. Decide whether the old AO20-era account/lobby/control packet surfaces are
-    still in scope.
-    Outcome: the old lobby, anti-cheat session packets, feature toggles,
-    hotkeys, skin/reset/delete-item flows, and premium/shop or publication
-    control surfaces are either explicitly required for parity or explicitly
-    cut from scope.
-
-18. If those old AO20-era packet surfaces remain in scope, implement them.
-    Outcome: the selected old account/lobby/control packet families exist as
-    parity features instead of staying as decoder-only or completely absent
-    protocol surfaces.
-
-19. Close any remaining backend drift only by adding a failing parity test
-    first.
-    Outcome: no undocumented "close enough" backend differences remain.
-
-20. Fix map-transfer and reconnect edge cases uncovered by lifecycle and
-    replay tests.
-    Outcome: map transfer, mid-transfer disconnect, and reconnect-after-transfer
-    work correctly instead of leaving ghost sessions or losing player state.
-
-## Phase 4. Parity Proof
-
-21. Expand the current formula golden coverage to the remaining VB6 formulas
-    and edge cases.
-    Outcome: combat, XP, regen, prices, training, and remaining formula edge
-    cases are checked against VB6 outputs.
-
-22. Add `ao_session` unit tests for session-state transitions and protocol
-    invariants.
-    Outcome: session-level packet handling and state transitions are covered
-    below the TCP smoke layer.
-
-23. Add spell-effect golden tests for legacy spells and their edge cases.
-    Outcome: individual spell outputs and side effects are checked against the
-    VB6 baseline instead of only broad combat formulas.
-
-24. Add pet/taming parity tests.
-    Outcome: pet follow/attack/taming behavior is proven under the same parity
-    gate as player combat and movement.
-
-25. Add concurrent combat integration tests with multiple live clients.
-    Outcome: two-client and multi-actor combat ordering is verified instead of
-    assuming single-session happy paths.
-
-26. Expand lifecycle tests for login/autosave/logout/crash cleanup/transfer.
-   **Partial**: crash-then-re-login, double crash, online directory cleanup,
-   and graceful-vs-crash save semantics are covered. Still open: map transfer
-   edge cases, autosave timing under load, multi-map transfer chains,
-   cleanup DB failure behavior, autosave flush timeout behavior, autosave
-   worker-crash/start-failure behavior, stale autosave-vs-cleanup ordering,
-   and explicit graceful-disconnect behavior under final-save failure.
-   Shutdown-started command races and pending-autosave behavior during
-   graceful shutdown are now covered by shutdown drain tests (#5).
-   Outcome: persistence and ownership transitions stay correct under failure.
-
-27. Expand guild/faction/ban/mute persistence coverage.
-    Outcome: shared cross-map state survives restart and migration.
-
-28. Add a high-load bot benchmark as part of the load/soak gate.
-    Outcome: the parity gate includes an explicit many-session benchmark, not
-    just ad hoc long-running tests.
-
-29. Add a load/soak gate.
-    Outcome: long-running many-session behavior is tested before public use.
-
-30. Define the exact parity-gate required suites.
-    Outcome: "parity gate green" means a concrete, documented set of passing
-    suites instead of a vague status label.
-
-31. **BLOCKED on Windows/VB6 environment.** Build and version a real VB6
-    packet-capture corpus using `mix capture.packets` against an unmodified
-    VB6 client.
-    Outcome: replay tests have captured byte fixtures from the real old client
-    instead of ad hoc locally built packet sequences, and the capture workflow
-    is part of the normal parity toolchain.
-    **Cannot proceed until a Windows environment with VB6 toolchain is
-    available.**
-
-32. **BLOCKED on #31.** Add packet replay coverage for login, character
-    creation, and session bootstrap.
-    Outcome: authentication and initial game-state delivery are proven against
-    captured traffic.
-
-33. **BLOCKED on #31.** Add packet replay coverage for movement, map transfer,
-    chat, and info/service requests.
-    Outcome: common non-combat session flows are proven against captured
-    traffic.
-
-34. **BLOCKED on #31.** Add packet replay coverage for inventory, equip/use,
-    combat, spells, and death.
-    Outcome: the core gameplay packet loops are proven against captured
-    traffic.
-
-35. **BLOCKED on #31.** Add packet replay coverage for bank, trade, party,
-    guild, faction, reconnect, and logout.
-    Outcome: the remaining social/economy/session packet flows are proven
-    against captured traffic.
 
 ## Phase 5. Security And Hardening
 

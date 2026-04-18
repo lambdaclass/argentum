@@ -112,9 +112,13 @@ defmodule Arena.Map.NpcInteraction do
             {:noreply, state}
 
           npc_def.npc_type == @npc_type_enlistador ->
+            entity = Map.put(entity, :last_clicked_npc_type, @npc_type_enlistador)
+            state = %{state | players: Map.put(state.players, char_id, entity)}
             Faction.handle_enlistador_click(state, char_id, entity, npc_def)
 
           npc_def.npc_type == @npc_type_banquero ->
+            entity = Map.put(entity, :last_clicked_npc_type, @npc_type_banquero)
+            state = %{state | players: Map.put(state.players, char_id, entity)}
             case Arena.Map.Bank.handle_open_bank(state, char_id, npc.x, npc.y) do
               {:reply, _result, new_state} -> {:noreply, new_state}
               _ -> {:noreply, state}
@@ -137,6 +141,8 @@ defmodule Arena.Map.NpcInteraction do
             handle_fish_delivery(state, char_id, entity, npc_def)
 
           npc_def.npc_type == @npc_type_timbero ->
+            entity = Map.put(entity, :last_clicked_npc_type, @npc_type_timbero)
+            state = %{state | players: Map.put(state.players, char_id, entity)}
             msg(state, char_id, "#{npc_def.name} dice: Haz tu apuesta con /APOSTAR cantidad (1-5000 monedas).")
             {:noreply, state}
 

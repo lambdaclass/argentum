@@ -668,44 +668,56 @@ defmodule AoTcpGateway.SessionLogic do
 
   # ---- Support ----
 
+  @support_cooldown_ms 30_000
+
   def handle_command(state, {:role_master_request, %{request: request}})
       when state.character_id != nil do
-    if request != "" do
-      player_name = AoTcpGateway.SessionHelpers.resolve_char_name(state.character_id)
+    cond do
+      request == "" ->
+        {state, []}
 
-      raw =
-        AoProtocol.Server.Encoder.encode(
-          {:console_msg, %{message: "#{player_name} PREGUNTA ROL: #{request}", font_index: 3}}
-        )
+      support_rate_limited?(state.character_id) ->
+        {state, [{:console_msg, %{message: "Estás enviando solicitudes demasiado rápido.", font_index: 0}}]}
 
-      AoSession.OnlineDirectory.broadcast_to_gms({:send_raw, raw})
-      {state, [{:console_msg, %{message: "Su solicitud ha sido enviada.", font_index: 0}}]}
-    else
-      {state, []}
+      true ->
+        player_name = AoTcpGateway.SessionHelpers.resolve_char_name(state.character_id)
+
+        raw =
+          AoProtocol.Server.Encoder.encode(
+            {:console_msg, %{message: "#{player_name} PREGUNTA ROL: #{request}", font_index: 3}}
+          )
+
+        AoSession.OnlineDirectory.broadcast_to_gms({:send_raw, raw})
+        {state, [{:console_msg, %{message: "Su solicitud ha sido enviada.", font_index: 0}}]}
     end
   end
 
   def handle_command(state, {:question_gm, %{consulta: consulta, tipo: tipo}})
       when state.character_id != nil do
-    if consulta != "" do
-      player_name = AoTcpGateway.SessionHelpers.resolve_char_name(state.character_id)
+    cond do
+      consulta == "" ->
+        {state, []}
 
-      raw =
-        AoProtocol.Server.Encoder.encode(
-          {:console_msg,
-           %{
-             message: "Se ha recibido un nuevo mensaje de soporte de #{player_name}.",
-             font_index: 1
-           }}
-        )
+      support_rate_limited?(state.character_id) ->
+        {state, [{:console_msg, %{message: "Estás enviando solicitudes demasiado rápido.", font_index: 0}}]}
 
-      AoSession.OnlineDirectory.broadcast_to_gms({:send_raw, raw})
-      Logger.info("QuestionGM from #{player_name} (#{tipo}): #{consulta}")
+      true ->
+        player_name = AoTcpGateway.SessionHelpers.resolve_char_name(state.character_id)
 
-      {state,
-       [{:console_msg, %{message: "Tu mensaje fue recibido por el equipo de soporte.", font_index: 0}}]}
-    else
-      {state, []}
+        raw =
+          AoProtocol.Server.Encoder.encode(
+            {:console_msg,
+             %{
+               message: "Se ha recibido un nuevo mensaje de soporte de #{player_name}.",
+               font_index: 1
+             }}
+          )
+
+        AoSession.OnlineDirectory.broadcast_to_gms({:send_raw, raw})
+        Logger.info("QuestionGM from #{player_name} (#{tipo}): #{consulta}")
+
+        {state,
+         [{:console_msg, %{message: "Tu mensaje fue recibido por el equipo de soporte.", font_index: 0}}]}
     end
   end
 
@@ -714,5 +726,25 @@ defmodule AoTcpGateway.SessionLogic do
   def handle_command(state, {command_type, _}) do
     Logger.debug("Unhandled command: #{command_type}")
     {state, []}
+  end
+
+  # ---- Private helpers ----
+
+  defp support_rate_limited?(char_id) do
+    try do
+      :ets.new(:ao_support_rate_limit, [:named_table, :public, :set])
+    catch
+      :error, :badarg -> :ok
+    end
+
+    now = System.monotonic_time(:millisecond)
+
+    case :ets.lookup(:ao_support_rate_limit, char_id) do
+      [{^char_id, last_at}] when now - last_at < @support_cooldown_ms -> true
+
+      _ ->
+        :ets.insert(:ao_support_rate_limit, {char_id, now})
+        false
+    end
   end
 end

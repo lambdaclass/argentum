@@ -75,9 +75,14 @@ defmodule Arena.Map.Commerce do
         npc_id = entity.commerce_npc_id
         npc_def = if npc_id, do: GameData.get_npc(npc_id)
 
-        if npc_def == nil or not npc_def.comercia do
-          {:reply, {:error, :no_commerce}, state}
-        else
+        cond do
+          npc_def == nil or not npc_def.comercia ->
+            {:reply, {:error, :no_commerce}, state}
+
+          not merchant_still_valid?(state, entity, npc_id) ->
+            {:reply, {:error, :merchant_gone}, state}
+
+          true ->
           shop_item = Enum.at(npc_def.shop_items, slot - 1)
 
           if shop_item == nil do
@@ -169,6 +174,9 @@ defmodule Arena.Map.Commerce do
         cond do
           entity.commerce_npc_id == nil ->
             {:reply, {:error, :no_commerce}, state}
+
+          not merchant_still_valid?(state, entity, entity.commerce_npc_id) ->
+            {:reply, {:error, :merchant_gone}, state}
 
           amount <= 0 ->
             {:reply, {:error, :invalid_amount}, state}
@@ -348,6 +356,13 @@ defmodule Arena.Map.Commerce do
   end
 
   # Private helpers
+
+  defp merchant_still_valid?(state, entity, npc_id) do
+    case Enum.find(state.npcs_live, fn {_inst, npc} -> npc.npc_id == npc_id end) do
+      nil -> false
+      {_inst, npc} -> abs(entity.x - npc.x) <= 3 and abs(entity.y - npc.y) <= 3
+    end
+  end
 
   defp find_inventory_slot(entity, item_id, stackable) do
     if stackable do

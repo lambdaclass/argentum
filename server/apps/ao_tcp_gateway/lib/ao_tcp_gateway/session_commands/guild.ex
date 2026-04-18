@@ -73,8 +73,12 @@ defmodule AoTcpGateway.SessionCommands.Guild do
   end
 
   def handle_talk_guild(state, {:guild_chat, guild_message}) do
-    Arena.GuildServer.guild_chat(state.character_id, guild_message)
-    {state, []}
+    if state.is_dead == true do
+      {state, []}
+    else
+      Arena.GuildServer.guild_chat(state.character_id, guild_message)
+      {state, []}
+    end
   end
 
   def handle_talk_guild(state, {:guild_news, text}) do
@@ -176,11 +180,16 @@ defmodule AoTcpGateway.SessionCommands.Guild do
   end
 
   def handle_command(state, {:guild_message, %{message: msg}}) do
-    if state.is_dead == true do
-      {state, []}
-    else
-      Arena.GuildServer.guild_chat(state.character_id, msg)
-      {state, []}
+    cond do
+      state.entity.muted_until > System.system_time(:millisecond) ->
+        {state, [{:console_msg, %{message: "Estás silenciado.", font_index: 0}}]}
+
+      state.is_dead == true ->
+        {state, []}
+
+      true ->
+        Arena.GuildServer.guild_chat(state.character_id, msg)
+        {state, []}
     end
   end
 

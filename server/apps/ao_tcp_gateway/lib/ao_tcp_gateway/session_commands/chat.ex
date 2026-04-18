@@ -90,10 +90,20 @@ defmodule AoTcpGateway.SessionCommands.Chat do
 
   # ---- Group/party chat ----
 
+  @chat_cooldown_ms 500
+
   def handle_command(state, {:grupo_msg, %{message: message}}) when state.character_id != nil do
-    if state.is_dead == true do
-      {state, []}
-    else
+    cond do
+      state.entity.muted_until > System.system_time(:millisecond) ->
+        {state, [{:console_msg, %{message: "Estás silenciado.", font_index: 0}}]}
+
+      System.monotonic_time(:millisecond) - state.entity.last_chat_at < @chat_cooldown_ms ->
+        {state, [{:console_msg, %{message: "Estás hablando demasiado rápido.", font_index: 0}}]}
+
+      state.is_dead == true ->
+        {state, []}
+
+      true ->
       case Arena.PartyServer.get_party(state.character_id) do
         {:ok, party} ->
           sender_name =
@@ -118,6 +128,8 @@ defmodule AoTcpGateway.SessionCommands.Chat do
       end
     end
   end
+
+  def handle_command(state, {:grupo_msg, _}), do: {state, []}
 
   # ---- Faction message (binary packet) ----
 
