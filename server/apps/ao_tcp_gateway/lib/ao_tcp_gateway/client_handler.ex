@@ -107,6 +107,11 @@ defmodule AoTcpGateway.ClientHandler do
         end
         loop(state)
 
+      :shutdown_drain ->
+        Logger.info("Shutdown drain: closing session for char #{inspect(state.character_id)}")
+        SessionLogic.cleanup(state)
+        state.transport.close(state.socket)
+
       :hogar_arrive ->
         case Arena.Map.MapServer.snapshot_entity(state.map_id, state.character_id) do
           {:ok, entity} ->

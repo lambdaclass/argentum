@@ -132,6 +132,67 @@ defmodule AoTcpGateway.AutosaveWriter do
     end
   end
 
+  @impl true
+  def terminate(reason, state) do
+    in_flight_count = map_size(state.in_flight)
+    pending_count = map_size(state.pending)
+
+    if in_flight_count > 0 or pending_count > 0 do
+      Logger.info(
+        "AutosaveWriter shutting down (#{inspect(reason)}): " <>
+          "waiting for #{in_flight_count} in-flight, #{pending_count} pending writes"
+      )
+
+      # Wait for in-flight writes to complete (best-effort, 10s max)
+      wait_in_flight(state, System.monotonic_time(:millisecond) + 10_000)
+    end
+
+    :ok
+  end
+
+  defp wait_in_flight(state, deadline) do
+    if map_size(state.in_flight) == 0 do
+      :ok
+    else
+      if System.monotonic_time(:millisecond) >= deadline do
+        Logger.warning(
+          "AutosaveWriter shutdown timeout: #{map_size(state.in_flight)} writes still in-flight"
+        )
+      else
+        # Process any incoming :write_done or :DOWN messages
+        receive do
+          {:write_done, char_id, result, duration} ->
+            event = if result == :ok, do: :ok, else: :error
+
+            :telemetry.execute([:arena, :persistence, :autosave],
+              %{duration: duration, count: 1},
+              %{char_id: char_id, event: event})
+
+            if result != :ok do
+              Logger.error("Autosave failed during shutdown for #{char_id}: #{inspect(result)}")
+            end
+
+            state = demonitor_for_char(state, char_id)
+            state = %{state | in_flight: Map.delete(state.in_flight, char_id)}
+            wait_in_flight(state, deadline)
+
+          {:DOWN, ref, :process, _pid, reason} ->
+            case Map.pop(state.task_monitors, ref) do
+              {nil, _} ->
+                wait_in_flight(state, deadline)
+
+              {char_id, task_monitors} ->
+                Logger.error("Autosave task crashed during shutdown for #{char_id}: #{inspect(reason)}")
+                state = %{state | task_monitors: task_monitors, in_flight: Map.delete(state.in_flight, char_id)}
+                wait_in_flight(state, deadline)
+            end
+        after
+          500 -> wait_in_flight(state, deadline)
+        end
+      end
+    end
+  end
+
   # ---- Internal ----
 
   defp start_write(state, char_id, snapshot) do

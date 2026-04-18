@@ -36,4 +36,10 @@ defmodule AoTcpGateway.Application do
     opts = [strategy: :one_for_one, name: AoTcpGateway.Supervisor]
     Supervisor.start_link(children, opts)
   end
+
+  @impl true
+  def prep_stop(state) do
+    AoTcpGateway.ShutdownDrain.run()
+    state
+  end
 end

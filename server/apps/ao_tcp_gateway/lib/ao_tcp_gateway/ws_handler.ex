@@ -122,6 +122,12 @@ defmodule AoTcpGateway.WsHandler do
     end
   end
 
+  def websocket_info(:shutdown_drain, state) do
+    Logger.info("Shutdown drain: closing WS session for char #{inspect(state.character_id)}")
+    SessionLogic.cleanup(state)
+    {:reply, {:close, 1001, "Server shutting down"}, state}
+  end
+
   def websocket_info(_info, state), do: {:ok, state}
 
   def terminate(_reason, _req, state) do
