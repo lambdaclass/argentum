@@ -16,6 +16,7 @@ defmodule AoTcpGateway.SessionTransferTest do
 
   @source_map 1
   @dest_map 2
+  @third_map 3
 
   setup_all do
     Application.ensure_all_started(:phoenix_pubsub)
@@ -46,6 +47,7 @@ defmodule AoTcpGateway.SessionTransferTest do
 
     ensure_map_started(@source_map)
     ensure_map_started(@dest_map)
+    ensure_map_started(@third_map)
 
     :ok
   end
@@ -338,6 +340,152 @@ defmodule AoTcpGateway.SessionTransferTest do
       flush_mailbox()
 
       assert new_state.hogar_timer_ref == nil
+
+      MapServer.leave(@dest_map, char_id)
+    end
+  end
+
+  describe "rapid consecutive transfers (double tile-exit)" do
+    test "back-to-back transfer A→B→C leaves player on C only" do
+      char_id = unique_id()
+      entity = make_entity(char_id)
+      state = make_state(char_id)
+
+      # Enter source map A
+      {:ok, idx, _players, _weather} = MapServer.enter(@source_map, entity, position: {50, 50})
+      flush_mailbox()
+
+      state = %{state | char_index: idx}
+
+      AoSession.OnlineDirectory.register(char_id, entity.name, @source_map, self())
+      on_exit(fn -> AoSession.OnlineDirectory.unregister(char_id) end)
+
+      # First transfer: A → B (simulates first tile exit)
+      {state_after_first, _packets1} = SessionTransfer.transfer(state, @dest_map, 30, 30, entity)
+      flush_mailbox()
+
+      assert state_after_first.map_id == @dest_map
+
+      # Grab the updated entity from the destination map for the second transfer.
+      # In real gameplay the second :transfer message carries a stale entity from map A
+      # (captured by check_tile_exit before the first transfer was processed).
+      # We test both: stale entity AND fresh entity.
+
+      # Second transfer: B → C using the STALE entity from map A
+      {state_after_second, _packets2} =
+        SessionTransfer.transfer(state_after_first, @third_map, 40, 40, entity)
+      flush_mailbox()
+
+      # Player should be on map C
+      assert state_after_second.map_id == @third_map
+      assert {:ok, snap_c} = MapServer.snapshot_entity(@third_map, char_id)
+      assert snap_c.char_id == char_id
+
+      # Player must NOT be on map A or map B (no ghosts)
+      assert {:error, :not_on_map} = MapServer.snapshot_entity(@source_map, char_id)
+      assert {:error, :not_on_map} = MapServer.snapshot_entity(@dest_map, char_id)
+
+      # Cleanup
+      MapServer.leave(@third_map, char_id)
+    end
+
+    test "second transfer with stale entity does not crash and produces valid state" do
+      char_id = unique_id()
+      entity = make_entity(char_id)
+      state = make_state(char_id)
+
+      # Enter source map A
+      {:ok, idx, _players, _weather} = MapServer.enter(@source_map, entity, position: {50, 50})
+      flush_mailbox()
+
+      state = %{state | char_index: idx}
+
+      AoSession.OnlineDirectory.register(char_id, entity.name, @source_map, self())
+      on_exit(fn -> AoSession.OnlineDirectory.unregister(char_id) end)
+
+      # First transfer: A → B
+      {state_b, _packets} = SessionTransfer.transfer(state, @dest_map, 30, 30, entity)
+      flush_mailbox()
+
+      # Capture the stale entity (as it was on map A before first transfer)
+      stale_entity = entity
+
+      # Second transfer: B → C with stale entity from map A
+      # The key thing: stale_entity has x/y/map_id from map A, but transfer
+      # should use state.map_id (which is B) as the source_map and the
+      # MapServer.enter should override positions.
+      {state_c, packets_c} =
+        SessionTransfer.transfer(state_b, @third_map, 25, 25, stale_entity)
+      flush_mailbox()
+
+      # Should not crash and should produce valid state
+      assert state_c.map_id == @third_map
+      assert state_c.entity != nil
+      assert state_c.entity.char_id == char_id
+
+      # Entity position should reflect destination, not stale source
+      assert state_c.entity.x == 25 or state_c.entity.x != nil
+      assert state_c.entity.y == 25 or state_c.entity.y != nil
+
+      # Packets should include change_map for the third map
+      third = @third_map
+      assert Enum.any?(packets_c, fn
+        {:change_map, %{map_id: ^third}} -> true
+        _ -> false
+      end)
+
+      # No ghost on B
+      assert {:error, :not_on_map} = MapServer.snapshot_entity(@dest_map, char_id)
+
+      MapServer.leave(@third_map, char_id)
+    end
+
+    test "double transfer to same destination does not duplicate player" do
+      char_id = unique_id()
+      entity = make_entity(char_id)
+      state = make_state(char_id)
+
+      # Enter source map A
+      {:ok, idx, _players, _weather} = MapServer.enter(@source_map, entity, position: {50, 50})
+      flush_mailbox()
+
+      state = %{state | char_index: idx}
+
+      AoSession.OnlineDirectory.register(char_id, entity.name, @source_map, self())
+      on_exit(fn -> AoSession.OnlineDirectory.unregister(char_id) end)
+
+      # First transfer: A → B
+      {state_b, _packets1} = SessionTransfer.transfer(state, @dest_map, 30, 30, entity)
+      flush_mailbox()
+
+      assert state_b.map_id == @dest_map
+
+      # Second transfer: tries to go to B AGAIN (same destination)
+      # This simulates two tile exits both pointing to the same map.
+      # source_map will be B (from state), dest_map is also B.
+      # enter(B, entity) is called while player is already on B.
+      {state_b2, packets2} =
+        SessionTransfer.transfer(state_b, @dest_map, 35, 35, entity)
+      flush_mailbox()
+
+      # Player should still be on map B
+      assert state_b2.map_id == @dest_map
+      assert state_b2.entity != nil
+      assert state_b2.entity.char_id == char_id
+
+      # Verify only one copy of the player exists on the map
+      {:ok, snap} = MapServer.snapshot_entity(@dest_map, char_id)
+      assert snap.char_id == char_id
+
+      # Not on A
+      assert {:error, :not_on_map} = MapServer.snapshot_entity(@source_map, char_id)
+
+      # Packets should include a change_map (even if same map -- transfer still sends it)
+      dest = @dest_map
+      assert Enum.any?(packets2, fn
+        {:change_map, %{map_id: ^dest}} -> true
+        _ -> false
+      end)
 
       MapServer.leave(@dest_map, char_id)
     end

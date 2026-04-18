@@ -40,25 +40,22 @@ defmodule AoTcpGateway.SessionTransfer do
       quest_npc_id: nil
     }
 
+    # When source == dest (e.g. two tile exits on the same map both pointing to
+    # the same destination, or a same-map teleport), we must leave BEFORE enter.
+    # Otherwise enter() overwrites the player record and leave() then removes the
+    # freshly-entered player, leaving them absent from the map entirely.
+    # For cross-map transfers, enter-then-leave is correct: the player exists on
+    # the destination before being removed from the source.
+    if source_map == dest_map do
+      do_leave(source_map, entity.char_id)
+    end
+
     with :ok <- SessionWorld.ensure_map_started(dest_map),
          {:ok, char_index, all_players, weather} <-
            Arena.Map.MapServer.enter(dest_map, clean_entity, position: {dest_x, dest_y}) do
-      # Destination entry succeeded — now remove from source.
-      # Check the result: if leave fails the player may ghost on the source map.
-      case Arena.Map.MapServer.leave(source_map, entity.char_id) do
-        {:ok, _departed} ->
-          :ok
-
-        :not_found ->
-          Logger.warning(
-            "leave(#{source_map}, #{entity.char_id}) returned :not_found during transfer — " <>
-              "player may have already been removed (tile exit cleanup)"
-          )
-
-        other ->
-          Logger.warning(
-            "leave(#{source_map}, #{entity.char_id}) unexpected result during transfer: #{inspect(other)}"
-          )
+      # Destination entry succeeded — now remove from source (cross-map only).
+      if source_map != dest_map do
+        do_leave(source_map, entity.char_id)
       end
 
       AoSession.OnlineDirectory.update_map(state.character_id, dest_map)
@@ -101,6 +98,26 @@ defmodule AoTcpGateway.SessionTransfer do
       {:error, reason} ->
         Logger.error("Failed to transfer to map #{dest_map}: #{inspect(reason)}")
         {state, [{:error_msg, %{message: "Destination map not available."}}]}
+    end
+  end
+
+  # ---- Leave helper ----
+
+  defp do_leave(map_id, char_id) do
+    case Arena.Map.MapServer.leave(map_id, char_id) do
+      {:ok, _departed} ->
+        :ok
+
+      :not_found ->
+        Logger.warning(
+          "leave(#{map_id}, #{char_id}) returned :not_found during transfer — " <>
+            "player may have already been removed (tile exit cleanup)"
+        )
+
+      other ->
+        Logger.warning(
+          "leave(#{map_id}, #{char_id}) unexpected result during transfer: #{inspect(other)}"
+        )
     end
   end
 
