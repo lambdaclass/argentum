@@ -18,6 +18,7 @@ defmodule Arena.Map.StatusTicks do
   @penalty_decrement_interval 20
 
   def process_player_buffs(state, char_id, entity, now) do
+    was_invisible = entity.invisible
     {expired, active} = Enum.split_with(entity.buffs, fn b -> now >= b.expires_at end)
 
     # Clear flags for expired buffs
@@ -79,6 +80,11 @@ defmodule Arena.Map.StatusTicks do
     players = Map.put(state.players, char_id, entity)
     state = %{state | players: players}
 
+    # Reveal player if invisibility just expired
+    if was_invisible and not entity.invisible do
+      Arena.Map.Visibility.reveal_to_non_gm(state, entity)
+    end
+
     if was_alive and entity.dead do
       Helpers.broadcast_character_change(state, entity)
     end
@@ -111,6 +117,7 @@ defmodule Arena.Map.StatusTicks do
         state
       else
         original_entity = state.players[char_id]
+        was_invisible_before_regen = entity.invisible
 
         # VB6: decrement jail penalty every minute
         entity =
@@ -141,7 +148,7 @@ defmodule Arena.Map.StatusTicks do
                   {:send_raw, Encoder.encode({:console_msg, %{message: "Has vuelto a ser visible.", font_index: 0}})}
                 )
 
-                %{entity | oculto: false, oculto_timer: 0}
+                %{entity | oculto: false, oculto_timer: 0, invisible: false}
               else
                 %{entity | oculto_timer: new_timer}
               end
@@ -321,19 +328,27 @@ defmodule Arena.Map.StatusTicks do
           )
         end
 
-        if entity.dead and not original_entity.dead do
-          Helpers.send_to_session(
-            state.sessions,
-            char_id,
-            {:send_raw, Encoder.encode({:console_msg, %{message: "Has muerto de inanición.", font_index: 0}})}
-          )
+        state =
+          if entity.dead and not original_entity.dead do
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw, Encoder.encode({:console_msg, %{message: "Has muerto de inanición.", font_index: 0}})}
+            )
 
-          state = %{state | players: Map.put(state.players, char_id, entity)}
-          Helpers.broadcast_character_change(state, entity)
-          state
-        else
-          %{state | players: Map.put(state.players, char_id, entity)}
+            state = %{state | players: Map.put(state.players, char_id, entity)}
+            Helpers.broadcast_character_change(state, entity)
+            state
+          else
+            %{state | players: Map.put(state.players, char_id, entity)}
+          end
+
+        # Reveal player if oculto/invisible just expired during this tick
+        if was_invisible_before_regen and not entity.invisible do
+          Arena.Map.Visibility.reveal_to_non_gm(state, entity)
         end
+
+        state
       end
     end)
   end

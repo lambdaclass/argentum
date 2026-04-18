@@ -201,4 +201,39 @@ defmodule Arena.Adversarial.MerchantSessionAuthorityTest do
       assert new_state.players[:player].inventory |> Enum.at(0) != nil
     end
   end
+
+  describe "sell equipped item" do
+    test "sell is rejected when the item is equipped" do
+      merchant_id = find_merchant_npc_id()
+      item_id = find_sellable_item_id()
+      assert merchant_id != nil
+      assert item_id != nil
+
+      merchant = %{npc_id: merchant_id, x: 50, y: 50, instance_id: :merchant}
+
+      entity =
+        make_entity(%{
+          commerce_npc_id: merchant_id,
+          commerce_npc_instance_id: :merchant,
+          x: 50,
+          y: 50,
+          gold: 100,
+          inventory:
+            List.replace_at(List.duplicate(nil, 24), 0, %{
+              item_id: item_id,
+              amount: 1,
+              equipped: true
+            })
+        })
+
+      state = make_map_state(entity, npcs_live: %{merchant: merchant})
+
+      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+
+      assert result == {:error, :equipped_item}
+      # Inventory and gold must remain unchanged
+      assert new_state.players[:player].gold == 100
+      assert new_state.players[:player].inventory |> Enum.at(0) != nil
+    end
+  end
 end

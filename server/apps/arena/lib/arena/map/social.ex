@@ -603,11 +603,11 @@ defmodule Arena.Map.Social do
           true ->
             # VB6: hide timer = skill_level / 2 regen ticks
             timer = max(div(skill_level, 2), 1)
-            entity = %{entity | oculto: true, oculto_timer: timer}
+            entity = %{entity | oculto: true, oculto_timer: timer, invisible: true}
             players = Map.put(state.players, char_id, entity)
             state = %{state | players: players}
 
-            Helpers.broadcast_character_change(state, %{entity | invisible: true})
+            Arena.Map.Visibility.hide_from_non_gm(state, entity)
             msg(state, char_id, "Te has ocultado entre las sombras.")
             {:noreply, state}
         end

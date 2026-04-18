@@ -152,7 +152,13 @@ defmodule Arena.Map.Gm.World do
     msg = if new_invisible, do: "You are now invisible.", else: "You are now visible."
     AuditLog.log_gm_action(char_id, "invisible", msg)
     Helpers.gm_console(state, char_id, msg)
-    Helpers.broadcast_character_change(state, entity)
+
+    if new_invisible do
+      Arena.Map.Visibility.hide_from_non_gm(state, entity)
+    else
+      Arena.Map.Visibility.reveal_to_non_gm(state, entity)
+    end
+
     {:noreply, state}
   end
 

@@ -164,9 +164,16 @@ defmodule Arena.Map.Movement do
         state = %{state | players: players}
         heading_raw = Encoder.encode(Helpers.character_change_packet(entity))
 
-        Visibility.broadcast_visible(state, entity.x, entity.y, char_id, fn pid ->
-          send(pid, {:send_raw, heading_raw})
-        end)
+        # Invisible players: only broadcast heading to GMs
+        if entity.invisible do
+          Visibility.broadcast_visible_gm_only(state, entity.x, entity.y, char_id, fn pid ->
+            send(pid, {:send_raw, heading_raw})
+          end)
+        else
+          Visibility.broadcast_visible(state, entity.x, entity.y, char_id, fn pid ->
+            send(pid, {:send_raw, heading_raw})
+          end)
+        end
 
         {:noreply, state}
 
@@ -219,9 +226,17 @@ defmodule Arena.Map.Movement do
       Helpers.send_to_session(state.sessions, char_id, {:send_raw, pos_raw})
     end
 
-    recipients = Visibility.broadcast_visible(state, nx, ny, char_id, fn pid ->
-      send(pid, {:send_raw, move_raw})
-    end)
+    # Invisible players: only broadcast movement to GMs
+    recipients =
+      if moved_entity.invisible do
+        Visibility.broadcast_visible_gm_only(state, nx, ny, char_id, fn pid ->
+          send(pid, {:send_raw, move_raw})
+        end)
+      else
+        Visibility.broadcast_visible(state, nx, ny, char_id, fn pid ->
+          send(pid, {:send_raw, move_raw})
+        end)
+      end
 
     Arena.Metrics.inc_move(recipients)
 

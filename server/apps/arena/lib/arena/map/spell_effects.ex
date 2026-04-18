@@ -7,6 +7,8 @@ defmodule Arena.Map.SpellEffects do
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
+  require Logger
+
   # VB6: IntervaloVeneno = 90 counter ticks at 40ms (MaybeRunGameEvents) = 3600ms
   @poison_tick_interval 3600
 
@@ -169,7 +171,10 @@ defmodule Arena.Map.SpellEffects do
              )}
           )
 
-          %{acc | players: players}
+          acc = %{acc | players: players}
+          # Reveal the now-visible player to non-GM clients
+          Visibility.reveal_to_non_gm(acc, updated)
+          acc
         else
           acc
         end
@@ -514,6 +519,8 @@ defmodule Arena.Map.SpellEffects do
 
         duration_ms = max((spell_def.duration || 0) * 1000, 3000)
 
+        target_entity_before = target_entity
+
         target_entity =
           cond do
             spell_def.paraliza ->
@@ -551,8 +558,18 @@ defmodule Arena.Map.SpellEffects do
           {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
         )
 
+        was_visible = not (Map.get(target_entity_before, :invisible, false))
+        now_invisible = target_entity.invisible
+
         players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, target_entity)
-        %{state | players: players}
+        state = %{state | players: players}
+
+        # When becoming invisible, hide from non-GM clients
+        if was_visible and now_invisible do
+          Visibility.hide_from_non_gm(state, target_entity)
+        end
+
+        state
         end
     end
   end

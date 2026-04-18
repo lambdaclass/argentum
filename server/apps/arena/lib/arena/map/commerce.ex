@@ -196,6 +196,16 @@ defmodule Arena.Map.Commerce do
             inv_item == nil ->
               {:reply, {:error, :empty_slot}, state}
 
+            inv_item.equipped ->
+              Helpers.send_to_session(
+                state.sessions,
+                char_id,
+                {:send_raw,
+                 Encoder.encode({:console_msg, %{message: "Debes desequipar el objeto antes de venderlo.", font_index: 0}})}
+              )
+
+              {:reply, {:error, :equipped_item}, state}
+
             inv_item.amount < amount ->
               {:reply, {:error, :not_enough}, state}
 

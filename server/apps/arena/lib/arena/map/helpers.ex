@@ -117,8 +117,8 @@ defmodule Arena.Map.Helpers do
        min_mana: entity.mana,
        max_mana: entity.max_mana,
        speed: entity.speeding,
-       clan_index: entity.guild_id,
-       clan_nivel: entity.guild_level
+       clan_index: Map.get(entity, :guild_id, 0),
+       clan_nivel: Map.get(entity, :guild_level, 0)
      }}
   end
 
@@ -241,6 +241,7 @@ defmodule Arena.Map.Helpers do
 
   # Break invisibility and oculto (used by combat, inventory, movement)
   # VB6: RemoveUserInvisibility clears both invisible and oculto flags
+  # Sends character_create to non-GM clients to reveal the player.
   def break_invisibility(entity, state, char_id) do
     if entity.invisible or entity.oculto do
       buffs = Enum.reject(entity.buffs, &(&1.type in [:invisible, :oculto]))
@@ -251,6 +252,12 @@ defmodule Arena.Map.Helpers do
         char_id,
         {:send_raw, Encoder.encode({:console_msg, %{message: "Has vuelto a ser visible.", font_index: 0}})}
       )
+
+      # Reveal to non-GM nearby players (only if state has full visibility info)
+      if Map.has_key?(state, :visibility_mode) do
+        temp_state = %{state | players: Map.put(state.players, char_id, entity)}
+        Arena.Map.Visibility.reveal_to_non_gm(temp_state, entity)
+      end
 
       entity
     else
