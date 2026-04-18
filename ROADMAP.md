@@ -77,24 +77,21 @@ or permission changes.
    cleanup-save failure tests, autosave-flush-timeout/worker-crash tests,
    and shutdown-with-in-flight-autosave tests that prove graceful shutdown and
    graceful disconnect do not silently degrade into best-effort persistence.
+   **#5 is done.** Coordinated shutdown drain via `prep_stop/1`:
+   ShutdownDrain stops TCP/WS listeners, sends `:shutdown_drain` to all
+   transport pids, polls until sessions drain or timeout. AutosaveWriter
+   `terminate/2` waits up to 10s for in-flight writes. TCP ClientHandler
+   and WS WsHandler handle `:shutdown_drain` with cleanup + close.
+   Contract: must-finish (authoritative writes, registry cleanup),
+   best-effort (autosave), may-drop (new connections after shutdown).
+   Telemetry for all 6 phases. 7 tests: empty drain, session drain,
+   in-flight autosave, terminate flush, telemetry contract (2),
+   crash-vs-graceful contrast.
 
-## Phase 3. Security And Authority
+## Phase 3. Parity-Required Rules And Backend Behavior
 
-Items that protect gameplay integrity.
-Every task in this phase closes only with an adversarial regression for the
-abuse path plus a normal-path control test.
-
-6.  Enforce mute/dead/cooldown rules on guild and party chat.
-    Outcome: all social chat paths follow the same moderation and spam rules,
-    not just normal chat and faction chat.
-    Tests required: muted/dead/cooldown bypass attempts for guild and party
-    chat, including binary packet and text-command paths.
-
-7.  Rate-limit `question_gm` and `role_master_request`.
-    Outcome: support/admin channels cannot be flooded even when packet replay
-    protection is already in place.
-    Tests required: burst-spam rate-limit tests, cooldown-recovery tests, and
-    invalid/empty payload spam cases.
+These items come before modern hardening because the first priority is to make
+the game behave like the inspected VB6 baseline.
 
 8. Finish remaining trade-start validation gaps.
     **Done**: meditating, navigating, paralyzed checks; distance, target-dead,
@@ -153,63 +150,51 @@ abuse path plus a normal-path control test.
     Tests required: boundary-radius adversarial cases, bank-open while
     trading, and stale-session/radius-drift regressions.
 
-14. Keep the exploit and parity audit executable.
-   Outcome: every bug above has a regression test in the adversarial/parity
-   suites, and roadmap comments are updated when a gap is fixed so audit
-   notes do not become stale folklore.
-   Tests required: keep the adversarial suites runnable in CI and update them
-   whenever a security or authority fix lands, including guild
-   invite/request-consumption failures, guild DB-failure survival on kick/leave
-   and related membership paths, cleanup final-save failure, and autosave
-   worker/flush failure regressions.
+39. Audit remaining invisibility, NPC AI, and spell-selection edge cases
+    against VB6.
+    Outcome: the remaining known semantic edge cases are either matched or
+    explicitly documented as out of scope.
 
-15. Add anti-cheat hardening: movement anomaly scoring, rate validation,
-    state-machine validation, economy invariants, structured anti-cheat
-    events, and operator visibility.
-    Outcome: speed hacking, packet abuse, duping, and botting signals are
-    detected, logged, and acted on systematically without changing legal
-    gameplay behavior.
-    Tests required: adversarial movement/packet/economy fixtures that prove
-    detection triggers on abuse and stays quiet on legal gameplay.
+40. Finish the remaining info/service/NPC-request window semantics.
+    Outcome: help, MOTD, uptime, punishments, reward, account-state, banker,
+    timbero, priest, enlistador, and related old request/response windows stop
+    using placeholder text and match VB6 behavior.
 
-## Phase 4. Observability And Ops
+41. Decide the old GM/admin binary packet target.
+    Outcome: the exact packet compatibility target is explicit instead of
+    implicit.
 
-16. Finish telemetry wiring and make emitted events operationally useful.
-    **Partial**: events emit for map ticks, movement, broadcasts, combat
-    (attack/spell), persistence (cleanup/autosave), session (login/crash).
-    **Still open**: PromEx/Prometheus reporter initialization, Grafana
-    dashboard wiring, bank and guild_write events, per-map cardinality
-    strategy.
-    Outcome: the telemetry stack is live and feeding real dashboards, not just
-    emitting events into the void.
+42. Implement the remaining GM/admin binary packet behavior for that target.
+    Outcome: the supported old GM/admin packet family works end-to-end.
 
-17. Add metrics and dashboards.
-    Outcome: Prometheus and Grafana reflect real telemetry for map ticks,
-    movement, broadcasts, persistence latency/failure, crash cleanup, and
-    reconnect behavior instead of placeholder dashboards with no backing
-    events.
+43. Implement events / tournaments / lobby events / capture events /
+    invasions / global world-event announcements.
+    Outcome: server-side event systems match the selected old-server feature
+    set, including the old event-lobby protocol where that baseline depends on
+    it.
 
-18. Add alerts.
-    Outcome: critical runtime and operational failures page operators before
-    they become player-visible incidents.
+44. Decide whether the old AO20-era account/lobby/control packet surfaces are
+    still in scope.
+    Outcome: the old lobby, anti-cheat session packets, feature toggles,
+    hotkeys, skin/reset/delete-item flows, and premium/shop or publication
+    control surfaces are either explicitly required for parity or explicitly
+    cut from scope.
 
-19. Add runtime admin tools for map/process inspection and control.
-    Outcome: operators can inspect mailboxes, player counts, force save, and
-    restart maps cleanly.
+45. If those old AO20-era packet surfaces remain in scope, implement them.
+    Outcome: the selected old account/lobby/control packet families exist as
+    parity features instead of staying as decoder-only or completely absent
+    protocol surfaces.
 
-20. Add admin lookup for accounts, characters, and online players.
-    Outcome: operators can inspect live and persisted entities.
+46. Close any remaining backend drift only by adding a failing parity test
+    first.
+    Outcome: no undocumented "close enough" backend differences remain.
 
-21. Add admin moderation actions: kick, ban, mute, jail.
-    Outcome: basic live moderation exists outside raw gameplay commands.
+47. Fix map-transfer and reconnect edge cases uncovered by lifecycle and
+    replay tests.
+    Outcome: map transfer, mid-transfer disconnect, and reconnect-after-transfer
+    work correctly instead of leaving ghost sessions or losing player state.
 
-22. Add admin world actions: item/NPC spawn, teleport, locate.
-    Outcome: operator world control exists in one supported surface.
-
-23. Add admin logs and health views.
-    Outcome: operators can inspect recent actions and system state quickly.
-
-## Phase 5. Parity Proof
+## Phase 4. Parity Proof
 
 24. Expand the current formula golden coverage to the remaining VB6 formulas
     and edge cases.
@@ -285,51 +270,79 @@ abuse path plus a normal-path control test.
     Outcome: the remaining social/economy/session packet flows are proven
     against captured traffic.
 
-## Phase 6. Parity-Required Backend Behavior
+## Phase 5. Security And Hardening
 
-39. Audit remaining invisibility, NPC AI, and spell-selection edge cases
-    against VB6.
-    Outcome: the remaining known semantic edge cases are either matched or
-    explicitly documented as out of scope.
+These items harden the server after parity-required behavior is in place.
+Every task in this phase closes only with an adversarial regression for the
+abuse path plus a normal-path control test.
 
-40. Finish the remaining info/service/NPC-request window semantics.
-    Outcome: help, MOTD, uptime, punishments, reward, account-state, banker,
-    timbero, priest, enlistador, and related old request/response windows stop
-    using placeholder text and match VB6 behavior.
+6.  Enforce mute/dead/cooldown rules on guild and party chat.
+    Outcome: all social chat paths follow the same moderation and spam rules,
+    not just normal chat and faction chat.
+    Tests required: muted/dead/cooldown bypass attempts for guild and party
+    chat, including binary packet and text-command paths.
 
-41. Decide the old GM/admin binary packet target.
-    Outcome: the exact packet compatibility target is explicit instead of
-    implicit.
+7.  Rate-limit `question_gm` and `role_master_request`.
+    Outcome: support/admin channels cannot be flooded even when packet replay
+    protection is already in place.
+    Tests required: burst-spam rate-limit tests, cooldown-recovery tests, and
+    invalid/empty payload spam cases.
 
-42. Implement the remaining GM/admin binary packet behavior for that target.
-    Outcome: the supported old GM/admin packet family works end-to-end.
+14. Keep the exploit and parity audit executable.
+   Outcome: every bug above has a regression test in the adversarial/parity
+   suites, and roadmap comments are updated when a gap is fixed so audit
+   notes do not become stale folklore.
+   Tests required: keep the adversarial suites runnable in CI and update them
+   whenever a security or authority fix lands, including guild
+   invite/request-consumption failures, guild DB-failure survival on kick/leave
+   and related membership paths, cleanup final-save failure, and autosave
+   worker/flush failure regressions.
 
-43. Implement events / tournaments / lobby events / capture events /
-    invasions / global world-event announcements.
-    Outcome: server-side event systems match the selected old-server feature
-    set, including the old event-lobby protocol where that baseline depends on
-    it.
+15. Add anti-cheat hardening: movement anomaly scoring, rate validation,
+    state-machine validation, economy invariants, structured anti-cheat
+    events, and operator visibility.
+    Outcome: speed hacking, packet abuse, duping, and botting signals are
+    detected, logged, and acted on systematically without changing legal
+    gameplay behavior.
+    Tests required: adversarial movement/packet/economy fixtures that prove
+    detection triggers on abuse and stays quiet on legal gameplay.
 
-44. Decide whether the old AO20-era account/lobby/control packet surfaces are
-    still in scope.
-    Outcome: the old lobby, anti-cheat session packets, feature toggles,
-    hotkeys, skin/reset/delete-item flows, and premium/shop or publication
-    control surfaces are either explicitly required for parity or explicitly
-    cut from scope.
+## Phase 6. Observability And Ops
 
-45. If those old AO20-era packet surfaces remain in scope, implement them.
-    Outcome: the selected old account/lobby/control packet families exist as
-    parity features instead of staying as decoder-only or completely absent
-    protocol surfaces.
+16. Finish telemetry wiring and make emitted events operationally useful.
+    **Partial**: events emit for map ticks, movement, broadcasts, combat
+    (attack/spell), persistence (cleanup/autosave), session (login/crash).
+    **Still open**: PromEx/Prometheus reporter initialization, Grafana
+    dashboard wiring, bank and guild_write events, per-map cardinality
+    strategy.
+    Outcome: the telemetry stack is live and feeding real dashboards, not just
+    emitting events into the void.
 
-46. Close any remaining backend drift only by adding a failing parity test
-    first.
-    Outcome: no undocumented "close enough" backend differences remain.
+17. Add metrics and dashboards.
+    Outcome: Prometheus and Grafana reflect real telemetry for map ticks,
+    movement, broadcasts, persistence latency/failure, crash cleanup, and
+    reconnect behavior instead of placeholder dashboards with no backing
+    events.
 
-47. Fix map-transfer and reconnect edge cases uncovered by lifecycle and
-    replay tests.
-    Outcome: map transfer, mid-transfer disconnect, and reconnect-after-transfer
-    work correctly instead of leaving ghost sessions or losing player state.
+18. Add alerts.
+    Outcome: critical runtime and operational failures page operators before
+    they become player-visible incidents.
+
+19. Add runtime admin tools for map/process inspection and control.
+    Outcome: operators can inspect mailboxes, player counts, force save, and
+    restart maps cleanly.
+
+20. Add admin lookup for accounts, characters, and online players.
+    Outcome: operators can inspect live and persisted entities.
+
+21. Add admin moderation actions: kick, ban, mute, jail.
+    Outcome: basic live moderation exists outside raw gameplay commands.
+
+22. Add admin world actions: item/NPC spawn, teleport, locate.
+    Outcome: operator world control exists in one supported surface.
+
+23. Add admin logs and health views.
+    Outcome: operators can inspect recent actions and system state quickly.
 
 ## Phase 7. Backend Architecture
 
