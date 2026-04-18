@@ -53,9 +53,15 @@ defmodule AoTcpGateway.WsHandler do
   end
 
   def websocket_handle({:binary, data}, state) do
-    buffer = state.buffer <> data
-    {state, frames} = decode_loop(%{state | buffer: buffer}, [])
-    reply(state, frames)
+    if AoTcpGateway.ShutdownDrain.shutdown_in_progress?() do
+      Logger.info("Shutdown gate: rejecting WS commands for char #{inspect(state.character_id)}")
+      SessionLogic.cleanup(state)
+      {:reply, {:close, 1001, "Server shutting down"}, state}
+    else
+      buffer = state.buffer <> data
+      {state, frames} = decode_loop(%{state | buffer: buffer}, [])
+      reply(state, frames)
+    end
   end
 
   def websocket_handle(_frame, state), do: {:ok, state}

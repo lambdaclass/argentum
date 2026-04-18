@@ -50,12 +50,21 @@ defmodule AoTcpGateway.ShutdownDrainTest do
       _ -> :ok
     end
 
+    # Ensure the shutdown gate is cleared and listeners are restarted
+    # when this module's tests finish (so other test files aren't broken)
+    on_exit(fn ->
+      AoTcpGateway.ShutdownDrain.reset_shutdown_gate()
+      restart_listeners()
+    end)
+
     :ok
   end
 
   setup do
     Ecto.Adapters.SQL.Sandbox.checkout(GameBackend.Repo)
     Ecto.Adapters.SQL.Sandbox.mode(GameBackend.Repo, {:shared, self()})
+    # Reset the shutdown gate before each test
+    AoTcpGateway.ShutdownDrain.reset_shutdown_gate()
     :ok
   end
 
@@ -201,6 +210,52 @@ defmodule AoTcpGateway.ShutdownDrainTest do
     end
   end
 
+  describe "AutosaveWriter terminate drains pending snapshots" do
+    test "pending coalesced snapshot is persisted during terminate, not dropped" do
+      {char_id, entity} = create_test_character("ASWPending_#{System.unique_integer([:positive])}")
+
+      test_pid = self()
+
+      # Spawn a fake in-flight writer that sends :write_done to the test process
+      {_pid, monitor_ref} =
+        spawn_monitor(fn ->
+          Process.sleep(50)
+          send(test_pid, {:write_done, char_id, :ok, 1000})
+        end)
+
+      # Build state with in-flight + pending (simulates: one write running,
+      # a newer coalesced snapshot waiting)
+      snapshot = AutosaveWriter.snapshot_from_entity(%{entity | gold: 2222})
+
+      state = %{
+        pending: %{char_id => snapshot},
+        in_flight: %{char_id => true},
+        flush_waiters: %{},
+        task_monitors: %{monitor_ref => char_id}
+      }
+
+      # Call terminate from test process — wait_in_flight receives :write_done
+      # via our mailbox. Currently: clears in_flight, returns :ok, drops pending.
+      # After fix: should also start and drain the pending write.
+      AutosaveWriter.terminate(:shutdown, state)
+
+      # If the bug exists, gold is still 0 (initial value), not 2222
+      saved = GameBackend.Characters.get(char_id)
+      assert saved.gold == 2222
+    end
+  end
+
+  describe "shutdown_in_progress gate" do
+    test "shutdown_in_progress? returns false before shutdown and true after" do
+      refute AoTcpGateway.ShutdownDrain.shutdown_in_progress?()
+
+      # Run shutdown
+      AoTcpGateway.ShutdownDrain.run()
+
+      assert AoTcpGateway.ShutdownDrain.shutdown_in_progress?()
+    end
+  end
+
   describe "shutdown telemetry contract" do
     test "shutdown_completed includes duration" do
       handler_id = attach_shutdown_telemetry(self())
@@ -320,6 +375,48 @@ defmodule AoTcpGateway.ShutdownDrainTest do
     case Process.whereis(name) do
       nil -> start_fun.()
       _pid -> :ok
+    end
+  end
+
+  defp restart_listeners do
+    tcp_port = Application.get_env(:ao_tcp_gateway, :port, 7666)
+    ws_port = Application.get_env(:ao_tcp_gateway, :ws_port, 7667)
+
+    # Restart TCP listener if stopped
+    try do
+      :ranch.get_port(AoTcpGateway.Listener)
+    catch
+      _, _ ->
+        try do
+          AoTcpGateway.Listener.start_link(port: tcp_port)
+        catch
+          _, _ -> :ok
+        end
+    end
+
+    # Restart WS listener if stopped
+    try do
+      :ranch.get_port(:ao_ws_listener)
+    catch
+      _, _ ->
+        try do
+          ws_dispatch =
+            :cowboy_router.compile([
+              {:_, [
+                {"/ao", AoTcpGateway.WsHandler, []},
+                {"/", AoTcpGateway.RootHandler, []},
+                {:_, Plug.Cowboy.Handler, {AoTcpGateway.WsRouter, []}}
+              ]}
+            ])
+
+          :cowboy.start_clear(
+            :ao_ws_listener,
+            [port: ws_port, max_connections: :infinity],
+            %{env: %{dispatch: ws_dispatch}}
+          )
+        catch
+          _, _ -> :ok
+        end
     end
   end
 end

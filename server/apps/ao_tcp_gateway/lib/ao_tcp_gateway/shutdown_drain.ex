@@ -40,6 +40,18 @@ defmodule AoTcpGateway.ShutdownDrain do
   require Logger
 
   @drain_timeout_ms Application.compile_env(:ao_tcp_gateway, :shutdown_drain_timeout_ms, 15_000)
+  @shutdown_key :ao_tcp_gateway_shutdown_in_progress
+
+  @doc "Returns true after shutdown drain has started."
+  def shutdown_in_progress? do
+    :persistent_term.get(@shutdown_key, false)
+  end
+
+  @doc false
+  # Reset the shutdown gate. Only for tests.
+  def reset_shutdown_gate do
+    :persistent_term.put(@shutdown_key, false)
+  end
 
   @doc """
   Execute the coordinated shutdown drain. Called from prep_stop/1.
@@ -47,6 +59,7 @@ defmodule AoTcpGateway.ShutdownDrain do
   Returns :ok. Errors are logged but do not prevent shutdown.
   """
   def run do
+    :persistent_term.put(@shutdown_key, true)
     start = System.monotonic_time()
     :telemetry.execute([:arena, :shutdown, :shutdown_started], %{}, %{})
     Logger.info("Shutdown drain started")

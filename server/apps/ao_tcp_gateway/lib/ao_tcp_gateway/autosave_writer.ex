@@ -151,14 +151,18 @@ defmodule AoTcpGateway.AutosaveWriter do
   end
 
   defp wait_in_flight(state, deadline) do
-    if map_size(state.in_flight) == 0 do
+    if map_size(state.in_flight) == 0 and map_size(state.pending) == 0 do
       :ok
     else
       if System.monotonic_time(:millisecond) >= deadline do
         Logger.warning(
-          "AutosaveWriter shutdown timeout: #{map_size(state.in_flight)} writes still in-flight"
+          "AutosaveWriter shutdown timeout: #{map_size(state.in_flight)} in-flight, " <>
+            "#{map_size(state.pending)} pending writes still remaining"
         )
       else
+        # Start any pending writes that have no in-flight counterpart
+        state = start_pending_writes(state)
+
         # Process any incoming :write_done or :DOWN messages
         receive do
           {:write_done, char_id, result, duration} ->
@@ -191,6 +195,18 @@ defmodule AoTcpGateway.AutosaveWriter do
         end
       end
     end
+  end
+
+  # Start writes for pending snapshots that don't already have an in-flight write.
+  defp start_pending_writes(state) do
+    ready = for {char_id, _} <- state.pending, not Map.has_key?(state.in_flight, char_id), do: char_id
+
+    Enum.reduce(ready, state, fn char_id, acc ->
+      {snapshot, pending} = Map.pop(acc.pending, char_id)
+      acc = %{acc | pending: pending}
+      {_, acc} = start_write(acc, char_id, snapshot)
+      acc
+    end)
   end
 
   # ---- Internal ----

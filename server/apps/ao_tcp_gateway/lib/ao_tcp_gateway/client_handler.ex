@@ -172,6 +172,18 @@ defmodule AoTcpGateway.ClientHandler do
   end
 
   defp decode_loop(state) do
+    if AoTcpGateway.ShutdownDrain.shutdown_in_progress?() do
+      # Shutdown in progress — stop processing commands, close connection
+      Logger.info("Shutdown gate: rejecting commands for char #{inspect(state.character_id)}")
+      SessionLogic.cleanup(state)
+      state.transport.close(state.socket)
+      %{state | character_id: nil, map_id: nil}
+    else
+      decode_loop_inner(state)
+    end
+  end
+
+  defp decode_loop_inner(state) do
     case AoProtocol.Client.Decoder.decode(state.buffer) do
       {:ok, command, rest} ->
         case FloodGuard.check(state.flood_guard) do
