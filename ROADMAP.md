@@ -1,6 +1,7 @@
 # Argentum Roadmap
 
-This file lists remaining work only. Completed work lives in `CHANGELOG.md`.
+This file lists remaining work. Completed implementation detail lives in
+`CHANGELOG.md`.
 Testing rule: every runtime-safety, security, authority, persistence, and
 economy task must land with a regression test for the abuse or failure path.
 Parity tasks require golden/replay coverage. Browser state tasks require
@@ -8,17 +9,9 @@ reducer, contract, E2E, or visual coverage as appropriate.
 
 ## Phase 1. Maintenance
 
-Execution order is literal at the top of the file: clear the known red suites
-first, then finish or isolate half-finished active patches, then continue into
-the parity phases below.
-
 1. Fix the currently known failing bug/regression suites before any new
    parity, hardening, or feature work.
-   **#1 is done.** All 6 suites green: `SpellAuthority`, `MerchantSession`,
-   `SelectedNpcAccountReward`, `ChatAuthority`, `SupportRequestRateLimit`,
-   `SessionLifecycle` (22 tests). 315 total tests, 0 failures.
-   Outcome: the main line is green again on the currently known red suites, so
-   new parity work starts from a trustworthy baseline.
+   Closed — see `CHANGELOG.md`.
 
 2. Finish or isolate any active gameplay patch before unrelated work starts.
    Outcome: parity work does not overlap with half-integrated gameplay edits.
@@ -31,75 +24,90 @@ the parity phases below.
 
 ## Phase 2. Parity-Required Rules And Backend Behavior
 
-These items come before modern hardening because the first priority is to make
-the game behave like the inspected VB6 baseline.
-
 4. Finish remaining trade-start validation gaps.
-    **#4 is done.** Safe-zone block on player-to-player trade initiation added
-    in commerce.ex. Distance recheck (<=3 tiles) before trade execution added
-    in trade.ex. 4 new adversarial tests (safe-zone block, safe-zone allow,
-    walk-apart reject, in-range accept).
-    Outcome: player-trade start matches the inspected VB6 safety rules.
+    Closed — see `CHANGELOG.md`.
 
 5. Keep guild invite and request authority proven under DB-backed flows.
-   **#5 is done.** Invite expiry, inviter-still-leads, request-exists, and
-   consume-invite/request-only-after-durable-success are now covered both by
-   synthetic failure-path tests and DB-backed persisted-row tests. DB outage
-   semantics for `request_membership`, `list_requests`, and `accept_request`
-   now return explicit `:db_error` instead of looking like normal authority
-   rejection or an empty queue.
-   Outcome: guild invite/request authority stays correct even when persistence
-   fails or guild state changes between issue and accept.
+   Closed — see `CHANGELOG.md`.
 
 6. Restore VB6 `leave_faction` restrictions.
-    **#6 is done.** `handle_leave_faction` now calls `find_nearby_enlistador`
-    with the player's faction instead of generic `find_nearby_npc_of_type`.
-    Aligned guild check added: players in armada/caotica guilds cannot leave
-    faction. 7 new adversarial tests (wrong enlistador Royal/Chaos, correct
-    enlistador, aligned guild Royal/Chaos, neutral guild, no guild).
-    Outcome: faction leave requires the correct enlistador interaction and
-    preserves the old aligned-clan restrictions.
+    Closed — see `CHANGELOG.md`.
 
 7. Restore selected-NPC semantics for account-state and reward flows.
-    **#7 is done.** Account-state and reward flows now bind to the actual
-    selected NPC instance, reject stale or spoofed selection state, and enforce
-    the VB6 distance checks after selection. Adversarial coverage includes
-    no-click, wrong-NPC, stale-selection, out-of-range, and spoofed-selection
-    cases for banker, timbero, and enlistador flows.
-    Outcome: banker, timbero, and enlistador requests use the actual targeted
-    NPC and correct faction-side checks instead of any nearby NPC of the right
-    type.
+    Closed — see `CHANGELOG.md`.
 
 8. Align the remaining merchant/account-state behavior with the inspected VB6
     backend.
-    **Partial**: merchant sessions are now bound to the original merchant
-    instance, not just the base `npc_id`, so despawned-session and same-`npc_id`
-    replacement abuse no longer slips through. 6 adversarial tests pass
-    (despawned buy/sell, far-away buy/sell, replacement merchant buy/sell).
-    **Still open**: remaining old item rules, timbero account-state text/value
-    semantics drift.
-    Outcome: merchant sell restrictions such as the remaining old item rules,
-    and the timbero account-state text/value semantics, stop drifting from the
-    VB6 baseline.
+    **Partial**: merchant sessions are bound to the original merchant instance
+    instead of only the base `npc_id`. Equipped items are now rejected on sell.
+    **Still open** (from audit #8):
+    - Timbero message format: VB6 shows `"Timbero te dice: ..."` style, server
+      sends raw console messages.
+    - Quest item sell block: VB6 prevents selling items that are active quest
+      objectives; server allows it.
+    - Max stack size enforcement: VB6 caps stacking at item-type-specific
+      limits; server allows unlimited stacking on some types.
+    Outcome: merchant sell restrictions and timbero semantics stop drifting
+    from the VB6 baseline.
 
 9. Close the remaining interaction-radius and bank-open guard drifts.
+    **Still open** (from audit #9):
+    - Commerce double-click handler missing: VB6 opens commerce on NPC
+      double-click for merchant NPCs; server requires explicit `/COMERCIAR`.
+    - Bank interaction distance: server uses 6-tile radius, VB6 uses 3.
+    - Inconsistent NPC interaction distances across handlers (3, 5, 6 tiles
+      depending on NPC type).
+    - Walk-away cleanup: VB6 closes commerce/bank when player walks too far
+      from NPC; server does not enforce distance after session opens.
     Outcome: NPC interaction radii and the old "already trading" bank-open
     rule match the inspected VB6 behavior instead of stricter or looser
     approximations.
     Tests required: boundary-radius adversarial cases, bank-open while
-    trading, and stale-session/radius-drift regressions.
+    trading, wrong-NPC-type attempts at radius boundaries, walk-away distance
+    enforcement, and stale-session/radius-drift regressions.
 
 10. Audit remaining invisibility, NPC AI, and spell-selection edge cases
     against VB6.
-    Outcome: the remaining known semantic edge cases are either matched or
-    explicitly documented as out of scope.
+    **Invisibility visibility fixed**: `enter_visibility`, movement broadcasts,
+    AoI enter/leave, heading changes, and invis/oculto on/off transitions now
+    filter invisible players from non-GM clients. GM exception implemented.
+    `break_invisibility` sends `reveal_to_non_gm` on state change. Buff/oculto
+    timer expiry also triggers reveal. Combat resolution unchanged — blind
+    melee, arrows, and spells aimed at the correct tile still connect.
+    Test coverage in `invisibility_visibility_test.exs` (7 tests).
+    **Still open**: remaining NPC AI edge cases (leash distance, target
+    switching, NPC spell level) and spell-selection edge cases.
+    Outcome: remaining NPC AI and spell-selection edge cases are either matched
+    or explicitly documented as out of scope.
 
 11. Finish the remaining info/service/NPC-request window semantics.
+    **Still open** (from audit #11):
+    - **High**: Prontuario display — `gm_remove_punishment` is a stub (accepts
+      command but does nothing); punishment list shows `"Sin prontuario."`
+      instead of actual records.
+    - **High**: Reward items/thresholds — faction rank-up returns
+      `"No hay recompensas disponibles en este momento"` instead of granting
+      VB6 reward items per rank tier. The TODO in social.ex ~line 726 is still
+      open.
+    - **Medium**: Priest click should show prontuario info in VB6; server does
+      not implement this NPC interaction.
+    - **Low**: banker/timbero/enlistador response text exact wording drift.
     Outcome: help, MOTD, uptime, punishments, reward, account-state, banker,
     timbero, priest, enlistador, and related old request/response windows stop
     using placeholder text and match VB6 behavior.
 
 12. Decide the old GM/admin binary packet target.
+    **Audit findings** (from audit #12-16):
+    - 65+ GM commands implemented and working.
+    - **Missing GM permission hierarchy**: all GMs have boolean `entity.gm`
+      flag — VB6 had Admin/Dios/SemiDios/Consejero tiers with different
+      access levels.
+    - **Missing commands**: /SUMMON (teleport player to you), /UNJAIL,
+      /SHUTDOWN, /NAVIGANDO, /CC (GM channel chat), /RMCRIMINAL, /RMCITIZEN,
+      /SYSTEMTICK, quest admin commands, server open/close toggle (decoded but
+      stub).
+    - **Stub commands**: `gm_remove_punishment` accepts but does nothing; SOS
+      help system packets decoded but non-functional.
     Outcome: the exact packet compatibility target is explicit instead of
     implicit.
 
@@ -108,6 +116,12 @@ the game behave like the inspected VB6 baseline.
 
 14. Implement events / tournaments / lobby events / capture events /
     invasions / global world-event announcements.
+    **Implemented** (from audit #14): Tournament (full bracket system),
+    Invasion (mass NPC spawn with kill tracking), Bonus events (XP/gold/drop),
+    Treasure hunt events, global announcement system (/GLOBAL_MESSAGE, /RMSG,
+    /CMSG).
+    **Still missing**: Capture/control point events, siege/castle events,
+    event participant tracking/rewards system, event scheduling/duration system.
     Outcome: server-side event systems match the selected old-server feature
     set, including the old event-lobby protocol where that baseline depends on
     it.
@@ -126,21 +140,21 @@ the game behave like the inspected VB6 baseline.
 
 17. Close any remaining backend drift only by adding a failing parity test
     first.
+    **Audit findings** (from audit #17 systematic scan):
+    - Guild relation stubs: peace/alliance proposals accept but don't modify
+      guild state properly (guild.ex).
+    - Oculto class-based visibility breaking: movement.ex comment notes
+      "oculto is not yet implemented" for per-class stealth break behavior.
+    - Decoder-only packets: server_open_toggle (402), save_chars (417) are
+      decoded but have minimal/stub handlers.
+    - Cross-map NPC queries not supported (inspection.ex).
+    Every newly discovered mismatch must first become a failing
+    parity/adversarial test before it is fixed.
     Outcome: no undocumented "close enough" backend differences remain.
 
 18. Fix map-transfer and reconnect edge cases uncovered by lifecycle and
     replay tests.
-    **#18 is done.** `MapServer.leave()` result checked and logged.
-    Transient session state cleared on transfer. Hogar timer cancelled on
-    tile-exit transfer. OnlineDirectory updated after leave. Same-map
-    transfer ordering fixed (leave before enter when source==dest).
-    Mid-transfer disconnect proven safe: both maps monitor session pid via
-    `Process.monitor`, both fire `:DOWN` cleanup. Destination unavailable
-    proven safe: `:noproc` caught, player stays on source. Rapid consecutive
-    transfers proven safe: sequential mailbox processing, entity re-fetched
-    after enter. 14 new tests total.
-    Outcome: map transfer, mid-transfer disconnect, and reconnect-after-transfer
-    work correctly instead of leaving ghost sessions or losing player state.
+    Closed — see `CHANGELOG.md`.
 
 ## Phase 3. Parity Proof
 
@@ -168,13 +182,12 @@ the game behave like the inspected VB6 baseline.
 
 24. Expand lifecycle tests for login/autosave/logout/crash cleanup/transfer.
    **Partial**: crash-then-re-login, double crash, online directory cleanup,
-   and graceful-vs-crash save semantics are covered. Still open: map transfer
-   edge cases, autosave timing under load, multi-map transfer chains,
-   cleanup DB failure behavior, autosave flush timeout behavior, autosave
-   worker-crash/start-failure behavior, stale autosave-vs-cleanup ordering,
-   and explicit graceful-disconnect behavior under final-save failure.
-   Shutdown-started command races and pending-autosave behavior during
-   graceful shutdown are now covered by shutdown drain tests (#35).
+   graceful-vs-crash save semantics, shutdown-started command races, and
+   pending-autosave behavior during graceful shutdown are covered. Still open:
+   autosave timing under load, multi-map transfer chains, cleanup DB failure
+   behavior, autosave flush timeout behavior, autosave worker-crash/
+   start-failure behavior, stale autosave-vs-cleanup ordering, and explicit
+   graceful-disconnect behavior under final-save failure.
    Outcome: persistence and ownership transitions stay correct under failure.
 
 25. Expand guild/faction/ban/mute persistence coverage.
@@ -222,15 +235,6 @@ the game behave like the inspected VB6 baseline.
 
 ## Phase 4. Critical Runtime Safety
 
-These items address live data-loss risks and production crash risks. They
-remain important infrastructure work, but the roadmap puts VB6 parity first.
-Authoritative gameplay and economy writes stay sync-first. Existing async DB
-writes are temporary exceptions to contain, not a model to expand.
-While a player is online, in-memory state stays authoritative; the DB is the
-offline source of truth and the target of explicit durable commit boundaries.
-Autosave remains a best-effort snapshot path, not the commit point for economy
-or permission changes.
-
 34. Implement the sync-first persistence boundary (broader architecture).
    Audit all `GameBackend.*` write sites. Keep authoritative writes explicit
    and synchronous by default: logout/cleanup, bank, trade,
@@ -247,46 +251,13 @@ or permission changes.
    Tests required: authoritative persistence regressions for logout/cleanup,
    bank, trade, inventory/equipment, guild membership/invites, and failure
    cases that must leave in-memory and durable state consistent.
-   Progress: guild fire-and-forget writes replaced with sync helpers (done);
-   bank operations reordered to DB-first with failure rollback (done); guild
-   membership/invite/request/relation paths reordered to DB-first and hardened
-   against DB exceptions (done).
-   AutosaveWriter worker model replaced with `spawn_monitor/1` (unlinked +
-   monitored, worker crash cannot take down the writer). Flush reliable under
-   worker-crash paths. Cleanup/logout "log and proceed" behavior is now explicit
-   and tested (cleanup_save_failed telemetry + logging). Kick/leave `{0, nil}`
-   bug fixed (Repo.delete_all returning zero rows treated as error). 7 failure-
-   path tests added (guild accept_invite/request/kick/leave DB failure, autosave
-   worker-death recovery, cleanup_save_failed telemetry).
-   Trade boundary done: `execute_trade` now persists both players atomically
-   via `save_trade_snapshots/2` before mutating in-memory state; on DB failure
-   both players stay unchanged. 5 trade persistence tests added.
-   Guild DB-failure semantics fixed: `request_membership` returns `:db_error`
-   (not `:already_requested`) on DB failure; `list_requests` returns
-   `{:error, :db_error}` (not empty list). Cleanup/logout final-save policy
-   documented as accepted best-effort under DB failure, with telemetry and
-   logging. Authoritative writes (trade, bank, guild) are the true commit
-   boundaries.
-   **#34 is done.** All authoritative write paths (guild, bank, trade) are
-   sync-first. Cleanup is documented best-effort with observability.
+   Closed — see `CHANGELOG.md`.
 
 35. Verify graceful host shutdown.
    Depends on #34 — shutdown verification is more meaningful once the
    persistence path is less ad hoc.
    Outcome: shutdown does not lose player state or corrupt runtime processes.
-   **#35 is done.** Coordinated shutdown drain via `prep_stop/1`:
-   ShutdownDrain stops TCP/WS listeners, sends `:shutdown_drain` to all
-   transport pids, polls until sessions drain or timeout. AutosaveWriter
-   `terminate/2` waits up to 10s for in-flight writes and drains pending
-   coalesced snapshots. TCP ClientHandler and WS WsHandler handle
-   `:shutdown_drain` with cleanup + close. Global `shutdown_in_progress?`
-   gate via `:persistent_term` rejects commands arriving after drain starts.
-   Contract: must-finish (authoritative writes, registry cleanup),
-   best-effort (autosave including pending coalesced snapshots),
-   may-drop (new connections/commands after shutdown begins).
-   Telemetry for all 6 shutdown phases. 9 tests: empty drain, session drain,
-   in-flight autosave, terminate flush, pending autosave drain, shutdown gate,
-   telemetry contract (2), crash-vs-graceful contrast.
+   Closed — see `CHANGELOG.md`.
 
 ## Phase 5. Security And Hardening
 
@@ -295,18 +266,10 @@ Every task in this phase closes only with an adversarial regression for the
 abuse path plus a normal-path control test.
 
 36. Enforce mute/dead/cooldown rules on guild and party chat.
-    **#36 is done.** Mute check on `guild_message` binary packet, dead check
-    on `/CC` text guild chat path, mute+cooldown checks on `grupo_msg` party
-    chat. 4 adversarial tests pass (ChatAuthorityTest).
-    Outcome: all social chat paths follow the same moderation and spam rules,
-    not just normal chat and faction chat.
+    Closed — see `CHANGELOG.md`.
 
 37. Rate-limit `question_gm` and `role_master_request`.
-    **#37 is done.** ETS-based per-character cooldown (30s) on both handlers.
-    Second immediate call returns rate-limit message and does not broadcast
-    to GMs. 2 adversarial tests pass (SupportRequestRateLimitTest).
-    Outcome: support/admin channels cannot be flooded even when packet replay
-    protection is already in place.
+    Closed — see `CHANGELOG.md`.
 
 38. Keep the exploit and parity audit executable.
    Outcome: every bug above has a regression test in the adversarial/parity
