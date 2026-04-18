@@ -142,8 +142,10 @@ the game behave like the inspected VB6 baseline.
     **Partial**: `MapServer.leave()` result now checked and logged in
     session_transfer.ex (ghost session prevention). Transient session state
     (commerce, bank, trade, meditation, quest NPC) cleared on transfer.
-    5 new tests. **Still open**: mid-transfer disconnect, destination
-    unavailable, hogar timer cancellation, rapid consecutive transfers.
+    Hogar timer cancelled on tile-exit transfer. OnlineDirectory updated
+    after leave (not before). 7 new tests.
+    **Still open**: mid-transfer disconnect, destination unavailable,
+    rapid consecutive transfers.
     Outcome: map transfer, mid-transfer disconnect, and reconnect-after-transfer
     work correctly instead of leaving ghost sessions or losing player state.
 
