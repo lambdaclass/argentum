@@ -139,13 +139,15 @@ the game behave like the inspected VB6 baseline.
 
 18. Fix map-transfer and reconnect edge cases uncovered by lifecycle and
     replay tests.
-    **Partial**: `MapServer.leave()` result now checked and logged in
-    session_transfer.ex (ghost session prevention). Transient session state
-    (commerce, bank, trade, meditation, quest NPC) cleared on transfer.
-    Hogar timer cancelled on tile-exit transfer. OnlineDirectory updated
-    after leave (not before). 7 new tests.
-    **Still open**: mid-transfer disconnect, destination unavailable,
-    rapid consecutive transfers.
+    **#18 is done.** `MapServer.leave()` result checked and logged.
+    Transient session state cleared on transfer. Hogar timer cancelled on
+    tile-exit transfer. OnlineDirectory updated after leave. Same-map
+    transfer ordering fixed (leave before enter when source==dest).
+    Mid-transfer disconnect proven safe: both maps monitor session pid via
+    `Process.monitor`, both fire `:DOWN` cleanup. Destination unavailable
+    proven safe: `:noproc` caught, player stays on source. Rapid consecutive
+    transfers proven safe: sequential mailbox processing, entity re-fetched
+    after enter. 14 new tests total.
     Outcome: map transfer, mid-transfer disconnect, and reconnect-after-transfer
     work correctly instead of leaving ghost sessions or losing player state.
 
