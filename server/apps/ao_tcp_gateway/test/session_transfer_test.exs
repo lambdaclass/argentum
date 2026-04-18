@@ -288,4 +288,58 @@ defmodule AoTcpGateway.SessionTransferTest do
       MapServer.leave(@dest_map, char_id)
     end
   end
+
+  describe "transfer/5 cancels hogar timer" do
+    test "active hogar_timer_ref is cancelled and cleared after tile-exit transfer" do
+      char_id = unique_id()
+      entity = make_entity(char_id)
+
+      # Simulate an active /HOGAR timer (10s delayed teleport)
+      hogar_ref = Process.send_after(self(), :hogar_arrive, 60_000)
+      state = make_state(char_id, %{hogar_timer_ref: hogar_ref})
+
+      # Enter source map
+      {:ok, idx, _players, _weather} = MapServer.enter(@source_map, entity, position: {50, 50})
+      flush_mailbox()
+
+      state = %{state | char_index: idx}
+
+      AoSession.OnlineDirectory.register(char_id, entity.name, @source_map, self())
+      on_exit(fn -> AoSession.OnlineDirectory.unregister(char_id) end)
+
+      # Perform tile-exit transfer (this is what happens when stepping on a tile exit)
+      {new_state, _packets} = SessionTransfer.transfer(state, @dest_map, 30, 30, entity)
+      flush_mailbox()
+
+      # CRITICAL: hogar timer must be cancelled so it doesn't fire after transfer
+      assert new_state.hogar_timer_ref == nil
+
+      # The timer should actually be cancelled (not just the ref cleared)
+      # Verify no :hogar_arrive message arrives
+      refute_receive :hogar_arrive, 200
+
+      MapServer.leave(@dest_map, char_id)
+    end
+
+    test "transfer with no active hogar timer does not crash" do
+      char_id = unique_id()
+      entity = make_entity(char_id)
+      state = make_state(char_id, %{hogar_timer_ref: nil})
+
+      {:ok, idx, _players, _weather} = MapServer.enter(@source_map, entity, position: {50, 50})
+      flush_mailbox()
+
+      state = %{state | char_index: idx}
+
+      AoSession.OnlineDirectory.register(char_id, entity.name, @source_map, self())
+      on_exit(fn -> AoSession.OnlineDirectory.unregister(char_id) end)
+
+      {new_state, _packets} = SessionTransfer.transfer(state, @dest_map, 30, 30, entity)
+      flush_mailbox()
+
+      assert new_state.hogar_timer_ref == nil
+
+      MapServer.leave(@dest_map, char_id)
+    end
+  end
 end

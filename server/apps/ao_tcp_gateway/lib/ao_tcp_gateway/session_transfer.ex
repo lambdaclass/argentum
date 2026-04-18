@@ -61,11 +61,22 @@ defmodule AoTcpGateway.SessionTransfer do
           )
       end
 
+      AoSession.OnlineDirectory.update_map(state.character_id, dest_map)
+
       entity = Map.get(all_players, entity.char_id)
 
       Logger.info("#{entity.name} transferred to map #{dest_map} at (#{dest_x}, #{dest_y})")
 
       state = %{state | map_id: dest_map, char_index: char_index, entity: entity}
+
+      # Cancel any active /HOGAR timer — a tile-exit transfer must not be
+      # followed by a stale hogar teleport that would yank the player away.
+      state = case Map.get(state, :hogar_timer_ref) do
+        nil -> state
+        ref ->
+          Process.cancel_timer(ref)
+          Map.put(state, :hogar_timer_ref, nil)
+      end
 
       global_rain = try do Arena.WorldWeather.raining?() rescue _ -> weather.rain catch :exit, _ -> weather.rain end
       global_snow = try do Arena.WorldWeather.snowing?() rescue _ -> weather.snow catch :exit, _ -> weather.snow end
@@ -85,7 +96,6 @@ defmodule AoTcpGateway.SessionTransfer do
             Arena.Map.Helpers.character_create_packet(other)
           end
 
-      AoSession.OnlineDirectory.update_map(state.character_id, dest_map)
       {state, packets}
     else
       {:error, reason} ->
