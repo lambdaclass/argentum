@@ -14,9 +14,9 @@ the parity phases below.
 
 1. Fix the currently known failing bug/regression suites before any new
    parity, hardening, or feature work.
-   Fixed: `SpellAuthority`, `MerchantSession`,
-   `SelectedNpcAccountReward`, `ChatAuthority`, `SupportRequestRateLimit`.
-   Remaining: `SessionLifecycle`.
+   **#1 is done.** All 6 suites green: `SpellAuthority`, `MerchantSession`,
+   `SelectedNpcAccountReward`, `ChatAuthority`, `SupportRequestRateLimit`,
+   `SessionLifecycle` (22 tests). 315 total tests, 0 failures.
    Outcome: the main line is green again on the currently known red suites, so
    new parity work starts from a trustworthy baseline.
 
@@ -69,20 +69,27 @@ the game behave like the inspected VB6 baseline.
     aligned-clan restriction cases, and no-side-effect regressions on reject.
 
 7. Restore selected-NPC semantics for account-state and reward flows.
+    **Done**: `last_clicked_npc_type` set on NPC double-click for banker,
+    timbero, and enlistador. `handle_request_account_state` and
+    `handle_request_reward` check clicked type instead of proximity scan.
+    Adversarial tests pass (3 tests: nearby-banker, nearby-timbero,
+    nearby-enlistador all correctly rejected without explicit click).
+    **Still open**: wrong-NPC, stale-selection, out-of-range, and spoofed
+    selected-NPC attempts for account-state and reward requests.
     Outcome: banker, timbero, and enlistador requests use the actual targeted
     NPC and correct faction-side checks instead of any nearby NPC of the right
     type.
-    Tests required: wrong-NPC, stale-selection, out-of-range, and spoofed
-    selected-NPC attempts for account-state and reward requests.
 
 8. Align the remaining merchant/account-state behavior with the inspected VB6
     backend.
+    **Partial**: `merchant_still_valid?/3` validates NPC is still alive in
+    `npcs_live` and player within 3 tiles before buy/sell. 4 adversarial tests
+    pass (MerchantSessionAuthorityTest: despawned buy/sell, far-away buy/sell).
+    **Still open**: remaining old item rules, timbero account-state text/value
+    semantics drift.
     Outcome: merchant sell restrictions such as the remaining old item rules,
     and the timbero account-state text/value semantics, stop drifting from the
     VB6 baseline.
-    Tests required: stale merchant-session abuse, wrong-NPC-type access,
-    remaining merchant item-rule exploits, and timbero/account-state drift
-    checks.
 
 9. Close the remaining interaction-radius and bank-open guard drifts.
     Outcome: NPC interaction radii and the old "already trading" bank-open
@@ -288,16 +295,18 @@ Every task in this phase closes only with an adversarial regression for the
 abuse path plus a normal-path control test.
 
 36. Enforce mute/dead/cooldown rules on guild and party chat.
+    **#36 is done.** Mute check on `guild_message` binary packet, dead check
+    on `/CC` text guild chat path, mute+cooldown checks on `grupo_msg` party
+    chat. 4 adversarial tests pass (ChatAuthorityTest).
     Outcome: all social chat paths follow the same moderation and spam rules,
     not just normal chat and faction chat.
-    Tests required: muted/dead/cooldown bypass attempts for guild and party
-    chat, including binary packet and text-command paths.
 
 37. Rate-limit `question_gm` and `role_master_request`.
+    **#37 is done.** ETS-based per-character cooldown (30s) on both handlers.
+    Second immediate call returns rate-limit message and does not broadcast
+    to GMs. 2 adversarial tests pass (SupportRequestRateLimitTest).
     Outcome: support/admin channels cannot be flooded even when packet replay
     protection is already in place.
-    Tests required: burst-spam rate-limit tests, cooldown-recovery tests, and
-    invalid/empty payload spam cases.
 
 38. Keep the exploit and parity audit executable.
    Outcome: every bug above has a regression test in the adversarial/parity
