@@ -9,13 +9,22 @@ defmodule Arena.Map.GmCommands do
     Events,
     Inspection,
     Moderation,
+    Permissions,
     Teleport,
     World
   }
 
   # GM command dispatch (called by Chat module when message starts with "/")
-  def dispatch_gm_command(state, char_id, entity, message),
-    do: handle_gm_command(state, char_id, entity, message)
+  def dispatch_gm_command(state, char_id, entity, message) do
+    case Permissions.check_permission(entity, message) do
+      :ok ->
+        handle_gm_command(state, char_id, entity, message)
+
+      {:error, reason} ->
+        Helpers.gm_console(state, char_id, reason)
+        {:noreply, state}
+    end
+  end
 
   def handle_gm_rain_toggle(state, char_id) do
     case Map.fetch(state.players, char_id) do
@@ -61,6 +70,10 @@ defmodule Arena.Map.GmCommands do
       ["/GOTO", _name_upper] ->
         target_name = Enum.at(parts, 1)
         Teleport.gm_goto(state, char_id, entity, target_name)
+
+      ["/SUMMON", _name_upper] ->
+        target_name = Enum.at(parts, 1)
+        Teleport.gm_summon(state, char_id, entity, target_name)
 
       # World
       ["/SPAWNITEM", item_str, amount_str] ->
@@ -198,6 +211,10 @@ defmodule Arena.Map.GmCommands do
 
         Moderation.gm_jail(state, char_id, target_name, minutes)
 
+      ["/UNJAIL", _name_upper] ->
+        target_name = Enum.at(parts, 1)
+        Moderation.gm_unjail(state, char_id, target_name)
+
       ["/BANCUENTA", _name | _rest] ->
         target_name = Enum.at(parts, 1)
         reason = Enum.at(parts, 2, "Sin motivo")
@@ -228,6 +245,18 @@ defmodule Arena.Map.GmCommands do
       ["/CHAOSKICK", _name] ->
         target_name = Enum.at(parts, 1)
         Moderation.gm_faction_kick(state, char_id, target_name, :chaos_legion)
+
+      ["/NAVIGANDO", _name_upper] ->
+        target_name = Enum.at(parts, 1)
+        Moderation.gm_navigando(state, char_id, target_name)
+
+      ["/RMCRIMINAL", _name_upper] ->
+        target_name = Enum.at(parts, 1)
+        Moderation.gm_rm_criminal(state, char_id, target_name)
+
+      ["/RMCITIZEN", _name_upper] ->
+        target_name = Enum.at(parts, 1)
+        Moderation.gm_rm_citizen(state, char_id, target_name)
 
       # CharEdit
       ["/GIVEITEM", _name, item_str, amount_str] ->

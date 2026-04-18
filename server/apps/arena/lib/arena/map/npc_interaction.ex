@@ -112,6 +112,9 @@ defmodule Arena.Map.NpcInteraction do
                 )
               end
 
+              # VB6: clicking a priest also shows the player's prontuario
+              show_prontuario(state, char_id, entity)
+
               {:noreply, state}
 
             npc_def.npc_type == @npc_type_enlistador ->
@@ -381,9 +384,9 @@ defmodule Arena.Map.NpcInteraction do
                 )
 
                 if won do
-                  msg(state, char_id, "Has ganado #{amount} monedas de oro!")
+                  msg(state, char_id, "Timbero te dice: Has ganado #{amount} monedas de oro!")
                 else
-                  msg(state, char_id, "Has perdido #{amount} monedas de oro.")
+                  msg(state, char_id, "Timbero te dice: Has perdido #{amount} monedas de oro.")
                 end
 
                 {:noreply, state}
@@ -643,5 +646,17 @@ defmodule Arena.Map.NpcInteraction do
         {:noreply, state}
       end
     end
+  end
+
+  # VB6: clicking a priest NPC shows the player's prontuario (punishment record)
+  defp show_prontuario(state, char_id, entity) do
+    punishments = Map.get(entity, :punishments, [])
+    text = Arena.Map.Gm.Moderation.format_punishments(punishments)
+
+    Helpers.send_to_session(
+      state.sessions,
+      char_id,
+      {:send_raw, Encoder.encode({:console_msg, %{message: text, font_index: 0}})}
+    )
   end
 end

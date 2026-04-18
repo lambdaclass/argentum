@@ -244,6 +244,18 @@ defmodule Arena.Map.Commerce do
 
                   {:reply, {:error, :gold_item}, state}
 
+                quest_objective_item?(entity, inv_item.item_id) ->
+                  Helpers.send_to_session(
+                    state.sessions,
+                    char_id,
+                    {:send_raw,
+                     Encoder.encode(
+                       {:console_msg, %{message: "No puedes vender objetos de mision.", font_index: 0}}
+                     )}
+                  )
+
+                  {:reply, {:error, :quest_item}, state}
+
                 true ->
                   sell_price = if item_def, do: div(item_def.valor, 3) * amount, else: 0
 
@@ -388,6 +400,17 @@ defmodule Arena.Map.Commerce do
             false
         end
     end
+  end
+
+  defp quest_objective_item?(entity, item_id) do
+    active_quests = Map.get(entity, :active_quests, [])
+
+    Enum.any?(active_quests, fn qs ->
+      quest_def = GameData.get_quest(qs.quest_id)
+
+      quest_def != nil and
+        Enum.any?(quest_def.required_objs, fn req -> req.id == item_id end)
+    end)
   end
 
   defp find_inventory_slot(entity, item_id, stackable) do

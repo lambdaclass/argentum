@@ -1,5 +1,5 @@
 defmodule Arena.Map.Gm.Teleport do
-  @moduledoc "GM teleport commands: teleport, goto."
+  @moduledoc "GM teleport commands: teleport, goto, summon."
 
   alias Arena.AuditLog
   alias Arena.Map.Helpers
@@ -39,6 +39,35 @@ defmodule Arena.Map.Gm.Teleport do
 
           {:noreply, state}
         end
+
+      :not_found ->
+        Helpers.gm_console(state, char_id, "Player '#{target_name}' not found on this map.")
+        {:noreply, state}
+    end
+  end
+
+  @doc """
+  /SUMMON target_name — teleport the target player to the GM's current position.
+  The reverse of /GOTO.
+  """
+  def gm_summon(state, char_id, entity, target_name) do
+    case Helpers.find_player_by_name(state, target_name) do
+      {:ok, target_id, target} ->
+        AuditLog.log_gm_action(char_id, "summon", target.name)
+
+        Helpers.send_to_session(
+          state.sessions,
+          target_id,
+          {:transfer, entity.map_id, entity.x, entity.y, target}
+        )
+
+        Helpers.gm_console(
+          state,
+          char_id,
+          "Summoning #{target.name} to your position (map #{entity.map_id}, #{entity.x}, #{entity.y})..."
+        )
+
+        {:noreply, state}
 
       :not_found ->
         Helpers.gm_console(state, char_id, "Player '#{target_name}' not found on this map.")

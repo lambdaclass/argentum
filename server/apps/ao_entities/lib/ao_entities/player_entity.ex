@@ -114,6 +114,8 @@ defmodule AoEntities.PlayerEntity do
     saddle_slot: 0,
     navigating: false,
     gm: false,
+    # VB6 GM tiers: :admin, :dios, :semi_dios, :consejero, or nil (not GM)
+    gm_level: nil,
     faction: :none,
 
     # Guild cache (populated on login, updated on guild join/leave/level-up)
@@ -186,6 +188,10 @@ defmodule AoEntities.PlayerEntity do
     gamble_plays: 0,
     active_quests: [],
     completed_quests: MapSet.new(),
-    quest_npc_id: nil
+    quest_npc_id: nil,
+
+    # Punishment record (VB6: prontuario) — persisted list of GM actions
+    # Each entry: %{number: int, text: String.t(), date: String.t(), gm_name: String.t()}
+    punishments: []
   ]
 end

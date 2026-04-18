@@ -131,6 +131,8 @@ defmodule Arena.Map.Gm.Moderation do
   def gm_jail(state, char_id, target_name, minutes) do
     case Helpers.find_player_by_name(state, target_name) do
       {:ok, target_id, target} ->
+        gm_name = gm_name_for(state, char_id)
+        target = add_punishment(target, "Carcel #{minutes} min", gm_name)
         target = %{target | penalty: minutes}
         players = Map.put(state.players, target_id, target)
         state = %{state | players: players}
@@ -241,9 +243,35 @@ defmodule Arena.Map.Gm.Moderation do
     {:noreply, state}
   end
 
-  def gm_remove_punishment(state, char_id, target_name, _num_str, _text) do
-    Helpers.gm_console(state, char_id, "Punishment removed from #{target_name}.")
-    {:noreply, state}
+  def gm_remove_punishment(state, char_id, target_name, num_str, _text) do
+    case Helpers.find_player_by_name(state, target_name) do
+      {:ok, target_id, target} ->
+        num =
+          case Integer.parse(num_str) do
+            {n, _} -> n
+            :error -> 0
+          end
+
+        existing = Map.get(target, :punishments, [])
+
+        if Enum.any?(existing, &(&1.number == num)) do
+          new_punishments = Enum.reject(existing, &(&1.number == num))
+          target = %{target | punishments: new_punishments}
+          players = Map.put(state.players, target_id, target)
+          state = %{state | players: players}
+
+          AuditLog.log_gm_action(char_id, "remove_punishment", "#{target_name} ##{num}")
+          Helpers.gm_console(state, char_id, "Punishment ##{num} removed from #{target_name}.")
+          {:noreply, state}
+        else
+          Helpers.gm_console(state, char_id, "Punishment ##{num} not found for #{target_name}.")
+          {:noreply, state}
+        end
+
+      :not_found ->
+        Helpers.gm_console(state, char_id, "Player '#{target_name}' not found on this map.")
+        {:noreply, state}
+    end
   end
 
   def gm_council_kick(state, char_id, target_name) do
@@ -276,6 +304,140 @@ defmodule Arena.Map.Gm.Moderation do
       :not_found ->
         Helpers.gm_console(state, char_id, "Player '#{target_name}' not found.")
         {:noreply, state}
+    end
+  end
+
+  def gm_unjail(state, char_id, target_name) do
+    case Helpers.find_player_by_name(state, target_name) do
+      {:ok, target_id, target} ->
+        target = %{target | penalty: 0}
+        players = Map.put(state.players, target_id, target)
+        state = %{state | players: players}
+
+        Helpers.send_to_session(
+          state.sessions,
+          target_id,
+          {:send_raw, Encoder.encode({:console_msg, %{message: "Has sido liberado de la cárcel.", font_index: 0}})}
+        )
+
+        AuditLog.log_gm_action(char_id, "unjail", target.name)
+        Helpers.gm_console(state, char_id, "#{target.name} has been unjailed (penalty cleared).")
+        {:noreply, state}
+
+      :not_found ->
+        Helpers.gm_console(state, char_id, "Player '#{target_name}' not found on this map.")
+        {:noreply, state}
+    end
+  end
+
+  def gm_navigando(state, char_id, target_name) do
+    case Helpers.find_player_by_name(state, target_name) do
+      {:ok, target_id, target} ->
+        new_navigating = not target.navigating
+        target = %{target | navigating: new_navigating}
+        players = Map.put(state.players, target_id, target)
+        state = %{state | players: players}
+
+        status = if new_navigating, do: "activada", else: "desactivada"
+
+        Helpers.send_to_session(
+          state.sessions,
+          target_id,
+          {:send_raw, Encoder.encode({:console_msg, %{message: "Navegación #{status}.", font_index: 0}})}
+        )
+
+        AuditLog.log_gm_action(char_id, "navigando", "#{target.name} #{status}")
+        Helpers.gm_console(state, char_id, "#{target.name} navigation #{status}.")
+        {:noreply, state}
+
+      :not_found ->
+        Helpers.gm_console(state, char_id, "Player '#{target_name}' not found on this map.")
+        {:noreply, state}
+    end
+  end
+
+  def gm_rm_criminal(state, char_id, target_name) do
+    case Helpers.find_player_by_name(state, target_name) do
+      {:ok, target_id, target} ->
+        target = %{target | criminal: false}
+        players = Map.put(state.players, target_id, target)
+        state = %{state | players: players}
+
+        Helpers.send_to_session(
+          state.sessions,
+          target_id,
+          {:send_raw,
+           Encoder.encode({:console_msg, %{message: "Tu status de criminal ha sido removido.", font_index: 0}})}
+        )
+
+        AuditLog.log_gm_action(char_id, "rm_criminal", target.name)
+        Helpers.gm_console(state, char_id, "#{target.name} is no longer a criminal.")
+        {:noreply, state}
+
+      :not_found ->
+        Helpers.gm_console(state, char_id, "Player '#{target_name}' not found on this map.")
+        {:noreply, state}
+    end
+  end
+
+  def gm_rm_citizen(state, char_id, target_name) do
+    case Helpers.find_player_by_name(state, target_name) do
+      {:ok, target_id, target} ->
+        target = %{target | criminal: true}
+        players = Map.put(state.players, target_id, target)
+        state = %{state | players: players}
+
+        Helpers.send_to_session(
+          state.sessions,
+          target_id,
+          {:send_raw, Encoder.encode({:console_msg, %{message: "Ahora eres un criminal.", font_index: 0}})}
+        )
+
+        AuditLog.log_gm_action(char_id, "rm_citizen", target.name)
+        Helpers.gm_console(state, char_id, "#{target.name} is now a criminal.")
+        {:noreply, state}
+
+      :not_found ->
+        Helpers.gm_console(state, char_id, "Player '#{target_name}' not found on this map.")
+        {:noreply, state}
+    end
+  end
+
+  # ── Punishment record helpers ──────────────────────────────────────
+
+  @doc """
+  Append a punishment record to an entity's prontuario.
+  """
+  def add_punishment(entity, text, gm_name) do
+    existing = Map.get(entity, :punishments, [])
+    next_number = if existing == [], do: 1, else: Enum.max_by(existing, & &1.number).number + 1
+
+    record = %{
+      number: next_number,
+      text: text,
+      date: Date.utc_today() |> Date.to_string(),
+      gm_name: gm_name
+    }
+
+    Map.put(entity, :punishments, existing ++ [record])
+  end
+
+  @doc "Format punishment records for display."
+  def format_punishments([]), do: "Sin prontuario."
+
+  def format_punishments(punishments) do
+    lines =
+      Enum.map(punishments, fn p ->
+        "#{p.number}. [#{p.date}] #{p.text} (#{p.gm_name})"
+      end)
+
+    "Prontuario:\n" <> Enum.join(lines, "\n")
+  end
+
+  defp gm_name_for(state, char_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, gm_entity} -> gm_entity.name
+      :error -> "GM"
     end
   end
 end

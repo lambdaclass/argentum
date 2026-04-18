@@ -5,7 +5,7 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 ## Recently Completed
 
 - **Invisibility visibility layer fix + equipped item sell block (2026-04-18):**
-  - **#10 Invisibility visibility**: invisible players are now hidden from
+  - **Invisibility visibility**: invisible players are now hidden from
     non-GM clients at the broadcast/visibility layer. `enter_visibility`,
     movement broadcasts, AoI enter/leave, heading changes, and invis/oculto
     on/off transitions all filter invisible entities from non-GM recipients.
@@ -14,58 +14,57 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
     `break_invisibility` now internally calls `reveal_to_non_gm`. Buff and
     oculto timer expiry also trigger reveal. 7 new tests in
     `invisibility_visibility_test.exs`.
-  - **#8 Equipped item sell block**: selling an equipped item now returns
+  - **Equipped item sell block**: selling an equipped item now returns
     `{:error, :equipped_item}` with console message instead of silently
     vendoring from equipped state. VB6 parity. Test in
     `merchant_session_authority_test.exs`.
-  - **Comprehensive 5-agent parity audit**: audited #8 merchant/timbero, #9
-    interaction radius/bank, #10 NPC AI/invisibility, #11 service
-    windows/punishments/rewards, #12-16 GM commands/events/unknown drift.
-    Findings consolidated into ROADMAP.md items #8-#17.
+  - **Comprehensive 5-agent parity audit**: audited merchant/timbero,
+    interaction radius/bank, NPC AI/invisibility, service
+    windows/punishments/rewards, GM commands/events/unknown drift.
 
 - **Roadmap closures moved out of `ROADMAP.md` (2026-04-18):**
-  - **#1 known red suites back to green:** `SpellAuthority`,
+  - **Known red suites back to green:** `SpellAuthority`,
     `MerchantSession`, `SelectedNpcAccountReward`, `ChatAuthority`,
     `SupportRequestRateLimit`, and `SessionLifecycle` now pass again, so new
     parity work starts from a clean baseline instead of a branch with known red
     regressions.
-  - **#4 trade-start parity:** added the missing safe-zone trade block and the
+  - **Trade-start parity:** added the missing safe-zone trade block and the
     accept-time revalidation that rejects execution if the peer is no longer a
     valid nearby trade target.
-  - **#5 guild invite/request authority under real DB-backed flows:** invite
+  - **Guild invite/request authority under real DB-backed flows:** invite
     and request revalidation, DB-failure handling, and the remaining
     request-membership/list-requests semantics are now covered by the committed
     guild hardening work and DB-backed authority tests instead of synthetic
     happy-path checks.
-  - **#6 `leave_faction` parity:** leaving faction now requires the correct
+  - **`leave_faction` parity:** leaving faction now requires the correct
     enlistador for the player faction and rejects aligned-guild cases that VB6
     also blocked.
-  - **#7 selected-NPC authority for account-state/reward flows:** account-state
+  - **Selected-NPC authority for account-state/reward flows:** account-state
     and reward requests now bind to the actual clicked NPC instance instead of
     any nearby NPC of the same type; stale, spoofed, mismatched, and out-of-
     range selection cases are rejected by adversarial coverage.
-  - **#8 merchant/account-state parity (partial):** merchant sessions are bound
+  - **Merchant/account-state parity (partial):** merchant sessions are bound
     to the original merchant instance, and equipped items are now rejected on
     sell instead of being vendored directly from equipped state. Remaining old
     merchant item rules and timbero text/value semantics stay in the roadmap.
-  - **#18 map-transfer/reconnect parity:** transfer no longer ignores
+  - **Map-transfer/reconnect parity:** transfer no longer ignores
     `MapServer.leave/2`, clears transfer-sensitive transient state, cancels
     hogar timing on tile exit, and updates online-directory state in the safer
     order needed to avoid ghost/orphaned sessions.
-  - **#34 sync-first persistence closure:** guild, bank, and trade all now
+  - **Sync-first persistence closure:** guild, bank, and trade all now
     commit through explicit DB-first or atomic sync boundaries; autosave is
     bounded and observable instead of a naked background write path; cleanup
     remains explicit best-effort with telemetry instead of pretending to be a
     stronger durability guarantee than it is.
-  - **#35 graceful host shutdown closure:** coordinated shutdown drain now runs
+  - **Graceful host shutdown closure:** coordinated shutdown drain now runs
     from `prep_stop/1`, stops listeners, rejects new commands after drain
     starts, drains active sessions, and waits for in-flight plus pending
     autosave work according to the documented must-finish / best-effort /
     may-drop contract.
-  - **#36 guild/party chat moderation:** guild chat now enforces mute/dead
+  - **Guild/party chat moderation:** guild chat now enforces mute/dead
     checks across both packet and text-command paths, and party chat now
     enforces mute plus cooldown behavior.
-  - **#37 support request throttling:** `question_gm` and
+  - **Support request throttling:** `question_gm` and
     `role_master_request` now share an ETS-backed per-character cooldown so
     burst spam is rejected instead of broadcast to operators.
 

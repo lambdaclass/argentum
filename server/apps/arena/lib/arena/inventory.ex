@@ -144,26 +144,38 @@ defmodule Arena.Inventory do
   defp gender_allowed?(%{gender_restriction: :any}, _), do: true
   defp gender_allowed?(%{gender_restriction: required}, char_gender), do: required == char_gender
 
+  defp max_stack_for_item(item_id) do
+    case GameData.get_item(item_id) do
+      %{max_hit: max_hit} when is_integer(max_hit) and max_hit > 0 -> max_hit
+      _ -> @max_stack
+    end
+  end
+
   defp add_stackable(inventory, item_id, amount, elemental_tags) do
+    max_stack = max_stack_for_item(item_id)
+
     case find_stack_slot(inventory, item_id, elemental_tags) do
       nil ->
         add_to_empty_slot(inventory, item_id, amount, elemental_tags)
 
       idx ->
         item = Enum.at(inventory, idx)
-        new_amount = min(item.amount + amount, @max_stack)
+        new_amount = min(item.amount + amount, max_stack)
         new_item = %{item | amount: new_amount}
         {:ok, List.replace_at(inventory, idx, new_item), idx}
     end
   end
 
   defp add_to_empty_slot(inventory, item_id, amount, elemental_tags) do
+    max_stack = max_stack_for_item(item_id)
+
     case find_empty_slot(inventory) do
       nil ->
         {:error, :inventory_full}
 
       idx ->
-        new_item = %{item_id: item_id, amount: amount, equipped: false, elemental_tags: elemental_tags}
+        capped_amount = min(amount, max_stack)
+        new_item = %{item_id: item_id, amount: capped_amount, equipped: false, elemental_tags: elemental_tags}
         {:ok, List.replace_at(inventory, idx, new_item), idx}
     end
   end

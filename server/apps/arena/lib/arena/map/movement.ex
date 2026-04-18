@@ -191,7 +191,14 @@ defmodule Arena.Map.Movement do
   def do_move(state, char_id, entity, nx, ny, direction, now, min_interval) do
     # VB6: spell invisibility does NOT break on walking.
     # Only Oculto (stealth/hide skill) breaks on walk for non-Thief/Bandit.
-    # Oculto is not yet implemented — when it is, break it here for non-stealth classes.
+    # If the entity is oculto and their class/skill combo doesn't qualify
+    # for stealth-while-moving, break their invisibility.
+    entity =
+      if entity.oculto and not can_move_while_hidden?(entity) do
+        Helpers.break_invisibility(entity, state, char_id)
+      else
+        entity
+      end
 
     moved_entity = %{
       entity
@@ -229,9 +236,12 @@ defmodule Arena.Map.Movement do
     # Invisible players: only broadcast movement to GMs
     recipients =
       if moved_entity.invisible do
-        Visibility.broadcast_visible_gm_only(state, nx, ny, char_id, fn pid ->
-          send(pid, {:send_raw, move_raw})
-        end)
+        result =
+          Visibility.broadcast_visible_gm_only(state, nx, ny, char_id, fn pid ->
+            send(pid, {:send_raw, move_raw})
+          end)
+
+        length(List.wrap(result))
       else
         Visibility.broadcast_visible(state, nx, ny, char_id, fn pid ->
           send(pid, {:send_raw, move_raw})
@@ -262,6 +272,20 @@ defmodule Arena.Map.Movement do
       %{dest_map: dest_map, dest_x: dest_x, dest_y: dest_y} ->
         Helpers.send_to_session(state.sessions, char_id, {:transfer, dest_map, dest_x, dest_y, entity})
         {state, true}
+    end
+  end
+
+  # VB6: certain classes can remain oculto while moving, provided their
+  # hiding skill meets the threshold.
+  defp can_move_while_hidden?(entity) do
+    hiding = Map.get(entity.skills, :hiding, 0)
+
+    case entity.class do
+      :asesino -> true
+      :ladron -> hiding >= 50
+      :bandido -> hiding >= 50
+      :cazador -> hiding >= 75
+      _ -> false
     end
   end
 

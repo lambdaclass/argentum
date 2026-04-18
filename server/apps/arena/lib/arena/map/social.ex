@@ -601,15 +601,21 @@ defmodule Arena.Map.Social do
             {:noreply, state}
 
           true ->
-            # VB6: hide timer = skill_level / 2 regen ticks
-            timer = max(div(skill_level, 2), 1)
-            entity = %{entity | oculto: true, oculto_timer: timer, invisible: true}
-            players = Map.put(state.players, char_id, entity)
-            state = %{state | players: players}
+            # VB6: success roll — random(1..100) <= hiding skill
+            if :rand.uniform(100) <= skill_level do
+              # VB6: hide timer = skill_level / 2 regen ticks
+              timer = max(div(skill_level, 2), 1)
+              entity = %{entity | oculto: true, oculto_timer: timer, invisible: true}
+              players = Map.put(state.players, char_id, entity)
+              state = %{state | players: players}
 
-            Arena.Map.Visibility.hide_from_non_gm(state, entity)
-            msg(state, char_id, "Te has ocultado entre las sombras.")
-            {:noreply, state}
+              Arena.Map.Visibility.hide_from_non_gm(state, entity)
+              msg(state, char_id, "Te has ocultado entre las sombras.")
+              {:noreply, state}
+            else
+              msg(state, char_id, "No has logrado ocultarte.")
+              {:noreply, state}
+            end
         end
 
       :error ->

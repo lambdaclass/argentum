@@ -512,7 +512,9 @@ defmodule AoTcpGateway.SessionLogic do
         if not entity.gm and entity.name != name do
           {state, [{:console_msg, %{message: "Servidor: Comando deshabilitado para tu cargo.", font_index: 0}}]}
         else
-          {state, [{:console_msg, %{message: "Sin prontuario.", font_index: 0}}]}
+          punishments = Map.get(entity, :punishments, [])
+          text = Arena.Map.Gm.Moderation.format_punishments(punishments)
+          {state, [{:console_msg, %{message: text, font_index: 0}}]}
         end
 
       _ ->
