@@ -735,4 +735,127 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       assert {:reply, {:error, :not_on_map}, _state} = result
     end
   end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 11. Safe-zone trade block
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "safe zone trade block" do
+    test "player-to-player trade initiation is rejected in safe zone" do
+      alice = make_entity(%{name: "Alice", x: 50, y: 50, char_index: 1})
+      bob = make_entity(%{name: "Bob", x: 51, y: 50, char_index: 2})
+
+      players = %{1001 => alice, 2002 => bob}
+
+      state = map_state(
+        players: players,
+        sessions: %{},
+        occupancy: %{{50, 50} => {:player, 1001}, {51, 50} => {:player, 2002}},
+        meta: %{rain: false, sin_invi_ocul: false, safe_zone: true}
+      )
+
+      result = Commerce.handle_open_commerce(state, 1001, 51, 50)
+      assert {:reply, {:error, :safe_zone}, _state} = result
+    end
+
+    test "player-to-player trade allowed when safe_zone is false" do
+      alice = make_entity(%{name: "Alice", x: 50, y: 50, char_index: 1})
+      bob = make_entity(%{name: "Bob", x: 51, y: 50, char_index: 2})
+
+      players = %{1001 => alice, 2002 => bob}
+
+      state = map_state(
+        players: players,
+        sessions: %{},
+        occupancy: %{{50, 50} => {:player, 1001}, {51, 50} => {:player, 2002}},
+        meta: %{rain: false, sin_invi_ocul: false, safe_zone: false}
+      )
+
+      result = Commerce.handle_open_commerce(state, 1001, 51, 50)
+      # Should succeed (first request) — at least not be :safe_zone
+      refute match?({:reply, {:error, :safe_zone}, _}, result),
+             "Trade should be allowed when safe_zone is false"
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 12. Distance recheck on trade execution
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "distance recheck on trade execution" do
+    test "handle_user_trade_accept rejects when players walked apart after first accept" do
+      # Alice already accepted. Bob is far away and now accepts too.
+      # The system should detect they are too far apart and reject.
+      alice = make_entity(%{
+        name: "Alice", x: 50, y: 50, char_index: 1,
+        trade_partner_id: 2002, trade_accepted: true,
+        trade_offer_gold: 100, gold: 1000
+      })
+
+      bob = make_entity(%{
+        name: "Bob", x: 60, y: 60, char_index: 2,
+        trade_partner_id: 1001, trade_accepted: false,
+        trade_offer_gold: 100, gold: 1000
+      })
+
+      players = %{1001 => alice, 2002 => bob}
+      state = make_map_state(players)
+
+      # Bob accepts — at this point both have accepted, but they're >3 tiles apart
+      result = Trade.handle_user_trade_accept(state, 2002)
+
+      case result do
+        {:reply, {:error, :too_far}, new_state} ->
+          # Correctly rejected for distance
+          alice_after = Map.get(new_state.players, 1001)
+          bob_after = Map.get(new_state.players, 2002)
+          assert alice_after.trade_partner_id == nil
+          assert bob_after.trade_partner_id == nil
+
+        {:reply, :ok, new_state} ->
+          # If trade went through, gold should NOT have been exchanged
+          alice_after = Map.get(new_state.players, 1001)
+          bob_after = Map.get(new_state.players, 2002)
+
+          # The critical assertion: if no distance check exists, the trade
+          # would attempt to execute (gold transfer). If gold changed, the
+          # distance check is missing.
+          assert alice_after.gold == 1000 and bob_after.gold == 1000,
+                 "VULNERABILITY: Trade executed despite players being >3 tiles apart. " <>
+                 "Alice gold: #{alice_after.gold}, Bob gold: #{bob_after.gold}"
+          # Even if gold didn't change (due to DB error), the trade should
+          # have been explicitly rejected with :too_far, not accidentally saved
+          # by a DB failure.
+          flunk("MISSING VALIDATION: Trade accept should return {:error, :too_far} " <>
+                "when players are more than 3 tiles apart, but returned :ok")
+
+        other ->
+          flunk("Unexpected result: #{inspect(other)}")
+      end
+    end
+
+    test "handle_user_trade_accept succeeds when players are within range" do
+      alice = make_entity(%{
+        name: "Alice", x: 50, y: 50, char_index: 1,
+        trade_partner_id: 2002, trade_accepted: true,
+        trade_offer_gold: 0, gold: 1000
+      })
+
+      bob = make_entity(%{
+        name: "Bob", x: 52, y: 51, char_index: 2,
+        trade_partner_id: 1001, trade_accepted: false,
+        trade_offer_gold: 0, gold: 1000
+      })
+
+      players = %{1001 => alice, 2002 => bob}
+      state = make_map_state(players)
+
+      # Bob accepts — both within range, trade should proceed
+      result = Trade.handle_user_trade_accept(state, 2002)
+
+      # Should not return :too_far
+      refute match?({:reply, {:error, :too_far}, _}, result),
+             "Trade should succeed when players are within 3 tiles"
+    end
+  end
 end

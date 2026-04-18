@@ -92,9 +92,15 @@ defmodule Arena.Map.Trade do
         partner = Map.get(state.players, entity.trade_partner_id)
 
         if partner && partner.trade_accepted do
-          # Both accepted -- execute trade
-          state = execute_trade(state, char_id, entity.trade_partner_id)
-          {:reply, :ok, state}
+          # Both accepted -- verify distance before executing trade
+          if abs(entity.x - partner.x) > 3 or abs(entity.y - partner.y) > 3 do
+            state = end_user_trade(state, char_id)
+            {:reply, {:error, :too_far}, state}
+          else
+            # Both accepted and within range -- execute trade
+            state = execute_trade(state, char_id, entity.trade_partner_id)
+            {:reply, :ok, state}
+          end
         else
           {:reply, :ok, state}
         end

@@ -23,11 +23,43 @@ defmodule AoTcpGateway.SessionTransfer do
   def transfer(state, dest_map, dest_x, dest_y, entity) do
     source_map = state.map_id
 
+    # Clear transient session-state flags before entering the destination map.
+    # These are map-local interactions that must not carry across maps.
+    # Mirrors the cleanup done in PlayerDeath for consistency.
+    clean_entity = %{entity |
+      commerce_npc_id: nil,
+      bank_npc_id: nil,
+      bank_gold: 0,
+      trade_partner_id: nil,
+      trade_request_target: nil,
+      trade_offer_gold: 0,
+      trade_offer_items: [],
+      trade_accepted: false,
+      meditating: false,
+      resting: false,
+      quest_npc_id: nil
+    }
+
     with :ok <- SessionWorld.ensure_map_started(dest_map),
          {:ok, char_index, all_players, weather} <-
-           Arena.Map.MapServer.enter(dest_map, entity, position: {dest_x, dest_y}) do
-      # Destination entry succeeded — now remove from source
-      Arena.Map.MapServer.leave(source_map, entity.char_id)
+           Arena.Map.MapServer.enter(dest_map, clean_entity, position: {dest_x, dest_y}) do
+      # Destination entry succeeded — now remove from source.
+      # Check the result: if leave fails the player may ghost on the source map.
+      case Arena.Map.MapServer.leave(source_map, entity.char_id) do
+        {:ok, _departed} ->
+          :ok
+
+        :not_found ->
+          Logger.warning(
+            "leave(#{source_map}, #{entity.char_id}) returned :not_found during transfer — " <>
+              "player may have already been removed (tile exit cleanup)"
+          )
+
+        other ->
+          Logger.warning(
+            "leave(#{source_map}, #{entity.char_id}) unexpected result during transfer: #{inspect(other)}"
+          )
+      end
 
       entity = Map.get(all_players, entity.char_id)
 

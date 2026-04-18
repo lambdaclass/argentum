@@ -32,6 +32,9 @@ defmodule Arena.Map.Commerce do
         case target_occ do
           # VB6: target is a player -> user-to-user trade request
           {:player, target_id} when target_id != char_id ->
+            if Map.get(state.meta, :safe_zone, false) do
+              {:reply, {:error, :safe_zone}, state}
+            else
             target = Map.get(state.players, target_id)
 
             cond do
@@ -46,6 +49,7 @@ defmodule Arena.Map.Commerce do
 
               true ->
                 Trade.start_user_trade_request(state, char_id, entity, target_id)
+            end
             end
 
           # Target is NPC -> NPC commerce

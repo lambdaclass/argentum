@@ -459,4 +459,241 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       assert new_state.players[:player].faction == :none
     end
   end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Leave faction rejected when only wrong-faction enlistador is nearby
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "leave faction with wrong-faction enlistador" do
+    setup do
+      # Insert test NPC defs into ETS so GameData.get_npc works
+      royal_npc_def = %Arena.Data.NpcDef{
+        id: 9901,
+        name: "Enlistador Real Test",
+        npc_type: 5,
+        faccion: 3
+      }
+
+      chaos_npc_def = %Arena.Data.NpcDef{
+        id: 9902,
+        name: "Enlistador Caos Test",
+        npc_type: 5,
+        faccion: 2
+      }
+
+      :ets.insert(:arena_game_data, {{:npc, 9901}, royal_npc_def})
+      :ets.insert(:arena_game_data, {{:npc, 9902}, chaos_npc_def})
+
+      on_exit(fn ->
+        :ets.delete(:arena_game_data, {:npc, 9901})
+        :ets.delete(:arena_game_data, {:npc, 9902})
+      end)
+
+      :ok
+    end
+
+    test "royal army player cannot leave at chaos enlistador" do
+      # Player is in royal army, only a chaos enlistador is nearby
+      entity = make_entity(%{char_id: :player, faction: :royal_army, x: 50, y: 50, faction_reenlistadas: 0})
+      chaos_npc = %{npc_id: 9902, x: 51, y: 51, instance_id: :chaos_enl}
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{chaos_enl: chaos_npc})
+
+      {:noreply, new_state} = Faction.handle_leave_faction(state, :player)
+
+      # Must NOT leave — the nearby enlistador belongs to the wrong faction
+      assert new_state.players[:player].faction == :royal_army
+      assert new_state.players[:player].faction_reenlistadas == 0
+    end
+
+    test "chaos legion player cannot leave at royal enlistador" do
+      # Player is in chaos legion, only a royal army enlistador is nearby
+      entity = make_entity(%{char_id: :player, faction: :chaos_legion, x: 50, y: 50, faction_reenlistadas: 0})
+      royal_npc = %{npc_id: 9901, x: 52, y: 50, instance_id: :royal_enl}
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{royal_enl: royal_npc})
+
+      {:noreply, new_state} = Faction.handle_leave_faction(state, :player)
+
+      # Must NOT leave — the nearby enlistador belongs to the wrong faction
+      assert new_state.players[:player].faction == :chaos_legion
+      assert new_state.players[:player].faction_reenlistadas == 0
+    end
+
+    test "royal army player CAN leave at royal enlistador" do
+      # Player is in royal army, a royal army enlistador is nearby — should succeed
+      entity = make_entity(%{char_id: :player, faction: :royal_army, x: 50, y: 50, faction_reenlistadas: 0})
+      royal_npc = %{npc_id: 9901, x: 51, y: 51, instance_id: :royal_enl}
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{royal_enl: royal_npc})
+
+      {:noreply, new_state} = Faction.handle_leave_faction(state, :player)
+
+      # SHOULD leave successfully at own faction's enlistador
+      assert new_state.players[:player].faction == :none
+      assert new_state.players[:player].faction_reenlistadas == 1
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Leave faction rejected when player is in an aligned guild
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "leave faction rejected when in aligned guild" do
+    setup do
+      # Insert test enlistador NPC defs
+      royal_npc_def = %Arena.Data.NpcDef{
+        id: 9901,
+        name: "Enlistador Real Test",
+        npc_type: 5,
+        faccion: 3
+      }
+
+      chaos_npc_def = %Arena.Data.NpcDef{
+        id: 9902,
+        name: "Enlistador Caos Test",
+        npc_type: 5,
+        faccion: 2
+      }
+
+      :ets.insert(:arena_game_data, {{:npc, 9901}, royal_npc_def})
+      :ets.insert(:arena_game_data, {{:npc, 9902}, chaos_npc_def})
+
+      # Set up GuildServer ETS table for guild membership checks
+      # GuildServer uses :ao_guilds table
+      guild_table_existed = :ets.whereis(:ao_guilds) != :undefined
+
+      unless guild_table_existed do
+        :ets.new(:ao_guilds, [:named_table, :set, :public])
+      end
+
+      on_exit(fn ->
+        :ets.delete(:arena_game_data, {:npc, 9901})
+        :ets.delete(:arena_game_data, {:npc, 9902})
+        # Clean up guild entries
+        :ets.delete(:ao_guilds, {:member, :player})
+        :ets.delete(:ao_guilds, {:guild, 999})
+
+        unless guild_table_existed do
+          :ets.delete(:ao_guilds)
+        end
+      end)
+
+      :ok
+    end
+
+    test "royal army player in armada-aligned guild cannot leave faction" do
+      # Player is in royal army and belongs to an armada-aligned guild
+      entity = make_entity(%{char_id: :player, faction: :royal_army, x: 50, y: 50, faction_reenlistadas: 0})
+      royal_npc = %{npc_id: 9901, x: 51, y: 51, instance_id: :royal_enl}
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{royal_enl: royal_npc})
+
+      # Set up guild membership: player is in an armada-aligned guild
+      armada_guild = %{
+        id: 999,
+        name: "Royal Guard",
+        leader: :player,
+        founder_id: :player,
+        created_at: ~U[2024-01-01 00:00:00Z],
+        members: [:player],
+        level: 1,
+        current_exp: 0,
+        description: "",
+        news: "",
+        url: "",
+        alignment: Arena.GuildAlignment.armada()
+      }
+
+      :ets.insert(:ao_guilds, {{:guild, 999}, armada_guild})
+      :ets.insert(:ao_guilds, {{:member, :player}, 999})
+
+      {:noreply, new_state} = Faction.handle_leave_faction(state, :player)
+
+      # Must NOT leave — leaving would make alignment ciudadana, incompatible with armada guild
+      assert new_state.players[:player].faction == :royal_army
+      assert new_state.players[:player].faction_reenlistadas == 0
+    end
+
+    test "chaos legion player in caotica-aligned guild cannot leave faction" do
+      entity = make_entity(%{char_id: :player, faction: :chaos_legion, x: 50, y: 50, faction_reenlistadas: 0})
+      chaos_npc = %{npc_id: 9902, x: 51, y: 51, instance_id: :chaos_enl}
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{chaos_enl: chaos_npc})
+
+      # Set up guild membership: player is in a caotica-aligned guild
+      caotica_guild = %{
+        id: 999,
+        name: "Dark Legion",
+        leader: :player,
+        founder_id: :player,
+        created_at: ~U[2024-01-01 00:00:00Z],
+        members: [:player],
+        level: 1,
+        current_exp: 0,
+        description: "",
+        news: "",
+        url: "",
+        alignment: Arena.GuildAlignment.caotica()
+      }
+
+      :ets.insert(:ao_guilds, {{:guild, 999}, caotica_guild})
+      :ets.insert(:ao_guilds, {{:member, :player}, 999})
+
+      {:noreply, new_state} = Faction.handle_leave_faction(state, :player)
+
+      # Must NOT leave — leaving would make alignment ciudadana, incompatible with caotica guild
+      assert new_state.players[:player].faction == :chaos_legion
+      assert new_state.players[:player].faction_reenlistadas == 0
+    end
+
+    test "faction player in neutral guild CAN leave faction" do
+      # Player is in royal army and belongs to a neutral guild — should be allowed to leave
+      entity = make_entity(%{char_id: :player, faction: :royal_army, x: 50, y: 50, faction_reenlistadas: 0})
+      royal_npc = %{npc_id: 9901, x: 51, y: 51, instance_id: :royal_enl}
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{royal_enl: royal_npc})
+
+      # Set up guild membership: player is in a neutral guild
+      neutral_guild = %{
+        id: 999,
+        name: "Adventurers",
+        leader: :player,
+        founder_id: :player,
+        created_at: ~U[2024-01-01 00:00:00Z],
+        members: [:player],
+        level: 1,
+        current_exp: 0,
+        description: "",
+        news: "",
+        url: "",
+        alignment: Arena.GuildAlignment.neutral()
+      }
+
+      :ets.insert(:ao_guilds, {{:guild, 999}, neutral_guild})
+      :ets.insert(:ao_guilds, {{:member, :player}, 999})
+
+      {:noreply, new_state} = Faction.handle_leave_faction(state, :player)
+
+      # SHOULD leave — neutral guilds accept any alignment
+      assert new_state.players[:player].faction == :none
+      assert new_state.players[:player].faction_reenlistadas == 1
+    end
+
+    test "faction player not in any guild CAN leave faction" do
+      # Player is in royal army, not in any guild, at own enlistador
+      entity = make_entity(%{char_id: :player, faction: :royal_army, x: 50, y: 50, faction_reenlistadas: 0})
+      royal_npc = %{npc_id: 9901, x: 51, y: 51, instance_id: :royal_enl}
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{royal_enl: royal_npc})
+
+      # No guild entries in ETS — player is not in a guild
+
+      {:noreply, new_state} = Faction.handle_leave_faction(state, :player)
+
+      # SHOULD leave — no guild restriction
+      assert new_state.players[:player].faction == :none
+      assert new_state.players[:player].faction_reenlistadas == 1
+    end
+  end
 end

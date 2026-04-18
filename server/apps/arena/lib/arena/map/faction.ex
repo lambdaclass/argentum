@@ -183,32 +183,48 @@ defmodule Arena.Map.Faction do
           msg(state, char_id, "No perteneces a ninguna faccion.")
           {:noreply, state}
         else
-          case find_nearby_npc_of_type(state, entity, [@npc_type_enlistador]) do
+          case find_nearby_enlistador(state, entity, entity.faction) do
             :not_found ->
-              msg(state, char_id, "Necesitas estar cerca de un enlistador.")
+              msg(state, char_id, "Necesitas estar cerca de un enlistador de tu faccion.")
               {:noreply, state}
 
             {:ok, _npc, _npc_def} ->
-              entity = strip_faction_items(entity)
-              entity = %{entity | faction: :none, faction_reenlistadas: entity.faction_reenlistadas + 1}
-              players = Map.put(state.players, char_id, entity)
+              if blocked_by_aligned_guild?(char_id) do
+                msg(state, char_id, "No puedes renunciar a tu faccion mientras pertenezcas a un clan alineado.")
+                {:noreply, state}
+              else
+                entity = strip_faction_items(entity)
+                entity = %{entity | faction: :none, faction_reenlistadas: entity.faction_reenlistadas + 1}
+                players = Map.put(state.players, char_id, entity)
 
-              AoSession.OnlineDirectory.update_faction(char_id, :none)
+                AoSession.OnlineDirectory.update_faction(char_id, :none)
 
-              Enum.each(0..23, fn slot ->
-                Helpers.send_inventory_slot(state.sessions, char_id, entity.inventory, slot)
-              end)
+                Enum.each(0..23, fn slot ->
+                  Helpers.send_inventory_slot(state.sessions, char_id, entity.inventory, slot)
+                end)
 
-              state = %{state | players: players}
-              Helpers.broadcast_character_change(state, entity)
+                state = %{state | players: players}
+                Helpers.broadcast_character_change(state, entity)
 
-              msg(state, char_id, "Has renunciado a tu faccion.")
-              {:noreply, state}
+                msg(state, char_id, "Has renunciado a tu faccion.")
+                {:noreply, state}
+              end
           end
         end
 
       :error ->
         {:noreply, state}
+    end
+  end
+
+  defp blocked_by_aligned_guild?(char_id) do
+    case Arena.GuildServer.get_guild(char_id) do
+      {:ok, guild} ->
+        guild.alignment != Arena.GuildAlignment.neutral() and
+          guild.alignment != 0
+
+      :not_in_guild ->
+        false
     end
   end
 
