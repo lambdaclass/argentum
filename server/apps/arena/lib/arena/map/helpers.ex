@@ -348,16 +348,16 @@ defmodule Arena.Map.Helpers do
     )
   end
 
-  @doc "Find an NPC of a given type within 5 tiles of the entity."
-  def find_nearby_npc_of_type(state, entity, npc_types) do
+  @doc "Find an NPC of a given type within `range` tiles of the entity (default 10, VB6 Distancia)."
+  def find_nearby_npc_of_type(state, entity, npc_types, range \\ 10) do
     result =
       Enum.find_value(state.npcs_live, fn {_id, npc} ->
         npc_def = GameData.get_npc(npc.npc_id)
 
         if npc_def != nil and
              npc_def.npc_type in npc_types and
-             abs(npc.x - entity.x) <= 5 and
-             abs(npc.y - entity.y) <= 5 do
+             abs(npc.x - entity.x) <= range and
+             abs(npc.y - entity.y) <= range do
           {npc, npc_def}
         end
       end)

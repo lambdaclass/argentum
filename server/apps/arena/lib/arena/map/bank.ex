@@ -528,7 +528,7 @@ defmodule Arena.Map.Bank do
           npc == nil ->
             {:error, :no_bank}
 
-          abs(entity.x - npc.x) > 6 or abs(entity.y - npc.y) > 6 ->
+          abs(entity.x - npc.x) > 10 or abs(entity.y - npc.y) > 10 ->
             {:error, :too_far}
 
           true ->
