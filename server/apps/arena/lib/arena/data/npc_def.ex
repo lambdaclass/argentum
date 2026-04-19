@@ -43,7 +43,11 @@ defmodule Arena.Data.NpcDef do
     map_target_entry_x: 0,
     map_target_entry_y: 0,
     num_quest: 0,
-    quest_numbers: []
+    quest_numbers: [],
+    # VB6 taming: NpcList(NpcIndex).flags.Domable — difficulty threshold for taming
+    domable: 0,
+    # VB6 taming: NpcList(NpcIndex).MinTameLevel — minimum player level to tame (default 1)
+    min_tame_level: 1
   ]
 
   @doc "Build an NpcDef from a parsed INI section (downcased keys)."
@@ -88,7 +92,9 @@ defmodule Arena.Data.NpcDef do
       map_target_entry_x: parse_int(section["maptargetentryx"]),
       map_target_entry_y: parse_int(section["maptargetentryy"]),
       num_quest: parse_int(section["numquest"]),
-      quest_numbers: parse_quest_numbers(section)
+      quest_numbers: parse_quest_numbers(section),
+      domable: parse_int(section["domable"]),
+      min_tame_level: parse_int_default(section["mintamelevel"], 1)
     }
   end
 

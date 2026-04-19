@@ -109,8 +109,31 @@ defmodule Arena.Map.Crafting do
 
   @max_pets 3
   @taming_range 3
+  # VB6 parity: max 2 pets of the same NPC type (PuedeDomarMascota)
+  @max_same_type_pets 2
+  # VB6 parity: Druids divide puntosDomar by 6, all others by 118
+  @druid_taming_divisor 6
+  @default_taming_divisor 118
 
   # ---- Taming ----
+
+  @doc """
+  VB6 taming score formula (public for testability).
+
+  puntosDomar = Charisma * TamingSkill
+  Druids: puntosDomar / 6
+  Others: puntosDomar / 118
+  """
+  def taming_score(entity, class) do
+    cha = Map.get(entity, :cha, 18)
+    skill_value = Map.get(entity.skills, :taming, 0)
+    raw = cha * skill_value
+
+    case class do
+      :druida -> div(raw, @druid_taming_divisor)
+      _ -> div(raw, @default_taming_divisor)
+    end
+  end
 
   defp attempt_taming(state, char_id, entity) do
     cond do
@@ -125,32 +148,84 @@ defmodule Arena.Map.Crafting do
             {:noreply, state}
 
           {instance_id, npc} ->
+            npc_def = GameData.get_npc(npc.npc_id)
             skill_value = Map.get(entity.skills, :taming, 0)
-            {entity, state} = consume_stamina(state, char_id, entity)
 
-            if skill_check(skill_value) do
-              # Taming success — set ownership
-              npc = %{npc | owner_id: char_id, target_id: nil}
-              state = put_in(state.npcs_live[instance_id], npc)
+            cond do
+              # VB6 drift #3: minimum tame level check
+              npc_def != nil and Map.get(npc_def, :min_tame_level, 1) > entity.level ->
+                min_level = Map.get(npc_def, :min_tame_level, 1)
 
-              entity = %{entity | pet_ids: [instance_id | entity.pet_ids]}
-              entity = try_skill_up(entity, :taming, skill_value)
-              state = update_player(state, char_id, entity)
-              send_skills(state, char_id, entity)
+                send_msg(
+                  state,
+                  char_id,
+                  "Debes ser nivel #{min_level} o superior para domar esta criatura."
+                )
 
-              npc_def = GameData.get_npc(npc.npc_id)
-              name = if npc_def, do: npc_def.name, else: "la criatura"
-              send_msg(state, char_id, "Has domado a #{name}!")
-              {:noreply, state}
-            else
-              entity = try_skill_up(entity, :taming, skill_value)
-              state = update_player(state, char_id, entity)
-              send_skills(state, char_id, entity)
-              send_msg(state, char_id, "No has podido domar a la criatura.")
-              {:noreply, state}
+                {:noreply, state}
+
+              # VB6 drift #5: duplicate-type pet limit (max 2 of same NPC type)
+              not can_tame_pet_type?(state, entity, npc.npc_id) ->
+                send_msg(state, char_id, "Ya tienes demasiadas mascotas de ese tipo.")
+                {:noreply, state}
+
+              true ->
+                {entity, state} = consume_stamina(state, char_id, entity)
+
+                # VB6 drift #1 + #2: Charisma * Taming / class_divisor
+                score = taming_score(entity, entity.class)
+                domable = if npc_def, do: Map.get(npc_def, :domable, 0), else: 0
+
+                # VB6 drift #4: domable check AND 1-in-5 random gate
+                if domable <= score and :rand.uniform(5) == 1 do
+                  # Taming success — set ownership
+                  npc = %{npc | owner_id: char_id, target_id: nil}
+                  state = put_in(state.npcs_live[instance_id], npc)
+
+                  entity = %{entity | pet_ids: [instance_id | entity.pet_ids]}
+                  entity = try_skill_up(entity, :taming, skill_value)
+                  state = update_player(state, char_id, entity)
+                  send_skills(state, char_id, entity)
+
+                  name = if npc_def, do: npc_def.name, else: "la criatura"
+                  send_msg(state, char_id, "Has domado a #{name}!")
+
+                  # VB6 drift #6: safe-zone pet handling
+                  no_mascotas = Map.get(state.meta, :no_mascotas, false) or
+                                  Map.get(state.meta, :safe_zone, false)
+
+                  if no_mascotas do
+                    # Remove NPC from map but keep in pet_ids
+                    state = %{state | npcs_live: Map.delete(state.npcs_live, instance_id)}
+                    send_msg(state, char_id, "Tu mascota te aguarda afuera.")
+                    {:noreply, state}
+                  else
+                    {:noreply, state}
+                  end
+                else
+                  entity = try_skill_up(entity, :taming, skill_value)
+                  state = update_player(state, char_id, entity)
+                  send_skills(state, char_id, entity)
+                  send_msg(state, char_id, "No has podido domar a la criatura.")
+                  {:noreply, state}
+                end
             end
         end
     end
+  end
+
+  # VB6 parity (PuedeDomarMascota): max 2 pets of the same NPC type.
+  defp can_tame_pet_type?(state, entity, target_npc_id) do
+    same_type_count =
+      entity.pet_ids
+      |> Enum.count(fn instance_id ->
+        case Map.get(state.npcs_live, instance_id) do
+          nil -> false
+          pet -> pet.npc_id == target_npc_id
+        end
+      end)
+
+    same_type_count < @max_same_type_pets
   end
 
   # Find the nearest alive hostile NPC within taming range that is not already a pet.
