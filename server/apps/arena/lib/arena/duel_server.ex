@@ -17,11 +17,18 @@ defmodule Arena.DuelServer do
   6. `/ABANDONAR` forfeits the duel immediately.
   7. `/CANCELAR` cancels a pending (not yet started) challenge.
 
-  ## Simplification
+  ## Room allocation (VB6: Salas)
 
-  The VB6 server uses dedicated "sala" (room) maps.  This implementation
-  keeps players on the same map and simply tracks duel state, enforcing
-  combat restrictions and round scoring through the MapServer hooks.
+  Like the VB6 server, this implementation manages dedicated duel rooms
+  ("salas").  Each room has a map_id, left spawn position (PosIzquierda),
+  and right spawn position (PosDerecha).  Rooms are loaded at startup
+  via the `:rooms` option and tracked as free/occupied.  When a duel
+  starts, a free room is allocated (VB6: BuscarSala); when it ends, the
+  room is freed (VB6: SalaLiberada).  If no rooms are available, the
+  duel is rejected with `{:error, :no_rooms_available}`.
+
+  When no rooms are configured (`:rooms` option omitted), the server
+  operates in legacy mode — duels proceed without room allocation.
 
   This GenServer is a singleton that holds *all* pending challenges and
   active duels in an ETS-free map structure for simplicity and testability.
@@ -40,6 +47,19 @@ defmodule Arena.DuelServer do
     defstruct [:challenger_id, :target_id, :bet, :created_at]
   end
 
+  defmodule Room do
+    @moduledoc """
+    A duel room (VB6: t_SalaReto).
+
+    * `id`        — 1-based room index (VB6: Sala)
+    * `map_id`    — map number (VB6: Salas(Sala).PosIzquierda.Map)
+    * `left_pos`  — {x, y} spawn for left team (VB6: PosIzquierda)
+    * `right_pos` — {x, y} spawn for right team (VB6: PosDerecha)
+    * `in_use`    — whether the room is currently occupied (VB6: EnUso)
+    """
+    defstruct [:id, :map_id, :left_pos, :right_pos, in_use: false]
+  end
+
   defmodule Duel do
     @moduledoc false
     @doc """
@@ -49,11 +69,21 @@ defmodule Arena.DuelServer do
       VB6: Puntaje works the same way (positive = right team, negative = left).
     * `round` — current round number (1-based).
     * `bet` — gold each player put in.
+    * `room_id` — allocated room index (VB6: SalaReto), nil when no rooms configured.
+    * `map_id` — map number of the duel room.
+    * `left_pos` — {x, y} left team spawn position.
+    * `right_pos` — {x, y} right team spawn position.
+    * `original_positions` — %{char_id => saved_pos} for warp-back (VB6: LastPos).
     """
     defstruct [
       :player_a,
       :player_b,
       :bet,
+      :room_id,
+      :map_id,
+      :left_pos,
+      :right_pos,
+      original_positions: %{},
       round: 1,
       score: 0
     ]
@@ -66,7 +96,8 @@ defmodule Arena.DuelServer do
 
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__)
-    GenServer.start_link(__MODULE__, %{}, name: name)
+    rooms = Keyword.get(opts, :rooms, [])
+    GenServer.start_link(__MODULE__, %{rooms: rooms}, name: name)
   end
 
   @doc """
@@ -108,6 +139,15 @@ defmodule Arena.DuelServer do
     GenServer.call(server, {:player_died, char_id})
   end
 
+  @doc """
+  Notify that a player disconnected during a duel (VB6: desconexion en reto).
+  The disconnecting player forfeits and the opponent wins.
+  Returns {:ok, result} | {:error, :not_in_duel}.
+  """
+  def player_disconnected(char_id, server \\ __MODULE__) do
+    GenServer.call(server, {:player_disconnected, char_id})
+  end
+
   @doc "Query the active duel for a given player, or nil."
   def get_duel(char_id, server \\ __MODULE__) do
     GenServer.call(server, {:get_duel, char_id})
@@ -128,15 +168,45 @@ defmodule Arena.DuelServer do
     GenServer.call(server, {:duel_opponent, char_id})
   end
 
+  @doc "Return the number of free duel rooms (VB6: SalasLibres)."
+  def free_rooms_count(server \\ __MODULE__) do
+    GenServer.call(server, :free_rooms_count)
+  end
+
   # ── GenServer callbacks ────────────────────────────────────────────────
 
   @impl true
-  def init(_opts) do
+  def init(opts) do
     # challenges: %{challenger_id => %Challenge{}}
     # duels: %{duel_key => %Duel{}}  where duel_key = {min_id, max_id}
     # player_to_duel: %{char_id => duel_key}
     # player_to_challenge: %{target_id => challenger_id}  (reverse index)
-    {:ok, %{challenges: %{}, duels: %{}, player_to_duel: %{}, player_to_challenge: %{}}}
+    # rooms: %{room_id => %Room{}}  (VB6: Salas array)
+
+    rooms_config = Map.get(opts, :rooms, [])
+
+    rooms =
+      rooms_config
+      |> Enum.with_index(1)
+      |> Map.new(fn {cfg, idx} ->
+        {idx,
+         %Room{
+           id: idx,
+           map_id: cfg.map_id,
+           left_pos: cfg.left_pos,
+           right_pos: cfg.right_pos,
+           in_use: false
+         }}
+      end)
+
+    {:ok,
+     %{
+       challenges: %{},
+       duels: %{},
+       player_to_duel: %{},
+       player_to_challenge: %{},
+       rooms: rooms
+     }}
   end
 
   @impl true
@@ -202,25 +272,40 @@ defmodule Arena.DuelServer do
             state = remove_challenge(state, challenger_id)
             {:reply, {:error, :challenger_in_duel}, state}
           else
-            # Start the duel
-            duel = %Duel{
-              player_a: challenger_id,
-              player_b: acceptor_id,
-              bet: challenge.bet,
-              round: 1,
-              score: 0
-            }
+            # VB6: BuscarSala — allocate a free room if rooms are configured
+            case allocate_room(state) do
+              {:error, :no_rooms_available} ->
+                {:reply, {:error, :no_rooms_available}, state}
 
-            duel_key = duel_key(challenger_id, acceptor_id)
+              {:ok, room, state} ->
+                # Start the duel (VB6: IniciarReto)
+                duel = %Duel{
+                  player_a: challenger_id,
+                  player_b: acceptor_id,
+                  bet: challenge.bet,
+                  round: 1,
+                  score: 0,
+                  room_id: room && room.id,
+                  map_id: room && room.map_id,
+                  left_pos: room && room.left_pos,
+                  right_pos: room && room.right_pos,
+                  original_positions: %{
+                    challenger_id => nil,
+                    acceptor_id => nil
+                  }
+                }
 
-            state =
-              state
-              |> remove_challenge(challenger_id)
-              |> put_in(:duels, duel_key, duel)
-              |> put_in(:player_to_duel, challenger_id, duel_key)
-              |> put_in(:player_to_duel, acceptor_id, duel_key)
+                duel_key = duel_key(challenger_id, acceptor_id)
 
-            {:reply, {:ok, duel}, state}
+                state =
+                  state
+                  |> remove_challenge(challenger_id)
+                  |> put_in(:duels, duel_key, duel)
+                  |> put_in(:player_to_duel, challenger_id, duel_key)
+                  |> put_in(:player_to_duel, acceptor_id, duel_key)
+
+                {:reply, {:ok, duel}, state}
+            end
           end
         end
     end
@@ -252,6 +337,21 @@ defmodule Arena.DuelServer do
       duel_key ->
         duel = Map.fetch!(state.duels, duel_key)
         # The abandoning player loses — opponent wins
+        winner_id = opponent_id(duel, char_id)
+        result = finalize_duel(duel, winner_id)
+        state = remove_duel(state, duel_key, duel)
+        {:reply, {:ok, result}, state}
+    end
+  end
+
+  def handle_call({:player_disconnected, char_id}, _from, state) do
+    case Map.get(state.player_to_duel, char_id) do
+      nil ->
+        {:reply, {:error, :not_in_duel}, state}
+
+      duel_key ->
+        duel = Map.fetch!(state.duels, duel_key)
+        # The disconnecting player forfeits — opponent wins
         winner_id = opponent_id(duel, char_id)
         result = finalize_duel(duel, winner_id)
         state = remove_duel(state, duel_key, duel)
@@ -331,6 +431,15 @@ defmodule Arena.DuelServer do
     end
   end
 
+  def handle_call(:free_rooms_count, _from, state) do
+    count =
+      state.rooms
+      |> Map.values()
+      |> Enum.count(fn room -> not room.in_use end)
+
+    {:reply, count, state}
+  end
+
   # ── Internal helpers ───────────────────────────────────────────────────
 
   defp duel_key(a, b), do: {min(a, b), max(a, b)}
@@ -354,7 +463,7 @@ defmodule Arena.DuelServer do
   end
 
   defp remove_duel(state, duel_key, duel) do
-    %{
+    state = %{
       state
       | duels: Map.delete(state.duels, duel_key),
         player_to_duel:
@@ -362,12 +471,23 @@ defmodule Arena.DuelServer do
           |> Map.delete(duel.player_a)
           |> Map.delete(duel.player_b)
     }
+
+    # VB6: SalaLiberada — free the room
+    free_room(state, duel.room_id)
   end
 
   defp finalize_duel(duel, :tie) do
     # Refund each player their bet
     refund = duel.bet
-    %{type: :tie, player_a: duel.player_a, player_b: duel.player_b, refund: refund, duel: duel}
+
+    %{
+      type: :tie,
+      player_a: duel.player_a,
+      player_b: duel.player_b,
+      refund: refund,
+      duel: duel,
+      original_positions: duel.original_positions
+    }
   end
 
   defp finalize_duel(duel, winner_id) do
@@ -382,8 +502,48 @@ defmodule Arena.DuelServer do
       loser: loser_id,
       prize: prize,
       tax: tax,
-      duel: duel
+      duel: duel,
+      original_positions: duel.original_positions
     }
+  end
+
+  # ── Room management helpers (VB6: BuscarSala / SalaLiberada) ──────────
+
+  # When no rooms are configured, allocation always succeeds with nil room.
+  defp allocate_room(%{rooms: rooms} = state) when map_size(rooms) == 0 do
+    {:ok, nil, state}
+  end
+
+  # Find a free room and mark it in_use (VB6: BuscarSala).
+  defp allocate_room(state) do
+    free_room =
+      state.rooms
+      |> Map.values()
+      |> Enum.find(fn room -> not room.in_use end)
+
+    case free_room do
+      nil ->
+        {:error, :no_rooms_available}
+
+      room ->
+        updated_room = %{room | in_use: true}
+        rooms = Map.put(state.rooms, room.id, updated_room)
+        {:ok, room, %{state | rooms: rooms}}
+    end
+  end
+
+  # Free a room after a duel ends (VB6: SalaLiberada).
+  defp free_room(state, nil), do: state
+
+  defp free_room(state, room_id) do
+    case Map.get(state.rooms, room_id) do
+      nil ->
+        state
+
+      room ->
+        updated_room = %{room | in_use: false}
+        %{state | rooms: Map.put(state.rooms, room_id, updated_room)}
+    end
   end
 
   # Helper for nested map puts
