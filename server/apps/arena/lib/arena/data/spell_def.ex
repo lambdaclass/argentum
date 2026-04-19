@@ -52,7 +52,9 @@ defmodule Arena.Data.SpellDef do
     require_weapon_type: 0,
     target_effect_type: 0,
     remove_invisibility: false,
-    is_elemental_tags_only: false
+    is_elemental_tags_only: false,
+    # VB6: AntiRm — when 1, spell ignores magic resistance
+    anti_rm: 0
   ]
 
   @doc "Build a SpellDef from a parsed INI section (downcased keys)."
@@ -104,7 +106,8 @@ defmodule Arena.Data.SpellDef do
       require_weapon_type: parse_int(section["requireweapontype"]),
       target_effect_type: parse_int(section["targeteffecttype"]),
       remove_invisibility: band(parse_int(section["effects"]), 32768) != 0,
-      is_elemental_tags_only: parse_int(section["iselementaltagsonly"]) > 0
+      is_elemental_tags_only: parse_int(section["iselementaltagsonly"]) > 0,
+      anti_rm: parse_int(section["antirm"])
     }
   end
 

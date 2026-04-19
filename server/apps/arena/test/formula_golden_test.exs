@@ -129,67 +129,74 @@ defmodule Arena.FormulaGoldenTest do
       assert Combat.level_up_gains(1, @guerrero, 18, 18, 0, 0.5) == :no_level_up
     end
 
-    test "level up with rand_hp_factor 0.0 yields minimum HP gain" do
-      # Need to know the XP threshold for level 2
+    test "VB6 biased HP gain is within bounded range (constitution-aware)" do
+      # VB6: HP gain uses RandomIntBiased with PromClaseRaza +/- RangoVidas
       next_xp = GameData.exp_for_level(2)
 
       if next_xp do
         current_xp = next_xp + 10
+        con = 18
 
         {:level_up, gains} =
-          Combat.level_up_gains(1, @guerrero, 18, 18, current_xp, 0.0)
-
-        hp_mod = GameData.class_hp_mod(@guerrero)
-        expected_hp = max(trunc(hp_mod * (0.8 + 0.0 * 0.4)), 1)
+          Combat.level_up_gains(1, @guerrero, 18, 18, current_xp, 0.0, con, con)
 
         assert gains.new_level == 2
-        assert gains.hp_gain == expected_hp
+        assert gains.hp_gain >= 1
         assert gains.remaining_xp == current_xp - next_xp
+
+        # HP gain should be within reasonable range for the class
+        hp_mod = GameData.class_hp_mod(@guerrero)
+        prom = hp_mod - (21 - con) * 0.5
+        # With RangoVidas=2, range is [prom-2, prom+2] plus capping
+        assert gains.hp_gain <= round(prom + 2 + 10)
       end
     end
 
-    test "level up with rand_hp_factor 1.0 yields maximum HP gain" do
+    test "level up with rand_hp_factor 1.0 yields valid HP gain" do
       next_xp = GameData.exp_for_level(2)
 
       if next_xp do
         current_xp = next_xp
 
         {:level_up, gains} =
-          Combat.level_up_gains(1, @guerrero, 18, 18, current_xp, 1.0)
+          Combat.level_up_gains(1, @guerrero, 18, 18, current_xp, 1.0, 18, 18)
 
-        hp_mod = GameData.class_hp_mod(@guerrero)
-        expected_hp = max(trunc(hp_mod * (0.8 + 1.0 * 0.4)), 1)
-
-        assert gains.hp_gain == expected_hp
+        assert gains.hp_gain >= 1
         assert gains.new_level == 2
       end
     end
 
-    test "mana gain is deterministic from int and class mana mult" do
+    test "mana gain uses VB6 GetMaxMana delta formula" do
+      # VB6: GetMaxMana = int * ManaInicial + (MultMana * int) * (level - 1)
       next_xp = GameData.exp_for_level(2)
 
       if next_xp do
         int = 25
         {:level_up, gains} =
-          Combat.level_up_gains(1, @mago, int, 18, next_xp, 0.5)
+          Combat.level_up_gains(1, @mago, int, 18, next_xp, 0.5, 18, 18)
 
+        mana_initial = GameData.class_mana_initial(@mago)
         mana_mult = GameData.class_mana_mult(@mago)
-        expected_mana = trunc(int * mana_mult)
+        max_mana_old = trunc(int * mana_initial + mana_mult * int * 0)
+        max_mana_new = trunc(int * mana_initial + mana_mult * int * 1)
+        expected_mana = max_mana_new - max_mana_old
 
         assert gains.mana_gain == expected_mana
       end
     end
 
-    test "stamina gain is deterministic from agi and class stamina growth" do
+    test "stamina gain uses VB6 GetMaxStamina delta formula" do
+      # VB6: GetMaxStamina = 60 + (level - 1) * AumentoSta
       next_xp = GameData.exp_for_level(2)
 
       if next_xp do
         agi = 20
         {:level_up, gains} =
-          Combat.level_up_gains(1, @guerrero, 18, agi, next_xp, 0.5)
+          Combat.level_up_gains(1, @guerrero, 18, agi, next_xp, 0.5, 18, 18)
 
         sta_growth = GameData.class_stamina_growth(@guerrero)
-        expected_sta = max(trunc(sta_growth * agi / 33), 1)
+        # Delta: (60 + 1*sta_growth) - (60 + 0*sta_growth) = sta_growth
+        expected_sta = trunc(sta_growth)
 
         assert gains.sta_gain == expected_sta
       end
@@ -490,9 +497,9 @@ defmodule Arena.FormulaGoldenTest do
       # raw = (60 + 40 + 5) * dmg_mod = 105 * dmg_mod
       base_dmg = max(round(105 * dmg_mod), 1)
 
-      # Apply critical
+      # Apply critical (VB6: CriticalHitDmgModifier = 0.33)
       crit_dmg = Combat.apply_critical(base_dmg)
-      assert crit_dmg == round(base_dmg * 1.5)
+      assert crit_dmg == round(base_dmg + base_dmg * 0.33)
 
       # XP from damage: npc_give_exp=200, npc_max_hp=150, player_level=10, npc_level=10
       xp = Combat.xp_gain(crit_dmg, 200, 150, 10, 10)

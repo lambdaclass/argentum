@@ -241,7 +241,7 @@ defmodule Arena.PropertyFuzzExpansionTest do
     end
 
     test "critical_hit? with zero skill" do
-      result = Combat.critical_hit?(0)
+      result = Combat.critical_hit?(:bandido, :knuckle, 0)
       assert is_boolean(result)
     end
 

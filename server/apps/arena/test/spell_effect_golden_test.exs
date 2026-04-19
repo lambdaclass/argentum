@@ -1324,7 +1324,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster}, occupancy: occupancy, npcs_live: %{1 => npc})
 
       # Apply 30 damage directly (bypassing random roll)
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 30, 51, 50)
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 30, %SpellDef{}, 51, 50)
 
       # npc_id 99999 has no NPC def, so magic_resistance = 0, full damage passes
       updated_npc = new_state.npcs_live[1]
@@ -1341,7 +1341,7 @@ defmodule Arena.SpellEffectGoldenTest do
       occupancy = %{{51, 50} => {:npc, 1}}
       state = make_state(%{caster: caster}, occupancy: occupancy, npcs_live: %{1 => npc})
 
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 20, 51, 50)
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 20, %SpellDef{}, 51, 50)
 
       updated_npc = new_state.npcs_live[1]
       assert updated_npc.target_id == :caster
@@ -1357,7 +1357,7 @@ defmodule Arena.SpellEffectGoldenTest do
       occupancy = %{{51, 50} => {:npc, 1}}
       state = make_state(%{caster: caster}, occupancy: occupancy, npcs_live: %{1 => npc})
 
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, 51, 50)
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, %SpellDef{}, 51, 50)
 
       # NPC HP unchanged
       assert new_state.npcs_live[1].hp == 0
@@ -1381,7 +1381,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster}, occupancy: occupancy, npcs_live: %{1 => npc})
 
       # 100 raw damage, 50% resistance -> 50 final damage
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 100, 51, 50)
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 100, %SpellDef{}, 51, 50)
 
       assert new_state.npcs_live[1].hp == 150
 
@@ -1406,7 +1406,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster, defender: defender}, occupancy: occupancy)
 
       # 100 raw damage, 30% resistance -> round(100 * 0.7) = 70 final
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 100, 51, 50)
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 100, %SpellDef{}, 51, 50)
 
       assert new_state.players[:defender].hp == 130
     end
@@ -1424,7 +1424,7 @@ defmodule Arena.SpellEffectGoldenTest do
         meta: %{safe_zone: true, sin_invi_ocul: false}
       )
 
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 100, 51, 50)
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 100, %SpellDef{}, 51, 50)
 
       # Defender HP unchanged -- safe zone blocked it
       assert new_state.players[:defender].hp == 200
@@ -1440,7 +1440,7 @@ defmodule Arena.SpellEffectGoldenTest do
       occupancy = %{{51, 50} => {:player, :defender}}
       state = make_state(%{caster: caster, defender: defender}, occupancy: occupancy)
 
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, 51, 50)
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, %SpellDef{}, 51, 50)
 
       # Caster becomes criminal for attacking a non-criminal
       assert new_state.players[:caster].criminal == true
@@ -1456,7 +1456,7 @@ defmodule Arena.SpellEffectGoldenTest do
       occupancy = %{{51, 50} => {:player, :defender}}
       state = make_state(%{caster: caster, defender: defender}, occupancy: occupancy)
 
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, 51, 50)
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, %SpellDef{}, 51, 50)
 
       assert new_state.players[:caster].criminal == false
     end
@@ -1471,7 +1471,7 @@ defmodule Arena.SpellEffectGoldenTest do
       occupancy = %{{51, 50} => {:player, :defender}}
       state = make_state(%{caster: caster, defender: defender}, occupancy: occupancy)
 
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, 51, 50)
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, %SpellDef{}, 51, 50)
 
       # HP unchanged -- same faction blocked it
       assert new_state.players[:defender].hp == 200
@@ -1487,7 +1487,7 @@ defmodule Arena.SpellEffectGoldenTest do
       caster = make_entity(%{mana: 180, hp: 100})
       state = make_state(%{caster: caster})
 
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, nil, nil)
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, %SpellDef{}, nil, nil)
 
       # No damage to self -- damage spells require a valid target
       assert new_state.players[:caster].hp == 100
@@ -1497,7 +1497,7 @@ defmodule Arena.SpellEffectGoldenTest do
       caster = make_entity(%{mana: 180, hp: 100})
       state = make_state(%{caster: caster})
 
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, 60, 60)
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, %SpellDef{}, 60, 60)
 
       assert new_state.players[:caster].hp == 100
     end
@@ -1508,7 +1508,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster}, occupancy: occupancy)
 
       # {:player, :caster} with target_id == char_id falls through to no-op
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, 50, 50)
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, %SpellDef{}, 50, 50)
 
       assert new_state.players[:caster].hp == 100
     end

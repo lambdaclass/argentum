@@ -104,7 +104,7 @@ defmodule Arena.Map.SpellEffects do
       spell_def.sube_hp == 2 ->
         is_mage = entity.class in [:mago]
         damage = Arena.Combat.spell_damage(spell_def.min_hp, spell_def.max_hp, entity.level, is_mage)
-        apply_spell_damage(state, char_id, entity, damage, target_x, target_y)
+        apply_spell_damage(state, char_id, entity, damage, spell_def, target_x, target_y)
 
       # Heal spell (sube_hp == 1 or sanacion)
       spell_def.sube_hp == 1 or spell_def.sanacion ->
@@ -184,7 +184,7 @@ defmodule Arena.Map.SpellEffects do
     %{state | players: players}
   end
 
-  def apply_spell_damage(state, char_id, entity, damage, target_x, target_y) do
+  def apply_spell_damage(state, char_id, entity, damage, spell_def, target_x, target_y) do
     target = if target_x && target_y, do: Helpers.get_occupancy(state.occupancy, target_x, target_y), else: nil
 
     case target do
@@ -205,7 +205,7 @@ defmodule Arena.Map.SpellEffects do
             %{state | players: players}
 
           defender ->
-            apply_spell_damage_to_player(state, char_id, entity, damage, target_id, defender)
+            apply_spell_damage_to_player(state, char_id, entity, damage, spell_def, target_id, defender)
         end
 
       _ ->
@@ -270,7 +270,7 @@ defmodule Arena.Map.SpellEffects do
     end
   end
 
-  defp apply_spell_damage_to_player(state, char_id, entity, damage, defender_id, defender) do
+  defp apply_spell_damage_to_player(state, char_id, entity, damage, spell_def, defender_id, defender) do
     # VB6 parity: faction/duel exceptions for safe zone (same as physical attacks)
     duel_pvp_exception =
       Map.get(entity, :in_duel, false) and Map.get(defender, :in_duel, false) and
@@ -335,9 +335,50 @@ defmodule Arena.Map.SpellEffects do
         %{state | players: players}
 
       true ->
-        # VB6: apply magic resistance in PvP (resistance skill as percentage)
-        resist_pct = Map.get(defender.skills, :resistance, 0)
-        final_damage = Arena.Combat.apply_magic_resistance(damage, resist_pct)
+        # VB6 full PvP magic damage formula (modHechizos.bas:3289-3331)
+        # 1. Apply weapon magic bonuses (percentage + flat)
+        {w_pct, w_abs, w_pen} = Arena.CombatStats.magic_bonuses_for_slot(entity.equipment, :weapon)
+        dmg = damage + round(damage * w_pct / 100) + w_abs
+
+        # 2. Apply ring magic bonuses (percentage + flat)
+        {r_pct, r_abs, r_pen} = Arena.CombatStats.magic_bonuses_for_slot(entity.equipment, :ring)
+        dmg = dmg + round(dmg * r_pct / 100) + r_abs
+
+        # 3. Total penetration from attacker equipment
+        total_penetration = w_pen + r_pen
+
+        # 4. If spell does not ignore MR (anti_rm == 0), compute and apply MR
+        anti_rm = Map.get(spell_def, :anti_rm, 0)
+
+        dmg =
+          if anti_rm == 0 do
+            # VB6: GetUserMR(target) = armor + ring + shield + helmet MR + 100 * class MR mod
+            def_class_id = Helpers.class_atom_to_id(defender.class)
+            user_mr = Arena.CombatStats.get_user_mr(defender.equipment, def_class_id)
+
+            # Also include resistance skill (VB6: MRSkillProtectionModifier feature)
+            resist_skill = Map.get(defender.skills, :resistance, 0)
+            total_mr = max(0, user_mr - total_penetration + resist_skill)
+
+            if total_mr > 0 do
+              max(round(dmg * (1 - total_mr / 100)), 0)
+            else
+              dmg
+            end
+          else
+            dmg
+          end
+
+        # 5. Apply MagicDamageModifier (attacker) and MagicDamageReduction (defender)
+        # VB6: GetMagicDamageModifier = max(1 + User.Modifiers.MagicDamageBonus, 0)
+        # VB6: GetMagicDamageReduction = max(1 - User.Modifiers.MagicDamageReduction, 0)
+        atk_modifier = max(1.0 + Map.get(entity, :magic_damage_modifier, 0.0), 0.0)
+        def_reduction = max(1.0 - Map.get(defender, :magic_damage_reduction, 0.0), 0.0)
+        dmg = round(dmg * atk_modifier * def_reduction)
+
+        # VB6: Prevengo dano negativo
+        final_damage = max(dmg, 0)
+
         new_hp = max(defender.hp - final_damage, 0)
         defender = %{defender | hp: new_hp}
 
@@ -524,7 +565,15 @@ defmodule Arena.Map.SpellEffects do
         target_entity =
           cond do
             spell_def.paraliza ->
-              buff = %{type: :paralyzed, expires_at: now + div(duration_ms, 2)}
+              # VB6: duration halved for everyone, then 0.7x for Warrior/Hunter
+              base_dur = div(duration_ms, 2)
+
+              effective_dur =
+                if target_entity.class in [:guerrero, :cazador],
+                  do: trunc(base_dur * 0.7),
+                  else: base_dur
+
+              buff = %{type: :paralyzed, expires_at: now + effective_dur}
               buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :paralyzed))]
               %{target_entity | paralyzed: true, buffs: buffs}
 
@@ -543,8 +592,15 @@ defmodule Arena.Map.SpellEffects do
               %{target_entity | invisible: true, buffs: buffs}
 
             spell_def.inmoviliza ->
-              # VB6: immobilize duration is halved
-              buff = %{type: :immobilized, expires_at: now + div(duration_ms, 2)}
+              # VB6: immobilize duration is halved, then 0.7x for Warrior/Hunter
+              base_dur = div(duration_ms, 2)
+
+              effective_dur =
+                if target_entity.class in [:guerrero, :cazador],
+                  do: trunc(base_dur * 0.7),
+                  else: base_dur
+
+              buff = %{type: :immobilized, expires_at: now + effective_dur}
               buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :immobilized))]
               %{target_entity | immobilized: true, buffs: buffs}
 

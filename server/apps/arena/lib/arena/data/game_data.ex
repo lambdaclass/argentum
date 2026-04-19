@@ -182,6 +182,14 @@ defmodule Arena.Data.GameData do
     end
   end
 
+  @doc "VB6: per-class magic resistance modifier (Balance.dat MODRESISTENCIAMAGICA)."
+  def class_magic_resistance_mod(class_id) when is_integer(class_id) do
+    case :ets.lookup(@table, {:class_magic_resistance_mod, class_id}) do
+      [{_, value}] -> value
+      [] -> 0.0
+    end
+  end
+
   @doc "VB6: per-class hit modifier for levels 1-36."
   def class_hit_pre36(class_id) when is_integer(class_id) do
     case :ets.lookup(@table, {:class_hit_pre36, class_id}) do
@@ -374,6 +382,8 @@ defmodule Arena.Data.GameData do
     load_class_section(sections, "MODDANOARMAS", :class_damage_mod, 1.0)
     load_class_section(sections, "MODEVASION", :class_evasion_mod, 1.0)
     load_class_section(sections, "MODESCUDO", :class_shield_mod, 1.0)
+    # VB6: per-class magic resistance modifier (Balance.dat MODRESISTENCIAMAGICA)
+    load_class_section(sections, "MODRESISTENCIAMAGICA", :class_magic_resistance_mod, 0.0)
     # VB6: per-class base hit scaling (Balance.dat GOLPE_PRE_36 / GOLPE_POST_36)
     load_class_section_int(sections, "GOLPE_PRE_36", :class_hit_pre36, 1)
     load_class_section_int(sections, "GOLPE_POST_36", :class_hit_post36, 1)

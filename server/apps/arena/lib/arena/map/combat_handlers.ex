@@ -241,16 +241,19 @@ defmodule Arena.Map.CombatHandlers do
           weapon_skill = Map.get(entity.skills, skill_name, 50)
           npc_evasion = if npc_def, do: npc_def.poder_evasion, else: 0
 
+          # Drift #1: Use hit_chance_vs_npc (VB6: UserImpactoNpc)
+          # NPC evasion is used directly, no class_evasion_mod or level bonus
+          # Drift #2: Include equipment hit bonus
+          hit_bonus = CombatStats.equipment_hit_bonus(entity.equipment)
+
           hit_roll =
-            Combat.hit_chance(
+            Combat.hit_chance_vs_npc(
               weapon_skill,
               entity.agi,
               entity.level,
               class_id,
               npc_evasion,
-              0,
-              if(npc_def, do: npc_def.npc_level, else: 1),
-              class_id
+              hit_bonus
             )
 
           if :rand.uniform(100) <= hit_roll do
@@ -260,8 +263,22 @@ defmodule Arena.Map.CombatHandlers do
             raw_damage =
               Combat.melee_damage(min_weapon, max_weapon, entity.str + entity.str_buff, class_id, user_min, user_max)
 
+            # Drift #7: Apply full physical damage pipeline for PvE
             npc_defense = if npc_def, do: npc_def.def, else: 0
-            final_damage = max(raw_damage - npc_defense, 0)
+            defense_bonus = 0
+            armor_pen = 0
+            damage_modifier = 1.0
+            damage_reduction = 1.0
+
+            final_damage =
+              Combat.apply_physical_damage_modifiers(
+                raw_damage,
+                npc_defense,
+                defense_bonus,
+                armor_pen,
+                damage_modifier,
+                damage_reduction
+              )
 
             # VB6: CalculateElementalTagsModifiers — apply elemental matrix
             final_damage = Arena.Map.SpellEffects.apply_elemental_modifiers_for_weapon(final_damage, entity, npc_def)
@@ -407,6 +424,10 @@ defmodule Arena.Map.CombatHandlers do
             weapon_skill = Map.get(entity.skills, skill_name, 50)
             def_tactics = Map.get(defender.skills, :combat_tactics, 50)
 
+            # Drift #2: Include equipment hit and evasion bonuses
+            hit_bonus = CombatStats.equipment_hit_bonus(entity.equipment)
+            evasion_bonus = CombatStats.equipment_evasion_bonus(defender.equipment)
+
             hit_roll =
               Combat.hit_chance(
                 weapon_skill,
@@ -416,20 +437,136 @@ defmodule Arena.Map.CombatHandlers do
                 def_tactics,
                 defender.agi + defender.agi_buff,
                 defender.level,
-                def_class_id
+                def_class_id,
+                hit_bonus,
+                evasion_bonus
               )
 
             # VB6: meditating reduces evasion by 25%
             hit_roll = Combat.adjust_hit_for_meditate(hit_roll, defender.meditating)
 
             if :rand.uniform(100) <= hit_roll do
+              # --- HIT: deal damage ---
+              # VB6: weapon skill gain on hit
+              entity = maybe_gain_skill(entity, skill_name)
+
+              # VB6: base user damage added to weapon damage
+              {user_min, user_max} = Combat.base_user_damage(entity.level, class_id)
+
+              raw_damage =
+                Combat.melee_damage(
+                  min_weapon,
+                  max_weapon,
+                  entity.str + entity.str_buff,
+                  class_id,
+                  user_min,
+                  user_max
+                )
+
+              # Drift #4: Critical hit check — class-gated (bandido + knuckle only)
+              weapon_type_id = CombatStats.weapon_type(entity.equipment)
+              weapon_type_atom = weapon_type_to_atom(weapon_type_id)
+              wrestling_skill = Map.get(entity.skills, :wrestling, 0)
+              extra_crit = CombatStats.weapon_extra_crit_chance(entity.equipment)
+
+              raw_damage =
+                if Combat.critical_hit?(entity.class, weapon_type_atom, wrestling_skill, extra_crit),
+                  do: Combat.apply_critical(raw_damage),
+                  else: raw_damage
+
+              # Drift #7: Apply full physical damage pipeline for PvP
+              {min_def, max_def} = CombatStats.effective_defense(defender.equipment)
+              defense = if max_def > min_def, do: Enum.random(min_def..max_def), else: min_def
+              defense_bonus = CombatStats.equipment_defense_bonus(defender.equipment)
+
+              final_damage =
+                Combat.apply_physical_damage_modifiers(
+                  raw_damage,
+                  defense,
+                  defense_bonus,
+                  _armor_penetration = 0,
+                  _damage_modifier = 1.0,
+                  _damage_reduction = 1.0
+                )
+
+              new_hp = max(defender.hp - final_damage, 0)
+              defender = %{defender | hp: new_hp}
+
+              Helpers.send_to_session(
+                state.sessions,
+                char_id,
+                {:send_raw,
+                 Encoder.encode({:user_hitted_user, %{char_index: defender.char_index, damage: final_damage}})}
+              )
+
+              Helpers.send_to_session(
+                state.sessions,
+                defender_id,
+                {:send_raw,
+                 Encoder.encode({:user_hitted_by_user, %{char_index: entity.char_index, damage: final_damage}})}
+              )
+
+              Helpers.send_to_session(
+                state.sessions,
+                defender_id,
+                {:send_raw, Encoder.encode({:update_hp, %{min_hp: new_hp}})}
+              )
+
+              # Guild war: no criminal flag when attacking enemy guild members
+              guild_war = Arena.GuildServer.players_at_war?(char_id, defender_id)
+              entity = if not defender.criminal and not guild_war, do: %{entity | criminal: true}, else: entity
+
+              {defender, state} =
+                if new_hp <= 0 do
+                  Helpers.send_to_session(
+                    state.sessions,
+                    defender_id,
+                    {:send_raw, Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})}
+                  )
+
+                  Arena.Map.PlayerDeath.handle_player_death(state, defender_id, defender)
+                else
+                  {defender, state}
+                end
+
+              # Faction score + kill counters + guild XP on PvP kill
+              entity =
+                if defender.dead do
+                  score = Arena.Map.Faction.faction_score_for_kill(entity, defender)
+                  entity = if score > 0, do: %{entity | faction_score: entity.faction_score + score}, else: entity
+                  entity = Arena.Map.PlayerDeath.update_pvp_kill_counters(entity, defender)
+
+                  case Arena.GuildServer.guild_id_for(char_id) do
+                    nil -> :ok
+                    gid -> Arena.GuildServer.add_guild_exp(gid, 50)
+                  end
+
+                  entity
+                else
+                  entity
+                end
+
+              players =
+                state.players
+                |> Map.put(char_id, entity)
+                |> Map.put(defender_id, defender)
+
+              state = %{state | players: players}
+
+              if defender.dead do
+                Helpers.broadcast_character_change(state, defender)
+              end
+
+              state
+            else
+              # --- MISS: Drift #3 — shield block checked AFTER miss (second chance) ---
+              # VB6 ref: SistemaCombate.bas UsuarioImpacto (line 1014-1033)
               shield_pct = CombatStats.shield_defense_pct(defender.equipment)
               def_skill = Map.get(defender.skills, :combat_defense, 50)
 
-              # VB6: shield block uses attacker's weapon skill, not tactics
-              if shield_pct > 0 and
-                   Combat.shield_block?(shield_pct, def_skill, Map.get(entity.skills, :combat_weapons, 50)) do
-                # VB6: defense skill gain on block
+              # Drift #3: Use DEFENDER's tactics (not attacker's weapons skill)
+              if shield_pct > 0 and Combat.shield_block?(shield_pct, def_skill, def_tactics) do
+                # Shield blocked the attack
                 defender = maybe_gain_skill(defender, :combat_defense)
 
                 Helpers.send_to_session(
@@ -451,101 +588,10 @@ defmodule Arena.Map.CombatHandlers do
 
                 %{state | players: players}
               else
-                # VB6: base user damage added to weapon damage
-                {user_min, user_max} = Combat.base_user_damage(entity.level, class_id)
-
-                raw_damage =
-                  Combat.melee_damage(
-                    min_weapon,
-                    max_weapon,
-                    entity.str + entity.str_buff,
-                    class_id,
-                    user_min,
-                    user_max
-                  )
-
-                # VB6: critical hit check
-                raw_damage =
-                  if Combat.critical_hit?(weapon_skill), do: Combat.apply_critical(raw_damage), else: raw_damage
-
-                {min_def, max_def} = CombatStats.effective_defense(defender.equipment)
-                {final_damage, _location} = Combat.apply_defense(raw_damage, {min_def, max_def})
-
-                new_hp = max(defender.hp - final_damage, 0)
-                defender = %{defender | hp: new_hp}
-
-                Helpers.send_to_session(
-                  state.sessions,
-                  char_id,
-                  {:send_raw,
-                   Encoder.encode({:user_hitted_user, %{char_index: defender.char_index, damage: final_damage}})}
-                )
-
-                Helpers.send_to_session(
-                  state.sessions,
-                  defender_id,
-                  {:send_raw,
-                   Encoder.encode({:user_hitted_by_user, %{char_index: entity.char_index, damage: final_damage}})}
-                )
-
-                Helpers.send_to_session(
-                  state.sessions,
-                  defender_id,
-                  {:send_raw, Encoder.encode({:update_hp, %{min_hp: new_hp}})}
-                )
-
-                # VB6: weapon skill gain on hit
-                entity = maybe_gain_skill(entity, skill_name)
-                # Guild war: no criminal flag when attacking enemy guild members
-                guild_war = Arena.GuildServer.players_at_war?(char_id, defender_id)
-                entity = if not defender.criminal and not guild_war, do: %{entity | criminal: true}, else: entity
-
-                {defender, state} =
-                  if new_hp <= 0 do
-                    Helpers.send_to_session(
-                      state.sessions,
-                      defender_id,
-                      {:send_raw, Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})}
-                    )
-
-                    Arena.Map.PlayerDeath.handle_player_death(state, defender_id, defender)
-                  else
-                    {defender, state}
-                  end
-
-                # Faction score + kill counters + guild XP on PvP kill
-                entity =
-                  if defender.dead do
-                    score = Arena.Map.Faction.faction_score_for_kill(entity, defender)
-                    entity = if score > 0, do: %{entity | faction_score: entity.faction_score + score}, else: entity
-                    entity = Arena.Map.PlayerDeath.update_pvp_kill_counters(entity, defender)
-
-                    case Arena.GuildServer.guild_id_for(char_id) do
-                      nil -> :ok
-                      gid -> Arena.GuildServer.add_guild_exp(gid, 50)
-                    end
-
-                    entity
-                  else
-                    entity
-                  end
-
-                players =
-                  state.players
-                  |> Map.put(char_id, entity)
-                  |> Map.put(defender_id, defender)
-
-                state = %{state | players: players}
-
-                if defender.dead do
-                  Helpers.broadcast_character_change(state, defender)
-                end
-
-                state
+                # Pure miss — no block
+                players = Map.put(state.players, char_id, entity)
+                %{state | players: players}
               end
-            else
-              players = Map.put(state.players, char_id, entity)
-              %{state | players: players}
             end
         end
     end
@@ -1092,4 +1138,15 @@ defmodule Arena.Map.CombatHandlers do
 
     {:reply, {:error, :invalid_target}, state}
   end
+
+  # VB6 e_WeaponType mapping (Drift #4)
+  # Maps integer weapon_type IDs to atoms for critical hit class gating.
+  @weapon_type_atoms %{
+    1 => :knuckle,
+    2 => :bow,
+    3 => :gunpowder,
+    4 => :dagger,
+    5 => :sword
+  }
+  defp weapon_type_to_atom(type_id), do: Map.get(@weapon_type_atoms, type_id, :sword)
 end

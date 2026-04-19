@@ -879,7 +879,7 @@ defmodule Arena.BugRegressionTest do
       state = %{state | occupancy: occ}
 
       # Directly call apply_spell_damage with 50 damage at defender's tile
-      new_state = SpellEffects.apply_spell_damage(state, :attacker, attacker, 50, 51, 50)
+      new_state = SpellEffects.apply_spell_damage(state, :attacker, attacker, 50, %Arena.Data.SpellDef{}, 51, 50)
 
       defender_after = Map.get(new_state.players, :defender)
       assert defender_after.hp == 100, "Spell should not damage players in safe zone"

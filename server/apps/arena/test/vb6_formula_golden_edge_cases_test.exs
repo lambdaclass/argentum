@@ -528,15 +528,16 @@ defmodule Arena.VB6FormulaGoldenEdgeCasesTest do
   # ── Combined formula chain golden tests ────────────────────────────────────
   # Simulate a full melee attack pipeline: damage -> critical -> defense -> result
 
+  # VB6: CriticalHitDmgModifier = 0.33, total = damage + damage * 0.33
   describe "combined formula chain: melee attack pipeline" do
     test "critical hit on base damage, then zero defense" do
       # Step 1: base damage 100
-      # Step 2: apply critical -> 150
-      # Step 3: apply defense with {0, 0} -> {150, _location}
+      # Step 2: apply critical -> 133 (100 + 100*0.33)
+      # Step 3: apply defense with {0, 0} -> {133, _location}
       crit_dmg = Combat.apply_critical(100)
-      assert crit_dmg == 150
+      assert crit_dmg == 133
       {final, _loc} = Combat.apply_defense(crit_dmg, {0, 0})
-      assert final == 150
+      assert final == 133
     end
 
     test "non-critical damage absorbed entirely by defense" do
@@ -565,7 +566,8 @@ defmodule Arena.VB6FormulaGoldenEdgeCasesTest do
 
     test "critical on 1 damage then high defense yields 0" do
       crit = Combat.apply_critical(1)
-      assert crit == 2
+      # round(1 + 1*0.33) = round(1.33) = 1
+      assert crit == 1
       {final, _loc} = Combat.apply_defense(crit, {10, 10})
       assert final == 0
     end
@@ -739,29 +741,30 @@ defmodule Arena.VB6FormulaGoldenEdgeCasesTest do
   end
 
   # ── apply_critical/1 comprehensive edge cases ──────────────────────────────
+  # VB6: CriticalHitDmgModifier = 0.33, total = damage + damage * 0.33
 
   describe "apply_critical/1 comprehensive values" do
     test "negative damage stays negative (edge: should not happen in practice)" do
-      # round(-10 * 1.5) = -15
-      assert Combat.apply_critical(-10) == -15
+      # round(-10 + -10*0.33) = round(-13.3) = -13
+      assert Combat.apply_critical(-10) == round(-10 + -10 * 0.33)
     end
 
     test "very large damage 99999" do
-      assert Combat.apply_critical(99_999) == round(99_999 * 1.5)
+      assert Combat.apply_critical(99_999) == round(99_999 + 99_999 * 0.33)
     end
 
-    test "even numbers: 2 -> 3, 4 -> 6, 10 -> 15, 100 -> 150" do
+    test "even numbers: 2 -> 3, 4 -> 5, 10 -> 13, 100 -> 133" do
       assert Combat.apply_critical(2) == 3
-      assert Combat.apply_critical(4) == 6
-      assert Combat.apply_critical(10) == 15
-      assert Combat.apply_critical(100) == 150
+      assert Combat.apply_critical(4) == round(4 + 4 * 0.33)
+      assert Combat.apply_critical(10) == round(10 + 10 * 0.33)
+      assert Combat.apply_critical(100) == 133
     end
 
-    test "odd numbers: 1 -> 2, 3 -> 4/5, 5 -> 8, 7 -> 10/11" do
-      assert Combat.apply_critical(1) == round(1 * 1.5)
-      assert Combat.apply_critical(3) == round(3 * 1.5)
-      assert Combat.apply_critical(5) == round(5 * 1.5)
-      assert Combat.apply_critical(7) == round(7 * 1.5)
+    test "odd numbers: 1 -> 1, 3 -> 4, 5 -> 7, 7 -> 9" do
+      assert Combat.apply_critical(1) == round(1 + 1 * 0.33)
+      assert Combat.apply_critical(3) == round(3 + 3 * 0.33)
+      assert Combat.apply_critical(5) == round(5 + 5 * 0.33)
+      assert Combat.apply_critical(7) == round(7 + 7 * 0.33)
     end
   end
 

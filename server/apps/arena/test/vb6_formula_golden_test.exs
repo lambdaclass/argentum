@@ -360,25 +360,27 @@ defmodule Arena.VB6FormulaGoldenTest do
 
   # ── apply_critical/1 golden tests ─────────────────────────────────────────
 
+  # VB6: CriticalHitDmgModifier = 0.33 (Balance.dat [EXTRA] ModDanoGolpeCritico)
+  # BonusDamage = Damage * 0.33, Total = Damage + BonusDamage = Damage * 1.33
   describe "apply_critical/1 golden values" do
-    test "100 damage becomes 150" do
-      assert Combat.apply_critical(100) == 150
+    test "100 damage becomes 133 (100 + 100*0.33)" do
+      assert Combat.apply_critical(100) == 133
     end
 
-    test "1 damage becomes 2 (rounds 1.5 to 2)" do
-      assert Combat.apply_critical(1) == 2
+    test "1 damage becomes 1 (round(1 + 0.33) = 1)" do
+      assert Combat.apply_critical(1) == 1
     end
 
     test "0 damage stays 0" do
       assert Combat.apply_critical(0) == 0
     end
 
-    test "odd number 33 becomes 50 (rounds 49.5 to 50)" do
-      assert Combat.apply_critical(33) == 50
+    test "odd number 33 becomes 44 (round(33 * 1.33) = 44)" do
+      assert Combat.apply_critical(33) == 44
     end
 
-    test "200 damage becomes 300" do
-      assert Combat.apply_critical(200) == 300
+    test "200 damage becomes 266 (round(200 * 1.33) = 266)" do
+      assert Combat.apply_critical(200) == 266
     end
   end
 

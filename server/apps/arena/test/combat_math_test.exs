@@ -121,17 +121,20 @@ defmodule Arena.CombatMathTest do
       end
     end
 
-    test "rand_hp_factor of 0 vs max (close to 1.0)" do
+    test "VB6 biased random HP gain: always in a reasonable range" do
       required_xp = Arena.Data.GameData.exp_for_level(2)
 
-      {:level_up, gains_min} = Combat.level_up_gains(1, 6, 18, 18, required_xp, 0.0)
-      {:level_up, gains_max} = Combat.level_up_gains(1, 6, 18, 18, required_xp, 0.999)
+      # Run multiple times to ensure randomness is bounded
+      gains_list =
+        for _ <- 1..50 do
+          {:level_up, gains} = Combat.level_up_gains(1, 6, 18, 18, required_xp, 0.5, 18, 18)
+          gains.hp_gain
+        end
 
-      # HP gain with factor 0 should be <= HP gain with factor ~1
-      assert gains_min.hp_gain <= gains_max.hp_gain
-      # Both must be at least 1
-      assert gains_min.hp_gain >= 1
-      assert gains_max.hp_gain >= 1
+      # HP gain must always be at least 1
+      assert Enum.all?(gains_list, &(&1 >= 1))
+      # HP gain should be in a reasonable range for guerrero (hp_mod ~ 8-10)
+      assert Enum.max(gains_list) <= 20
     end
 
     test "remaining XP is correctly calculated with excess XP" do

@@ -305,21 +305,24 @@ defmodule Arena.CombatPropertyTest do
     end
   end
 
-  # ---- critical_hit?: always boolean ----
+  # ---- critical_hit?: always boolean, class-gated (Drift #4) ----
 
   describe "critical_hit? invariant" do
     test "always returns boolean" do
       for _ <- 1..@iterations do
-        result = Combat.critical_hit?(rand_skill())
+        # Only bandido + knuckle can crit; test both paths
+        result = Combat.critical_hit?(:bandido, :knuckle, rand_skill())
         assert is_boolean(result)
+        result2 = Combat.critical_hit?(:guerrero, :sword, rand_skill())
+        assert is_boolean(result2)
       end
     end
 
-    test "crit rate is bounded (≤15% by design)" do
-      hits = for _ <- 1..10_000, Combat.critical_hit?(100), do: 1
+    test "crit rate is bounded (class-gated, bandido + knuckle)" do
+      hits = for _ <- 1..10_000, Combat.critical_hit?(:bandido, :knuckle, 100), do: 1
       rate = length(hits) / 10_000
-      # Should be around 15% ± tolerance
-      assert rate < 0.20, "crit rate=#{Float.round(rate, 3)} exceeds 20%"
+      # BanditCriticalHitChance = 0.1, so at skill 100: 10% base chance
+      assert rate < 0.15, "crit rate=#{Float.round(rate, 3)} exceeds 15%"
     end
   end
 
@@ -334,11 +337,13 @@ defmodule Arena.CombatPropertyTest do
       end
     end
 
-    test "multiplier is exactly 1.5x" do
-      assert Combat.apply_critical(100) == 150
-      assert Combat.apply_critical(10) == 15
-      # round(1 * 1.5) = 2
-      assert Combat.apply_critical(1) == 2
+    test "multiplier is VB6 CriticalHitDmgModifier=0.33 (damage + damage * 0.33)" do
+      # VB6: BonusDamage = Damage * CriticalHitDmgModifier (0.33)
+      # Total = Damage + BonusDamage = Damage * 1.33
+      assert Combat.apply_critical(100) == 133
+      assert Combat.apply_critical(10) == 13
+      # round(1 + 1 * 0.33) = round(1.33) = 1
+      assert Combat.apply_critical(1) == 1
     end
   end
 

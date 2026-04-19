@@ -7,21 +7,53 @@ defmodule Arena.Combat do
   alias Arena.Data.GameData
 
   @doc """
-  Compute hit chance for player melee attack.
+  Compute hit chance for PvP player melee attack.
   Returns integer 5..95.
 
-  attack_power = (skill + 3 * skill / 100 * agi) * class_mod + 2.5 * max(level - 12, 0)
-  evasion = (tactics + 3 * tactics / 100 * agi) * class_mod + 2.5 * max(level - 12, 0)
+  VB6 ref: SistemaCombate.bas UsuarioImpacto (line 945)
+  attack_power = (skill + 3 * skill / 100 * agi) * class_mod + 2.5 * max(level - 12, 0) + hit_bonus
+  evasion = (tactics + 3 * tactics / 100 * agi) * class_mod + 2.5 * max(level - 12, 0) + evasion_bonus
   hit_chance = clamp(50 + (attack_power - evasion) * 0.4, 5, 95)
+
+  hit_bonus and evasion_bonus come from equipment/modifier bonuses (Drift #2).
   """
-  def hit_chance(atk_skill, atk_agi, atk_level, atk_class_id, def_tactics, def_agi, def_level, def_class_id) do
+  def hit_chance(
+        atk_skill, atk_agi, atk_level, atk_class_id,
+        def_tactics, def_agi, def_level, def_class_id,
+        hit_bonus \\ 0, evasion_bonus \\ 0
+      ) do
     atk_mod = GameData.class_attack_mod(atk_class_id)
     def_mod = GameData.class_evasion_mod(def_class_id)
 
-    attack_power = (atk_skill + 3 * atk_skill / 100 * atk_agi) * atk_mod + 2.5 * max(atk_level - 12, 0)
-    evasion = (def_tactics + 3 * def_tactics / 100 * def_agi) * def_mod + 2.5 * max(def_level - 12, 0)
+    attack_power =
+      (atk_skill + 3 * atk_skill / 100 * atk_agi) * atk_mod +
+        2.5 * max(atk_level - 12, 0) + hit_bonus
+
+    evasion =
+      (def_tactics + 3 * def_tactics / 100 * def_agi) * def_mod +
+        2.5 * max(def_level - 12, 0) + evasion_bonus
 
     round(50 + (attack_power - evasion) * 0.4) |> clamp(5, 95)
+  end
+
+  @doc """
+  Compute hit chance for player vs NPC attack (Drift #1).
+  Returns integer 5..95.
+
+  VB6 ref: SistemaCombate.bas UserImpactoNpc (line 242)
+  VB6 uses NPC's PoderEvasion directly — no class_evasion_mod or level bonus applied
+  to the NPC's evasion. The player attack_power is still computed using the player formula.
+
+  Formula: clamp(50 + (attack_power - npc_evasion) * 0.4, 5, 95)
+  """
+  def hit_chance_vs_npc(atk_skill, atk_agi, atk_level, atk_class_id, npc_evasion, hit_bonus \\ 0) do
+    atk_mod = GameData.class_attack_mod(atk_class_id)
+
+    attack_power =
+      (atk_skill + 3 * atk_skill / 100 * atk_agi) * atk_mod +
+        2.5 * max(atk_level - 12, 0) + hit_bonus
+
+    round(50 + (attack_power - npc_evasion) * 0.4) |> clamp(5, 95)
   end
 
   @doc """
@@ -39,17 +71,34 @@ defmodule Arena.Combat do
   end
 
   @doc """
-  VB6 critical hit check. Chance based on weapon skill, ~10-15% at high skill.
+  VB6 critical hit check (Drift #4: class-gated).
+
+  VB6 ref: SistemaCombate.bas PuedeGolpeCritico (line 2003-2013)
+  Only Bandit class with Knuckle weapon (weapon_type == :knuckle) can crit.
+
+  VB6 ref: SistemaCombate.bas GetCriticalHitChanceBase (line 2374-2385)
+  Chance = wrestling_skill * BanditCriticalHitChance + weapon ExtraCritAndStabChance
+  Clamped to 0..100 by ClampChance.
+
   Returns true if the attack is a critical hit.
   """
-  @crit_divisor 100
-  def critical_hit?(weapon_skill) do
-    chance = div(weapon_skill, @crit_divisor) * 10 + 5
-    :rand.uniform(100) <= min(chance, 15)
+  # VB6: BanditCriticalHitChance from Balance.dat [BACKSTAB] section.
+  # Default to 0.1 (10% at skill 100) as a reasonable value when not in data file.
+  @bandit_crit_chance 0.1
+
+  def critical_hit?(class, weapon_type, wrestling_skill, extra_crit_chance \\ 0) do
+    if class == :bandido and weapon_type == :knuckle do
+      chance = trunc(min(max(wrestling_skill * @bandit_crit_chance + extra_crit_chance, 0), 100))
+      :rand.uniform(100) <= chance
+    else
+      false
+    end
   end
 
-  @crit_multiplier 1.5
-  def apply_critical(damage), do: round(damage * @crit_multiplier)
+  # VB6: CriticalHitDmgModifier from Balance.dat [EXTRA] section = 0.33
+  # The critical hit adds bonus damage = base_damage * 0.33
+  @crit_damage_modifier 0.33
+  def apply_critical(damage), do: round(damage + damage * @crit_damage_modifier)
 
   @doc """
   Apply defense reduction. Random hit location: 1/6 head (helmet only), 5/6 body (armor + shield).
@@ -62,12 +111,17 @@ defmodule Arena.Combat do
   end
 
   @doc """
-  Check if attack is blocked by shield.
-  block_chance = clamp(shield_pct * def_skill / max(def_skill + tactics, 1), 10, 90)
+  Check if attack is blocked by shield (Drift #3: uses defender's skills).
+
+  VB6 ref: SistemaCombate.bas UsuarioImpacto (line 985-986)
+  Formula: clamp(shield_pct * def_defense_skill / max(def_defense_skill + def_tactics, 1), 10, 90)
+  Uses DEFENDER's defense skill and DEFENDER's tactics (not attacker's).
+  Shield block is checked AFTER a miss (second chance to block), not after a hit.
+
   Returns boolean.
   """
-  def shield_block?(shield_pct, defense_skill, attacker_tactics) when shield_pct > 0 do
-    chance = round(shield_pct * defense_skill / max(defense_skill + attacker_tactics, 1))
+  def shield_block?(shield_pct, def_defense_skill, def_tactics) when shield_pct > 0 do
+    chance = round(shield_pct * def_defense_skill / max(def_defense_skill + def_tactics, 1))
     chance = clamp(chance, 10, 90)
     Enum.random(1..100) <= chance
   end
@@ -216,31 +270,97 @@ defmodule Arena.Combat do
   # ==================================================================
 
   @doc """
-  Compute all stat gains for a level-up, given the *current* entity stats and
-  a random HP factor (0.0..1.0 exclusive, typically from `:rand.uniform()`).
+  Compute all stat gains for a level-up (Drift #6: constitution-aware HP).
 
-  Returns a map with keys: `:new_level`, `:hp_gain`, `:mana_gain`, `:sta_gain`,
-  `:skill_points`, `:min_hit`, `:max_hit`, `:remaining_xp`.
+  VB6 ref: Modulo_UsUaRiOs.bas (line 1057-1101)
 
-  VB6 formulas:
-    hp_gain  = max(trunc(class_hp_mod * (0.8 + rand_factor * 0.4)), 1)
-    mana_gain = trunc(int * class_mana_mult)
-    sta_gain  = max(trunc(class_stamina_growth * agi / 33), 1)
+  HP gain uses biased random with constitution awareness:
+    PromClaseRaza = ModClase.Vida - (21 - con) * 0.5
+    PromPersonaje = (max_hp - con) / (level - 1) [or PromClaseRaza at level 1]
+    PromBias = PromClaseRaza + (PromClaseRaza - PromPersonaje) * DesbalancePromedioVidas
+    AumentoHP = RandomIntBiased(PromClaseRaza - RangoVidas, PromClaseRaza + RangoVidas, PromBias, InfluenciaPromedioVidas)
+    Plus GetMaxHp capping with CapVidaMax/CapVidaMin
+
+  Mana is recalculated (delta of GetMaxMana between levels):
+    GetMaxMana = int * ManaInicial + (MultMana * int) * (level - 1)
+
+  Stamina is recalculated (delta of GetMaxStamina between levels):
+    GetMaxStamina = 60 + (level - 1) * AumentoSta
+
+  Accepts con and max_hp as optional params for backward compatibility.
+  Old callers passing 6 args still work (con defaults to 18, max_hp to 0).
   """
-  def level_up_gains(level, class_id, int, agi, current_xp, rand_hp_factor) do
+  # VB6 Balance.dat [EXTRA] section constants
+  @desbalance_promedio_vidas 0.0
+  @rango_vidas 2.0
+  @influencia_promedio_vidas 0.0
+  @cap_vida_max 10.0
+  @cap_vida_min -10.0
+
+  def level_up_gains(level, class_id, int, _agi, current_xp, _rand_hp_factor, con \\ 18, max_hp \\ 0) do
     next_xp = GameData.exp_for_level(level + 1)
 
     if next_xp && current_xp >= next_xp do
       new_level = level + 1
 
+      # --- HP gain (VB6 biased random) ---
       hp_mod = GameData.class_hp_mod(class_id)
-      hp_gain = max(trunc(hp_mod * (0.8 + rand_hp_factor * 0.4)), 1)
+      prom_clase_raza = hp_mod - (21 - con) * 0.5
 
+      prom_personaje =
+        if level <= 1 do
+          prom_clase_raza
+        else
+          (max_hp - con) / (level - 1)
+        end
+
+      prom_bias = prom_clase_raza + (prom_clase_raza - prom_personaje) * @desbalance_promedio_vidas
+
+      hp_gain =
+        round(
+          random_int_biased(
+            prom_clase_raza - @rango_vidas,
+            prom_clase_raza + @rango_vidas,
+            prom_bias,
+            @influencia_promedio_vidas
+          )
+        )
+
+      # VB6: GetMaxHp = (Vida - (21 - con) * 0.5) * (level - 1) + con
+      # Capping against GetMaxHp at the new level
+      get_max_hp_new = trunc(prom_clase_raza * (new_level - 1) + con)
+      current_max_hp = if max_hp > 0, do: max_hp, else: trunc(prom_clase_raza * (level - 1) + con)
+
+      hp_gain =
+        if current_max_hp + hp_gain > get_max_hp_new + @cap_vida_max do
+          trunc(get_max_hp_new + @cap_vida_max - current_max_hp)
+        else
+          hp_gain
+        end
+
+      hp_gain =
+        if current_max_hp + hp_gain < get_max_hp_new + @cap_vida_min do
+          trunc(get_max_hp_new + @cap_vida_min - current_max_hp)
+        else
+          hp_gain
+        end
+
+      hp_gain = max(hp_gain, 1)
+
+      # --- Mana gain (VB6: delta of GetMaxMana) ---
+      # GetMaxMana = int * ManaInicial + (MultMana * int) * (level - 1)
+      mana_initial = GameData.class_mana_initial(class_id)
       mana_mult = GameData.class_mana_mult(class_id)
-      mana_gain = trunc(int * mana_mult)
+      max_mana_old = trunc(int * mana_initial + mana_mult * int * (level - 1))
+      max_mana_new = trunc(int * mana_initial + mana_mult * int * (new_level - 1))
+      mana_gain = max_mana_new - max_mana_old
 
+      # --- Stamina gain (VB6: delta of GetMaxStamina) ---
+      # GetMaxStamina = 60 + (level - 1) * AumentoSta
       sta_growth = GameData.class_stamina_growth(class_id)
-      sta_gain = max(trunc(sta_growth * agi / 33), 1)
+      max_sta_old = trunc(60 + (level - 1) * sta_growth)
+      max_sta_new = trunc(60 + (new_level - 1) * sta_growth)
+      sta_gain = max_sta_new - max_sta_old
 
       skill_pts = GameData.class_skill_points(class_id)
 
@@ -260,6 +380,22 @@ defmodule Arena.Combat do
     else
       :no_level_up
     end
+  end
+
+  @doc """
+  VB6 RandomIntBiased (General.bas:1744-1762).
+
+  Generates a biased random value in [min, max]:
+    random_range = :rand.uniform() * (max - min) + min
+    mix = :rand.uniform() * influence
+    result = random_range * (1 - mix) + bias * mix
+
+  When influence is 0, result is purely random in [min, max].
+  """
+  def random_int_biased(min_val, max_val, bias, influence) do
+    random_range = :rand.uniform() * (max_val - min_val) + min_val
+    mix = :rand.uniform() * influence
+    random_range * (1 - mix) + bias * mix
   end
 
   # ==================================================================
@@ -292,6 +428,34 @@ defmodule Arena.Combat do
   end
 
   def cap_xp_to_pool(xp_gained, available_pool), do: {xp_gained, available_pool}
+
+  @doc """
+  Apply full physical damage pipeline (Drift #7).
+
+  VB6 ref: SistemaCombate.bas UserDamageToUser (line 1154-1166)
+  and SistemaCombate.bas UserDamageToNpc (line 391-402)
+
+  Pipeline:
+    1. defense_total = defense + defense_bonus
+    2. defense_total = max(0, defense_total - armor_penetration)
+    3. damage = raw_damage - defense_total
+    4. damage = damage * physical_damage_modifier (attacker)
+    5. damage = damage * physical_damage_reduction (defender)
+    6. damage = max(damage, 0)
+  """
+  def apply_physical_damage_modifiers(
+        raw_damage,
+        defense,
+        defense_bonus,
+        armor_penetration,
+        damage_modifier,
+        damage_reduction
+      ) do
+    defense_total = max(0, defense + defense_bonus - armor_penetration)
+    damage = (raw_damage - defense_total) * damage_modifier * damage_reduction
+
+    if damage < 0, do: 0, else: round(damage)
+  end
 
   defp clamp(val, min_val, max_val), do: min(max(val, min_val), max_val)
 end

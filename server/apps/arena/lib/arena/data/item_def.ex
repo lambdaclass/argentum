@@ -42,7 +42,26 @@ defmodule Arena.Data.ItemDef do
     caos: false,
     ropaje: nil,
     elemental_tags: 0,
-    forum_id: 0
+    forum_id: 0,
+    # Drift #2: hit/evasion bonuses
+    hit_bonus: 0,
+    evasion_bonus: 0,
+    improved_melee_hit_chance: 0,
+    improved_ranged_hit_chance: 0,
+    # Drift #4: extra crit/stab chance for weapons
+    extra_crit_and_stab_chance: 0,
+    # Drift #7: physical damage/defense bonuses
+    defense_bonus: 0,
+    min_armor_penetration_flat: 0,
+    max_armor_penetration_flat: 0,
+    armor_penetration_percent: 0,
+    physical_damage_bonus: 0.0,
+    physical_damage_reduction: 0.0,
+    # Drift #5: magic combat fields (loaded from obj.dat)
+    magic_damage_bonus: 0,
+    magic_absolute_bonus: 0,
+    magic_penetration: 0,
+    resistencia_magica: 0
   ]
 
   @stackable_types [1, 5, 11, 13, 32, 33, 34]
@@ -109,7 +128,25 @@ defmodule Arena.Data.ItemDef do
       caos: parse_int(section["caos"]) == 1,
       ropaje: parse_ropaje(section),
       elemental_tags: parse_int(section["elementaltags"]),
-      forum_id: parse_int(section["foroid"])
+      forum_id: parse_int(section["foroid"]),
+      # Drift #2: hit/evasion bonuses
+      hit_bonus: parse_int(section["hitbonus"]),
+      evasion_bonus: parse_int(section["evasionbonus"]),
+      improved_melee_hit_chance: parse_int(section["improvedmhit"]),
+      improved_ranged_hit_chance: parse_int(section["improvedrhit"]),
+      # Drift #4: extra crit/stab chance
+      extra_crit_and_stab_chance: parse_int(section["extracritandstabchance"]),
+      # Drift #7: physical damage/defense bonuses
+      defense_bonus: parse_int(section["defensebonus"]),
+      min_armor_penetration_flat: parse_int(section["minarmorpenetrationflat"]),
+      max_armor_penetration_flat: parse_int(section["maxarmorpenetrationflat"]),
+      armor_penetration_percent: parse_int(section["armorpenetrationpercent"]),
+      physical_damage_bonus: parse_float(section["physicaldamagebonus"]),
+      physical_damage_reduction: parse_float(section["physicaldamagereduction"]),
+      magic_damage_bonus: parse_int(section["magicdamagebonus"]),
+      magic_absolute_bonus: parse_int(section["magicabsolutebonus"]),
+      magic_penetration: parse_int(section["magicpenetration"]),
+      resistencia_magica: parse_int(section["resistenciamagica"])
     }
   end
 
@@ -121,6 +158,17 @@ defmodule Arena.Data.ItemDef do
     case Integer.parse(str) do
       {val, _} -> val
       :error -> 0
+    end
+  end
+
+  defp parse_float(nil), do: 0.0
+
+  defp parse_float(str) do
+    str = String.trim(str)
+
+    case Float.parse(str) do
+      {val, _} -> val
+      :error -> 0.0
     end
   end
 

@@ -106,25 +106,23 @@ defmodule Arena.VB6FormulaGoldenExpansionTest do
   end
 
   # ── apply_critical/1 additional edge cases ─────────────────────────────────
-  # VB6: damage * 1.5, rounded
+  # VB6: CriticalHitDmgModifier = 0.33, total = damage + damage * 0.33
 
   describe "apply_critical/1 extended golden values" do
-    test "2 damage becomes 3" do
+    test "2 damage becomes 3 (round(2 * 1.33) = 3)" do
       assert Combat.apply_critical(2) == 3
     end
 
-    test "3 damage becomes 5 (4.5 rounds to 4? check)" do
-      # 3 * 1.5 = 4.5, Elixir round/1 rounds to even = 4
-      assert Combat.apply_critical(3) == round(3 * 1.5)
+    test "3 damage becomes 4 (round(3 * 1.33) = 4)" do
+      assert Combat.apply_critical(3) == round(3 + 3 * 0.33)
     end
 
-    test "999 damage becomes 1499" do
-      # 999 * 1.5 = 1498.5 -> round = 1498 (banker's rounding) or 1499
-      assert Combat.apply_critical(999) == round(999 * 1.5)
+    test "999 damage becomes 1329 (round(999 * 1.33))" do
+      assert Combat.apply_critical(999) == round(999 + 999 * 0.33)
     end
 
-    test "large damage 10000 becomes 15000" do
-      assert Combat.apply_critical(10000) == 15000
+    test "large damage 10000 becomes 13300" do
+      assert Combat.apply_critical(10000) == 13300
     end
   end
 

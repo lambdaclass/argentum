@@ -190,6 +190,12 @@ defmodule AoEntities.PlayerEntity do
     completed_quests: MapSet.new(),
     quest_npc_id: nil,
 
+    # VB6 Modifiers: magic damage modifier (from effects over time / buffs)
+    # GetMagicDamageModifier = max(1 + MagicDamageBonus, 0)
+    magic_damage_modifier: 0.0,
+    # GetMagicDamageReduction = max(1 - MagicDamageReduction, 0)
+    magic_damage_reduction: 0.0,
+
     # Punishment record (VB6: prontuario) — persisted list of GM actions
     # Each entry: %{number: int, text: String.t(), date: String.t(), gm_name: String.t()}
     punishments: []
