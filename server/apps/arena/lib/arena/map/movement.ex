@@ -90,12 +90,12 @@ defmodule Arena.Map.Movement do
                       {:reply, {:ok, {nx, ny}}, state}
 
                     match?({:player, _}, Helpers.get_occupancy(state.occupancy, nx, ny)) ->
-                      # VB6: only dead/GM-invisible players get pushed out of the way.
-                      # Living visible players block the tile.
+                      # VB6: only dead or invisible players get pushed out of the way.
+                      # Living visible players (including visible GMs) block the tile.
                       {:player, other_id} = Helpers.get_occupancy(state.occupancy, nx, ny)
                       other = Map.get(state.players, other_id)
 
-                      if other != nil and (other.dead or other.gm) do
+                      if other != nil and (other.dead or other.invisible) do
                         old_x = entity.x
                         old_y = entity.y
 
