@@ -513,6 +513,11 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
+  def handle_command(state, {:craft_carpenter, %{item: item, amount: amount}}) when state.character_id != nil do
+    Arena.Map.MapServer.craft_item(state.map_id, state.character_id, :carpentry, item, max(amount, 1))
+    {state, []}
+  end
+
   def handle_command(state, {:craft_carpenter, %{item: item}}) when state.character_id != nil do
     Arena.Map.MapServer.craft_item(state.map_id, state.character_id, :carpentry, item)
     {state, []}

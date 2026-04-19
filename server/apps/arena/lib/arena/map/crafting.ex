@@ -40,6 +40,7 @@ defmodule Arena.Map.Crafting do
   @non_worker_stamina_multiplier 3
   @worker_classes [:worker, :trabajador]
 
+
   defp effective_stamina_cost(entity) do
     if entity.class in @worker_classes do
       @work_stamina_cost
@@ -452,8 +453,23 @@ defmodule Arena.Map.Crafting do
   @doc """
   Handle a craft request for a specific item from the crafting UI.
   The client sends the item_id (result) that the player selected in the window.
+  The 4-arity version defaults to amount=1 (backwards compatible).
+  The 5-arity version accepts an amount for batch crafting (CraftCarpenter).
   """
-  def handle_craft_item(state, char_id, skill_atom, item_id) do
+  def handle_craft_item(state, char_id, skill_atom, item_id),
+    do: handle_craft_item(state, char_id, skill_atom, item_id, 1)
+
+  def handle_craft_item(state, char_id, skill_atom, item_id, amount) when amount >= 1 do
+    do_craft_item_loop(state, char_id, skill_atom, item_id, amount)
+  end
+
+  def handle_craft_item(state, _char_id, _skill_atom, _item_id, _amount) do
+    {:noreply, state}
+  end
+
+  defp do_craft_item_loop(state, _char_id, _skill_atom, _item_id, 0), do: {:noreply, state}
+
+  defp do_craft_item_loop(state, char_id, skill_atom, item_id, remaining) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         cost = effective_stamina_cost(entity)
@@ -468,7 +484,13 @@ defmodule Arena.Map.Crafting do
             {:noreply, state}
 
           true ->
-            do_craft_item(state, char_id, entity, skill_atom, item_id)
+            case do_craft_item(state, char_id, entity, skill_atom, item_id) do
+              {:noreply, new_state} when remaining > 1 ->
+                do_craft_item_loop(new_state, char_id, skill_atom, item_id, remaining - 1)
+
+              result ->
+                result
+            end
         end
 
       :error ->

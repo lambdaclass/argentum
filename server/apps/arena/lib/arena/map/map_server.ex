@@ -156,7 +156,10 @@ defmodule Arena.Map.MapServer do
   def train_skill(map_id, char_id, skill_index), do: GenServer.cast(via(map_id), {:train_skill, char_id, skill_index})
 
   def craft_item(map_id, char_id, skill_atom, item_id),
-    do: GenServer.cast(via(map_id), {:craft_item, char_id, skill_atom, item_id})
+    do: GenServer.cast(via(map_id), {:craft_item, char_id, skill_atom, item_id, 1})
+
+  def craft_item(map_id, char_id, skill_atom, item_id, amount),
+    do: GenServer.cast(via(map_id), {:craft_item, char_id, skill_atom, item_id, amount})
 
   def double_click(map_id, char_id, x, y), do: GenServer.cast(via(map_id), {:double_click, char_id, x, y})
   def snapshot_entity(map_id, char_id), do: GenServer.call(via(map_id), {:snapshot, char_id})
@@ -639,8 +642,8 @@ defmodule Arena.Map.MapServer do
     do: NpcInteraction.handle_train_skill(state, char_id, skill_index)
 
   @impl true
-  def handle_cast({:craft_item, char_id, skill_atom, item_id}, state),
-    do: Arena.Map.Crafting.handle_craft_item(state, char_id, skill_atom, item_id)
+  def handle_cast({:craft_item, char_id, skill_atom, item_id, amount}, state),
+    do: Arena.Map.Crafting.handle_craft_item(state, char_id, skill_atom, item_id, amount)
 
   @impl true
   def handle_cast({:request_skills, char_id}, state), do: Social.handle_request_skills(state, char_id)
