@@ -715,7 +715,7 @@ defmodule Arena.PetTamingExtendedTest do
 
       state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
 
-      {:noreply, state} = Pets.handle_pet_leave(state, 7)
+      {:noreply, state} = Pets.handle_pet_leave(state, 7, 1)
 
       # Pet should still be alive — dead player cannot release
       assert Map.has_key?(state.npcs_live, 1),
@@ -730,7 +730,7 @@ defmodule Arena.PetTamingExtendedTest do
   # ================================================================
 
   describe "pet limits and /LIBERAR" do
-    test "/LIBERAR releases first pet (head of pet_ids list)" do
+    test "/LIBERAR releases the specified pet by instance ID" do
       pet1 = make_npc(owner_id: 7, instance_id: 1, char_index: 100)
       pet2 = make_npc(owner_id: 7, instance_id: 2, char_index: 200)
       pet3 = make_npc(owner_id: 7, instance_id: 3, char_index: 300)
@@ -742,10 +742,11 @@ defmodule Arena.PetTamingExtendedTest do
         npc_char_indices: %{100 => 1, 200 => 2, 300 => 3}
       )
 
-      {:noreply, state} = Pets.handle_pet_leave(state, 7)
+      # Release pet 1 by its instance ID
+      {:noreply, state} = Pets.handle_pet_leave(state, 7, 1)
 
       # First pet (instance 1) should be gone
-      refute Map.has_key?(state.npcs_live, 1), "First pet should be released"
+      refute Map.has_key?(state.npcs_live, 1), "Selected pet should be released"
       # Others remain
       assert Map.has_key?(state.npcs_live, 2), "Second pet should remain"
       assert Map.has_key?(state.npcs_live, 3), "Third pet should remain"
@@ -753,7 +754,7 @@ defmodule Arena.PetTamingExtendedTest do
       assert state.players[7].pet_ids == [2, 3]
     end
 
-    test "successive /LIBERAR releases pets in order" do
+    test "successive /LIBERAR releases specified pets" do
       pet1 = make_npc(owner_id: 7, instance_id: 1, char_index: 100)
       pet2 = make_npc(owner_id: 7, instance_id: 2, char_index: 200)
       owner = make_player(pet_ids: [1, 2])
@@ -764,15 +765,15 @@ defmodule Arena.PetTamingExtendedTest do
         npc_char_indices: %{100 => 1, 200 => 2}
       )
 
-      # First release
-      {:noreply, state} = Pets.handle_pet_leave(state, 7)
-      assert state.players[7].pet_ids == [2]
-      refute Map.has_key?(state.npcs_live, 1)
-
-      # Second release
-      {:noreply, state} = Pets.handle_pet_leave(state, 7)
-      assert state.players[7].pet_ids == []
+      # Release pet 2 first (not the head)
+      {:noreply, state} = Pets.handle_pet_leave(state, 7, 2)
+      assert state.players[7].pet_ids == [1]
       refute Map.has_key?(state.npcs_live, 2)
+
+      # Then release pet 1
+      {:noreply, state} = Pets.handle_pet_leave(state, 7, 1)
+      assert state.players[7].pet_ids == []
+      refute Map.has_key?(state.npcs_live, 1)
     end
 
     test "max pet limit is exactly 3" do

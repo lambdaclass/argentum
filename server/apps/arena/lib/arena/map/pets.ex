@@ -39,33 +39,32 @@ defmodule Arena.Map.Pets do
     end
   end
 
-  def handle_pet_leave(state, char_id) do
+  def handle_pet_leave(state, char_id, pet_id) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         if entity.dead do
           msg(state, char_id, "Estas muerto!")
           {:noreply, state}
         else
-          case entity.pet_ids do
-            [first_pet | rest_pets] ->
-              case Map.get(state.npcs_live, first_pet) do
-                nil ->
-                  entity = %{entity | pet_ids: rest_pets}
-                  state = %{state | players: Map.put(state.players, char_id, entity)}
-                  {:noreply, state}
+          if pet_id in (entity.pet_ids || []) do
+            case Map.get(state.npcs_live, pet_id) do
+              nil ->
+                entity = %{entity | pet_ids: List.delete(entity.pet_ids, pet_id)}
+                state = %{state | players: Map.put(state.players, char_id, entity)}
+                {:noreply, state}
 
-                npc ->
-                  {state, effects} = Arena.NpcAi.despawn_pet(state, first_pet, npc)
-                  Arena.NpcAi.dispatch_effects(state, effects)
-                  entity = %{entity | pet_ids: rest_pets}
-                  state = %{state | players: Map.put(state.players, char_id, entity)}
-                  msg(state, char_id, "Has liberado una mascota.")
-                  {:noreply, state}
-              end
-
-            _ ->
-              msg(state, char_id, "No tienes mascotas.")
-              {:noreply, state}
+              npc ->
+                {state, effects} = Arena.NpcAi.despawn_pet(state, pet_id, npc)
+                Arena.NpcAi.dispatch_effects(state, effects)
+                entity = Map.fetch!(state.players, char_id)
+                entity = %{entity | pet_ids: List.delete(entity.pet_ids, pet_id)}
+                state = %{state | players: Map.put(state.players, char_id, entity)}
+                msg(state, char_id, "Has liberado una mascota.")
+                {:noreply, state}
+            end
+          else
+            msg(state, char_id, "No tienes mascotas.")
+            {:noreply, state}
           end
         end
 
