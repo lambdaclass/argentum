@@ -312,8 +312,8 @@ defmodule Arena.Map.NpcInteraction do
 
             if npc_def != nil and
                  npc_def.npc_type == @npc_type_entrenador and
-                 abs(npc.x - entity.x) <= 5 and
-                 abs(npc.y - entity.y) <= 5 do
+                 abs(npc.x - entity.x) <= 10 and
+                 abs(npc.y - entity.y) <= 10 do
               npc_def
             end
           end)
@@ -361,7 +361,8 @@ defmodule Arena.Map.NpcInteraction do
                 {:noreply, state}
 
               {:ok, _npc, npc_def} ->
-                won = :rand.uniform(2) == 1
+                # VB6 parity: RandomNumber(1, 100) <= 10 → 10% win rate
+                won = :rand.uniform(100) <= 10
 
                 entity =
                   if won do
@@ -400,34 +401,93 @@ defmodule Arena.Map.NpcInteraction do
     end
   end
 
-  def handle_forgive(state, char_id) do
+  # VB6 parity constants for /PERDON (HandleDonateGold + HandleForgive)
+  # CostoPerdonPorCiudadano = 5000, GoldMult = 1 (from Example.Configuracion.ini)
+  @costo_perdon_por_ciudadano 5000
+  @gold_mult 1
+  # VB6: priest range check uses Distancia > 3
+  @forgive_max_range 3
+
+  def handle_forgive(state, char_id, gold_amount) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
-        if entity.dead do
-          msg(state, char_id, "Estas muerto!")
-          {:noreply, state}
-        else
-          case find_nearby_npc_of_type(state, entity, [@npc_type_revividor, @npc_type_resucitador_newbie]) do
-            :not_found ->
-              msg(state, char_id, "Necesitas estar cerca de un sacerdote.")
-              {:noreply, state}
+        cond do
+          entity.dead ->
+            msg(state, char_id, "Estas muerto!")
+            {:noreply, state}
 
-            {:ok, _npc, _npc_def} ->
-              if entity.criminal do
-                entity = %{entity | criminal: false}
-                players = Map.put(state.players, char_id, entity)
-                state = %{state | players: players}
-                msg(state, char_id, "Has sido perdonado.")
+          not entity.criminal ->
+            msg(state, char_id, "No eres un criminal.")
+            {:noreply, state}
+
+          # VB6: faction members (armada/caos) cannot use /PERDON
+          entity.faction == :royal_army or entity.faction == :chaos_legion ->
+            msg(state, char_id, "No puedo aceptar tu donacion en este momento.")
+            {:noreply, state}
+
+          true ->
+            case find_nearby_priest(state, entity) do
+              :not_found ->
+                msg(state, char_id, "Necesitas estar cerca de un sacerdote.")
                 {:noreply, state}
-              else
-                msg(state, char_id, "No eres un criminal.")
-                {:noreply, state}
-              end
-          end
+
+              {:ok, _npc, _npc_def} ->
+                # VB6: donation threshold based on ciudadanosMatados
+                required_donation =
+                  if entity.citizens_killed > 0 do
+                    entity.citizens_killed * @gold_mult * @costo_perdon_por_ciudadano
+                  else
+                    div(@costo_perdon_por_ciudadano, 2)
+                  end
+
+                cond do
+                  entity.gold < gold_amount ->
+                    msg(state, char_id, "No tienes suficiente dinero.")
+                    {:noreply, state}
+
+                  gold_amount < required_donation ->
+                    msg(state, char_id, "Dios no puede perdonarte si eres una persona avara.")
+                    {:noreply, state}
+
+                  true ->
+                    entity = %{entity | criminal: false, gold: entity.gold - gold_amount}
+                    players = Map.put(state.players, char_id, entity)
+                    state = %{state | players: players}
+
+                    Helpers.send_to_session(
+                      state.sessions,
+                      char_id,
+                      {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
+                    )
+
+                    msg(state, char_id, "Has sido perdonado.")
+                    {:noreply, state}
+                end
+            end
         end
 
       :error ->
         {:noreply, state}
+    end
+  end
+
+  # Find a priest within VB6 range (distance <= 3)
+  defp find_nearby_priest(state, entity) do
+    result =
+      Enum.find_value(state.npcs_live, fn {_id, npc} ->
+        npc_def = GameData.get_npc(npc.npc_id)
+
+        if npc_def != nil and
+             npc_def.npc_type in [@npc_type_revividor, @npc_type_resucitador_newbie] and
+             abs(npc.x - entity.x) <= @forgive_max_range and
+             abs(npc.y - entity.y) <= @forgive_max_range do
+          {npc, npc_def}
+        end
+      end)
+
+    case result do
+      {npc, npc_def} -> {:ok, npc, npc_def}
+      nil -> :not_found
     end
   end
 
@@ -441,8 +501,8 @@ defmodule Arena.Map.NpcInteraction do
             if npc_def != nil and
                  npc_def.npc_type == @npc_type_arena_guard and
                  npc_def.arena_enabled and
-                 abs(npc.x - entity.x) <= 5 and
-                 abs(npc.y - entity.y) <= 5 do
+                 abs(npc.x - entity.x) <= 10 and
+                 abs(npc.y - entity.y) <= 10 do
               npc_def
             end
           end)
@@ -596,40 +656,41 @@ defmodule Arena.Map.NpcInteraction do
     quest_ids_set = MapSet.new(npc_def.quest_numbers)
 
     completable =
-      Enum.filter(entity.active_quests, fn aq ->
+      entity.active_quests
+      |> Enum.with_index()
+      |> Enum.filter(fn {aq, idx} ->
         MapSet.member?(quest_ids_set, aq.quest_id) and
-          Arena.QuestServer.quest_complete?(entity, aq)
+          Arena.QuestServer.quest_complete?(entity, idx)
       end)
 
     if completable != [] do
-      aq = hd(completable)
-      slot = Enum.find_index(entity.active_quests, fn a -> a.quest_id == aq.quest_id end) + 1
+      {aq, slot} = hd(completable)
+      quest_def = Arena.Data.GameData.get_quest(aq.quest_id)
+      updated_entity = Arena.QuestServer.complete_quest(entity, slot)
 
-      case Arena.QuestServer.complete_quest(entity, slot) do
-        {:ok, updated_entity, quest_def} ->
-          if quest_def.desc_final != "" do
-            msg(state, char_id, npc_def.name <> " dice: " <> quest_def.desc_final)
-          end
+      if updated_entity != entity and quest_def != nil do
+        if quest_def.desc_final != "" do
+          msg(state, char_id, npc_def.name <> " dice: " <> quest_def.desc_final)
+        end
 
-          if quest_def.reward_gld > 0 do
-            msg(state, char_id, "Recibiste #{quest_def.reward_gld} monedas de oro.")
-            Helpers.send_to_session(state.sessions, char_id,
-              {:send_raw, Encoder.encode({:update_gold, %{gold: updated_entity.gold}})})
-          end
+        if quest_def.reward_gld > 0 do
+          msg(state, char_id, "Recibiste #{quest_def.reward_gld} monedas de oro.")
+          Helpers.send_to_session(state.sessions, char_id,
+            {:send_raw, Encoder.encode({:update_gold, %{gold: updated_entity.gold}})})
+        end
 
-          if quest_def.reward_exp > 0 do
-            msg(state, char_id, "Recibiste #{quest_def.reward_exp} puntos de experiencia.")
-          end
+        if quest_def.reward_exp > 0 do
+          msg(state, char_id, "Recibiste #{quest_def.reward_exp} puntos de experiencia.")
+        end
 
-          state = put_in(state.players[char_id], updated_entity)
-          {:noreply, state}
-
-        {:error, reason} ->
-          msg(state, char_id, reason)
-          {:noreply, state}
+        state = put_in(state.players[char_id], updated_entity)
+        {:noreply, state}
+      else
+        msg(state, char_id, "No se pudo completar la mision.")
+        {:noreply, state}
       end
     else
-      available = Arena.QuestServer.available_quests_for_npc(npc_def, entity)
+      available = Arena.QuestServer.available_quests_for_npc(entity, npc_def)
 
       if available == [] do
         msg(state, char_id, npc_def.name <> " dice: No tengo misiones disponibles para ti.")

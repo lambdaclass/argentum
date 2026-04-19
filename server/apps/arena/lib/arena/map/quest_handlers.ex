@@ -40,8 +40,8 @@ defmodule Arena.Map.QuestHandlers do
             msg(state, char_id, "Mision no encontrada.")
             {:noreply, state}
 
-          quest_state ->
-            case Arena.QuestServer.build_quest_details(entity, quest_state) do
+          _quest_state ->
+            case Arena.QuestServer.build_quest_details(entity, index) do
               nil ->
                 msg(state, char_id, "Datos de mision no disponibles.")
                 {:noreply, state}
@@ -77,7 +77,7 @@ defmodule Arena.Map.QuestHandlers do
           if npc_def == nil do
             {:noreply, state}
           else
-            available = Arena.QuestServer.available_quests_for_npc(npc_def, entity)
+            available = Arena.QuestServer.available_quests_for_npc(entity, npc_def)
             quest_index = list_index - 1
 
             case Enum.at(available, quest_index) do
@@ -85,16 +85,22 @@ defmodule Arena.Map.QuestHandlers do
                 msg(state, char_id, "Mision no disponible.")
                 {:noreply, state}
 
-              quest_def ->
-                case Arena.QuestServer.can_accept_quest?(entity, quest_def) do
-                  :ok ->
+              quest_id ->
+                quest_def = GameData.get_quest(quest_id)
+
+                cond do
+                  quest_def == nil ->
+                    msg(state, char_id, "Mision no disponible.")
+                    {:noreply, state}
+
+                  Arena.QuestServer.can_accept_quest?(entity, quest_def) ->
                     entity = Arena.QuestServer.accept_quest(entity, quest_def)
                     msg(state, char_id, "Mision aceptada: #{quest_def.name}")
                     state = put_in(state.players[char_id], entity)
                     {:noreply, state}
 
-                  {:error, reason} ->
-                    msg(state, char_id, reason)
+                  true ->
+                    msg(state, char_id, "No puedes aceptar esta mision.")
                     {:noreply, state}
                 end
             end
@@ -120,7 +126,7 @@ defmodule Arena.Map.QuestHandlers do
           quest_state ->
             quest_def = GameData.get_quest(quest_state.quest_id)
             name = if quest_def, do: quest_def.name, else: "mision"
-            entity = Arena.QuestServer.abandon_quest(entity, quest_slot)
+            entity = Arena.QuestServer.abandon_quest(entity, index)
             msg(state, char_id, "Abandonaste la mision: #{name}")
             state = put_in(state.players[char_id], entity)
             {:noreply, state}
