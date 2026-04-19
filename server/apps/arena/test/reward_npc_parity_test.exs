@@ -534,6 +534,75 @@ defmodule Arena.RewardNpcParityTest do
   end
 
   # ═══════════════════════════════════════════════════════════════════════════
+  # 5b. Wrong-side enlistador -- VB6: Protocol.bas:4618 checks faction match
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "wrong-side enlistador rejected (VB6 faction-side check)" do
+    test "royal army player cannot claim rewards from chaos enlistador" do
+      # Create a Chaos Legion enlistador (faccion 2)
+      chaos_enlistador_def = %Arena.Data.NpcDef{
+        id: 9952,
+        name: "Test Enlistador Caos",
+        npc_type: @npc_type_enlistador,
+        faccion: 2
+      }
+
+      :ets.insert(:arena_game_data, {{:npc, 9952}, chaos_enlistador_def})
+
+      entity =
+        make_entity(%{
+          faction: :royal_army,
+          faction_rank_armada: 0,
+          faction_score: 150,
+          level: 30,
+          last_clicked_npc_instance_id: :chaos_enlistador,
+          last_clicked_npc_type: @npc_type_enlistador
+        })
+
+      enlistador = %{npc_id: 9952, x: 51, y: 50, instance_id: :chaos_enlistador}
+      state = make_map_state(entity, %{chaos_enlistador: enlistador})
+
+      {:noreply, new_state} = Social.handle_request_reward(state, :player)
+
+      # Should NOT promote -- wrong faction side
+      assert new_state.players[:player].faction_rank_armada == 0
+
+      # Should receive rejection message
+      assert_receive {:send_raw, raw}
+      msg = decode_console_msg(raw)
+      assert msg =~ "faccion" or msg =~ "enlistador"
+
+      :ets.delete(:arena_game_data, {:npc, 9952})
+    end
+
+    test "chaos legion player cannot claim rewards from royal army enlistador" do
+      # The test setup already has a royal army enlistador (faccion 3)
+      entity =
+        make_entity(%{
+          faction: :chaos_legion,
+          faction_rank_chaos: 0,
+          faction_score: 150,
+          level: 30,
+          last_clicked_npc_instance_id: :enlistador,
+          last_clicked_npc_type: @npc_type_enlistador
+        })
+
+      enlistador = %{npc_id: @test_enlistador_npc_id, x: 51, y: 50, instance_id: :enlistador}
+      state = make_map_state(entity, %{enlistador: enlistador})
+
+      {:noreply, new_state} = Social.handle_request_reward(state, :player)
+
+      # Should NOT promote -- wrong faction side
+      assert new_state.players[:player].faction_rank_chaos == 0
+
+      # Should receive rejection message
+      assert_receive {:send_raw, raw}
+      msg = decode_console_msg(raw)
+      assert msg =~ "faccion" or msg =~ "enlistador"
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
   # 6. Rank-up message is sent to the player
   # ═══════════════════════════════════════════════════════════════════════════
 

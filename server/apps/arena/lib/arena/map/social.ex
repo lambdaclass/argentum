@@ -792,6 +792,10 @@ defmodule Arena.Map.Social do
                 msg(state, char_id, "No perteneces a ninguna faccion.")
                 {:noreply, state}
 
+              npc_faccion_to_atom(npc_def.faccion) != entity.faction ->
+                msg(state, char_id, "Este enlistador no pertenece a tu faccion.")
+                {:noreply, state}
+
               true ->
                 # VB6: HandleReward — check faction_score & level vs rank
                 # requirements, then award rank-up + items for any newly-
@@ -848,6 +852,11 @@ defmodule Arena.Map.Social do
         {:noreply, state}
     end
   end
+
+  # VB6: Protocol.bas:4618 — enlistador faction must match player's faction
+  defp npc_faccion_to_atom(3), do: :royal_army
+  defp npc_faccion_to_atom(2), do: :chaos_legion
+  defp npc_faccion_to_atom(_), do: :none
 
   defp current_faction_rank(entity, :royal_army), do: entity.faction_rank_armada
   defp current_faction_rank(entity, :chaos_legion), do: entity.faction_rank_chaos

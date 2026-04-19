@@ -314,8 +314,15 @@ defmodule AoTcpGateway.SessionCommands.Guild do
   def handle_command(state, {:guild_reject_peace, _}), do: {state, [{:console_msg, %{message: @guild_relations_disabled, font_index: 0}}]}
   def handle_command(state, {:guild_accept_alliance, _}), do: {state, [{:console_msg, %{message: @guild_relations_disabled, font_index: 0}}]}
   def handle_command(state, {:guild_reject_alliance, _}), do: {state, [{:console_msg, %{message: @guild_relations_disabled, font_index: 0}}]}
-  def handle_command(state, {:guild_offer_peace, _}), do: {state, [{:console_msg, %{message: @guild_relations_disabled, font_index: 0}}]}
-  def handle_command(state, {:guild_offer_alliance, _}), do: {state, [{:console_msg, %{message: @guild_relations_disabled, font_index: 0}}]}
+  def handle_command(state, {:guild_offer_peace, %{guild: guild_name}}) do
+    Arena.GuildServer.propose_peace(state.character_id, guild_name)
+    {state, []}
+  end
+
+  def handle_command(state, {:guild_offer_alliance, %{guild: guild_name}}) do
+    Arena.GuildServer.propose_alliance(state.character_id, guild_name)
+    {state, []}
+  end
   def handle_command(state, {:guild_alliance_details, _}), do: {state, [{:console_msg, %{message: @guild_relations_disabled, font_index: 0}}]}
   def handle_command(state, {:guild_peace_details, _}), do: {state, [{:console_msg, %{message: @guild_relations_disabled, font_index: 0}}]}
   def handle_command(state, {:guild_alliance_prop_list, _}), do: {state, [{:console_msg, %{message: @guild_relations_disabled, font_index: 0}}]}

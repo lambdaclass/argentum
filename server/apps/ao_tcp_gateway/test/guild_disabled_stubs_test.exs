@@ -74,21 +74,21 @@ defmodule AoTcpGateway.GuildDisabledStubsTest do
     end
   end
 
-  describe "guild_offer_peace (disabled)" do
-    test "returns VB6 disabled message" do
+  describe "guild_offer_peace (wired to GuildServer)" do
+    test "delegates to GuildServer.propose_peace and returns empty packets" do
       {_state, packets} =
         SessionLogic.handle_command(base_state(), {:guild_offer_peace, %{guild: "SomeGuild", proposal: "Let's be friends"}})
 
-      assert [{:console_msg, %{message: @relations_disabled, font_index: 0}}] = packets
+      assert packets == []
     end
   end
 
-  describe "guild_offer_alliance (disabled)" do
-    test "returns VB6 disabled message" do
+  describe "guild_offer_alliance (wired to GuildServer)" do
+    test "delegates to GuildServer.propose_alliance and returns empty packets" do
       {_state, packets} =
         SessionLogic.handle_command(base_state(), {:guild_offer_alliance, %{guild: "SomeGuild", proposal: "Unite!"}})
 
-      assert [{:console_msg, %{message: @relations_disabled, font_index: 0}}] = packets
+      assert packets == []
     end
   end
 

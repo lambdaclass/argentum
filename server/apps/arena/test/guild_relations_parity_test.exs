@@ -376,7 +376,92 @@ defmodule Arena.GuildRelationsParityTest do
   end
 
   # ===========================================================
-  # 8. Target guild not found.
+  # 8. Binary guild_offer_peace and guild_offer_alliance
+  #    should be wired to GuildServer, not return disabled msg.
+  # ===========================================================
+
+  describe "binary guild_offer_peace handler" do
+    test "guild_offer_peace calls GuildServer.propose_peace instead of returning disabled" do
+      set_war_in_ets(@guild_a_id, @guild_b_id)
+
+      state = %{
+        character_id: @leader_a,
+        map_id: 1,
+        account_id: "test_acct",
+        entity: nil,
+        char_index: 1,
+        target_x: nil,
+        target_y: nil,
+        in_commerce: false,
+        in_bank: false,
+        in_trade: false,
+        is_gm: false,
+        is_dead: false,
+        hogar_timer_ref: nil
+      }
+
+      capture_log(fn ->
+        {_state, packets} =
+          AoTcpGateway.SessionCommands.Guild.handle_command(
+            state,
+            {:guild_offer_peace, %{guild: "BravoGuild", proposal: ""}}
+          )
+
+        disabled_msg = "Relaciones de clan desactivadas por el momento."
+
+        has_disabled =
+          Enum.any?(packets, fn
+            {:console_msg, %{message: msg}} -> msg == disabled_msg
+            _ -> false
+          end)
+
+        refute has_disabled,
+          "guild_offer_peace should call GuildServer.propose_peace, not return disabled message"
+      end)
+    end
+  end
+
+  describe "binary guild_offer_alliance handler" do
+    test "guild_offer_alliance calls GuildServer.propose_alliance instead of returning disabled" do
+      state = %{
+        character_id: @leader_a,
+        map_id: 1,
+        account_id: "test_acct",
+        entity: nil,
+        char_index: 1,
+        target_x: nil,
+        target_y: nil,
+        in_commerce: false,
+        in_bank: false,
+        in_trade: false,
+        is_gm: false,
+        is_dead: false,
+        hogar_timer_ref: nil
+      }
+
+      capture_log(fn ->
+        {_state, packets} =
+          AoTcpGateway.SessionCommands.Guild.handle_command(
+            state,
+            {:guild_offer_alliance, %{guild: "BravoGuild", proposal: ""}}
+          )
+
+        disabled_msg = "Relaciones de clan desactivadas por el momento."
+
+        has_disabled =
+          Enum.any?(packets, fn
+            {:console_msg, %{message: msg}} -> msg == disabled_msg
+            _ -> false
+          end)
+
+        refute has_disabled,
+          "guild_offer_alliance should call GuildServer.propose_alliance, not return disabled message"
+      end)
+    end
+  end
+
+  # ===========================================================
+  # 9. Target guild not found.
   # ===========================================================
 
   describe "target not found" do

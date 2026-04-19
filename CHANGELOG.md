@@ -14,15 +14,19 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
     4=terrain) now enforced before mana is consumed. Casting breaks
     meditation/rest. 9 tests in `spell_selection_parity_test.exs`.
   - **/REWARD NPC flow**: players can now claim faction rank-up rewards from
-    enlistador NPCs. Validates level, score, max rank. Grants items to
-    inventory. 12 tests in `reward_npc_parity_test.exs`.
+    enlistador NPCs. Validates level, score, max rank, and enlistador faction
+    side (VB6: Protocol.bas:4618). Grants items to inventory. 14 tests in
+    `reward_npc_parity_test.exs`.
   - **Timbero account-state**: fixed wrong "Ganancias" computation (was
     subtracting counters), now shows wins/losses/plays separately. Gamble
     messages use `npc_def.name` instead of hardcoded "Timbero". 2 tests in
     `npc_text_parity_test.exs`.
-  - **Guild relation stubs**: wired `/PROPONERPAZ` and `/ALIANZA` text commands,
-    added idempotency guards to war declaration and conflict/duplicate checks to
-    alliance proposals. 24 tests in `guild_relations_parity_test.exs`.
+  - **Guild relation stubs**: wired `/PROPONERPAZ` and `/ALIANZA` text commands
+    and binary `guild_offer_peace`/`guild_offer_alliance` packet handlers to
+    GuildServer. Added idempotency guards to war declaration and
+    conflict/duplicate checks to alliance proposals. Accept/reject/details/
+    prop_list handlers remain disabled (Phase 8 — full proposal queue flow).
+    26 tests in `guild_relations_parity_test.exs`.
 
 - **Commerce double-click fix + walk-away session cleanup (2026-04-19):**
   - **Commerce on NPC double-click**: double-clicking a merchant NPC now opens
