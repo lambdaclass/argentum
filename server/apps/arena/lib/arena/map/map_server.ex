@@ -182,7 +182,7 @@ defmodule Arena.Map.MapServer do
   def faction_chat(map_id, char_id, message), do: GenServer.cast(via(map_id), {:faction_chat, char_id, message})
   def pet_stand(map_id, char_id), do: GenServer.cast(via(map_id), {:pet_stand, char_id})
   def pet_follow(map_id, char_id), do: GenServer.cast(via(map_id), {:pet_follow, char_id})
-  def pet_leave(map_id, char_id), do: GenServer.cast(via(map_id), {:pet_leave, char_id})
+  def pet_leave(map_id, char_id, pet_id), do: GenServer.cast(via(map_id), {:pet_leave, char_id, pet_id})
   def pet_leave_all(map_id, char_id), do: GenServer.cast(via(map_id), {:pet_leave_all, char_id})
   def move_spell(map_id, char_id, upwards, slot), do: GenServer.cast(via(map_id), {:move_spell, char_id, upwards, slot})
   def modify_skills(map_id, char_id, points), do: GenServer.cast(via(map_id), {:modify_skills, char_id, points})
@@ -209,7 +209,7 @@ defmodule Arena.Map.MapServer do
 
   def train_list(map_id, char_id), do: GenServer.cast(via(map_id), {:train_list, char_id})
   def gamble(map_id, char_id, amount), do: GenServer.cast(via(map_id), {:gamble, char_id, amount})
-  def forgive(map_id, char_id), do: GenServer.cast(via(map_id), {:forgive, char_id})
+  def forgive(map_id, char_id, gold_amount), do: GenServer.cast(via(map_id), {:forgive, char_id, gold_amount})
   def arena_entry(map_id, char_id), do: GenServer.cast(via(map_id), {:arena_entry, char_id})
   def request_account_state(map_id, char_id), do: GenServer.cast(via(map_id), {:request_account_state, char_id})
   def request_reward(map_id, char_id), do: GenServer.cast(via(map_id), {:request_reward, char_id})
@@ -662,7 +662,7 @@ defmodule Arena.Map.MapServer do
   @impl true
   def handle_cast({:pet_follow, char_id}, state), do: Pets.handle_pet_follow(state, char_id)
   @impl true
-  def handle_cast({:pet_leave, char_id}, state), do: Pets.handle_pet_leave(state, char_id)
+  def handle_cast({:pet_leave, char_id, pet_id}, state), do: Pets.handle_pet_leave(state, char_id, pet_id)
   @impl true
   def handle_cast({:pet_leave_all, char_id}, state), do: Pets.handle_pet_leave_all(state, char_id)
   @impl true
@@ -709,7 +709,7 @@ defmodule Arena.Map.MapServer do
     NpcInteraction.handle_gamble(state, char_id, amount, nil)
   end
 
-  def handle_cast({:forgive, char_id}, state), do: NpcInteraction.handle_forgive(state, char_id)
+  def handle_cast({:forgive, char_id, gold_amount}, state), do: NpcInteraction.handle_forgive(state, char_id, gold_amount)
   def handle_cast({:arena_entry, char_id}, state), do: NpcInteraction.handle_arena_entry(state, char_id)
   def handle_cast({:request_account_state, char_id}, state), do: Social.handle_request_account_state(state, char_id)
   def handle_cast({:request_reward, char_id}, state), do: Social.handle_request_reward(state, char_id)

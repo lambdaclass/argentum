@@ -252,8 +252,12 @@ defmodule AoProtocol.Client.Decoder do
   # PetFollow (ID 43)
   defp decode_packet(43, rest), do: {:ok, {:pet_follow, %{}}, rest}
 
-  # PetLeave (ID 44)
-  defp decode_packet(44, rest), do: {:ok, {:pet_leave, %{}}, rest}
+  # PetLeave (ID 44) — client sends the instance ID of the pet to release
+  defp decode_packet(44, rest) do
+    with {:ok, pet_id, rest} <- Reader.read_int16(rest) do
+      {:ok, {:pet_leave, %{pet_id: pet_id}}, rest}
+    end
+  end
 
   # TrainList (ID 46)
   defp decode_packet(46, rest), do: {:ok, {:train_list, %{}}, rest}
@@ -675,8 +679,12 @@ defmodule AoProtocol.Client.Decoder do
     end
   end
 
-  # Forgive (ID 68) — no payload
-  defp decode_packet(68, rest), do: {:ok, {:forgive, %{}}, rest}
+  # Forgive (ID 68) — gold_amount(I32) (VB6 parity: /PERDON requires gold donation)
+  defp decode_packet(68, rest) do
+    with {:ok, gold_amount, rest} <- Reader.read_int32(rest) do
+      {:ok, {:forgive, %{gold_amount: gold_amount}}, rest}
+    end
+  end
 
   # Gamble (ID 67) — amount(I32)
   defp decode_packet(67, rest) do

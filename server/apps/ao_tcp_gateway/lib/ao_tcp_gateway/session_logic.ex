@@ -545,8 +545,8 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
-  def handle_command(state, {:pet_leave, _}) when state.character_id != nil do
-    Arena.Map.MapServer.pet_leave(state.map_id, state.character_id)
+  def handle_command(state, {:pet_leave, %{pet_id: pet_id}}) when state.character_id != nil do
+    Arena.Map.MapServer.pet_leave(state.map_id, state.character_id, pet_id)
     {state, []}
   end
 
@@ -616,8 +616,8 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
-  def handle_command(state, {:forgive, _}) when state.character_id != nil do
-    Arena.Map.MapServer.forgive(state.map_id, state.character_id)
+  def handle_command(state, {:forgive, %{gold_amount: gold_amount}}) when state.character_id != nil do
+    Arena.Map.MapServer.forgive(state.map_id, state.character_id, gold_amount)
     {state, []}
   end
 

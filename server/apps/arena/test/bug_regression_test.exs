@@ -258,7 +258,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{})
 
-      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player)
+      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player, 5000)
       # Criminal status must not change — forgive should be rejected
       assert new_state.players[:player].criminal == true
     end
@@ -274,7 +274,7 @@ defmodule Arena.BugRegressionTest do
         npcs_live: %{npc1: non_priest}
       )
 
-      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player)
+      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player, 5000)
       assert new_state.players[:player].criminal == true
     end
   end

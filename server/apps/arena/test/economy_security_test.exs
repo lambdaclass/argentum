@@ -1325,7 +1325,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player)
+      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player, 5000)
       # Criminal status must not change — no priest nearby
       assert new_state.players[:player].criminal == true
     end
@@ -1337,13 +1337,13 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player)
+      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player, 5000)
       assert new_state.players[:player].criminal == false
     end
 
     test "forgive for unknown player is a no-op" do
       state = make_map_state(%{})
-      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :ghost)
+      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :ghost, 5000)
       assert new_state == state
     end
   end
