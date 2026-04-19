@@ -26,6 +26,12 @@ defmodule Arena.Adversarial.SpellAuthorityTest do
     :ok
   end
 
+  setup do
+    owner_pid = Ecto.Adapters.SQL.Sandbox.start_owner!(GameBackend.Repo, shared: true)
+    on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(owner_pid) end)
+    :ok
+  end
+
   defp make_entity(overrides \\ %{}) do
     struct!(PlayerEntity, Map.merge(%{
       char_id: :caster,

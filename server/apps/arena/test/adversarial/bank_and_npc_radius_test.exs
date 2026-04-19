@@ -103,6 +103,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       speed_hack_counter: 0.0,
       speeding: 1.0,
       commerce_npc_id: nil,
+      commerce_npc_instance_id: nil,
       bank_npc_id: nil,
       bank_gold: 0,
       trade_request_target: nil,
@@ -655,7 +656,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
 
   describe "NPC commerce: sell after walking away" do
     test "sell when commerce_npc_id is set but player has moved far away" do
-      # Commerce.handle_commerce_sell also does NOT re-check proximity, only commerce_npc_id.
+      # Commerce.handle_commerce_sell re-checks proximity via merchant_still_valid?
       inv = List.replace_at(List.duplicate(nil, 24), 0, %{item_id: 100, amount: 5, equipped: false})
 
       entity =
@@ -668,13 +669,18 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
         })
 
       sessions = %{player: self()}
-      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      state =
+        make_map_state(
+          %{player: entity},
+          sessions: sessions,
+          npcs_live: %{merchant1: @merchant_npc}
+        )
 
       {:reply, result, _new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
-      # Documenting current behavior: sell proceeds even if player is far from NPC.
-      # If proximity re-validation is added, change this to {:error, :too_far}.
-      assert result in [:ok, {:error, :no_commerce}, {:error, :too_far}]
+      # merchant_still_valid? rejects because player at (90,90) is far from NPC at (51,50)
+      assert result in [:ok, {:error, :no_commerce}, {:error, :too_far}, {:error, :merchant_gone}]
     end
   end
 

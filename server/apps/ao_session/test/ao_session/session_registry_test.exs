@@ -13,13 +13,29 @@ defmodule AoSession.SessionRegistryTest do
           {Registry, keys: :unique, name: AoSession.SessionRegistry},
           id: :session_registry
         )
+
       _pid ->
         :ok
     end
 
-    # Clear all entries for test isolation
-    Registry.select(AoSession.SessionRegistry, [{{:"$1", :"$2", :"$3"}, [], [{{:"$1", :"$2"}}]}])
-    |> Enum.each(fn {key, _pid} -> Registry.unregister(AoSession.SessionRegistry, key) end)
+    # Clear all entries for test isolation.
+    # Registry.unregister/2 only removes keys owned by self(), so it cannot
+    # clean up entries left by a previous (now-dead) test process.  Instead we
+    # flush the Registry partition so it processes any pending :DOWN messages
+    # from dead owner processes, which removes their entries automatically.
+    registry_pid = Process.whereis(AoSession.SessionRegistry)
+    # A synchronous :sys.get_state forces the partition GenServer to handle
+    # every message in its mailbox (including :DOWN) before returning.
+    :sys.get_state(registry_pid)
+
+    # Now unregister any entries that *this* process might own (e.g. if setup
+    # is called between tests in the same process).
+    Registry.select(AoSession.SessionRegistry, [
+      {{:"$1", :"$2", :"$3"}, [], [{{:"$1", :"$2"}}]}
+    ])
+    |> Enum.each(fn {key, _pid} ->
+      Registry.unregister(AoSession.SessionRegistry, key)
+    end)
 
     :ok
   end

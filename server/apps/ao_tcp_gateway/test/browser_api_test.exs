@@ -5,8 +5,8 @@ defmodule AoTcpGateway.BrowserApiTest do
   @opts AoTcpGateway.WsRouter.init([])
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(GameBackend.Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(GameBackend.Repo, {:shared, self()})
+    owner_pid = Ecto.Adapters.SQL.Sandbox.start_owner!(GameBackend.Repo, shared: true)
+    on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(owner_pid) end)
     :ok
   end
 
@@ -101,7 +101,7 @@ defmodule AoTcpGateway.BrowserApiTest do
 
     assert create_conn.status == 201
 
-    ranking_conn = request(:get, "/api/ranking/general", nil)
+    ranking_conn = request(:get, "/api/ranking/general?limit=100", nil)
 
     assert ranking_conn.status == 200
     assert Enum.any?(response_json(ranking_conn)["entries"], fn entry ->

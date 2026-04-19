@@ -27,6 +27,9 @@ defmodule Arena.GuildRelationsParityTest do
   @member_a 80_010
 
   setup do
+    owner_pid = Ecto.Adapters.SQL.Sandbox.start_owner!(GameBackend.Repo, shared: true)
+    on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(owner_pid) end)
+
     case GuildServer.start_link([]) do
       {:ok, _pid} -> :ok
       {:error, {:already_started, _pid}} -> :ok

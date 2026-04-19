@@ -103,6 +103,7 @@ defmodule Arena.EconomySecurityTest do
       speed_hack_counter: 0.0,
       speeding: 1.0,
       commerce_npc_id: nil,
+      commerce_npc_instance_id: nil,
       bank_npc_id: nil,
       bank_gold: 0,
       trade_request_target: nil,
@@ -134,6 +135,9 @@ defmodule Arena.EconomySecurityTest do
 
   # Banker NPC at (51,50) — used by bank tests that need validate_bank_session to pass
   @banker_npc %{npc_id: 1, x: 51, y: 50, instance_id: :banker1}
+
+  # Merchant NPC at (51,50) — used by commerce tests that need merchant_still_valid? to pass
+  @merchant_npc %{npc_id: 1, x: 51, y: 50, instance_id: :merchant1}
 
   defp make_map_state(players, opts \\ []) do
     map_state(
@@ -198,7 +202,7 @@ defmodule Arena.EconomySecurityTest do
     test "selling from empty inventory slot returns :empty_slot" do
       entity = make_entity(%{char_id: :player, commerce_npc_id: 1})
       sessions = %{player: self()}
-      state = make_map_state(%{player: entity}, sessions: sessions)
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{merchant1: @merchant_npc})
 
       # Slot 5 is empty (nil)
       {:reply, result, _state} = Commerce.handle_commerce_sell(state, :player, 5, 1)
@@ -213,7 +217,7 @@ defmodule Arena.EconomySecurityTest do
       inv = List.replace_at(List.duplicate(nil, 24), 23, %{item_id: 100, amount: 5, equipped: false})
       entity = make_entity(%{char_id: :player, commerce_npc_id: 1, inventory: inv})
       sessions = %{player: self()}
-      state = make_map_state(%{player: entity}, sessions: sessions)
+      state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{merchant1: @merchant_npc})
 
       # slot=0 → inv_idx = -1 → reads last slot (index 23)
       # If the handler doesn't guard slot > 0, this will find the item
