@@ -210,7 +210,7 @@ defmodule Arena.Map.Crafting do
         send_msg(state, char_id, "Necesitas la herramienta adecuada.")
         {:noreply, state}
 
-      Arena.Map.Social.find_nearby_npc_of_type(state, entity, npc_types) == :not_found ->
+      Arena.Map.Helpers.find_nearby_npc_of_type(state, entity, npc_types, 5) == :not_found ->
         send_msg(state, char_id, "No hay un taller cerca.")
         {:noreply, state}
 

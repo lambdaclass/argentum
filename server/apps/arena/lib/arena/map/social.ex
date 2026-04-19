@@ -508,7 +508,7 @@ defmodule Arena.Map.Social do
         msg(state, char_id, "Primero haz click sobre un sacerdote.")
         {:noreply, state}
 
-      # Priest too far (find_nearby_npc_of_type already checks distance <= 5)
+      # Priest too far (find_nearby_npc_of_type checks distance <= 10)
       # If we got here, priest is nearby. Check other conditions.
 
       # Cannot marry yourself
