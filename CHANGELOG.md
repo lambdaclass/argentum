@@ -4,6 +4,26 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **Phase 3 proof tests — ROADMAP #23-29 closed (2026-04-19):**
+  - **Pet/taming parity** (#26): 35 tests — stat inheritance from NPC def, attack
+    damage formula, adjacent-only range, aggro range, death handling (no XP, no
+    respawn, pet_ids cleanup), taming edge cases (stamina cost, skill-up on
+    success and failure, max 3 pets), mode commands, /LIBERAR order.
+  - **Concurrent combat** (#27): 13 integration tests — AoE spell hitting 3+
+    targets with state consistency, AoE killing mid-iteration, mutual lethal PvP,
+    three-way combat deaths, party safe blocking, faction PvP safe-zone exception,
+    spell cooldown isolation, mixed melee+spell attacker types.
+  - **Lifecycle expansion** (#28): 14 tests — autosave coalescing under rapid
+    changes, multi-map A→B→C transfer chains, cleanup DB failure, flush timeout,
+    worker crash recovery, stale autosave ordering, graceful-disconnect final-save
+    failure.
+  - **Persistence coverage** (#29): 38 tests — faction membership/score/rank/kill
+    counters round-trip through save_snapshot/to_entity, account ban/unban, character
+    muted_until, GM /BAN and /MUTE paths, expiration edge cases.
+  - **Pre-existing test fixes**: 10 failures fixed across 6 files (missing
+    commerce_npc_instance_id, Ecto Sandbox setup, Registry cleanup race, ranking
+    pagination). Full suite now 0 failures.
+
 - **Event systems: capture, siege, rewards, scheduler — ROADMAP #15-18 closed (2026-04-19):**
   - **Capture events** (#15): `Arena.Events.CaptureServer` GenServer — team-based flag
     capture with registration validation (level/gold/state checks), level-balanced
