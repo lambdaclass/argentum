@@ -4,7 +4,7 @@ defmodule Arena.CraftingTest do
   """
   use ExUnit.Case, async: true
 
-  alias Arena.Map.Crafting
+  alias Arena.Map.{Crafting, InventoryHandlers}
   alias AoEntities.PlayerEntity
   alias Arena.Data.CraftingRecipes
 
@@ -22,11 +22,14 @@ defmodule Arena.CraftingTest do
   defp make_state(players, opts \\ []) do
     trigger_map = Keyword.get(opts, :trigger_map, %{})
     npcs_live = Keyword.get(opts, :npcs_live, %{})
+    sessions = Keyword.get(opts, :sessions, %{})
+    objects = Keyword.get(opts, :objects, [])
 
     map_state(
       players: players,
+      sessions: sessions,
       npcs_live: npcs_live,
-      meta: %{safe_zone: false, trigger_map: trigger_map}
+      meta: %{safe_zone: false, trigger_map: trigger_map, objects: objects}
     )
   end
 
@@ -628,33 +631,36 @@ defmodule Arena.CraftingTest do
       # Espada Matadragones (402) needs min_skill 100
       entity = %PlayerEntity{
         char_id: 1, dead: false, stamina: 100,
+        equipment: %{weapon: 389},
         skills: %{blacksmithing: 10},
         inventory: [%{item_id: 388, amount: 500, equipped: false} | List.duplicate(nil, 23)]
       }
-      state = make_state(%{1 => entity})
-      {:noreply, _state} = Crafting.handle_craft_item(state, 1, :blacksmithing, 402)
+      state = make_state(%{1 => entity}, objects: [%{x: 50, y: 49, obj_index: 384, amount: 1}])
+      {:noreply, _state} = Crafting.handle_craft_item(state, 1, :blacksmithing, 402, 1, 50, 49)
     end
 
     test "rejects when materials missing" do
       # Lingote de Hierro (386) needs 2x iron ore (192)
       entity = %PlayerEntity{
         char_id: 1, dead: false, stamina: 100,
+        equipment: %{weapon: 389},
         skills: %{blacksmithing: 50},
         inventory: List.duplicate(nil, 24)
       }
-      state = make_state(%{1 => entity})
-      {:noreply, _state} = Crafting.handle_craft_item(state, 1, :blacksmithing, 386)
+      state = make_state(%{1 => entity}, objects: [%{x: 50, y: 49, obj_index: 384, amount: 1}])
+      {:noreply, _state} = Crafting.handle_craft_item(state, 1, :blacksmithing, 386, 1, 50, 49)
     end
 
     test "crafts item and consumes ingredients" do
       # Lingote de Hierro (386) needs 2x iron ore (192), min_skill 0
       entity = %PlayerEntity{
         char_id: 1, dead: false, stamina: 100,
+        equipment: %{weapon: 389},
         skills: %{blacksmithing: 50},
         inventory: [%{item_id: 192, amount: 5, equipped: false} | List.duplicate(nil, 23)]
       }
-      state = make_state(%{1 => entity})
-      {:noreply, new_state} = Crafting.handle_craft_item(state, 1, :blacksmithing, 386)
+      state = make_state(%{1 => entity}, objects: [%{x: 50, y: 49, obj_index: 384, amount: 1}])
+      {:noreply, new_state} = Crafting.handle_craft_item(state, 1, :blacksmithing, 386, 1, 50, 49)
 
       updated_entity = new_state.players[1]
       # Stamina should be reduced
@@ -669,6 +675,23 @@ defmodule Arena.CraftingTest do
     test "returns :noreply for missing player" do
       state = make_state(%{})
       {:noreply, _state} = Crafting.handle_craft_item(state, 999, :blacksmithing, 386)
+    end
+
+    test "blacksmithing rejects when no anvil or forge object is selected" do
+      entity = %PlayerEntity{
+        char_id: 1,
+        dead: false,
+        stamina: 100,
+        equipment: %{weapon: 389},
+        skills: %{blacksmithing: 50},
+        inventory: [%{item_id: 192, amount: 5, equipped: false} | List.duplicate(nil, 23)]
+      }
+
+      state = make_state(%{1 => entity}, sessions: %{1 => self()}, objects: [])
+      {:noreply, unchanged_state} = Crafting.handle_craft_item(state, 1, :blacksmithing, 386, 1, 50, 49)
+
+      assert unchanged_state.players[1].inventory == state.players[1].inventory
+      assert_receive {:send_raw, _}
     end
   end
 
@@ -702,6 +725,59 @@ defmodule Arena.CraftingTest do
     test "returns :noreply for missing player" do
       state = make_state(%{})
       {:noreply, _state} = Crafting.open_crafting_window(state, 999, :blacksmithing)
+    end
+  end
+
+  describe "working tool use opens production forms" do
+    test "carpentry form opens from using the equipped saw without any workstation NPC" do
+      entity = %PlayerEntity{
+        char_id: 1,
+        equipment: %{weapon: 198},
+        inventory: [%{item_id: 198, amount: 1, equipped: true} | List.duplicate(nil, 23)],
+        skills: %{carpentry: 50}
+      }
+
+      state = make_state(%{1 => entity}, sessions: %{1 => self()})
+      assert {:reply, :ok, _state} = InventoryHandlers.handle_use_item(state, 1, 0)
+      assert_receive {:send_raw, _}
+      assert_receive {:send_raw, _}
+    end
+
+    test "blacksmith form opens from using the equipped hammer with a selected anvil object" do
+      entity = %PlayerEntity{
+        char_id: 1,
+        x: 50,
+        y: 50,
+        equipment: %{weapon: 389},
+        inventory: [%{item_id: 389, amount: 1, equipped: true} | List.duplicate(nil, 23)],
+        skills: %{blacksmithing: 50}
+      }
+
+      state =
+        make_state(
+          %{1 => entity},
+          sessions: %{1 => self()},
+          objects: [%{x: 50, y: 49, obj_index: 384, amount: 1}]
+        )
+
+      assert {:reply, :ok, _state} = InventoryHandlers.handle_use_item(state, 1, 0, 50, 49)
+      assert_receive {:send_raw, _}
+      assert_receive {:send_raw, _}
+    end
+
+    test "blacksmith form rejects hammer use without a selected anvil or forge object" do
+      entity = %PlayerEntity{
+        char_id: 1,
+        x: 50,
+        y: 50,
+        equipment: %{weapon: 389},
+        inventory: [%{item_id: 389, amount: 1, equipped: true} | List.duplicate(nil, 23)],
+        skills: %{blacksmithing: 50}
+      }
+
+      state = make_state(%{1 => entity}, sessions: %{1 => self()})
+      assert {:reply, {:error, :missing_target}, _state} = InventoryHandlers.handle_use_item(state, 1, 0)
+      assert_receive {:send_raw, _}
     end
   end
 end

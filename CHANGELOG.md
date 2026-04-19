@@ -4,6 +4,35 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **Final backend parity sweep + tooling cleanup (2026-04-19):**
+  - Closed the late-stage parity sweep that landed after the Phase 2/3 roadmap
+    closures: core combat/spell/leveling formulas, trade/drop/bank item-rule
+    gaps, quest handler bugs, healing/gambling/`/PERDON` behavior, packet
+    semantics for `eInformation` and `eQuest`, selected-NPC targeting for
+    trainer/gamble/priest flows, `Ocultarse`, taming, pet commands, GM/SOS
+    support behavior, treasure NPC events, duel rooms, trainer creature spawn,
+    and selected-banker gold transfer.
+  - Added the structural parity helpers that make future audits cheaper:
+    canonical `vb6_distancia`, explicit selected-vs-nearby NPC resolution,
+    expanded `SessionRouteManifest` coverage, `mix parity.audit`, and the
+    `NpcInteraction` split into smaller domain modules.
+
+- **Crafting trigger-model parity (2026-04-19):**
+  - Blacksmithing no longer depends on workstation NPCs. Using the equipped
+    smith hammer now requires a selected anvil/forge object target, and
+    blacksmith craft requests revalidate that object target before consuming
+    materials.
+  - Carpentry, alchemy, and tailoring no longer require nearby workstation
+    NPCs. Their forms now open from equipped working-tool use, and the craft
+    requests themselves revalidate the correct tool instead of NPC proximity.
+  - Production `work` packets no longer act as a shortcut trigger for those
+    production skills; the trigger path now matches the old VB6 tool/object
+    model instead of the later NPC-workstation shortcut.
+  - Updated crafting route metadata from intentional divergence to exact parity,
+    added regression coverage in `crafting_test.exs` and
+    `crafting_bank_train_drift_test.exs`, and cleared the last confirmed item
+    from `drift.md`.
+
 - **`/HOGAR` tiered timer parity + account patron tiers (2026-04-19):**
   - Added legacy `accounts.is_active_patron` support to the backend account
     schema and mapped the old VB6 patron ids to online user tiers

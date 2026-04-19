@@ -10,16 +10,7 @@ Scope rules:
 
 ## NPC, Service, and Gameplay Flows
 
-1. Crafting production is still structurally different.
-Current:
-- `server/apps/arena/lib/arena/map/crafting.ex`
-VB6:
-- `old/server/Codigo/Acciones.bas:483`
-- `old/server/Codigo/InvUsuario.bas:1859`
-Notes:
-- Current blacksmithing/carpentry/alchemy/tailoring depend on nearby workstation NPC types.
-- VB6 ties blacksmithing to workstation objects and the other craft forms to equipped tool use.
-- This is an intentional divergence for now (documented in crafting.ex moduledoc).
+No confirmed open backend drift is currently tracked against the inspected VB6 baseline.
 
 ## Needs Verification
 

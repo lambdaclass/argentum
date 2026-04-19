@@ -202,7 +202,13 @@ defmodule AoTcpGateway.SessionLogic do
   end
 
   def handle_command(state, {:use_item, %{slot: slot}}) when state.character_id != nil do
-    case Arena.Map.MapServer.use_item(state.map_id, state.character_id, slot) do
+    case Arena.Map.MapServer.use_item(
+           state.map_id,
+           state.character_id,
+           slot,
+           state.target_x,
+           state.target_y
+         ) do
       {:error, :dead} ->
         {%{state | is_dead: true},
          [{:console_msg, %{message: "Estás muerto. No podés usar objetos.", font_index: 0}}]}
@@ -379,7 +385,16 @@ defmodule AoTcpGateway.SessionLogic do
   # ---- Crafting ----
 
   def handle_command(state, {:craft_blacksmith, %{item: item}}) when state.character_id != nil do
-    Arena.Map.MapServer.craft_item(state.map_id, state.character_id, :blacksmithing, item)
+    Arena.Map.MapServer.craft_item(
+      state.map_id,
+      state.character_id,
+      :blacksmithing,
+      item,
+      1,
+      state.target_x,
+      state.target_y
+    )
+
     {state, []}
   end
 

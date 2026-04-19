@@ -198,6 +198,7 @@ defmodule Arena.FactionCraftDriftTest do
       entity = %PlayerEntity{
         char_id: 1, dead: false, stamina: 300, max_stamina: 300,
         class: :worker, race: :human, gender: :male,
+        equipment: %{weapon: 198},
         skills: %{carpentry: 50},
         inventory: [%{item_id: 58, amount: 700, equipped: false} | List.duplicate(nil, 23)]
       }
@@ -228,6 +229,7 @@ defmodule Arena.FactionCraftDriftTest do
       entity = %PlayerEntity{
         char_id: 1, dead: false, stamina: 300, max_stamina: 300,
         class: :worker, race: :human, gender: :male,
+        equipment: %{weapon: 198},
         skills: %{carpentry: 50},
         inventory: [%{item_id: 58, amount: 700, equipped: false} | List.duplicate(nil, 23)]
       }
@@ -256,6 +258,7 @@ defmodule Arena.FactionCraftDriftTest do
       entity = %PlayerEntity{
         char_id: 1, dead: false, stamina: 300, max_stamina: 300,
         class: :worker, race: :human, gender: :male,
+        equipment: %{weapon: 198},
         skills: %{carpentry: 50},
         inventory: [%{item_id: 58, amount: 700, equipped: false} | List.duplicate(nil, 23)]
       }

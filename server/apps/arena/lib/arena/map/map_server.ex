@@ -103,7 +103,9 @@ defmodule Arena.Map.MapServer do
   def pick_up(map_id, char_id), do: GenServer.call(via(map_id), {:pick_up, char_id})
   def drop_item(map_id, char_id, slot, amount), do: GenServer.call(via(map_id), {:drop_item, char_id, slot, amount})
   def equip_item(map_id, char_id, slot), do: GenServer.call(via(map_id), {:equip_item, char_id, slot})
-  def use_item(map_id, char_id, slot), do: GenServer.call(via(map_id), {:use_item, char_id, slot})
+  def use_item(map_id, char_id, slot), do: GenServer.call(via(map_id), {:use_item, char_id, slot, nil, nil})
+  def use_item(map_id, char_id, slot, target_x, target_y),
+    do: GenServer.call(via(map_id), {:use_item, char_id, slot, target_x, target_y})
 
   def attack(map_id, char_id, target_x \\ nil, target_y \\ nil),
     do: GenServer.call(via(map_id), {:attack, char_id, target_x, target_y})
@@ -158,10 +160,13 @@ defmodule Arena.Map.MapServer do
   def train_skill(map_id, char_id, skill_index), do: GenServer.cast(via(map_id), {:train_skill, char_id, skill_index})
 
   def craft_item(map_id, char_id, skill_atom, item_id),
-    do: GenServer.cast(via(map_id), {:craft_item, char_id, skill_atom, item_id, 1})
+    do: GenServer.cast(via(map_id), {:craft_item, char_id, skill_atom, item_id, 1, nil, nil})
 
   def craft_item(map_id, char_id, skill_atom, item_id, amount),
-    do: GenServer.cast(via(map_id), {:craft_item, char_id, skill_atom, item_id, amount})
+    do: GenServer.cast(via(map_id), {:craft_item, char_id, skill_atom, item_id, amount, nil, nil})
+
+  def craft_item(map_id, char_id, skill_atom, item_id, amount, target_x, target_y),
+    do: GenServer.cast(via(map_id), {:craft_item, char_id, skill_atom, item_id, amount, target_x, target_y})
 
   def information(map_id, char_id), do: GenServer.cast(via(map_id), {:information, char_id})
   def double_click(map_id, char_id, x, y), do: GenServer.cast(via(map_id), {:double_click, char_id, x, y})
@@ -508,7 +513,8 @@ defmodule Arena.Map.MapServer do
     do: InventoryHandlers.handle_equip_item(state, char_id, slot)
 
   @impl true
-  def handle_call({:use_item, char_id, slot}, _from, state), do: InventoryHandlers.handle_use_item(state, char_id, slot)
+  def handle_call({:use_item, char_id, slot, target_x, target_y}, _from, state),
+    do: InventoryHandlers.handle_use_item(state, char_id, slot, target_x, target_y)
 
   # ---- Combat (delegated) ----
 
@@ -672,8 +678,16 @@ defmodule Arena.Map.MapServer do
     do: Training.handle_train_skill(state, char_id, skill_index)
 
   @impl true
-  def handle_cast({:craft_item, char_id, skill_atom, item_id, amount}, state),
-    do: Arena.Map.Crafting.handle_craft_item(state, char_id, skill_atom, item_id, amount)
+  def handle_cast({:craft_item, char_id, skill_atom, item_id, amount, target_x, target_y}, state),
+    do: Arena.Map.Crafting.handle_craft_item(
+      state,
+      char_id,
+      skill_atom,
+      item_id,
+      amount,
+      target_x,
+      target_y
+    )
 
   @impl true
   def handle_cast({:request_skills, char_id}, state), do: Social.handle_request_skills(state, char_id)

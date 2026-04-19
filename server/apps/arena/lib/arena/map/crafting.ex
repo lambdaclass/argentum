@@ -3,24 +3,13 @@ defmodule Arena.Map.Crafting do
   Crafting and gathering handlers for the Work packet.
 
   VB6 behavior: player must have the right tool equipped, be near the
-  right resource (tile type or NPC), and pass a skill roll.
+  right resource (tile type or object), and pass a skill roll.
 
-  ## VB6 trigger model vs Elixir model (Drift #29)
-
-  In VB6, each production skill has a different trigger mechanism:
-  - **Blacksmithing**: triggered by right-clicking an anvil *object* on the map
-    (Acciones.bas:483). The anvil is a map object, not an NPC. Distance check
-    is <= 2 tiles from the anvil.
-  - **Alchemy / Carpentry / Tailoring**: triggered by *equipping* the
-    corresponding tool item (InvUsuario.bas:1859). No NPC interaction needed.
-
-  In the Elixir server, ALL production skills are triggered via proximity to a
-  workstation NPC (forge=5, workbench=6, alchemy=7, loom=8) with a range of 5
-  tiles. This works with the current client, which sends craft packets after
-  NPC interaction.
-
-  The recipe lookup, ingredient consumption, and skill-check logic is identical
-  between VB6 and Elixir — only the trigger mechanism differs.
+  Production crafting follows the legacy VB6 trigger model:
+  - **Blacksmithing**: requires the smith hammer equipped plus a selected anvil
+    or forge object within 2 tiles.
+  - **Alchemy / Carpentry / Tailoring**: forms are opened by using the equipped
+    working tool, not by standing near a workstation NPC.
   """
 
   alias Arena.Map.Helpers
@@ -44,11 +33,9 @@ defmodule Arena.Map.Crafting do
   # Olla de Alquimia
   @alchemy_ids [887]
 
-  # NPC types for production workstations
-  @npc_type_forge 5
-  @npc_type_workbench 6
-  @npc_type_alchemy 7
-  @npc_type_loom 8
+  # VB6 object types: otAnvil=27, otForge=28
+  @blacksmith_object_types [27, 28]
+  @blacksmith_target_range 2
 
   @work_stamina_cost 15
 
@@ -56,6 +43,10 @@ defmodule Arena.Map.Crafting do
   # All other classes pay 3x the stamina cost per work action.
   @non_worker_stamina_multiplier 3
   @worker_classes [:worker, :trabajador]
+  @must_equip_tool_msg "Antes de usar la herramienta deberias equipartela."
+  @must_click_anvil_msg "Debes hacer click derecho sobre el yunque."
+  @too_far_msg "Estas demasiado lejos."
+  @use_equipped_tool_msg "Debes usar la herramienta equipada para construir."
 
 
   defp effective_stamina_cost(entity) do
@@ -104,16 +95,16 @@ defmodule Arena.Map.Crafting do
         gather(state, char_id, entity, :woodcutting, weapon_id, @woodcutting_axe_ids)
 
       :blacksmithing ->
-        produce(state, char_id, entity, :blacksmithing, weapon_id, @hammer_ids, [@npc_type_forge])
+        prompt_production_trigger(state, char_id, :blacksmithing)
 
       :carpentry ->
-        produce(state, char_id, entity, :carpentry, weapon_id, @saw_ids, [@npc_type_workbench])
+        prompt_production_trigger(state, char_id, :carpentry)
 
       :alchemy ->
-        produce(state, char_id, entity, :alchemy, weapon_id, @alchemy_ids, [@npc_type_alchemy])
+        prompt_production_trigger(state, char_id, :alchemy)
 
       :tailoring ->
-        produce(state, char_id, entity, :tailoring, weapon_id, @sewing_ids, [@npc_type_loom])
+        prompt_production_trigger(state, char_id, :tailoring)
 
       :taming ->
         attempt_taming(state, char_id, entity)
@@ -121,6 +112,70 @@ defmodule Arena.Map.Crafting do
       _ ->
         send_msg(state, char_id, "No puedes trabajar en eso.")
         {:noreply, state}
+    end
+  end
+
+  defp prompt_production_trigger(state, char_id, :blacksmithing) do
+    send_msg(state, char_id, @must_click_anvil_msg)
+    {:noreply, state}
+  end
+
+  defp prompt_production_trigger(state, char_id, _skill_atom) do
+    send_msg(state, char_id, @use_equipped_tool_msg)
+    {:noreply, state}
+  end
+
+  @doc """
+  Open a production crafting form from the equipped working tool.
+
+  VB6:
+  - hammer -> selected anvil/forge object
+  - saw/pot/sewing kit -> direct form open from equipped tool use
+  """
+  def handle_tool_use(state, char_id, entity, item_id, target_x \\ nil, target_y \\ nil) do
+    cond do
+      item_id in @hammer_ids ->
+        open_blacksmith_window(state, char_id, entity, target_x, target_y)
+
+      item_id in @saw_ids ->
+        open_tool_window(state, char_id, entity, :carpentry, @saw_ids)
+
+      item_id in @alchemy_ids ->
+        open_tool_window(state, char_id, entity, :alchemy, @alchemy_ids)
+
+      item_id in @sewing_ids ->
+        open_tool_window(state, char_id, entity, :tailoring, @sewing_ids)
+
+      true ->
+        {:error, :not_usable}
+    end
+  end
+
+  defp open_blacksmith_window(state, char_id, entity, target_x, target_y) do
+    cond do
+      not tool_equipped?(entity, @hammer_ids) ->
+        send_msg(state, char_id, @must_equip_tool_msg)
+        {:error, :must_equip_tool}
+
+      true ->
+        case validate_blacksmith_target(state, entity, target_x, target_y) do
+          :ok ->
+            {:noreply, state} = open_crafting_window(state, char_id, :blacksmithing)
+            {:ok, entity, state}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+    end
+  end
+
+  defp open_tool_window(state, char_id, entity, skill_atom, tool_ids) do
+    if tool_equipped?(entity, tool_ids) do
+      {:noreply, state} = open_crafting_window(state, char_id, skill_atom)
+      {:ok, entity, state}
+    else
+      send_msg(state, char_id, @must_equip_tool_msg)
+      {:error, :must_equip_tool}
     end
   end
 
@@ -294,23 +349,6 @@ defmodule Arena.Map.Crafting do
     end
   end
 
-  # ---- Production (blacksmithing, carpentry, etc.) ----
-
-  defp produce(state, char_id, entity, skill_atom, weapon_id, tool_ids, npc_types) do
-    cond do
-      weapon_id not in tool_ids ->
-        send_msg(state, char_id, "Necesitas la herramienta adecuada.")
-        {:noreply, state}
-
-      Arena.Map.Helpers.resolve_nearby_npc(state, entity, npc_types, 5) == :not_found ->
-        send_msg(state, char_id, "No hay un taller cerca.")
-        {:noreply, state}
-
-      true ->
-        attempt_production(state, char_id, entity, skill_atom)
-    end
-  end
-
   # ---- Skill roll + item creation ----
 
   defp attempt_gathering(state, char_id, entity, skill_atom) do
@@ -353,60 +391,6 @@ defmodule Arena.Map.Crafting do
       state = update_player(state, char_id, entity)
       send_skills(state, char_id, entity)
       {:noreply, state}
-    end
-  end
-
-  defp attempt_production(state, char_id, entity, skill_atom) do
-    skill_value = Map.get(entity.skills, skill_atom, 0)
-
-    case CraftingRecipes.find_craftable(skill_atom, skill_value, entity.inventory) do
-      nil ->
-        send_msg(state, char_id, "No tienes los materiales necesarios.")
-        {:noreply, state}
-
-      recipe ->
-        {entity, state} = consume_stamina(state, char_id, entity)
-
-        if skill_check(skill_value) do
-          case consume_ingredients(entity.inventory, recipe.ingredients) do
-            {:ok, new_inventory, consumed_slots} ->
-              case Inventory.add_item(new_inventory, recipe.result_id, recipe.result_amount) do
-                {:ok, final_inventory, result_slot} ->
-                  entity = try_skill_up(entity, skill_atom, skill_value)
-                  entity = %{entity | inventory: final_inventory}
-                  state = update_player(state, char_id, entity)
-
-                  for slot <- consumed_slots do
-                    Helpers.send_inventory_slot(state.sessions, char_id, final_inventory, slot)
-                  end
-
-                  Helpers.send_inventory_slot(state.sessions, char_id, final_inventory, result_slot)
-                  send_skills(state, char_id, entity)
-
-                  item_def = GameData.get_item(recipe.result_id)
-                  name = if item_def, do: item_def.name, else: "un objeto"
-                  send_msg(state, char_id, "Has creado #{name}.")
-                  {:noreply, state}
-
-                {:error, :inventory_full} ->
-                  send_msg(state, char_id, "No tienes espacio para el producto.")
-                  {:noreply, state}
-
-                {:gold, _} ->
-                  {:noreply, state}
-              end
-
-            {:error, :missing_ingredients} ->
-              send_msg(state, char_id, "No tienes los materiales necesarios.")
-              {:noreply, state}
-          end
-        else
-          send_msg(state, char_id, "No has podido crear nada.")
-          entity = try_skill_up(entity, skill_atom, skill_value)
-          state = update_player(state, char_id, entity)
-          send_skills(state, char_id, entity)
-          {:noreply, state}
-        end
     end
   end
 
@@ -525,7 +509,8 @@ defmodule Arena.Map.Crafting do
   @doc """
   Send the crafting window for a given skill to the player.
   Sends the recipe list followed by the show-form packet.
-  VB6 flow: NPC interaction → server sends item list + show form → client opens window.
+  VB6 flow: equipped tool or selected workstation object → server sends item
+  list + show form → client opens window.
   """
   def open_crafting_window(state, char_id, skill_atom) do
     case Map.fetch(state.players, char_id) do
@@ -549,19 +534,25 @@ defmodule Arena.Map.Crafting do
   The 5-arity version accepts an amount for batch crafting (CraftCarpenter).
   """
   def handle_craft_item(state, char_id, skill_atom, item_id),
-    do: handle_craft_item(state, char_id, skill_atom, item_id, 1)
+    do: handle_craft_item(state, char_id, skill_atom, item_id, 1, nil, nil)
 
   def handle_craft_item(state, char_id, skill_atom, item_id, amount) when amount >= 1 do
-    do_craft_item_loop(state, char_id, skill_atom, item_id, amount)
+    handle_craft_item(state, char_id, skill_atom, item_id, amount, nil, nil)
   end
 
-  def handle_craft_item(state, _char_id, _skill_atom, _item_id, _amount) do
+  def handle_craft_item(state, char_id, skill_atom, item_id, amount, target_x, target_y)
+      when amount >= 1 do
+    do_craft_item_loop(state, char_id, skill_atom, item_id, amount, target_x, target_y)
+  end
+
+  def handle_craft_item(state, _char_id, _skill_atom, _item_id, _amount, _target_x, _target_y) do
     {:noreply, state}
   end
 
-  defp do_craft_item_loop(state, _char_id, _skill_atom, _item_id, 0), do: {:noreply, state}
+  defp do_craft_item_loop(state, _char_id, _skill_atom, _item_id, 0, _target_x, _target_y),
+    do: {:noreply, state}
 
-  defp do_craft_item_loop(state, char_id, skill_atom, item_id, remaining) do
+  defp do_craft_item_loop(state, char_id, skill_atom, item_id, remaining, target_x, target_y) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         cost = effective_stamina_cost(entity)
@@ -576,9 +567,17 @@ defmodule Arena.Map.Crafting do
             {:noreply, state}
 
           true ->
-            case do_craft_item(state, char_id, entity, skill_atom, item_id) do
+            case do_craft_item(state, char_id, entity, skill_atom, item_id, target_x, target_y) do
               {:noreply, new_state} when remaining > 1 ->
-                do_craft_item_loop(new_state, char_id, skill_atom, item_id, remaining - 1)
+                do_craft_item_loop(
+                  new_state,
+                  char_id,
+                  skill_atom,
+                  item_id,
+                  remaining - 1,
+                  target_x,
+                  target_y
+                )
 
               result ->
                 result
@@ -590,7 +589,7 @@ defmodule Arena.Map.Crafting do
     end
   end
 
-  defp do_craft_item(state, char_id, entity, skill_atom, item_id) do
+  defp do_craft_item(state, char_id, entity, skill_atom, item_id, target_x, target_y) do
     skill_value = Map.get(entity.skills, skill_atom, 0)
 
     case CraftingRecipes.find_recipe_by_item(skill_atom, item_id) do
@@ -599,51 +598,131 @@ defmodule Arena.Map.Crafting do
         {:noreply, state}
 
       recipe ->
-        cond do
-          skill_value < recipe.min_skill ->
-            send_msg(state, char_id, "No tienes suficiente habilidad.")
-            {:noreply, state}
+        case validate_crafting_request(state, char_id, entity, skill_atom, target_x, target_y) do
+          :ok ->
+            cond do
+              skill_value < recipe.min_skill ->
+                send_msg(state, char_id, "No tienes suficiente habilidad.")
+                {:noreply, state}
 
-          not has_ingredients_for?(entity.inventory, recipe.ingredients) ->
-            send_msg(state, char_id, "No tienes los materiales necesarios.")
-            {:noreply, state}
-
-          true ->
-            {entity, state} = consume_stamina(state, char_id, entity)
-
-            case consume_ingredients(entity.inventory, recipe.ingredients) do
-              {:ok, new_inventory, consumed_slots} ->
-                case Inventory.add_item(new_inventory, recipe.result_id, recipe.result_amount) do
-                  {:ok, final_inventory, result_slot} ->
-                    entity = try_skill_up(entity, skill_atom, skill_value)
-                    entity = %{entity | inventory: final_inventory}
-                    state = update_player(state, char_id, entity)
-
-                    for slot <- consumed_slots do
-                      Helpers.send_inventory_slot(state.sessions, char_id, final_inventory, slot)
-                    end
-
-                    Helpers.send_inventory_slot(state.sessions, char_id, final_inventory, result_slot)
-                    send_skills(state, char_id, entity)
-
-                    item_def = GameData.get_item(recipe.result_id)
-                    name = if item_def, do: item_def.name, else: "un objeto"
-                    send_msg(state, char_id, "Has creado #{name}.")
-                    {:noreply, state}
-
-                  {:error, :inventory_full} ->
-                    send_msg(state, char_id, "No tienes espacio en el inventario.")
-                    {:noreply, state}
-
-                  {:gold, _} ->
-                    {:noreply, state}
-                end
-
-              {:error, :missing_ingredients} ->
+              not has_ingredients_for?(entity.inventory, recipe.ingredients) ->
                 send_msg(state, char_id, "No tienes los materiales necesarios.")
                 {:noreply, state}
+
+              true ->
+                {entity, state} = consume_stamina(state, char_id, entity)
+
+                case consume_ingredients(entity.inventory, recipe.ingredients) do
+                  {:ok, new_inventory, consumed_slots} ->
+                    case Inventory.add_item(new_inventory, recipe.result_id, recipe.result_amount) do
+                      {:ok, final_inventory, result_slot} ->
+                        entity = try_skill_up(entity, skill_atom, skill_value)
+                        entity = %{entity | inventory: final_inventory}
+                        state = update_player(state, char_id, entity)
+
+                        for slot <- consumed_slots do
+                          Helpers.send_inventory_slot(state.sessions, char_id, final_inventory, slot)
+                        end
+
+                        Helpers.send_inventory_slot(
+                          state.sessions,
+                          char_id,
+                          final_inventory,
+                          result_slot
+                        )
+
+                        send_skills(state, char_id, entity)
+
+                        item_def = GameData.get_item(recipe.result_id)
+                        name = if item_def, do: item_def.name, else: "un objeto"
+                        send_msg(state, char_id, "Has creado #{name}.")
+                        {:noreply, state}
+
+                      {:error, :inventory_full} ->
+                        send_msg(state, char_id, "No tienes espacio en el inventario.")
+                        {:noreply, state}
+
+                      {:gold, _} ->
+                        {:noreply, state}
+                    end
+
+                  {:error, :missing_ingredients} ->
+                    send_msg(state, char_id, "No tienes los materiales necesarios.")
+                    {:noreply, state}
+                end
             end
+
+          {:error, _reason} ->
+            {:noreply, state}
         end
+    end
+  end
+
+  defp validate_crafting_request(state, char_id, entity, :blacksmithing, target_x, target_y) do
+    cond do
+      not tool_equipped?(entity, @hammer_ids) ->
+        send_msg(state, char_id, @must_equip_tool_msg)
+        {:error, :must_equip_tool}
+
+      true ->
+        validate_blacksmith_target(state, entity, target_x, target_y)
+    end
+  end
+
+  defp validate_crafting_request(state, char_id, entity, skill_atom, _target_x, _target_y)
+       when skill_atom in [:carpentry, :alchemy, :tailoring] do
+    if tool_equipped?(entity, required_tool_ids(skill_atom)) do
+      :ok
+    else
+      send_msg(state, char_id, @must_equip_tool_msg)
+      {:error, :must_equip_tool}
+    end
+  end
+
+  defp validate_crafting_request(_state, _char_id, _entity, _skill_atom, _target_x, _target_y),
+    do: :ok
+
+  defp tool_equipped?(entity, tool_ids), do: Map.get(entity.equipment, :weapon) in tool_ids
+
+  defp required_tool_ids(:blacksmithing), do: @hammer_ids
+  defp required_tool_ids(:carpentry), do: @saw_ids
+  defp required_tool_ids(:alchemy), do: @alchemy_ids
+  defp required_tool_ids(:tailoring), do: @sewing_ids
+
+  defp validate_blacksmith_target(state, entity, target_x, target_y) do
+    cond do
+      is_nil(target_x) or is_nil(target_y) ->
+        send_msg(state, entity.char_id, @must_click_anvil_msg)
+        {:error, :missing_target}
+
+      Helpers.vb6_distancia_xy(entity.x, entity.y, target_x, target_y) > @blacksmith_target_range ->
+        send_msg(state, entity.char_id, @too_far_msg)
+        {:error, :too_far}
+
+      true ->
+        case blacksmith_target_object(state, target_x, target_y) do
+          nil ->
+            send_msg(state, entity.char_id, @must_click_anvil_msg)
+            {:error, :invalid_target}
+
+          _obj ->
+            :ok
+        end
+    end
+  end
+
+  defp blacksmith_target_object(state, target_x, target_y) do
+    state.meta
+    |> Map.get(:objects, [])
+    |> Enum.find(fn %{x: x, y: y, obj_index: obj_index} ->
+      x == target_x and y == target_y and blacksmith_object?(obj_index)
+    end)
+  end
+
+  defp blacksmith_object?(obj_index) do
+    case GameData.get_item(obj_index) do
+      nil -> false
+      item_def -> item_def.obj_type in @blacksmith_object_types
     end
   end
 

@@ -200,10 +200,10 @@ defmodule AoTcpGateway.SessionRouteManifest do
     train: %{group: :npc, dispatch: @map, vb6_ref: "Protocol.bas:3141:HandleTrain", parity_status: :exact},
 
     # ── Crafting ───────────────────────────────────────────────────────
-    craft_blacksmith: %{group: :crafting, dispatch: @map, vb6_ref: "Protocol.bas:2398:HandleCraftBlacksmith", parity_status: :intentional_divergence},
-    craft_carpenter: %{group: :crafting, dispatch: @map, vb6_ref: "Protocol.bas:2414:HandleCraftCarpenter", parity_status: :intentional_divergence},
-    craft_alchemy: %{group: :crafting, dispatch: @map, vb6_ref: "Protocol.bas:2436:HandleCraftAlquimia", parity_status: :intentional_divergence},
-    craft_tailor: %{group: :crafting, dispatch: @map, vb6_ref: "Protocol.bas:2447:HandleCraftSastre", parity_status: :intentional_divergence},
+    craft_blacksmith: %{group: :crafting, dispatch: @map, vb6_ref: "Protocol.bas:2398:HandleCraftBlacksmith", parity_status: :exact},
+    craft_carpenter: %{group: :crafting, dispatch: @map, vb6_ref: "Protocol.bas:2414:HandleCraftCarpenter", parity_status: :exact},
+    craft_alchemy: %{group: :crafting, dispatch: @map, vb6_ref: "Protocol.bas:2436:HandleCraftAlquimia", parity_status: :exact},
+    craft_tailor: %{group: :crafting, dispatch: @map, vb6_ref: "Protocol.bas:2447:HandleCraftSastre", parity_status: :exact},
 
     # ── Pets ───────────────────────────────────────────────────────────
     pet_stand: %{group: :pets, dispatch: @map, vb6_ref: "Protocol.bas:4052:HandlePetStand", parity_status: :exact},

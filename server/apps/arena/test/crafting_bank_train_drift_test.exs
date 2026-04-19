@@ -1,24 +1,12 @@
 defmodule Arena.CraftingBankTrainDriftTest do
   @moduledoc """
-  Tests for VB6 structural drifts #29, T5, and B7.
-
-  Drift #29 — Crafting production model: VB6 triggers blacksmithing via anvil
-              object right-click, alchemy/carpentry/tailoring via tool equip.
-              Elixir uses NPC-based workstation trigger for all production skills.
-              The recipe/ingredient/skill logic is the same; only the trigger differs.
-              We test the current NPC-based model and document the VB6 difference.
-
-  Drift T5  — Train packet: VB6 HandleTrain spawns a creature from a trainer's
-              list as a player pet.  Current code hard-rejects {:train, _}.
-
-  Drift B7  — Bank gold transfer: VB6 requires banker NPC proximity, transfers
-              from bank gold (Stats.Banco), supports offline delivery, blocks GMs,
-              and has a 10s cooldown.  Current code transfers wallet gold P2P.
+  Regression coverage for the former crafting, trainer-creature, and bank-transfer
+  structural drift lanes.
   """
   use ExUnit.Case, async: true
 
   alias Arena.Data.GameData
-  alias Arena.Map.{Crafting, NpcInteraction, Helpers}
+  alias Arena.Map.{Crafting, InventoryHandlers, NpcInteraction}
 
   import Arena.Test.MapStateFactory
 
@@ -152,54 +140,42 @@ defmodule Arena.CraftingBankTrainDriftTest do
   end
 
   # =====================================================================
-  # Drift #29 — Crafting production: NPC-based workstation model
+  # Crafting trigger parity
   # =====================================================================
 
-  describe "Drift #29: crafting production uses NPC workstations" do
-    @tag :drift_29
-
-    # VB6 difference documented:
-    # In VB6, blacksmithing is triggered by right-clicking an anvil *object*
-    # (not an NPC). Alchemy, carpentry, and tailoring are triggered by equipping
-    # the corresponding tool, not by NPC interaction.
-    # In the Elixir server, ALL production crafts require proximity to a
-    # workstation NPC (forge=5, workbench=6, alchemy=7, loom=8).
-    # The recipe lookup, ingredient consumption, and skill check logic is
-    # identical between VB6 and Elixir.
-
-    test "blacksmithing requires forge NPC (type 5) within range" do
-      entity = make_entity(%{equipment: %{weapon: 389}})
-      # Forge NPC at (52,50) — within default range
-      forge_npc = %{npc_id: 100, x: 52, y: 50, instance_id: :forge1, alive: true, owner_id: nil}
+  describe "crafting production follows the VB6 trigger model" do
+    test "blacksmithing opens from the equipped hammer plus a selected anvil object" do
+      entity =
+        make_entity(%{
+          x: 50,
+          y: 50,
+          stamina: 100,
+          equipment: %{weapon: 389},
+          inventory: [%{item_id: 389, amount: 1, equipped: true} | List.duplicate(nil, 23)],
+          skills: %{blacksmithing: 80}
+        })
 
       state =
         map_state(
           players: %{1 => entity},
           sessions: %{1 => self()},
-          npcs_live: %{:forge1 => forge_npc}
+          npcs_live: %{},
+          meta: %{objects: [%{x: 50, y: 49, obj_index: 384, amount: 1}]}
         )
 
-      # Stub NPC def: npc_type=5 is forge
-      # The actual check uses GameData.get_npc which may not find our fake NPC.
-      # Instead we test the Helpers.resolve_nearby_npc directly.
-      result = Helpers.resolve_nearby_npc(state, entity, [5], 5)
-
-      # If GameData doesn't know npc_id 100, this returns :not_found.
-      # This documents the current behavior: production crafting depends on NPC lookup.
-      case result do
-        {:ok, _npc, _npc_def} ->
-          assert true, "forge NPC found within range — production allowed"
-
-        :not_found ->
-          # Expected when GameData has no NPC 100.
-          # The code WILL reject crafting because no forge NPC is found.
-          assert true, "no forge NPC definition — crafting would be rejected (NPC model)"
-      end
+      assert {:reply, :ok, _state} = InventoryHandlers.handle_use_item(state, 1, 0, 50, 49)
+      assert_receive {:send_raw, _}, 500
+      assert_receive {:send_raw, _}, 500
     end
 
-    test "produce/6 rejects when no workstation NPC is nearby" do
-      # Player with hammer equipped but no forge NPC anywhere
-      entity = make_entity(%{equipment: %{weapon: 389}, stamina: 100})
+    test "carpentry opens from the equipped saw with no workstation NPC nearby" do
+      entity =
+        make_entity(%{
+          stamina: 100,
+          equipment: %{weapon: 198},
+          inventory: [%{item_id: 198, amount: 1, equipped: true} | List.duplicate(nil, 23)],
+          skills: %{carpentry: 80}
+        })
 
       state =
         map_state(
@@ -208,26 +184,33 @@ defmodule Arena.CraftingBankTrainDriftTest do
           npcs_live: %{}
         )
 
-      {:noreply, _state} = Crafting.handle_work(state, 1, :blacksmithing)
-
-      # Should receive "Necesitas la herramienta adecuada." or "No hay un taller cerca."
+      assert {:reply, :ok, _state} = InventoryHandlers.handle_use_item(state, 1, 0)
+      assert_receive {:send_raw, _}, 500
       assert_receive {:send_raw, _}, 500
     end
 
-    test "produce/6 checks NPC range — range 5 for crafting" do
-      # VB6 note: VB6 blacksmithing checks distance <= 2 to anvil object.
-      # Elixir uses range 5 for the NPC check in produce/6.
-      # This documents the current range behavior.
-      entity = make_entity(%{x: 50, y: 50})
+    test "blacksmith crafting rejects when no anvil or forge object is selected" do
+      entity =
+        make_entity(%{
+          x: 50,
+          y: 50,
+          stamina: 100,
+          equipment: %{weapon: 389},
+          skills: %{blacksmithing: 80},
+          inventory: [%{item_id: 192, amount: 5, equipped: false} | List.duplicate(nil, 23)]
+        })
 
-      # NPC at (56, 50) — distance 6, outside range 5
-      far_npc = %{npc_id: 100, x: 56, y: 50, instance_id: :far_forge, alive: true, owner_id: nil}
+      state =
+        map_state(
+          players: %{1 => entity},
+          sessions: %{1 => self()},
+          npcs_live: %{},
+          meta: %{objects: []}
+        )
 
-      state = map_state(npcs_live: %{:far_forge => far_npc})
-
-      result = Helpers.resolve_nearby_npc(state, entity, [5], 5)
-      # Even if GameData knows npc_id 100, it's out of range
-      assert result == :not_found, "NPC at distance 6 should be out of range 5"
+      {:noreply, new_state} = Crafting.handle_craft_item(state, 1, :blacksmithing, 386, 1, 50, 49)
+      assert new_state.players[1].inventory == state.players[1].inventory
+      assert_receive {:send_raw, _}, 500
     end
   end
 

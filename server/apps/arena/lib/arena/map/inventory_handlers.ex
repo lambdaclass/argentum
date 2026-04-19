@@ -402,7 +402,7 @@ defmodule Arena.Map.InventoryHandlers do
     end)
   end
 
-  def handle_use_item(state, char_id, slot) do
+  def handle_use_item(state, char_id, slot, target_x \\ nil, target_y \\ nil) do
     Helpers.with_player_call(state, char_id, fn entity ->
       now = System.monotonic_time(:millisecond)
 
@@ -427,7 +427,7 @@ defmodule Arena.Map.InventoryHandlers do
               if item_def == nil do
                 {:reply, {:error, :unknown_item}, state}
               else
-                case apply_item_use(entity, item_def, slot, state) do
+                case apply_item_use(entity, item_def, slot, state, target_x, target_y) do
                   {:ok, entity, state} ->
                     entity = %{entity | next_item_use_at: now + item_use_cooldown_ms()}
                     players = Map.put(state.players, char_id, entity)
@@ -444,8 +444,9 @@ defmodule Arena.Map.InventoryHandlers do
   end
 
   # Apply item use effects based on obj_type
-  # ObjType reference: 1=potion, 5=money, 8=food, 9=drink, 11=arrow, 13=key, 14=ship
-  def apply_item_use(entity, item_def, slot, state) do
+  # ObjType reference: 1=potion, 5=money, 8=food, 9=drink, 11=arrow, 13=key,
+  # 14=ship, 18=working tool
+  def apply_item_use(entity, item_def, slot, state, target_x \\ nil, target_y \\ nil) do
     case item_def.obj_type do
       # Food
       8 ->
@@ -478,6 +479,17 @@ defmodule Arena.Map.InventoryHandlers do
         players = Map.put(state.players, entity.char_id, entity)
         state = %{state | players: players}
         {:ok, entity, state}
+
+      # Working tools used for production-form opening.
+      18 ->
+        Arena.Map.Crafting.handle_tool_use(
+          state,
+          entity.char_id,
+          entity,
+          item_def.id,
+          target_x,
+          target_y
+        )
 
       _ ->
         {:error, :not_usable}

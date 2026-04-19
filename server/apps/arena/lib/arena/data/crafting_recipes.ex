@@ -3,7 +3,8 @@ defmodule Arena.Data.CraftingRecipes do
   Hardcoded crafting and gathering recipes matching VB6 AO20 obj.dat IDs.
 
   Gathering skills produce items from the environment (tile/water).
-  Production skills consume ingredients near a workstation NPC.
+  Production skills consume ingredients once the corresponding tool/object
+  trigger has opened the crafting form.
 
   All product IDs, skill requirements, and ingredient amounts are sourced
   directly from the VB6 obj.dat fields (SkHerreria, LingH/LingP/LingO,
