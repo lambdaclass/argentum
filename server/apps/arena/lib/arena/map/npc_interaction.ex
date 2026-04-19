@@ -379,6 +379,300 @@ defmodule Arena.Map.NpcInteraction do
     end
   end
 
+  # ---- Train creature (VB6: HandleTrain — Protocol.bas:3141) ----
+
+  # VB6 constants
+  @max_trainer_creatures 7
+
+  @doc """
+  Handle the Train packet (pet_index).
+
+  VB6 flow: player double-clicks a trainer NPC (stores TargetNPC), requests
+  train_list (server sends creature names), then sends Train(pet_index) to
+  spawn that creature as a pet.
+
+  VB6 checks:
+  - TargetNPC must be valid and of type Entrenador (3)
+  - Trainer's Mascotas < MAXMASCOTASENTRENADOR (7)
+  - PetIndex > 0 and PetIndex <= NroCriaturas
+  - SpawnNpc at the trainer's position
+  - Sets MaestroNPC on the spawned NPC (links pet to trainer)
+  """
+  def handle_train_creature(state, char_id, %{pet_index: pet_index}) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        # Validate selected trainer NPC (VB6: IsValidNpcRef(.flags.TargetNPC))
+        instance_id = Map.get(entity, :last_clicked_npc_instance_id)
+        npc_type = Map.get(entity, :last_clicked_npc_type)
+
+        cond do
+          instance_id == nil or npc_type != @npc_type_entrenador ->
+            msg(state, char_id, "Primero selecciona un entrenador.")
+            {:noreply, state}
+
+          true ->
+            case Map.get(state.npcs_live, instance_id) do
+              nil ->
+                msg(state, char_id, "El entrenador no esta disponible.")
+                {:noreply, state}
+
+              trainer_npc ->
+                # Check distance (VB6 uses implicit proximity from double-click, range 10)
+                if abs(trainer_npc.x - entity.x) > 10 or abs(trainer_npc.y - entity.y) > 10 do
+                  msg(state, char_id, "Estas demasiado lejos del entrenador.")
+                  {:noreply, state}
+                else
+                  do_train_creature(state, char_id, entity, trainer_npc, pet_index)
+                end
+            end
+        end
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  defp do_train_creature(state, char_id, entity, trainer_npc, pet_index) do
+    trainer_npc_def = GameData.get_npc(trainer_npc.npc_id)
+
+    cond do
+      trainer_npc_def == nil ->
+        msg(state, char_id, "Entrenador no reconocido.")
+        {:noreply, state}
+
+      trainer_npc_def.npc_type != @npc_type_entrenador ->
+        msg(state, char_id, "Ese NPC no es un entrenador.")
+        {:noreply, state}
+
+      true ->
+        creatures = trainer_npc_def.creatures
+
+        # Count how many creatures this trainer has already spawned
+        # VB6: NpcList(.flags.TargetNPC.ArrayIndex).Mascotas
+        trainer_spawned_count =
+          state.npcs_live
+          |> Enum.count(fn {_id, npc} ->
+            Map.get(npc, :trainer_master_id) == trainer_npc.instance_id
+          end)
+
+        cond do
+          # VB6: PetIndex > 0 And PetIndex < NroCriaturas + 1
+          pet_index < 1 or pet_index > length(creatures) ->
+            msg(state, char_id, "Indice de criatura invalido.")
+            {:noreply, state}
+
+          # VB6: Mascotas < MAXMASCOTASENTRENADOR
+          trainer_spawned_count >= @max_trainer_creatures ->
+            msg(state, char_id, "El entrenador no puede invocar mas criaturas.")
+            {:noreply, state}
+
+          true ->
+            # creatures list stores NPC IDs as strings (parsed from CI1..CI5 in npcs.dat)
+            creature_npc_id_str = Enum.at(creatures, pet_index - 1)
+
+            case Integer.parse(creature_npc_id_str || "") do
+              {creature_npc_id, _} ->
+                creature_def = GameData.get_npc(creature_npc_id)
+
+                if creature_def == nil do
+                  msg(state, char_id, "Criatura no encontrada.")
+                  {:noreply, state}
+                else
+                  spawn_trainer_creature(
+                    state,
+                    char_id,
+                    entity,
+                    trainer_npc,
+                    creature_def
+                  )
+                end
+
+              :error ->
+                msg(state, char_id, "Criatura no encontrada.")
+                {:noreply, state}
+            end
+        end
+    end
+  end
+
+  defp spawn_trainer_creature(state, char_id, _entity, trainer_npc, creature_def) do
+    alias Arena.Entity.NpcEntity
+
+    # VB6: SpawnNpc at the trainer's position
+    tx = trainer_npc.x
+    ty = trainer_npc.y
+
+    instance_id = state.next_char_index
+    npc_entity = NpcEntity.from_def(creature_def, instance_id, instance_id, tx, ty)
+
+    # Set owner to the player and link to the trainer (VB6: MaestroNPC)
+    npc_entity = %{npc_entity | owner_id: char_id, trainer_master_id: trainer_npc.instance_id}
+
+    npcs_live = Map.put(state.npcs_live, instance_id, npc_entity)
+    npc_char_indices = Map.put(state.npc_char_indices, instance_id, instance_id)
+
+    # Add to player's pet list
+    player = state.players[char_id]
+    player = %{player | pet_ids: [instance_id | player.pet_ids]}
+
+    state = %{
+      state
+      | npcs_live: npcs_live,
+        npc_char_indices: npc_char_indices,
+        next_char_index: instance_id + 1,
+        players: Map.put(state.players, char_id, player)
+    }
+
+    # Broadcast NPC creation to nearby players
+    raw = Encoder.encode(Helpers.npc_create_packet(npc_entity, creature_def))
+
+    Arena.Map.Visibility.broadcast_visible_all(state, tx, ty, fn pid ->
+      send(pid, {:send_raw, raw})
+    end)
+
+    creature_name = creature_def.name || "la criatura"
+    msg(state, char_id, "El entrenador ha invocado a #{creature_name}.")
+    {:noreply, state}
+  end
+
+  # ---- Bank gold transfer (VB6: HandleBovTransferir — Protocol.bas:5988) ----
+
+  # VB6 parity: 10 second cooldown between transfers
+  @transfer_gold_cooldown_ms 10_000
+
+  @doc """
+  Handle bank gold transfer to another player.
+
+  VB6 flow (Protocol.bas:5988-6055):
+  - Reads amount (Int32) and target username (String8)
+  - Validates amount > 0, Stats.Banco >= amount (bank gold, not wallet)
+  - Player must not be dead
+  - Validates selected NPC is a Banquero (type 4) within distance 10
+  - GMs are blocked from transferring gold
+  - 10 second cooldown between transfers (Counters.LastTransferGold)
+  - If target is online: directly adds to their Stats.Banco
+  - If target is offline: calls AddOroBancoDatabase(username, amount)
+  - Logs the transfer
+  """
+  def handle_bank_gold_transfer(state, char_id, target_name, amount) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        cond do
+          # VB6: amount <= 0
+          amount <= 0 ->
+            {:noreply, state}
+
+          # VB6: .flags.Muerto = 1
+          entity.dead ->
+            msg(state, char_id, "Estas muerto!")
+            {:noreply, state}
+
+          # VB6: EsGM(UserIndex) blocks transfer
+          entity.gm == true ->
+            msg(state, char_id, "Los administradores no pueden transferir oro.")
+            {:noreply, state}
+
+          # VB6: Stats.Banco < Cantidad
+          entity.bank_gold < amount ->
+            msg(state, char_id, "No tienes suficiente oro en el banco.")
+            {:noreply, state}
+
+          true ->
+            do_bank_gold_transfer(state, char_id, entity, target_name, amount)
+        end
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  defp do_bank_gold_transfer(state, char_id, entity, target_name, amount) do
+    # VB6: validate TargetNPC is a Banquero within distance 10
+    instance_id = Map.get(entity, :last_clicked_npc_instance_id)
+
+    banker_npc =
+      if instance_id do
+        case Map.get(state.npcs_live, instance_id) do
+          nil -> nil
+          npc ->
+            npc_def = GameData.get_npc(npc.npc_id)
+
+            if npc_def != nil and npc_def.npc_type == @npc_type_banquero and
+                 abs(npc.x - entity.x) <= 10 and abs(npc.y - entity.y) <= 10 do
+              npc
+            else
+              nil
+            end
+        end
+      end
+
+    cond do
+      banker_npc == nil ->
+        msg(state, char_id, "Primero selecciona un banquero.")
+        {:noreply, state}
+
+      # VB6: 10s cooldown check (TicksElapsed(.Counters.LastTransferGold, nowRaw) >= 10000)
+      not transfer_cooldown_elapsed?(entity) ->
+        msg(state, char_id, "Espera un momento antes de transferir de nuevo.")
+        {:noreply, state}
+
+      # Cannot transfer to yourself
+      target_name == entity.name ->
+        msg(state, char_id, "No puedes transferirte oro a ti mismo.")
+        {:noreply, state}
+
+      true ->
+        # Deduct from sender's bank gold
+        new_bank_gold = entity.bank_gold - amount
+        now = System.monotonic_time(:millisecond)
+
+        entity = %{entity | bank_gold: new_bank_gold, last_transfer_gold_at: now}
+        state = %{state | players: Map.put(state.players, char_id, entity)}
+
+        # Persist the sender's new bank gold
+        Arena.Map.Bank.save_bank_gold(entity.char_id, new_bank_gold)
+
+        # Try to deliver to online target, fall back to offline DB write
+        case AoSession.OnlineDirectory.lookup_by_name(target_name) do
+          {:ok, target_id, target_info} ->
+            # Target is online — add to their bank_gold via their map server
+            target_map = target_info.map_id
+            Arena.Map.MapServer.modify_bank_gold(target_map, target_id, amount)
+
+          :not_found ->
+            # Target is offline — persist to database
+            deliver_offline_bank_gold(target_name, amount)
+        end
+
+        Helpers.send_to_session(
+          state.sessions,
+          char_id,
+          {:send_raw, Encoder.encode({:update_bank_gold, %{bank_gold: new_bank_gold}})}
+        )
+
+        msg(state, char_id, "El envio se ha realizado con exito.")
+        {:noreply, state}
+    end
+  end
+
+  defp transfer_cooldown_elapsed?(entity) do
+    last = Map.get(entity, :last_transfer_gold_at, -1_000_000_000_000)
+    now = System.monotonic_time(:millisecond)
+    now - last >= @transfer_gold_cooldown_ms
+  end
+
+  defp deliver_offline_bank_gold(target_name, amount) do
+    # Look up the character by name and add to their bank_gold in DB
+    case GameBackend.Characters.get_by_name(target_name) do
+      nil ->
+        :not_found
+
+      char ->
+        new_bank_gold = (char.bank_gold || 0) + amount
+        GameBackend.Characters.save_snapshot(char.id, %{bank_gold: new_bank_gold})
+    end
+  end
+
   def handle_gamble(state, char_id, amount, _npc_instance_id) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->

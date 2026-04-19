@@ -200,6 +200,16 @@ defmodule Arena.Map.MapServer do
 
   def modify_gold(map_id, char_id, amount), do: GenServer.cast(via(map_id), {:modify_gold, char_id, amount})
 
+  @doc "Add amount to a player's bank_gold. Used by bank gold transfer for online recipients."
+  def modify_bank_gold(map_id, char_id, amount), do: GenServer.cast(via(map_id), {:modify_bank_gold, char_id, amount})
+
+  @doc "Route train creature packet to NpcInteraction."
+  def train_creature(map_id, char_id, payload), do: GenServer.cast(via(map_id), {:train_creature, char_id, payload})
+
+  @doc "Route bank gold transfer to NpcInteraction."
+  def bank_gold_transfer(map_id, char_id, target_name, amount),
+    do: GenServer.cast(via(map_id), {:bank_gold_transfer, char_id, target_name, amount})
+
   @doc "Update cached guild fields on a player entity. Used after guild join/leave/level-up."
   def update_guild_cache(map_id, char_id, guild_id, guild_level),
     do: GenServer.cast(via(map_id), {:update_guild_cache, char_id, guild_id, guild_level})
@@ -707,6 +717,28 @@ defmodule Arena.Map.MapServer do
   def handle_cast({:modify_gold, char_id, amount}, state), do: Social.handle_modify_gold(state, char_id, amount)
 
   @impl true
+  def handle_cast({:modify_bank_gold, char_id, amount}, state) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        new_bank_gold = max((entity.bank_gold || 0) + amount, 0)
+        entity = %{entity | bank_gold: new_bank_gold}
+        state = %{state | players: Map.put(state.players, char_id, entity)}
+        Arena.Map.Bank.save_bank_gold(entity.char_id, new_bank_gold)
+
+        Helpers.send_to_session(
+          state.sessions,
+          char_id,
+          {:send_raw, AoProtocol.Server.Encoder.encode({:update_bank_gold, %{bank_gold: new_bank_gold}})}
+        )
+
+        {:noreply, state}
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  @impl true
   def handle_cast({:update_guild_cache, char_id, guild_id, guild_level}, state) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
@@ -726,6 +758,12 @@ defmodule Arena.Map.MapServer do
   def handle_cast({:divorce, char_id}, state), do: Social.handle_divorce(state, char_id)
 
   def handle_cast({:train_list, char_id}, state), do: NpcInteraction.handle_train_list(state, char_id)
+
+  def handle_cast({:train_creature, char_id, payload}, state),
+    do: NpcInteraction.handle_train_creature(state, char_id, payload)
+
+  def handle_cast({:bank_gold_transfer, char_id, target_name, amount}, state),
+    do: NpcInteraction.handle_bank_gold_transfer(state, char_id, target_name, amount)
 
   def handle_cast({:gamble, char_id, amount}, state) do
     NpcInteraction.handle_gamble(state, char_id, amount, nil)

@@ -77,18 +77,20 @@ defmodule AoTcpGateway.ParityStubHandlersTest do
   end
 
   # ===================================================================
-  # 2. train — correct rejection when not near trainer NPC
+  # 2. train — routed to MapServer for trainer NPC validation
   # ===================================================================
 
-  describe "train (no nearby trainer)" do
-    test "returns rejection message" do
+  describe "train" do
+    test "routes to MapServer (no immediate rejection packet)" do
       state = base_state()
 
+      # VB6 parity: Train packet is now routed to MapServer which validates
+      # the selected trainer NPC and spawns the creature asynchronously.
+      # No immediate packets are returned from the session handler.
       {_returned_state, packets} =
         SessionLogic.handle_command(state, {:train, %{pet_index: 1}})
 
-      assert [{:console_msg, %{message: msg, font_index: 0}}] = packets
-      assert msg =~ "No puedes entrenar"
+      assert packets == []
     end
   end
 

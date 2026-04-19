@@ -4,6 +4,23 @@ defmodule Arena.Map.Crafting do
 
   VB6 behavior: player must have the right tool equipped, be near the
   right resource (tile type or NPC), and pass a skill roll.
+
+  ## VB6 trigger model vs Elixir model (Drift #29)
+
+  In VB6, each production skill has a different trigger mechanism:
+  - **Blacksmithing**: triggered by right-clicking an anvil *object* on the map
+    (Acciones.bas:483). The anvil is a map object, not an NPC. Distance check
+    is <= 2 tiles from the anvil.
+  - **Alchemy / Carpentry / Tailoring**: triggered by *equipping* the
+    corresponding tool item (InvUsuario.bas:1859). No NPC interaction needed.
+
+  In the Elixir server, ALL production skills are triggered via proximity to a
+  workstation NPC (forge=5, workbench=6, alchemy=7, loom=8) with a range of 5
+  tiles. This works with the current client, which sends craft packets after
+  NPC interaction.
+
+  The recipe lookup, ingredient consumption, and skill-check logic is identical
+  between VB6 and Elixir — only the trigger mechanism differs.
   """
 
   alias Arena.Map.Helpers

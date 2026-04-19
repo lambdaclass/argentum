@@ -493,11 +493,11 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
-  # VB6 parity: Train (pet_index) always rejects here because pet training is
-  # handled through the NPC interaction flow (train_list + double_click on trainer).
-  # The standalone :train packet from the VB6 client UI is a dead path.
-  def handle_command(state, {:train, _}) when state.character_id != nil do
-    {state, [{:console_msg, %{message: "No puedes entrenar esa criatura.", font_index: 0}}]}
+  # VB6 parity (Protocol.bas:3141): Train packet spawns a creature from
+  # the selected trainer NPC's creature list as a player pet.
+  def handle_command(state, {:train, payload}) when state.character_id != nil do
+    Arena.Map.MapServer.train_creature(state.map_id, state.character_id, payload)
+    {state, []}
   end
 
   # ---- Crafting ----
@@ -688,35 +688,16 @@ defmodule AoTcpGateway.SessionLogic do
     end
   end
 
+  # VB6 parity (Protocol.bas:5988): bank gold transfer requires banker NPC,
+  # uses bank gold (Stats.Banco) not wallet gold, supports offline delivery,
+  # blocks GMs, and enforces a 10s cooldown.
   def handle_command(state, {:transfer_gold, %{name: name, amount: amount}})
       when state.character_id != nil do
     if amount <= 0 do
       {state, [{:console_msg, %{message: "Cantidad invalida.", font_index: 0}}]}
     else
-      case AoSession.OnlineDirectory.lookup_by_name(name) do
-        {:ok, target_id, target_info} ->
-          case Arena.Map.MapServer.deduct_gold(state.map_id, state.character_id, amount) do
-            {:ok, new_gold} ->
-              target_map = target_info.map_id
-              Arena.Map.MapServer.modify_gold(target_map, target_id, amount)
-
-              {state,
-               [
-                 {:update_gold, %{gold: new_gold}},
-                 {:console_msg,
-                  %{message: "Has transferido #{amount} oro a #{name}.", font_index: 0}}
-               ]}
-
-            {:error, _reason} ->
-              {state, [{:console_msg, %{message: "No tienes suficiente oro.", font_index: 0}}]}
-          end
-
-        :not_found ->
-          {state, [{:console_msg, %{message: "Jugador no encontrado.", font_index: 0}}]}
-
-        _ ->
-          {state, [{:console_msg, %{message: "Cantidad invalida.", font_index: 0}}]}
-      end
+      Arena.Map.MapServer.bank_gold_transfer(state.map_id, state.character_id, name, amount)
+      {state, []}
     end
   end
 

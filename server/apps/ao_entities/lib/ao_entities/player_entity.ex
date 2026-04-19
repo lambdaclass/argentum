@@ -200,6 +200,10 @@ defmodule AoEntities.PlayerEntity do
 
     # Punishment record (VB6: prontuario) — persisted list of GM actions
     # Each entry: %{number: int, text: String.t(), date: String.t(), gm_name: String.t()}
-    punishments: []
+    punishments: [],
+
+    # VB6 parity: bank gold transfer cooldown (Counters.LastTransferGold)
+    # Monotonic ms timestamp of last /BOVTRANSFERIR usage. 10s cooldown.
+    last_transfer_gold_at: -1_000_000_000_000
   ]
 end
