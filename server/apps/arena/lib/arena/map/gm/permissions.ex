@@ -58,6 +58,7 @@ defmodule Arena.Map.Gm.Permissions do
         /INFO /LOCATE /ONLINEMAP /CHARSTATS /CHARGOLD
         /CHARINV /CHARBANK /CHARSKILLS /CHECKSLOT
         /CREATURES /SPAWNLIST
+        /ONLINE /WHERECHAR
       ) ->
         :consejero
 
@@ -85,6 +86,7 @@ defmodule Arena.Map.Gm.Permissions do
         /ROYALCOUNCIL /CHAOSCOUNCIL
         /INVASION
         /TOURNAMENT /EVENT
+        /RAIN /SETBODY /SETHEAD /SETSKIN /SETGOLD /SETLEVEL /SETSKILL /SPAWN
       ) ->
         :dios
 
@@ -92,6 +94,7 @@ defmodule Arena.Map.Gm.Permissions do
       cmd when cmd in ~w(
         /BAN /BANCUENTA /UNBANCUENTA /BANTEMPORAL
         /KICKALLCHARS /CLEANWORLD
+        /UNBAN /IPCHAR /SYSTEMINFO
       ) ->
         :admin
 

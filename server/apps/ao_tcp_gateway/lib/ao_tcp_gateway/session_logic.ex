@@ -72,24 +72,85 @@ defmodule AoTcpGateway.SessionLogic do
   # ---- GM commands (require is_gm == true) ----
 
   @gm_commands [
-    :go_to_char, :warp_me_to_target, :warp_char, :invisible, :silence,
-    :jail, :kick, :execute, :ban_char, :unban_char, :revive_char,
-    :summon_char, :kill_npc, :request_char_info, :where, :gm_message,
-    :server_message, :online_gm, :rain_toggle,
-    :online_map, :kick_all_chars, :server_open_toggle, :save_chars, :global_message,
-    :kill_npc_targeted, :kill_npc_no_respawn, :kill_all_nearby_npcs,
-    :create_npc, :create_npc_with_respawn, :spawn_creature, :spawn_list_request, :creatures_in_map,
-    :create_item, :give_item, :request_char_stats, :request_char_gold,
-    :request_char_inventory, :request_char_bank, :request_char_skills, :edit_char, :alter_name,
-    :ban_cuenta, :unban_cuenta, :ban_temporal, :remove_punishment,
-    :royal_army_message, :chaos_legion_message, :talk_as_npc,
-    :nieve_toggle, :niebla_toggle, :change_map_pk, :change_map_no_magic,
-    :change_map_no_invi, :change_map_no_resu, :tile_blocked_toggle, :set_trigger, :ask_trigger,
-    :force_midi_all, :force_wave_all, :force_midi_map, :force_wave_map,
-    :items_in_floor, :destroy_items, :destroy_all_area, :clean_world,
-    :show_name, :set_description, :set_speed, :nick_to_ip, :ip_to_nick, :check_slot,
-    :council_kick, :accept_royal_council, :accept_chaos_council,
-    :royal_army_kick, :chaos_legion_kick, :sos_show_list, :sos_remove, :clean_sos
+    :go_to_char,
+    :warp_me_to_target,
+    :warp_char,
+    :invisible,
+    :silence,
+    :jail,
+    :kick,
+    :execute,
+    :ban_char,
+    :unban_char,
+    :revive_char,
+    :summon_char,
+    :kill_npc,
+    :request_char_info,
+    :where,
+    :gm_message,
+    :server_message,
+    :online_gm,
+    :rain_toggle,
+    :online_map,
+    :kick_all_chars,
+    :server_open_toggle,
+    :save_chars,
+    :global_message,
+    :kill_npc_targeted,
+    :kill_npc_no_respawn,
+    :kill_all_nearby_npcs,
+    :create_npc,
+    :create_npc_with_respawn,
+    :spawn_creature,
+    :spawn_list_request,
+    :creatures_in_map,
+    :create_item,
+    :give_item,
+    :request_char_stats,
+    :request_char_gold,
+    :request_char_inventory,
+    :request_char_bank,
+    :request_char_skills,
+    :edit_char,
+    :alter_name,
+    :ban_cuenta,
+    :unban_cuenta,
+    :ban_temporal,
+    :remove_punishment,
+    :royal_army_message,
+    :chaos_legion_message,
+    :talk_as_npc,
+    :nieve_toggle,
+    :niebla_toggle,
+    :change_map_pk,
+    :change_map_no_magic,
+    :change_map_no_invi,
+    :change_map_no_resu,
+    :tile_blocked_toggle,
+    :set_trigger,
+    :ask_trigger,
+    :force_midi_all,
+    :force_wave_all,
+    :force_midi_map,
+    :force_wave_map,
+    :items_in_floor,
+    :destroy_items,
+    :destroy_all_area,
+    :clean_world,
+    :show_name,
+    :set_description,
+    :set_speed,
+    :nick_to_ip,
+    :ip_to_nick,
+    :check_slot,
+    :council_kick,
+    :accept_royal_council,
+    :accept_chaos_council,
+    :royal_army_kick,
+    :chaos_legion_kick,
+    :sos_show_list,
+    :sos_remove,
+    :clean_sos
   ]
 
   @gm_not_authorized_msg {:console_msg, %{message: "No tienes privilegios de GM.", font_index: 0}}
@@ -113,14 +174,33 @@ defmodule AoTcpGateway.SessionLogic do
   # ---- Guild commands ----
 
   @guild_commands [
-    :guild_create, :guild_leave, :guild_message, :guild_online, :guild_declare_war,
-    :guild_kick_member, :guild_update_news, :guild_request_membership,
-    :guild_accept_new_member, :guild_reject_new_member, :guild_request_details,
-    :request_guild_leader_info, :guild_accept_peace, :guild_reject_peace,
-    :guild_accept_alliance, :guild_reject_alliance, :guild_offer_peace,
-    :guild_offer_alliance, :guild_alliance_details, :guild_peace_details,
-    :guild_alliance_prop_list, :guild_peace_prop_list, :guild_request_joiner_info,
-    :guild_new_website, :guild_member_info, :guild_open_elections, :guild_vote,
+    :guild_create,
+    :guild_leave,
+    :guild_message,
+    :guild_online,
+    :guild_declare_war,
+    :guild_kick_member,
+    :guild_update_news,
+    :guild_request_membership,
+    :guild_accept_new_member,
+    :guild_reject_new_member,
+    :guild_request_details,
+    :request_guild_leader_info,
+    :guild_accept_peace,
+    :guild_reject_peace,
+    :guild_accept_alliance,
+    :guild_reject_alliance,
+    :guild_offer_peace,
+    :guild_offer_alliance,
+    :guild_alliance_details,
+    :guild_peace_details,
+    :guild_alliance_prop_list,
+    :guild_peace_prop_list,
+    :guild_request_joiner_info,
+    :guild_new_website,
+    :guild_member_info,
+    :guild_open_elections,
+    :guild_vote,
     :clan_codex_update
   ]
 
@@ -141,10 +221,23 @@ defmodule AoTcpGateway.SessionLogic do
   # ---- Commerce, banking, trading, auction ----
 
   @commerce_commands [
-    :commerce_start, :commerce_buy, :commerce_sell, :commerce_end,
-    :bank_start, :bank_deposit, :bank_extract_item, :bank_deposit_gold, :bank_extract_gold, :bank_end,
-    :user_commerce_offer, :user_commerce_ok, :user_commerce_reject, :user_commerce_end,
-    :oferta_inicial, :oferta_de_subasta, :subasta_info
+    :commerce_start,
+    :commerce_buy,
+    :commerce_sell,
+    :commerce_end,
+    :bank_start,
+    :bank_deposit,
+    :bank_extract_item,
+    :bank_deposit_gold,
+    :bank_extract_gold,
+    :bank_end,
+    :user_commerce_offer,
+    :user_commerce_ok,
+    :user_commerce_reject,
+    :user_commerce_end,
+    :oferta_inicial,
+    :oferta_de_subasta,
+    :subasta_info
   ]
 
   def handle_command(state, {cmd_type, _} = cmd)
@@ -202,7 +295,8 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
-  def handle_command(state, {:move_item, %{from_slot: from, to_slot: to}}) when state.character_id != nil do
+  def handle_command(state, {:move_item, %{from_slot: from, to_slot: to}})
+      when state.character_id != nil do
     Arena.Map.MapServer.move_item(state.map_id, state.character_id, from, to)
     {state, []}
   end
@@ -211,7 +305,8 @@ defmodule AoTcpGateway.SessionLogic do
 
   def handle_command(state, {:equip_item, _})
       when state.character_id != nil and state.is_dead == true do
-    {state, [{:console_msg, %{message: "Estás muerto. No podés equipar objetos.", font_index: 0}}]}
+    {state,
+     [{:console_msg, %{message: "Estás muerto. No podés equipar objetos.", font_index: 0}}]}
   end
 
   def handle_command(state, {:equip_item, %{slot: slot}}) when state.character_id != nil do
@@ -251,7 +346,12 @@ defmodule AoTcpGateway.SessionLogic do
   def handle_command(state, {:attack, _}) when state.character_id != nil do
     {state, cancel_packets} = SessionTransfer.maybe_cancel_hogar(state)
 
-    case Arena.Map.MapServer.attack(state.map_id, state.character_id, state.target_x, state.target_y) do
+    case Arena.Map.MapServer.attack(
+           state.map_id,
+           state.character_id,
+           state.target_x,
+           state.target_y
+         ) do
       {:error, :dead} ->
         {%{state | is_dead: true},
          cancel_packets ++
@@ -264,13 +364,20 @@ defmodule AoTcpGateway.SessionLogic do
 
   def handle_command(state, {:cast_spell, _})
       when state.character_id != nil and state.is_dead == true do
-    {state, [{:console_msg, %{message: "Estás muerto. No podés lanzar hechizos.", font_index: 0}}]}
+    {state,
+     [{:console_msg, %{message: "Estás muerto. No podés lanzar hechizos.", font_index: 0}}]}
   end
 
   def handle_command(state, {:cast_spell, %{spell_slot: slot}}) when state.character_id != nil do
     {state, cancel_packets} = SessionTransfer.maybe_cancel_hogar(state)
 
-    case Arena.Map.MapServer.cast_spell(state.map_id, state.character_id, slot, state.target_x, state.target_y) do
+    case Arena.Map.MapServer.cast_spell(
+           state.map_id,
+           state.character_id,
+           slot,
+           state.target_x,
+           state.target_y
+         ) do
       {:error, :dead} ->
         {%{state | is_dead: true},
          cancel_packets ++
@@ -335,7 +442,8 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
-  def handle_command(state, {:change_description, %{description: desc}}) when state.character_id != nil do
+  def handle_command(state, {:change_description, %{description: desc}})
+      when state.character_id != nil do
     Arena.Map.MapServer.change_description(state.map_id, state.character_id, desc)
     {state, []}
   end
@@ -345,7 +453,8 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
-  def handle_command(state, {:move_spell, %{upwards: upwards, slot: slot}}) when state.character_id != nil do
+  def handle_command(state, {:move_spell, %{upwards: upwards, slot: slot}})
+      when state.character_id != nil do
     Arena.Map.MapServer.move_spell(state.map_id, state.character_id, upwards, slot)
     {state, []}
   end
@@ -358,7 +467,13 @@ defmodule AoTcpGateway.SessionLogic do
   end
 
   def handle_command(state, {:information, _}) when state.character_id != nil do
-    Arena.Map.MapServer.double_click(state.map_id, state.character_id, state.target_x, state.target_y)
+    Arena.Map.MapServer.double_click(
+      state.map_id,
+      state.character_id,
+      state.target_x,
+      state.target_y
+    )
+
     {state, []}
   end
 
@@ -377,12 +492,16 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
-  def handle_command(state, {:work_left_click, %{x: x, y: y, skill: skill}}) when state.character_id != nil do
+  def handle_command(state, {:work_left_click, %{x: x, y: y, skill: skill}})
+      when state.character_id != nil do
     state = %{state | target_x: x, target_y: y}
     Arena.Map.MapServer.train_skill(state.map_id, state.character_id, skill)
     {state, []}
   end
 
+  # VB6 parity: Train (pet_index) always rejects here because pet training is
+  # handled through the NPC interaction flow (train_list + double_click on trainer).
+  # The standalone :train packet from the VB6 client UI is a dead path.
   def handle_command(state, {:train, _}) when state.character_id != nil do
     {state, [{:console_msg, %{message: "No puedes entrenar esa criatura.", font_index: 0}}]}
   end
@@ -438,6 +557,9 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
+  # Genuine no-op: UseSpellMacro is a client-side convenience (VB6 hotkey macro).
+  # The server receives it but needs no processing — the actual spell cast arrives
+  # as a separate :cast_spell packet.
   def handle_command(state, {:use_spell_macro, _}) when state.character_id != nil do
     {state, []}
   end
@@ -510,7 +632,11 @@ defmodule AoTcpGateway.SessionLogic do
     case Arena.Map.MapServer.snapshot_entity(state.map_id, state.character_id) do
       {:ok, entity} ->
         if not entity.gm and entity.name != name do
-          {state, [{:console_msg, %{message: "Servidor: Comando deshabilitado para tu cargo.", font_index: 0}}]}
+          {state,
+           [
+             {:console_msg,
+              %{message: "Servidor: Comando deshabilitado para tu cargo.", font_index: 0}}
+           ]}
         else
           punishments = Map.get(entity, :punishments, [])
           text = Arena.Map.Gm.Moderation.format_punishments(punishments)
@@ -522,7 +648,8 @@ defmodule AoTcpGateway.SessionLogic do
     end
   end
 
-  def handle_command(state, {:denounce, %{name: name, reason: reason}}) when state.character_id != nil do
+  def handle_command(state, {:denounce, %{name: name, reason: reason}})
+      when state.character_id != nil do
     Arena.AuditLog.log_report(state.character_id, name, reason)
     {state, [{:console_msg, %{message: "Denuncia registrada.", font_index: 0}}]}
   end
@@ -540,21 +667,25 @@ defmodule AoTcpGateway.SessionLogic do
         {:ok, _entity} ->
           case Arena.Map.MapServer.deduct_gold(state.map_id, state.character_id, amount) do
             {:ok, new_gold} ->
-              {state, [
-                {:update_gold, %{gold: new_gold}},
-                {:console_msg, %{message: "Has donado #{amount} monedas de oro a tu faccion.", font_index: 0}}
-              ]}
+              {state,
+               [
+                 {:update_gold, %{gold: new_gold}},
+                 {:console_msg,
+                  %{message: "Has donado #{amount} monedas de oro a tu faccion.", font_index: 0}}
+               ]}
 
             {:error, _reason} ->
               {state, [{:console_msg, %{message: "No tienes suficiente oro.", font_index: 0}}]}
           end
 
-        _ -> {state, []}
+        _ ->
+          {state, []}
       end
     end
   end
 
-  def handle_command(state, {:transfer_gold, %{name: name, amount: amount}}) when state.character_id != nil do
+  def handle_command(state, {:transfer_gold, %{name: name, amount: amount}})
+      when state.character_id != nil do
     if amount <= 0 do
       {state, [{:console_msg, %{message: "Cantidad invalida.", font_index: 0}}]}
     else
@@ -564,10 +695,13 @@ defmodule AoTcpGateway.SessionLogic do
             {:ok, new_gold} ->
               target_map = target_info.map_id
               Arena.Map.MapServer.modify_gold(target_map, target_id, amount)
-              {state, [
-                {:update_gold, %{gold: new_gold}},
-                {:console_msg, %{message: "Has transferido #{amount} oro a #{name}.", font_index: 0}}
-              ]}
+
+              {state,
+               [
+                 {:update_gold, %{gold: new_gold}},
+                 {:console_msg,
+                  %{message: "Has transferido #{amount} oro a #{name}.", font_index: 0}}
+               ]}
 
             {:error, _reason} ->
               {state, [{:console_msg, %{message: "No tienes suficiente oro.", font_index: 0}}]}
@@ -584,7 +718,8 @@ defmodule AoTcpGateway.SessionLogic do
 
   # ---- Forum ----
 
-  def handle_command(state, {:forum_post, %{title: title, message: body}}) when state.character_id != nil do
+  def handle_command(state, {:forum_post, %{title: title, message: body}})
+      when state.character_id != nil do
     forum_id = Map.get(state, :viewing_forum_id)
 
     if forum_id != nil and forum_id > 0 do
@@ -646,7 +781,8 @@ defmodule AoTcpGateway.SessionLogic do
   end
 
   def handle_command(state, {:request_motd, _}) when state.character_id != nil do
-    motd_lines = Application.get_env(:ao_tcp_gateway, :motd_lines, ["Bienvenido a Argentum Online!"])
+    motd_lines =
+      Application.get_env(:ao_tcp_gateway, :motd_lines, ["Bienvenido a Argentum Online!"])
 
     motd_msgs =
       Enum.map(motd_lines, fn line ->
@@ -656,7 +792,9 @@ defmodule AoTcpGateway.SessionLogic do
     {uptime_ms, _} = :erlang.statistics(:wall_clock)
     hours = div(uptime_ms, 3_600_000)
     minutes = div(rem(uptime_ms, 3_600_000), 60_000)
-    uptime_msg = {:console_msg, %{message: "Uptime del servidor: #{hours}h #{minutes}m", font_index: 0}}
+
+    uptime_msg =
+      {:console_msg, %{message: "Uptime del servidor: #{hours}h #{minutes}m", font_index: 0}}
 
     {state, motd_msgs ++ [uptime_msg]}
   end
@@ -679,7 +817,11 @@ defmodule AoTcpGateway.SessionLogic do
         {state, []}
 
       support_rate_limited?(state.character_id) ->
-        {state, [{:console_msg, %{message: "Estás enviando solicitudes demasiado rápido.", font_index: 0}}]}
+        {state,
+         [
+           {:console_msg,
+            %{message: "Estás enviando solicitudes demasiado rápido.", font_index: 0}}
+         ]}
 
       true ->
         player_name = AoTcpGateway.SessionHelpers.resolve_char_name(state.character_id)
@@ -701,7 +843,11 @@ defmodule AoTcpGateway.SessionLogic do
         {state, []}
 
       support_rate_limited?(state.character_id) ->
-        {state, [{:console_msg, %{message: "Estás enviando solicitudes demasiado rápido.", font_index: 0}}]}
+        {state,
+         [
+           {:console_msg,
+            %{message: "Estás enviando solicitudes demasiado rápido.", font_index: 0}}
+         ]}
 
       true ->
         player_name = AoTcpGateway.SessionHelpers.resolve_char_name(state.character_id)
@@ -719,7 +865,10 @@ defmodule AoTcpGateway.SessionLogic do
         Logger.info("QuestionGM from #{player_name} (#{tipo}): #{consulta}")
 
         {state,
-         [{:console_msg, %{message: "Tu mensaje fue recibido por el equipo de soporte.", font_index: 0}}]}
+         [
+           {:console_msg,
+            %{message: "Tu mensaje fue recibido por el equipo de soporte.", font_index: 0}}
+         ]}
     end
   end
 
@@ -742,7 +891,8 @@ defmodule AoTcpGateway.SessionLogic do
     now = System.monotonic_time(:millisecond)
 
     case :ets.lookup(:ao_support_rate_limit, char_id) do
-      [{^char_id, last_at}] when now - last_at < @support_cooldown_ms -> true
+      [{^char_id, last_at}] when now - last_at < @support_cooldown_ms ->
+        true
 
       _ ->
         :ets.insert(:ao_support_rate_limit, {char_id, now})

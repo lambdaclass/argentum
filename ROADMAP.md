@@ -16,16 +16,16 @@
 9. ~~Implement the /REWARD NPC request flow (rank-up rewards already work in faction.ex).~~ Done.
 10. ~~Match banker, timbero, priest, and enlistador response text and values to VB6.~~ Done.
 11. ~~Fix remaining guild relation stubs.~~ Done.
-12. Decide the GM/admin packet target.
-13. Implement the remaining GM/admin commands for the chosen target.
-14. Remove the remaining GM/admin stubs for the chosen target.
+12. ~~Decide the GM/admin packet target.~~ Done — VB6 parity, tiered text commands over both TCP and WS.
+13. ~~Implement the remaining GM/admin commands for the chosen target.~~ Done — 14 new commands added.
+14. ~~Remove the remaining GM/admin stubs for the chosen target.~~ Done — no dead stubs found.
 15. Implement capture and control-point events.
 16. Implement siege and castle events.
 17. Implement event participant tracking and rewards.
 18. Implement event scheduling and duration flows.
-19. Decide whether AO20-era account, lobby, and control packet surfaces remain in scope.
-20. Implement AO20-era account, lobby, and control packet surfaces if they remain in scope.
-21. Implement remaining decoded-but-stubbed parity packet handlers that stay in scope.
+19. ~~Decide whether AO20-era account, lobby, and control packet surfaces remain in scope.~~ Done — no AO20-only binary surfaces exist; account/lobby is REST, already implemented.
+20. ~~Implement AO20-era account, lobby, and control packet surfaces if they remain in scope.~~ Done — N/A (no binary surfaces to implement; REST API already exists).
+21. ~~Implement remaining decoded-but-stubbed parity packet handlers that stay in scope.~~ Done — `server_open_toggle` and `warp_me_to_target` fixed; remaining stubs documented as intentional.
 22. Add a failing parity test for each newly discovered backend drift before fixing it.
 
 ## Phase 3. Parity Proof — prove behavior against the VB6 baseline

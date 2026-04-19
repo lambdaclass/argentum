@@ -166,10 +166,7 @@ defmodule Arena.Map.Gm.CharEdit do
           Helpers.send_to_session(
             state.sessions,
             target_id,
-            {:send_raw,
-             Encoder.encode(
-               {:console_msg, %{message: "Un GM te ha resucitado.", font_index: 0}}
-             )}
+            {:send_raw, Encoder.encode({:console_msg, %{message: "Un GM te ha resucitado.", font_index: 0}})}
           )
 
           Helpers.broadcast_character_change(state, target)
@@ -216,6 +213,140 @@ defmodule Arena.Map.Gm.CharEdit do
 
       :error ->
         Helpers.gm_console(state, char_id, "Invalid speed value.")
+        {:noreply, state}
+    end
+  end
+
+  # ── VB6 shortcut commands ──────────────────────────────────────────────
+
+  @doc "/SETBODY target body_id — change a player's body graphic (VB6 parity)."
+  def gm_set_body(state, char_id, target_name, body_str) do
+    case Integer.parse(body_str) do
+      {body_id, ""} ->
+        case Helpers.find_player_by_name(state, target_name) do
+          {:ok, target_id, target} ->
+            target = %{target | body_id: body_id}
+            players = Map.put(state.players, target_id, target)
+            state = %{state | players: players}
+            Helpers.broadcast_character_change(state, target)
+            AuditLog.log_gm_action(char_id, "set_body", "#{target.name} body=#{body_id}")
+            Helpers.gm_console(state, char_id, "Set #{target.name} body to #{body_id}.")
+            {:noreply, state}
+
+          :not_found ->
+            Helpers.gm_console(state, char_id, "Player '#{target_name}' not found.")
+            {:noreply, state}
+        end
+
+      _ ->
+        Helpers.gm_console(state, char_id, "Usage: /SETBODY name body_id")
+        {:noreply, state}
+    end
+  end
+
+  @doc "/SETHEAD target head_id — change a player's head graphic (VB6 parity)."
+  def gm_set_head(state, char_id, target_name, head_str) do
+    case Integer.parse(head_str) do
+      {head_id, ""} ->
+        case Helpers.find_player_by_name(state, target_name) do
+          {:ok, target_id, target} ->
+            target = %{target | head_id: head_id}
+            players = Map.put(state.players, target_id, target)
+            state = %{state | players: players}
+            Helpers.broadcast_character_change(state, target)
+            AuditLog.log_gm_action(char_id, "set_head", "#{target.name} head=#{head_id}")
+            Helpers.gm_console(state, char_id, "Set #{target.name} head to #{head_id}.")
+            {:noreply, state}
+
+          :not_found ->
+            Helpers.gm_console(state, char_id, "Player '#{target_name}' not found.")
+            {:noreply, state}
+        end
+
+      _ ->
+        Helpers.gm_console(state, char_id, "Usage: /SETHEAD name head_id")
+        {:noreply, state}
+    end
+  end
+
+  @doc "/SETGOLD target amount — shortcut to set a player's gold (VB6 parity)."
+  def gm_set_gold(state, char_id, target_name, gold_str) do
+    case Integer.parse(gold_str) do
+      {value, _} ->
+        case Helpers.find_player_by_name(state, target_name) do
+          {:ok, target_id, target} ->
+            target = %{target | gold: max(value, 0)}
+            players = Map.put(state.players, target_id, target)
+            state = %{state | players: players}
+
+            Helpers.send_to_session(
+              state.sessions,
+              target_id,
+              {:send_raw, Encoder.encode({:update_gold, %{gold: target.gold}})}
+            )
+
+            AuditLog.log_gm_action(char_id, "set_gold", "#{target.name} gold=#{target.gold}")
+            Helpers.gm_console(state, char_id, "Set #{target.name} gold to #{target.gold}.")
+            {:noreply, state}
+
+          :not_found ->
+            Helpers.gm_console(state, char_id, "Player '#{target_name}' not found.")
+            {:noreply, state}
+        end
+
+      :error ->
+        Helpers.gm_console(state, char_id, "Usage: /SETGOLD name amount")
+        {:noreply, state}
+    end
+  end
+
+  @doc "/SETLEVEL target level — shortcut to set a player's level (VB6 parity)."
+  def gm_set_level(state, char_id, target_name, level_str) do
+    case Integer.parse(level_str) do
+      {value, _} ->
+        case Helpers.find_player_by_name(state, target_name) do
+          {:ok, target_id, target} ->
+            target = %{target | level: max(min(value, 50), 1)}
+            players = Map.put(state.players, target_id, target)
+            state = %{state | players: players}
+            AuditLog.log_gm_action(char_id, "set_level", "#{target.name} level=#{target.level}")
+            Helpers.gm_console(state, char_id, "Set #{target.name} level to #{target.level}.")
+            {:noreply, state}
+
+          :not_found ->
+            Helpers.gm_console(state, char_id, "Player '#{target_name}' not found.")
+            {:noreply, state}
+        end
+
+      :error ->
+        Helpers.gm_console(state, char_id, "Usage: /SETLEVEL name level")
+        {:noreply, state}
+    end
+  end
+
+  @doc "/SETSKILL target skill_name value — set a player's skill value (VB6 parity)."
+  def gm_set_skill(state, char_id, target_name, skill_name, value_str) do
+    case Integer.parse(value_str) do
+      {value, _} ->
+        case Helpers.find_player_by_name(state, target_name) do
+          {:ok, target_id, target} ->
+            clamped = max(min(value, 100), 0)
+            skill_atom = String.to_existing_atom(skill_name)
+            new_skills = Map.put(target.skills, skill_atom, clamped)
+            target = %{target | skills: new_skills}
+            players = Map.put(state.players, target_id, target)
+            state = %{state | players: players}
+            AuditLog.log_gm_action(char_id, "set_skill", "#{target.name} #{skill_name}=#{clamped}")
+            Helpers.gm_console(state, char_id, "Set #{target.name} #{skill_name} to #{clamped}.")
+            {:noreply, state}
+
+          :not_found ->
+            Helpers.gm_console(state, char_id, "Player '#{target_name}' not found.")
+            {:noreply, state}
+        end
+
+      :error ->
+        Helpers.gm_console(state, char_id, "Usage: /SETSKILL name skill_name value")
         {:noreply, state}
     end
   end

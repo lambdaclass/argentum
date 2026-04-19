@@ -9,7 +9,6 @@ defmodule AoTcpGateway.SessionCommands.Gm do
 
   require Logger
 
-
   # ---- Character Warping ----
 
   def handle_command(state, {:go_to_char, %{name: name}}) do
@@ -18,7 +17,21 @@ defmodule AoTcpGateway.SessionCommands.Gm do
   end
 
   def handle_command(state, {:warp_me_to_target, _}) do
-    {state, [{:console_msg, %{message: "Usa /GOTO <nombre> para teletransportarte.", font_index: 0}}]}
+    if state.target_x != nil and state.target_y != nil do
+      Arena.Map.MapServer.chat(
+        state.map_id,
+        state.character_id,
+        "/TELEPORT #{state.map_id} #{state.target_x} #{state.target_y}"
+      )
+
+      {state, []}
+    else
+      {state,
+       [
+         {:console_msg,
+          %{message: "Primero selecciona un objetivo con click izquierdo.", font_index: 0}}
+       ]}
+    end
   end
 
   def handle_command(state, {:warp_char, %{name: _name, map: map}}) do
@@ -67,7 +80,8 @@ defmodule AoTcpGateway.SessionCommands.Gm do
             {state, [{:console_msg, %{message: "#{name} ha sido desbaneado.", font_index: 0}}]}
 
           {:error, reason} ->
-            {state, [{:console_msg, %{message: "Error al desbanear: #{inspect(reason)}", font_index: 0}}]}
+            {state,
+             [{:console_msg, %{message: "Error al desbanear: #{inspect(reason)}", font_index: 0}}]}
         end
     end
   end
@@ -186,8 +200,16 @@ defmodule AoTcpGateway.SessionCommands.Gm do
     {state, []}
   end
 
-  def handle_command(state, {:give_item, %{name: name, item_id: item_id, amount: amount, reason: _reason}}) do
-    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/GIVEITEM #{name} #{item_id} #{amount}")
+  def handle_command(
+        state,
+        {:give_item, %{name: name, item_id: item_id, amount: amount, reason: _reason}}
+      ) do
+    Arena.Map.MapServer.chat(
+      state.map_id,
+      state.character_id,
+      "/GIVEITEM #{name} #{item_id} #{amount}"
+    )
+
     {state, []}
   end
 
@@ -219,7 +241,12 @@ defmodule AoTcpGateway.SessionCommands.Gm do
   end
 
   def handle_command(state, {:edit_char, %{name: name, option: option, arg1: arg1, arg2: _arg2}}) do
-    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/EDITCHAR #{name} #{option} #{arg1}")
+    Arena.Map.MapServer.chat(
+      state.map_id,
+      state.character_id,
+      "/EDITCHAR #{name} #{option} #{arg1}"
+    )
+
     {state, []}
   end
 
@@ -241,12 +268,22 @@ defmodule AoTcpGateway.SessionCommands.Gm do
   end
 
   def handle_command(state, {:ban_temporal, %{name: name, reason: reason, days: days}}) do
-    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/BANTEMPORAL #{name} #{days} #{reason}")
+    Arena.Map.MapServer.chat(
+      state.map_id,
+      state.character_id,
+      "/BANTEMPORAL #{name} #{days} #{reason}"
+    )
+
     {state, []}
   end
 
   def handle_command(state, {:remove_punishment, %{name: name, num: num, text: text}}) do
-    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/REMOVEPUNISHMENT #{name} #{num} #{text}")
+    Arena.Map.MapServer.chat(
+      state.map_id,
+      state.character_id,
+      "/REMOVEPUNISHMENT #{name} #{num} #{text}"
+    )
+
     {state, []}
   end
 
@@ -338,7 +375,12 @@ defmodule AoTcpGateway.SessionCommands.Gm do
   end
 
   def handle_command(state, {:force_wave_map, %{wave: wave, x: x, y: y, map: map}}) do
-    Arena.Map.MapServer.chat(state.map_id, state.character_id, "/FORCEWAVEMAP #{wave} #{x} #{y} #{map}")
+    Arena.Map.MapServer.chat(
+      state.map_id,
+      state.character_id,
+      "/FORCEWAVEMAP #{wave} #{x} #{y} #{map}"
+    )
+
     {state, []}
   end
 
@@ -392,7 +434,9 @@ defmodule AoTcpGateway.SessionCommands.Gm do
 
   def handle_command(state, {:ip_to_nick, %{ip: ip}}) do
     names = AoSession.OnlineDirectory.list_all_names()
-    {state, [{:console_msg, %{message: "Busqueda IP #{ip}: #{Enum.join(names, ", ")}", font_index: 0}}]}
+
+    {state,
+     [{:console_msg, %{message: "Busqueda IP #{ip}: #{Enum.join(names, ", ")}", font_index: 0}}]}
   end
 
   def handle_command(state, {:check_slot, %{name: name, slot: slot}}) do
@@ -427,7 +471,11 @@ defmodule AoTcpGateway.SessionCommands.Gm do
     {state, []}
   end
 
-  # ---- SOS stubs ----
+  # ---- SOS (support request tracking) ----
+  # VB6 parity: SOS was a GM-visible queue of player /GM requests.
+  # In this server, support requests are handled via QuestionGM / RoleMasterRequest
+  # and logged through AuditLog. These stubs acknowledge the GM commands but the
+  # underlying queue is not yet implemented — support requests go to Logger only.
 
   def handle_command(state, {:sos_show_list, _}) do
     {state, [{:console_msg, %{message: "Lista de SOS: (vacia)", font_index: 0}}]}
@@ -447,7 +495,9 @@ defmodule AoTcpGateway.SessionCommands.Gm do
     names = AoSession.OnlineDirectory.list_all_names()
     count = length(names)
     name_list = Enum.join(names, ", ")
-    {state, [{:console_msg, %{message: "Jugadores online (#{count}): #{name_list}", font_index: 0}}]}
+
+    {state,
+     [{:console_msg, %{message: "Jugadores online (#{count}): #{name_list}", font_index: 0}}]}
   end
 
   def handle_command(state, {:online_map, _}) do
@@ -457,11 +507,23 @@ defmodule AoTcpGateway.SessionCommands.Gm do
 
   def handle_command(state, {:kick_all_chars, _}) do
     AoSession.OnlineDirectory.broadcast_all(:disconnect)
-    {state, [{:console_msg, %{message: "Todos los jugadores han sido expulsados.", font_index: 0}}]}
+
+    {state,
+     [{:console_msg, %{message: "Todos los jugadores han sido expulsados.", font_index: 0}}]}
   end
 
   def handle_command(state, {:server_open_toggle, _}) do
-    {state, [{:console_msg, %{message: "Server open/close toggle recibido.", font_index: 0}}]}
+    current = Arena.Settings.get(:server_open, true)
+    new_value = not current
+    Arena.Settings.set(:server_open, new_value)
+
+    msg =
+      if new_value,
+        do: "Servidor abierto a nuevas conexiones.",
+        else: "Servidor cerrado a nuevas conexiones."
+
+    Logger.info("GM audit: #{state.entity.name} toggled server_open to #{new_value}")
+    {state, [{:console_msg, %{message: msg, font_index: 0}}]}
   end
 
   def handle_command(state, {:save_chars, _}) do
@@ -481,5 +543,4 @@ defmodule AoTcpGateway.SessionCommands.Gm do
 
     {state, []}
   end
-
 end

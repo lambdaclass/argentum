@@ -82,6 +82,9 @@ defmodule Arena.Map.GmCommands do
       ["/SPAWNITEM", item_str] ->
         World.gm_spawn_item(state, char_id, entity, item_str, "1")
 
+      ["/RAIN"] ->
+        World.gm_rain_toggle(state, char_id)
+
       ["/INVISIBLE"] ->
         World.gm_invisible(state, char_id, entity)
 
@@ -142,6 +145,20 @@ defmodule Arena.Map.GmCommands do
 
       ["/ONLINEMAP"] ->
         Inspection.gm_online_map(state, char_id)
+
+      ["/ONLINE"] ->
+        Inspection.gm_online(state, char_id)
+
+      ["/WHERECHAR", _name_upper] ->
+        target_name = Enum.at(parts, 1)
+        Inspection.gm_wherechar(state, char_id, target_name)
+
+      ["/IPCHAR", _name_upper] ->
+        target_name = Enum.at(parts, 1)
+        Inspection.gm_ipchar(state, char_id, target_name)
+
+      ["/SYSTEMINFO"] ->
+        Inspection.gm_system_info(state, char_id)
 
       ["/CHARSTATS", _name] ->
         target_name = Enum.at(parts, 1)
@@ -246,6 +263,13 @@ defmodule Arena.Map.GmCommands do
         target_name = Enum.at(parts, 1)
         Moderation.gm_faction_kick(state, char_id, target_name, :chaos_legion)
 
+      ["/KICKALLCHARS"] ->
+        Moderation.gm_kick_all_chars(state, char_id)
+
+      ["/UNBAN", _name_upper] ->
+        target_name = Enum.at(parts, 1)
+        Moderation.gm_unban(state, char_id, target_name)
+
       ["/NAVIGANDO", _name_upper] ->
         target_name = Enum.at(parts, 1)
         Moderation.gm_navigando(state, char_id, target_name)
@@ -286,8 +310,36 @@ defmodule Arena.Map.GmCommands do
       ["/SETSPEED", speed_str] ->
         CharEdit.gm_set_speed(state, char_id, entity, speed_str)
 
+      ["/SETBODY", _name, body_str] ->
+        target_name = Enum.at(parts, 1)
+        CharEdit.gm_set_body(state, char_id, target_name, body_str)
+
+      ["/SETHEAD", _name, head_str] ->
+        target_name = Enum.at(parts, 1)
+        CharEdit.gm_set_head(state, char_id, target_name, head_str)
+
+      ["/SETSKIN", _name, body_str] ->
+        target_name = Enum.at(parts, 1)
+        CharEdit.gm_set_body(state, char_id, target_name, body_str)
+
+      ["/SETGOLD", _name, gold_str] ->
+        target_name = Enum.at(parts, 1)
+        CharEdit.gm_set_gold(state, char_id, target_name, gold_str)
+
+      ["/SETLEVEL", _name, level_str] ->
+        target_name = Enum.at(parts, 1)
+        CharEdit.gm_set_level(state, char_id, target_name, level_str)
+
+      ["/SETSKILL", _name, _skill_str, value_str] ->
+        target_name = Enum.at(parts, 1)
+        skill_name = Enum.at(parts, 2)
+        CharEdit.gm_set_skill(state, char_id, target_name, skill_name, value_str)
+
       # Events
       ["/SPAWNNPC", npc_id_str] ->
+        Events.gm_spawn_npc(state, char_id, entity, npc_id_str)
+
+      ["/SPAWN", npc_id_str] ->
         Events.gm_spawn_npc(state, char_id, entity, npc_id_str)
 
       ["/SPAWNNPCR", npc_id_str] ->

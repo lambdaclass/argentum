@@ -8,7 +8,13 @@ defmodule Arena.Map.Gm.Inspection do
     case Helpers.find_player_by_name(state, target_name) do
       {:ok, _target_id, target} ->
         Helpers.gm_console(state, char_id, "=== Player Info: #{target.name} ===")
-        Helpers.gm_console(state, char_id, "HP: #{target.hp}/#{target.max_hp} | Mana: #{target.mana}/#{target.max_mana}")
+
+        Helpers.gm_console(
+          state,
+          char_id,
+          "HP: #{target.hp}/#{target.max_hp} | Mana: #{target.mana}/#{target.max_mana}"
+        )
+
         Helpers.gm_console(state, char_id, "Level: #{target.level} | Class: #{target.class} | Race: #{target.race}")
         Helpers.gm_console(state, char_id, "Position: map #{target.map_id} (#{target.x}, #{target.y})")
         Helpers.gm_console(state, char_id, "Gold: #{target.gold} | XP: #{target.xp}")
@@ -193,5 +199,121 @@ defmodule Arena.Map.Gm.Inspection do
     end)
 
     {:noreply, state}
+  end
+
+  # ── VB6 parity commands ────────────────────────────────────────────────
+
+  @doc "/ONLINE — show online player count (map + server-wide)."
+  def gm_online(state, char_id) do
+    map_count = map_size(state.players)
+    Helpers.gm_console(state, char_id, "Jugadores en este mapa: #{map_count}")
+
+    # Try to get server-wide count from OnlineDirectory if available
+    try do
+      server_count = AoSession.OnlineDirectory.online_count()
+      Helpers.gm_console(state, char_id, "Jugadores online (servidor): #{server_count}")
+    rescue
+      _ -> :ok
+    catch
+      _, _ -> :ok
+    end
+
+    {:noreply, state}
+  end
+
+  @doc "/WHERECHAR name — find a character's location with coordinates."
+  def gm_wherechar(state, char_id, target_name) do
+    # Try local map first
+    case Helpers.find_player_by_name(state, target_name) do
+      {:ok, _target_id, target} ->
+        Helpers.gm_console(
+          state,
+          char_id,
+          "#{target.name} esta en mapa #{state.map_id} (#{target.x}, #{target.y})"
+        )
+
+        {:noreply, state}
+
+      :not_found ->
+        # Try server-wide lookup
+        try do
+          case AoSession.OnlineDirectory.lookup_by_name(target_name) do
+            {:ok, _target_char_id, info} ->
+              Helpers.gm_console(state, char_id, "#{target_name} esta en mapa #{info.map_id}")
+
+            :not_found ->
+              Helpers.gm_console(state, char_id, "Player '#{target_name}' not found.")
+          end
+        rescue
+          _ ->
+            Helpers.gm_console(state, char_id, "Player '#{target_name}' not found.")
+        catch
+          _, _ ->
+            Helpers.gm_console(state, char_id, "Player '#{target_name}' not found.")
+        end
+
+        {:noreply, state}
+    end
+  end
+
+  @doc "/IPCHAR name — show a character's account/session info (VB6: shows IP)."
+  def gm_ipchar(state, char_id, target_name) do
+    case Helpers.find_player_by_name(state, target_name) do
+      {:ok, target_id, target} ->
+        session_pid = Map.get(state.sessions, target_id)
+        Helpers.gm_console(state, char_id, "=== Session Info: #{target.name} ===")
+        Helpers.gm_console(state, char_id, "Account: #{target.account_id}")
+        Helpers.gm_console(state, char_id, "Char ID: #{target_id}")
+        Helpers.gm_console(state, char_id, "Session PID: #{inspect(session_pid)}")
+        {:noreply, state}
+
+      :not_found ->
+        Helpers.gm_console(state, char_id, "Player '#{target_name}' not found.")
+        {:noreply, state}
+    end
+  end
+
+  @doc "/SYSTEMINFO — show server system information."
+  def gm_system_info(state, char_id) do
+    {total_mem, _alloc, _} = :memsup.get_memory_data()
+    beam_mem = :erlang.memory(:total)
+    schedulers = :erlang.system_info(:schedulers_online)
+    process_count = :erlang.system_info(:process_count)
+    uptime_ms = :erlang.statistics(:wall_clock) |> elem(0)
+    uptime_min = div(uptime_ms, 60_000)
+
+    Helpers.gm_console(state, char_id, "=== System Info ===")
+    Helpers.gm_console(state, char_id, "BEAM memory: #{div(beam_mem, 1_048_576)} MB")
+    Helpers.gm_console(state, char_id, "System memory: #{div(total_mem, 1_048_576)} MB")
+    Helpers.gm_console(state, char_id, "Schedulers: #{schedulers}")
+    Helpers.gm_console(state, char_id, "Processes: #{process_count}")
+    Helpers.gm_console(state, char_id, "Uptime: #{uptime_min} min")
+
+    Helpers.gm_console(
+      state,
+      char_id,
+      "Map #{state.map_id}: #{map_size(state.players)} players, #{map_size(state.npcs_live)} NPCs"
+    )
+
+    {:noreply, state}
+  rescue
+    # :memsup may not be available in all environments
+    _ ->
+      beam_mem = :erlang.memory(:total)
+      schedulers = :erlang.system_info(:schedulers_online)
+      process_count = :erlang.system_info(:process_count)
+
+      Helpers.gm_console(state, char_id, "=== System Info ===")
+      Helpers.gm_console(state, char_id, "BEAM memory: #{div(beam_mem, 1_048_576)} MB")
+      Helpers.gm_console(state, char_id, "Schedulers: #{schedulers}")
+      Helpers.gm_console(state, char_id, "Processes: #{process_count}")
+
+      Helpers.gm_console(
+        state,
+        char_id,
+        "Map #{state.map_id}: #{map_size(state.players)} players, #{map_size(state.npcs_live)} NPCs"
+      )
+
+      {:noreply, state}
   end
 end

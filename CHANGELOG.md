@@ -4,6 +4,20 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **GM commands + stub fixes + ROADMAP #12-14, #19-21 closed (2026-04-19):**
+  - **GM target locked to VB6 parity** (#12): tiered text commands over both TCP
+    and WS. 4-tier hierarchy (admin > dios > semi_dios > consejero) preserved.
+  - **14 new GM commands** (#13): /ONLINE, /WHERECHAR, /IPCHAR, /SYSTEMINFO,
+    /RAIN, /SETBODY, /SETHEAD, /SETSKIN, /SETGOLD, /SETLEVEL, /SETSKILL,
+    /KICKALLCHARS, /UNBAN, /SPAWN. 42 tests in `gm_commands_parity_test.exs`.
+  - **No dead GM stubs** (#14): audit found all existing GM functions implemented.
+  - **AO20 binary scope resolved** (#19): no AO20-only binary client→server
+    packets exist. Account/lobby is REST, already implemented.
+  - **Stub fixes** (#20-21): `server_open_toggle` now toggles
+    `Arena.Settings.server_open`; `warp_me_to_target` now teleports GM to
+    target. Remaining stubs documented as intentional no-ops. 15 tests in
+    `parity_stub_handlers_test.exs`.
+
 - **Backend parity: bank guards, NPC AI, spells, rewards, timbero, guild relations (2026-04-19):**
   - **Bank-open guards**: meditating, navigating, and paralyzed players can no
     longer open the bank (VB6 parity). 4 tests in `bank_guards_parity_test.exs`.

@@ -21,6 +21,9 @@ defmodule Arena.Settings do
   # Default values for all tunable settings.
   # Adding a new setting only requires adding it here.
   @defaults %{
+    # Server state
+    server_open: true,
+
     # Gameplay multipliers
     xp_multiplier: 1.0,
     gold_multiplier: 1.0,

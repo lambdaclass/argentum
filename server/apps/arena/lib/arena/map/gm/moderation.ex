@@ -403,6 +403,47 @@ defmodule Arena.Map.Gm.Moderation do
     end
   end
 
+  @doc "/KICKALLCHARS — kick all non-GM players from this map."
+  def gm_kick_all_chars(state, char_id) do
+    kicked =
+      Enum.reduce(state.players, 0, fn {pid, entity}, count ->
+        if not entity.gm do
+          Helpers.send_to_session(
+            state.sessions,
+            pid,
+            {:send_raw,
+             Encoder.encode({:console_msg, %{message: "Todos los jugadores han sido expulsados.", font_index: 0}})}
+          )
+
+          Helpers.send_to_session(state.sessions, pid, :disconnect)
+          count + 1
+        else
+          count
+        end
+      end)
+
+    AuditLog.log_gm_action(char_id, "kick_all_chars", "#{kicked} players")
+    Helpers.gm_console(state, char_id, "Kicked #{kicked} non-GM player(s) from this map.")
+    {:noreply, state}
+  end
+
+  @doc "/UNBAN name — unban a character by looking them up on the current map first."
+  def gm_unban(state, char_id, target_name) do
+    case Helpers.find_player_by_name(state, target_name) do
+      {:ok, _target_id, target} ->
+        case GameBackend.Account.unban(target.account_id) do
+          {:ok, _} -> Helpers.gm_console(state, char_id, "#{target_name} unbanned.")
+          {:error, err} -> Helpers.gm_console(state, char_id, "Unban failed: #{inspect(err)}")
+        end
+
+        {:noreply, state}
+
+      :not_found ->
+        Helpers.gm_console(state, char_id, "Player '#{target_name}' not found on this map.")
+        {:noreply, state}
+    end
+  end
+
   # ── Punishment record helpers ──────────────────────────────────────
 
   @doc """

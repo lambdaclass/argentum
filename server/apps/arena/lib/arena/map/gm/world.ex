@@ -6,6 +6,24 @@ defmodule Arena.Map.Gm.World do
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
+  @doc "/RAIN — toggle rain on the map via text command (VB6 parity)."
+  def gm_rain_toggle(state, char_id) do
+    new_rain = not Map.get(state.meta, :rain, false)
+    meta = Map.put(state.meta, :rain, new_rain)
+    state = %{state | meta: meta}
+
+    rain_raw = Encoder.encode({:rain_toggle, %{raining: new_rain}})
+
+    for {_cid, pid} <- state.sessions do
+      send(pid, {:send_raw, rain_raw})
+    end
+
+    label = if new_rain, do: "ON", else: "OFF"
+    AuditLog.log_gm_action(char_id, "rain_toggle", label)
+    Helpers.gm_console(state, char_id, "Rain toggled #{label} on this map.")
+    {:noreply, state}
+  end
+
   def gm_toggle_weather(state, char_id, weather_type) do
     label = if weather_type == :snow, do: "Nieve", else: "Niebla"
     current = Map.get(state.meta, weather_type, false)
@@ -30,6 +48,7 @@ defmodule Arena.Map.Gm.World do
 
   def gm_tile_block_toggle(state, char_id, entity) do
     {fx, fy} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
+
     {blocked_tiles, status} =
       if MapSet.member?(state.gm_blocked_tiles, {fx, fy}) do
         {MapSet.delete(state.gm_blocked_tiles, {fx, fy}), "unblocked"}

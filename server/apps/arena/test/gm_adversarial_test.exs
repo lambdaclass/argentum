@@ -521,7 +521,7 @@ defmodule Arena.GmAdversarialTest do
 
       assert length(messages) == 1
       [{:console_msg, %{message: msg}}] = messages
-      assert msg =~ "Server open/close toggle"
+      assert msg =~ "Servidor"
     end
 
     test "GM can use :save_chars" do
@@ -534,14 +534,14 @@ defmodule Arena.GmAdversarialTest do
       assert msg =~ "Guardado de personajes"
     end
 
-    test "GM can use :warp_me_to_target (returns hint message)" do
+    test "GM can use :warp_me_to_target (returns hint when no target)" do
       state = make_session_state(%{character_id: 2001, is_gm: true})
 
       {_new_state, messages} = SessionLogic.handle_command(state, {:warp_me_to_target, %{}})
 
       assert length(messages) == 1
       [{:console_msg, %{message: msg}}] = messages
-      assert msg =~ "/GOTO"
+      assert msg =~ "selecciona" or msg =~ "objetivo"
     end
   end
 
