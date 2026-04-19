@@ -30,9 +30,9 @@
 
 ## Phase 3. Parity Proof — prove behavior against the VB6 baseline
 
-23. Expand formula golden coverage to the remaining VB6 formulas and edge cases.
-24. Add `ao_session` unit tests for session-state transitions and protocol invariants.
-25. Add spell-effect golden tests for legacy spells and their edge cases.
+23. ~~Expand formula golden coverage to the remaining VB6 formulas and edge cases.~~ Done — 70 golden tests covering cap_xp_to_pool, skill_gain_probability, level_up_gains, XP penalty, melee/spell damage, apply_defense, npc_damage, base_user_damage monotonicity, elemental modifiers.
+24. ~~Add `ao_session` unit tests for session-state transitions and protocol invariants.~~ Done — 27 tests covering lifecycle, duplicate login, disconnect cleanup, OnlineDirectory, GM broadcast, concurrency.
+25. ~~Add spell-effect golden tests for legacy spells and their edge cases.~~ Done — 51 tests covering damage to NPC/player, safe zone, AoE, remove invisibility, status spells, mana/stamina/attribute buffs, resurrect, elemental modifiers, poison tick.
 26. Add pet and taming parity tests.
 27. Add concurrent combat integration tests with multiple live clients.
 28. Expand lifecycle tests for autosave timing, multi-map transfer chains, cleanup DB failure, flush timeout, worker crash and start failure, stale autosave ordering, and graceful-disconnect final-save failure.
