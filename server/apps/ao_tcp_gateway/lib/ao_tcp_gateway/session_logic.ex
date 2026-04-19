@@ -25,6 +25,7 @@ defmodule AoTcpGateway.SessionLogic do
   alias AoTcpGateway.SessionTransfer
   alias AoTcpGateway.SessionPersistence
   alias AoTcpGateway.SessionCommands
+  alias AoTcpGateway.SessionRouteManifest
 
   # ---- Login (delegated to SessionLogin) ----
 
@@ -71,87 +72,7 @@ defmodule AoTcpGateway.SessionLogic do
 
   # ---- GM commands (require is_gm == true) ----
 
-  @gm_commands [
-    :go_to_char,
-    :warp_me_to_target,
-    :warp_char,
-    :invisible,
-    :silence,
-    :jail,
-    :kick,
-    :execute,
-    :ban_char,
-    :unban_char,
-    :revive_char,
-    :summon_char,
-    :kill_npc,
-    :request_char_info,
-    :where,
-    :gm_message,
-    :server_message,
-    :online_gm,
-    :rain_toggle,
-    :online_map,
-    :kick_all_chars,
-    :server_open_toggle,
-    :save_chars,
-    :global_message,
-    :kill_npc_targeted,
-    :kill_npc_no_respawn,
-    :kill_all_nearby_npcs,
-    :create_npc,
-    :create_npc_with_respawn,
-    :spawn_creature,
-    :spawn_list_request,
-    :creatures_in_map,
-    :create_item,
-    :give_item,
-    :request_char_stats,
-    :request_char_gold,
-    :request_char_inventory,
-    :request_char_bank,
-    :request_char_skills,
-    :edit_char,
-    :alter_name,
-    :ban_cuenta,
-    :unban_cuenta,
-    :ban_temporal,
-    :remove_punishment,
-    :royal_army_message,
-    :chaos_legion_message,
-    :talk_as_npc,
-    :nieve_toggle,
-    :niebla_toggle,
-    :change_map_pk,
-    :change_map_no_magic,
-    :change_map_no_invi,
-    :change_map_no_resu,
-    :tile_blocked_toggle,
-    :set_trigger,
-    :ask_trigger,
-    :force_midi_all,
-    :force_wave_all,
-    :force_midi_map,
-    :force_wave_map,
-    :items_in_floor,
-    :destroy_items,
-    :destroy_all_area,
-    :clean_world,
-    :show_name,
-    :set_description,
-    :set_speed,
-    :nick_to_ip,
-    :ip_to_nick,
-    :check_slot,
-    :council_kick,
-    :accept_royal_council,
-    :accept_chaos_council,
-    :royal_army_kick,
-    :chaos_legion_kick,
-    :sos_show_list,
-    :sos_remove,
-    :clean_sos
-  ]
+  @gm_commands SessionRouteManifest.group(:gm)
 
   @gm_not_authorized_msg {:console_msg, %{message: "No tienes privilegios de GM.", font_index: 0}}
 
@@ -173,36 +94,7 @@ defmodule AoTcpGateway.SessionLogic do
 
   # ---- Guild commands ----
 
-  @guild_commands [
-    :guild_create,
-    :guild_leave,
-    :guild_message,
-    :guild_online,
-    :guild_declare_war,
-    :guild_kick_member,
-    :guild_update_news,
-    :guild_request_membership,
-    :guild_accept_new_member,
-    :guild_reject_new_member,
-    :guild_request_details,
-    :request_guild_leader_info,
-    :guild_accept_peace,
-    :guild_reject_peace,
-    :guild_accept_alliance,
-    :guild_reject_alliance,
-    :guild_offer_peace,
-    :guild_offer_alliance,
-    :guild_alliance_details,
-    :guild_peace_details,
-    :guild_alliance_prop_list,
-    :guild_peace_prop_list,
-    :guild_request_joiner_info,
-    :guild_new_website,
-    :guild_member_info,
-    :guild_open_elections,
-    :guild_vote,
-    :clan_codex_update
-  ]
+  @guild_commands SessionRouteManifest.group(:guild)
 
   def handle_command(state, {cmd_type, _} = cmd)
       when state.character_id != nil and cmd_type in @guild_commands do
@@ -211,7 +103,7 @@ defmodule AoTcpGateway.SessionLogic do
 
   # ---- Chat & communication commands ----
 
-  @chat_commands [:talk, :yell, :whisper, :grupo_msg, :faction_message, :council_message]
+  @chat_commands SessionRouteManifest.group(:chat)
 
   def handle_command(state, {cmd_type, _} = cmd)
       when state.character_id != nil and cmd_type in @chat_commands do
@@ -220,25 +112,9 @@ defmodule AoTcpGateway.SessionLogic do
 
   # ---- Commerce, banking, trading, auction ----
 
-  @commerce_commands [
-    :commerce_start,
-    :commerce_buy,
-    :commerce_sell,
-    :commerce_end,
-    :bank_start,
-    :bank_deposit,
-    :bank_extract_item,
-    :bank_deposit_gold,
-    :bank_extract_gold,
-    :bank_end,
-    :user_commerce_offer,
-    :user_commerce_ok,
-    :user_commerce_reject,
-    :user_commerce_end,
-    :oferta_inicial,
-    :oferta_de_subasta,
-    :subasta_info
-  ]
+  @commerce_commands SessionRouteManifest.group(:commerce)
+
+  def route_metadata(cmd_type), do: SessionRouteManifest.route(cmd_type)
 
   def handle_command(state, {cmd_type, _} = cmd)
       when state.character_id != nil and cmd_type in @commerce_commands do

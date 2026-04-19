@@ -148,7 +148,7 @@ defmodule Arena.Map.QuestHandlers do
   def handle_quest(state, char_id) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
-        case Helpers.find_nearby_npc_of_type(state, entity, [@npc_type_quest], 5) do
+        case Helpers.resolve_nearby_npc(state, entity, [@npc_type_quest], 5) do
           {:ok, _npc, npc_def} ->
             quest_ids_set = MapSet.new(npc_def.quest_numbers)
 

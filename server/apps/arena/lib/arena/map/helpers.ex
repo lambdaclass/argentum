@@ -348,16 +348,74 @@ defmodule Arena.Map.Helpers do
     )
   end
 
-  @doc "Find an NPC of a given type within `range` tiles of the entity (default 10, VB6 Distancia)."
-  def find_nearby_npc_of_type(state, entity, npc_types, range \\ 10) do
+  @doc """
+  VB6 `Distancia` on a single map.
+
+  VB6 uses Manhattan distance for most NPC interaction checks:
+  `Abs(x1 - x2) + Abs(y1 - y2)`.
+  """
+  def vb6_distancia_xy(x1, y1, x2, y2), do: abs(x1 - x2) + abs(y1 - y2)
+
+  @doc "VB6 `Distancia` between two same-map entities."
+  def vb6_distancia(%{x: x1, y: y1}, %{x: x2, y: y2}),
+    do: vb6_distancia_xy(x1, y1, x2, y2)
+
+  @doc "True when two same-map entities are within VB6 `Distancia`."
+  def within_vb6_distance?(left, right, max_distance),
+    do: vb6_distancia(left, right) <= max_distance
+
+  @doc """
+  Resolve the player's currently selected NPC.
+
+  Returns `{:ok, npc, npc_def}` only when the selected instance is still live
+  and still maps to a valid NPC definition.
+  """
+  def selected_npc(state, entity) do
+    case Map.get(entity, :last_clicked_npc_instance_id) do
+      nil ->
+        {:error, :no_selection}
+
+      instance_id ->
+        case Map.get(state.npcs_live, instance_id) do
+          nil ->
+            {:error, :stale_selection}
+
+          npc ->
+            case GameData.get_npc(npc.npc_id) do
+              nil -> {:error, :stale_selection}
+              npc_def -> {:ok, npc, npc_def}
+            end
+        end
+    end
+  end
+
+  @doc """
+  Resolve the selected NPC only when it matches the expected type set and is
+  within the given VB6 `Distancia`.
+  """
+  def resolve_selected_npc(state, entity, npc_types, max_distance) do
+    case selected_npc(state, entity) do
+      {:ok, npc, npc_def} ->
+        if npc_def.npc_type in npc_types and within_vb6_distance?(entity, npc, max_distance) do
+          {:ok, npc, npc_def}
+        else
+          :not_found
+        end
+
+      _ ->
+        :not_found
+    end
+  end
+
+  @doc "Resolve any nearby NPC by type using VB6 `Distancia`."
+  def resolve_nearby_npc(state, entity, npc_types, max_distance) do
     result =
       Enum.find_value(state.npcs_live, fn {_id, npc} ->
         npc_def = GameData.get_npc(npc.npc_id)
 
         if npc_def != nil and
              npc_def.npc_type in npc_types and
-             abs(npc.x - entity.x) <= range and
-             abs(npc.y - entity.y) <= range do
+             within_vb6_distance?(entity, npc, max_distance) do
           {npc, npc_def}
         end
       end)
@@ -367,6 +425,10 @@ defmodule Arena.Map.Helpers do
       nil -> :not_found
     end
   end
+
+  @deprecated "Prefer resolve_nearby_npc/4 or resolve_selected_npc/4 so target semantics stay explicit."
+  def find_nearby_npc_of_type(state, entity, npc_types, range \\ 10),
+    do: resolve_nearby_npc(state, entity, npc_types, range)
 
   # ---- GM shared helpers ----
 

@@ -174,8 +174,6 @@ defmodule Arena.Map.Social do
 
   defp msg(state, char_id, message), do: Helpers.msg(state, char_id, message)
 
-  defdelegate find_nearby_npc_of_type(state, entity, npc_types), to: Helpers
-
   # Pet commands delegated to Arena.Map.Pets
 
   # ==================================================================
@@ -500,7 +498,7 @@ defmodule Arena.Map.Social do
   end
 
   defp do_propose_marriage(state, char_id, entity, target_char_id, target_entity) do
-    priest_result = find_nearby_npc_of_type(state, entity, [@npc_type_revividor])
+    priest_result = Helpers.resolve_nearby_npc(state, entity, [@npc_type_revividor], 10)
 
     cond do
       # Must be near a priest
@@ -508,7 +506,7 @@ defmodule Arena.Map.Social do
         msg(state, char_id, "Primero haz click sobre un sacerdote.")
         {:noreply, state}
 
-      # Priest too far (find_nearby_npc_of_type checks distance <= 10)
+      # Priest too far (resolve_nearby_npc checks VB6 Distancia <= 10)
       # If we got here, priest is nearby. Check other conditions.
 
       # Cannot marry yourself
@@ -797,29 +795,6 @@ defmodule Arena.Map.Social do
     end
   end
 
-  defp selected_npc(state, entity) do
-    case Map.get(entity, :last_clicked_npc_instance_id) do
-      nil ->
-        {:error, :no_selection}
-
-      instance_id ->
-        case Map.get(state.npcs_live, instance_id) do
-          nil ->
-            {:error, :stale_selection}
-
-          npc ->
-            case GameData.get_npc(npc.npc_id) do
-              nil -> {:error, :stale_selection}
-              npc_def -> {:ok, npc, npc_def}
-            end
-        end
-    end
-  end
-
-  defp within_selected_npc_range?(entity, npc, max_distance) do
-    abs(entity.x - npc.x) <= max_distance and abs(entity.y - npc.y) <= max_distance
-  end
-
   # ==================================================================
   # Account state — VB6: HandleRequestAccountState
   # Banker shows bank gold, Timbero shows gambling stats.
@@ -832,15 +807,17 @@ defmodule Arena.Map.Social do
         {:noreply, state}
 
       {:ok, entity} ->
-        case selected_npc(state, entity) do
+        case Helpers.selected_npc(state, entity) do
           {:ok, npc, npc_def} ->
             cond do
-              npc_def.npc_type == @npc_type_banquero and within_selected_npc_range?(entity, npc, 3) ->
+              npc_def.npc_type == @npc_type_banquero and
+                  Helpers.within_vb6_distance?(entity, npc, 3) ->
                 bank_gold = Map.get(entity, :bank_gold, 0)
                 msg(state, char_id, "Tenes #{bank_gold} monedas de oro en tu cuenta.")
                 {:noreply, state}
 
-              npc_def.npc_type == @npc_type_timbero and within_selected_npc_range?(entity, npc, 3) ->
+              npc_def.npc_type == @npc_type_timbero and
+                  Helpers.within_vb6_distance?(entity, npc, 3) ->
                 # VB6: HandleRequestAccountState shows three separate gambling counters
                 wins = Map.get(entity, :gamble_wins, 0)
                 losses = Map.get(entity, :gamble_losses, 0)
@@ -884,14 +861,14 @@ defmodule Arena.Map.Social do
         {:noreply, state}
 
       {:ok, entity} ->
-        case selected_npc(state, entity) do
+        case Helpers.selected_npc(state, entity) do
           {:ok, npc, npc_def} ->
             cond do
               npc_def.npc_type != @npc_type_enlistador ->
                 msg(state, char_id, "Primero debes seleccionar un personaje, haz click izquierdo sobre el.")
                 {:noreply, state}
 
-              not within_selected_npc_range?(entity, npc, 4) ->
+              not Helpers.within_vb6_distance?(entity, npc, 4) ->
                 msg(state, char_id, "Estas demasiado lejos.")
                 {:noreply, state}
 

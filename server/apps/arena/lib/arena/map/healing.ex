@@ -168,7 +168,12 @@ defmodule Arena.Map.Healing do
           true ->
             # VB6: heal is NPC interaction -- full heal from Revividor NPC.
             # VB6: If .pos.Map = MAP_HOME_IN_JAIL And NpcList(...).npcType = Revividor Then Exit Sub
-            case Helpers.find_nearby_npc_of_type(state, entity, [@npc_type_revividor, @npc_type_resucitador_newbie]) do
+            case Helpers.resolve_nearby_npc(
+                   state,
+                   entity,
+                   [@npc_type_revividor, @npc_type_resucitador_newbie],
+                   10
+                 ) do
               {:ok, _npc, npc_def} ->
                 cond do
                   # VB6: If .pos.Map = MAP_HOME_IN_JAIL And NpcList(...).npcType = Revividor Then Exit Sub
@@ -238,7 +243,12 @@ defmodule Arena.Map.Healing do
       {:ok, entity} ->
         if entity.dead do
           # VB6: resurrection requires Revividor NPC nearby
-          case Helpers.find_nearby_npc_of_type(state, entity, [@npc_type_revividor, @npc_type_resucitador_newbie]) do
+          case Helpers.resolve_nearby_npc(
+                 state,
+                 entity,
+                 [@npc_type_revividor, @npc_type_resucitador_newbie],
+                 10
+               ) do
             {:ok, _npc, npc_def} ->
               # VB6: ResucitadorNewbie only serves newbies (level <= 12)
               if npc_def.npc_type == @npc_type_resucitador_newbie and entity.level > 12 do

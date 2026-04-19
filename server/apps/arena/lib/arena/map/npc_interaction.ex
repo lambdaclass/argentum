@@ -26,8 +26,6 @@ defmodule Arena.Map.NpcInteraction do
   @crafting_skills [:woodcutting, :fishing, :mining, :blacksmithing, :carpentry, :alchemy, :tailoring, :taming]
 
   defp msg(state, char_id, message), do: Helpers.msg(state, char_id, message)
-  defdelegate find_nearby_npc_of_type(state, entity, npc_types), to: Helpers
-
   @doc """
   Handle the eInformation packet (VB6: HandleInformation).
 
@@ -41,7 +39,7 @@ defmodule Arena.Map.NpcInteraction do
           msg(state, char_id, "Estas muerto!")
           {:noreply, state}
         else
-          case Helpers.find_nearby_npc_of_type(state, entity, [@npc_type_enlistador], 4) do
+          case Helpers.resolve_nearby_npc(state, entity, [@npc_type_enlistador], 4) do
             {:ok, _npc, npc_def} ->
               npc_faction = npc_faccion_to_atom(npc_def.faccion)
 
@@ -233,7 +231,7 @@ defmodule Arena.Map.NpcInteraction do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         skill_atom = Enum.at(@skill_order, skill_index)
-        trainer_result = find_nearby_npc_of_type(state, entity, [@npc_type_entrenador])
+        trainer_result = Helpers.resolve_nearby_npc(state, entity, [@npc_type_entrenador], 10)
         near_trainer = trainer_result != :not_found
 
         trainer_npc_def =
@@ -352,16 +350,10 @@ defmodule Arena.Map.NpcInteraction do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         trainer =
-          Enum.find_value(state.npcs_live, fn {_id, npc} ->
-            npc_def = GameData.get_npc(npc.npc_id)
-
-            if npc_def != nil and
-                 npc_def.npc_type == @npc_type_entrenador and
-                 abs(npc.x - entity.x) <= 10 and
-                 abs(npc.y - entity.y) <= 10 do
-              npc_def
-            end
-          end)
+          case Helpers.resolve_nearby_npc(state, entity, [@npc_type_entrenador], 10) do
+            {:ok, _npc, npc_def} -> npc_def
+            :not_found -> nil
+          end
 
         if trainer != nil and trainer.creatures != [] do
           raw =
@@ -588,22 +580,10 @@ defmodule Arena.Map.NpcInteraction do
 
   defp do_bank_gold_transfer(state, char_id, entity, target_name, amount) do
     # VB6: validate TargetNPC is a Banquero within distance 10
-    instance_id = Map.get(entity, :last_clicked_npc_instance_id)
-
     banker_npc =
-      if instance_id do
-        case Map.get(state.npcs_live, instance_id) do
-          nil -> nil
-          npc ->
-            npc_def = GameData.get_npc(npc.npc_id)
-
-            if npc_def != nil and npc_def.npc_type == @npc_type_banquero and
-                 abs(npc.x - entity.x) <= 10 and abs(npc.y - entity.y) <= 10 do
-              npc
-            else
-              nil
-            end
-        end
+      case Helpers.resolve_selected_npc(state, entity, [@npc_type_banquero], 10) do
+        {:ok, npc, _npc_def} -> npc
+        :not_found -> nil
       end
 
     cond do
@@ -694,7 +674,7 @@ defmodule Arena.Map.NpcInteraction do
             {:noreply, state}
 
           true ->
-            case find_nearby_npc_of_type(state, entity, [@npc_type_timbero]) do
+            case Helpers.resolve_nearby_npc(state, entity, [@npc_type_timbero], 10) do
               :not_found ->
                 msg(state, char_id, "No hay un timbero cerca.")
                 {:noreply, state}
@@ -810,41 +790,24 @@ defmodule Arena.Map.NpcInteraction do
     end
   end
 
-  # Find a priest within VB6 range (distance <= 3)
+  # Find a priest within VB6 range (Distancia <= 3)
   defp find_nearby_priest(state, entity) do
-    result =
-      Enum.find_value(state.npcs_live, fn {_id, npc} ->
-        npc_def = GameData.get_npc(npc.npc_id)
-
-        if npc_def != nil and
-             npc_def.npc_type in [@npc_type_revividor, @npc_type_resucitador_newbie] and
-             abs(npc.x - entity.x) <= @forgive_max_range and
-             abs(npc.y - entity.y) <= @forgive_max_range do
-          {npc, npc_def}
-        end
-      end)
-
-    case result do
-      {npc, npc_def} -> {:ok, npc, npc_def}
-      nil -> :not_found
-    end
+    Helpers.resolve_nearby_npc(
+      state,
+      entity,
+      [@npc_type_revividor, @npc_type_resucitador_newbie],
+      @forgive_max_range
+    )
   end
 
   def handle_arena_entry(state, char_id) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         guard =
-          Enum.find_value(state.npcs_live, fn {_id, npc} ->
-            npc_def = GameData.get_npc(npc.npc_id)
-
-            if npc_def != nil and
-                 npc_def.npc_type == @npc_type_arena_guard and
-                 npc_def.arena_enabled and
-                 abs(npc.x - entity.x) <= 10 and
-                 abs(npc.y - entity.y) <= 10 do
-              npc_def
-            end
-          end)
+          case Helpers.resolve_nearby_npc(state, entity, [@npc_type_arena_guard], 10) do
+            {:ok, _npc, npc_def} when npc_def.arena_enabled -> npc_def
+            _ -> nil
+          end
 
         cond do
           guard == nil ->

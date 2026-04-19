@@ -8,8 +8,6 @@ defmodule Arena.Map.Faction do
   @npc_type_enlistador 5
 
   defp msg(state, char_id, message), do: Helpers.msg(state, char_id, message)
-  defdelegate find_nearby_npc_of_type(state, entity, npc_types), to: Helpers
-
   defp npc_faccion_to_atom(3), do: :royal_army
   defp npc_faccion_to_atom(2), do: :chaos_legion
   defp npc_faccion_to_atom(_), do: :none
@@ -164,8 +162,7 @@ defmodule Arena.Map.Faction do
         if npc_def != nil and
              npc_def.npc_type == @npc_type_enlistador and
              npc_def.faccion == expected_faccion and
-             abs(npc.x - entity.x) <= 5 and
-             abs(npc.y - entity.y) <= 5 do
+             Helpers.within_vb6_distance?(entity, npc, 5) do
           {npc, npc_def}
         end
       end)
