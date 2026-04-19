@@ -181,8 +181,8 @@ defmodule Arena.CraftingBankTrainDriftTest do
 
       # Stub NPC def: npc_type=5 is forge
       # The actual check uses GameData.get_npc which may not find our fake NPC.
-      # Instead we test the Helpers.find_nearby_npc_of_type directly.
-      result = Helpers.find_nearby_npc_of_type(state, entity, [5], 5)
+      # Instead we test the Helpers.resolve_nearby_npc directly.
+      result = Helpers.resolve_nearby_npc(state, entity, [5], 5)
 
       # If GameData doesn't know npc_id 100, this returns :not_found.
       # This documents the current behavior: production crafting depends on NPC lookup.
@@ -225,7 +225,7 @@ defmodule Arena.CraftingBankTrainDriftTest do
 
       state = map_state(npcs_live: %{:far_forge => far_npc})
 
-      result = Helpers.find_nearby_npc_of_type(state, entity, [5], 5)
+      result = Helpers.resolve_nearby_npc(state, entity, [5], 5)
       # Even if GameData knows npc_id 100, it's out of range
       assert result == :not_found, "NPC at distance 6 should be out of range 5"
     end
@@ -478,7 +478,7 @@ defmodule Arena.CraftingBankTrainDriftTest do
     test "handle_bank_gold_transfer rejects when banker nearby but NOT selected" do
       # This is the core drift test: a real banker NPC (npc_id 3, type 4) is within
       # range, but the player has NOT clicked/selected it. The transfer MUST be
-      # rejected — no generic find_nearby_npc_of_type fallback allowed.
+      # rejected — no generic resolve_nearby_npc fallback allowed.
       banker_npc = %{
         npc_id: 3,
         x: 51,

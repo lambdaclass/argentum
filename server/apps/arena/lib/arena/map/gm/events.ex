@@ -343,7 +343,7 @@ defmodule Arena.Map.Gm.Events do
     nearest_npc =
       state.npcs_live
       |> Enum.min_by(
-        fn {_id, npc} -> abs(npc.x - entity.x) + abs(npc.y - entity.y) end,
+        fn {_id, npc} -> Helpers.vb6_distancia(npc, entity) end,
         fn -> nil end
       )
 

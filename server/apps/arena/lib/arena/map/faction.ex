@@ -12,6 +12,13 @@ defmodule Arena.Map.Faction do
   defp npc_faccion_to_atom(2), do: :chaos_legion
   defp npc_faccion_to_atom(_), do: :none
 
+  @doc """
+  Handle NPC enlistador click: enlist in a faction or rank up if already enlisted.
+
+  VB6: Acciones.bas:290-311 — Enlistador NPC double-click dispatch
+  VB6: ModFacciones.bas:33 — EnlistarArmadaReal
+  VB6: ModFacciones.bas:174 — EnlistarCaos
+  """
   def handle_enlistador_click(state, char_id, entity, npc_def) do
     npc_faction = npc_faccion_to_atom(npc_def.faccion)
 
@@ -67,6 +74,11 @@ defmodule Arena.Map.Faction do
     end
   end
 
+  # Rank-up logic for already-enlisted players.
+  #
+  # VB6: ModFacciones.bas:111 — RecompensaArmadaReal
+  # VB6: ModFacciones.bas:237 — RecompensaCaos
+  # VB6: Protocol.bas:4604 — HandleReward (packet entry point)
   defp handle_faction_rank_up(state, char_id, entity, faction) do
     current_rank = current_faction_rank(entity, faction)
     ranks = GameData.faction_ranks(faction)
@@ -104,6 +116,9 @@ defmodule Arena.Map.Faction do
   defp assign_rank(entity, :royal_army, rank), do: %{entity | faction_rank_armada: rank}
   defp assign_rank(entity, :chaos_legion, rank), do: %{entity | faction_rank_chaos: rank}
 
+  # Give faction rank rewards (items) for all ranks between old_rank and new_rank.
+  #
+  # VB6: ModFacciones.bas:299 — DarRecompensas
   defp give_faction_rewards(entity, state, char_id, faction, old_rank, new_rank) do
     rewards = GameData.faction_rewards(faction)
 
@@ -131,6 +146,14 @@ defmodule Arena.Map.Faction do
     end)
   end
 
+  @doc """
+  Handle the enlist-faction command by finding a nearby enlistador NPC and
+  delegating to `handle_enlistador_click/4`.
+
+  VB6: Acciones.bas:290-311 — Enlistador NPC double-click dispatch
+  VB6: ModFacciones.bas:33 — EnlistarArmadaReal
+  VB6: ModFacciones.bas:174 — EnlistarCaos
+  """
   def handle_enlist_faction(state, char_id, faction) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
@@ -173,6 +196,13 @@ defmodule Arena.Map.Faction do
     end
   end
 
+  @doc """
+  Handle the /RENUNCIAR command: leave the player's current faction.
+
+  VB6: Protocol.bas:4820 — HandleLeaveFaction
+  VB6: ModFacciones.bas:144 — ExpulsarFaccionReal
+  VB6: ModFacciones.bas:155 — ExpulsarFaccionCaos
+  """
   def handle_leave_faction(state, char_id) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
@@ -225,6 +255,9 @@ defmodule Arena.Map.Faction do
     end
   end
 
+  # Unequip and remove all faction-exclusive items (Real/Caos flagged).
+  #
+  # VB6: ModFacciones.bas:357 — PerderItemsFaccionarios
   defp strip_faction_items(entity) do
     alias Arena.Data.GameData
 
@@ -264,6 +297,14 @@ defmodule Arena.Map.Faction do
     end)
   end
 
+  @doc """
+  Calculate faction score awarded for a PvP kill.
+
+  VB6: Modulo_UsUaRiOs.bas:1862 — ContarMuerte (kill counting entry point)
+  VB6: Modulo_UsUaRiOs.bas:1916 — HandleFactionScoreForKill
+  VB6: Modulo_UsUaRiOs.bas:1900 — ShouldApplyFactionBonus (1.5x for cross-faction)
+  VB6: Modulo_UsUaRiOs.bas:1996 — CalculateBaseFactionScore
+  """
   def faction_score_for_kill(attacker, defender) do
     att_faction = attacker.faction
     def_faction = defender.faction
@@ -288,6 +329,9 @@ defmodule Arena.Map.Faction do
     end
   end
 
+  # Base faction score from level difference (before bonus/cap).
+  #
+  # VB6: Modulo_UsUaRiOs.bas:1996 — CalculateBaseFactionScore
   defp faction_score_base(att_level, def_level) do
     if att_level < def_level do
       10 + def_level - max(att_level, 0)
@@ -296,6 +340,11 @@ defmodule Arena.Map.Faction do
     end
   end
 
+  @doc """
+  Handle faction-wide chat message broadcast.
+
+  VB6: Protocol.bas:5211 — HandleFactionMessage
+  """
   def handle_faction_chat(state, char_id, message) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->

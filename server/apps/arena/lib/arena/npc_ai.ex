@@ -331,7 +331,7 @@ defmodule Arena.NpcAi do
       # If def is missing, assume hostile (wild NPC without def is anomalous but safe default)
       npc_def == nil or npc_def.hostile
     end)
-    |> Enum.min_by(fn {_id, n} -> abs(n.x - pet.x) + abs(n.y - pet.y) end, fn -> nil end)
+    |> Enum.min_by(fn {_id, n} -> Helpers.vb6_distancia(n, pet) end, fn -> nil end)
   end
 
   defp maybe_pet_attack(state, instance_id, npc, npc_def, now, target_instance_id, target_npc, effects) do
@@ -524,7 +524,7 @@ defmodule Arena.NpcAi do
     target_player = if npc.target_id, do: Map.get(state.players, npc.target_id)
 
     if target_player && not target_player.dead do
-      dist = abs(target_player.x - npc.x) + abs(target_player.y - npc.y)
+      dist = Helpers.vb6_distancia(target_player, npc)
 
       if dist <= @npc_spell_range do
         # Priority 2: Paralyze if target not already paralyzed

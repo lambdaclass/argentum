@@ -257,7 +257,7 @@ defmodule Arena.Map.Crafting do
       npc_def = GameData.get_npc(npc.npc_id)
       npc_def != nil and npc_def.hostile
     end)
-    |> Enum.min_by(fn {_id, npc} -> abs(npc.x - entity.x) + abs(npc.y - entity.y) end, fn -> nil end)
+    |> Enum.min_by(fn {_id, npc} -> Helpers.vb6_distancia(npc, entity) end, fn -> nil end)
   end
 
   # ---- Gathering (mining, woodcutting) ----

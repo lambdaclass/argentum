@@ -426,9 +426,6 @@ defmodule Arena.Map.Helpers do
     end
   end
 
-  @deprecated "Prefer resolve_nearby_npc/4 or resolve_selected_npc/4 so target semantics stay explicit."
-  def find_nearby_npc_of_type(state, entity, npc_types, range \\ 10),
-    do: resolve_nearby_npc(state, entity, npc_types, range)
 
   # ---- GM shared helpers ----
 

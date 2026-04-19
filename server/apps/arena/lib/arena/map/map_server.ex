@@ -21,7 +21,9 @@ defmodule Arena.Map.MapServer do
   - `Arena.Map.Chat` — chat, yell
   - `Arena.Map.Healing` — rest, meditate, heal, resucitate
   - `Arena.Map.Faction` — enlist, leave, faction chat, faction score
-  - `Arena.Map.NpcInteraction` — double-click, train, gamble, forgive
+  - `Arena.Map.NpcInteraction` — double-click, gamble, forgive
+  - `Arena.Map.Training` — skill training, creature training
+  - `Arena.Map.Banking` — bank gold transfer
   - `Arena.Map.GmCommands` — all /commands for game masters
   - `Arena.Map.Pets` — pet stand, follow, leave
   - `Arena.Map.QuestHandlers` — quest list, details, accept, abandon
@@ -40,7 +42,7 @@ defmodule Arena.Map.MapServer do
   alias AoEntities.PlayerEntity
   alias Arena.Entity.NpcEntity
   alias Arena.Map.{Helpers, Visibility, Movement, CombatHandlers, InventoryHandlers, Commerce, Bank, Trade, Social}
-  alias Arena.Map.{Chat, Healing, Pets, QuestHandlers, Faction, NpcInteraction, GmCommands, StatusTicks}
+  alias Arena.Map.{Chat, Healing, Pets, QuestHandlers, Faction, NpcInteraction, Training, Banking, GmCommands, StatusTicks}
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
@@ -203,10 +205,10 @@ defmodule Arena.Map.MapServer do
   @doc "Add amount to a player's bank_gold. Used by bank gold transfer for online recipients."
   def modify_bank_gold(map_id, char_id, amount), do: GenServer.cast(via(map_id), {:modify_bank_gold, char_id, amount})
 
-  @doc "Route train creature packet to NpcInteraction."
+  @doc "Route train creature packet to Training."
   def train_creature(map_id, char_id, payload), do: GenServer.cast(via(map_id), {:train_creature, char_id, payload})
 
-  @doc "Route bank gold transfer to NpcInteraction."
+  @doc "Route bank gold transfer to Banking."
   def bank_gold_transfer(map_id, char_id, target_name, amount),
     do: GenServer.cast(via(map_id), {:bank_gold_transfer, char_id, target_name, amount})
 
@@ -667,7 +669,7 @@ defmodule Arena.Map.MapServer do
   def handle_cast({:request_atributes, char_id}, state), do: Social.handle_request_atributes(state, char_id)
   @impl true
   def handle_cast({:train_skill, char_id, skill_index}, state),
-    do: NpcInteraction.handle_train_skill(state, char_id, skill_index)
+    do: Training.handle_train_skill(state, char_id, skill_index)
 
   @impl true
   def handle_cast({:craft_item, char_id, skill_atom, item_id, amount}, state),
@@ -757,13 +759,13 @@ defmodule Arena.Map.MapServer do
   @impl true
   def handle_cast({:divorce, char_id}, state), do: Social.handle_divorce(state, char_id)
 
-  def handle_cast({:train_list, char_id}, state), do: NpcInteraction.handle_train_list(state, char_id)
+  def handle_cast({:train_list, char_id}, state), do: Training.handle_train_list(state, char_id)
 
   def handle_cast({:train_creature, char_id, payload}, state),
-    do: NpcInteraction.handle_train_creature(state, char_id, payload)
+    do: Training.handle_train_creature(state, char_id, payload)
 
   def handle_cast({:bank_gold_transfer, char_id, target_name, amount}, state),
-    do: NpcInteraction.handle_bank_gold_transfer(state, char_id, target_name, amount)
+    do: Banking.handle_bank_gold_transfer(state, char_id, target_name, amount)
 
   def handle_cast({:gamble, char_id, amount}, state) do
     NpcInteraction.handle_gamble(state, char_id, amount, nil)

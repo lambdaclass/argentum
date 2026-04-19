@@ -1367,7 +1367,7 @@ defmodule Arena.EconomySecurityTest do
       # leave_faction now requires nearby enlistador NPC (VB6 parity)
       # NPC type 5 = enlistador, but we need GameData to have it.
       # If GameData doesn't have npc_id 900 as enlistador, the test still
-      # verifies the guard path. Use find_nearby_npc_of_type which scans npcs_live.
+      # verifies the guard path. Use resolve_nearby_npc which scans npcs_live.
       enlistador = %{npc_id: 900, x: 51, y: 50, instance_id: :enl1}
       entity = make_entity(%{char_id: :player, faction: :royal_army, faction_reenlistadas: 2})
       sessions = %{player: self()}

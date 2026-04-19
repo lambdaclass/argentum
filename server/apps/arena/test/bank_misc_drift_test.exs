@@ -3,7 +3,7 @@ defmodule Arena.BankMiscDriftTest do
   VB6 parity: three verified range drifts.
 
   B8  – Bank `validate_bank_session` uses 6-tile Chebyshev range; VB6 uses 10.
-  #21 – `find_nearby_npc_of_type` (heal / resurrect / marriage priest) uses 5;
+  #21 – `resolve_nearby_npc` (heal / resurrect / marriage priest) uses 5;
         VB6 uses distance <= 10 for all NPC interactions.
   T6  – `handle_train_list` uses an inline 5-tile range; VB6 uses 10.
   """
@@ -192,10 +192,10 @@ defmodule Arena.BankMiscDriftTest do
   end
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # #21: find_nearby_npc_of_type range (5 → 10)
+  # #21: resolve_nearby_npc range (5 → 10)
   # ═══════════════════════════════════════════════════════════════════════════
 
-  describe "#21: find_nearby_npc_of_type range should be 10, not 5" do
+  describe "#21: resolve_nearby_npc range should be 10, not 5" do
     test "priest at distance 6 should be found (VB6 allows <= 10)" do
       priest_npc_id = find_priest_npc_id()
       assert priest_npc_id != nil, "Need a priest NPC in game data"
@@ -205,7 +205,7 @@ defmodule Arena.BankMiscDriftTest do
       entity = make_entity(%{x: 56, y: 50})
       state = make_map_state(entity, npcs_live: %{priest_1: priest})
 
-      result = Helpers.find_nearby_npc_of_type(state, entity, [@npc_type_revividor])
+      result = Helpers.resolve_nearby_npc(state, entity, [@npc_type_revividor], 10)
       assert {:ok, _npc, _npc_def} = result,
              "Priest at distance 6 should be found (VB6 allows 10)"
     end
@@ -218,7 +218,7 @@ defmodule Arena.BankMiscDriftTest do
       entity = make_entity(%{x: 60, y: 50})
       state = make_map_state(entity, npcs_live: %{priest_1: priest})
 
-      result = Helpers.find_nearby_npc_of_type(state, entity, [@npc_type_revividor])
+      result = Helpers.resolve_nearby_npc(state, entity, [@npc_type_revividor], 10)
       assert {:ok, _npc, _npc_def} = result,
              "Priest at distance 10 should be found (VB6 allows 10)"
     end
@@ -231,7 +231,7 @@ defmodule Arena.BankMiscDriftTest do
       entity = make_entity(%{x: 61, y: 50})
       state = make_map_state(entity, npcs_live: %{priest_1: priest})
 
-      result = Helpers.find_nearby_npc_of_type(state, entity, [@npc_type_revividor])
+      result = Helpers.resolve_nearby_npc(state, entity, [@npc_type_revividor], 10)
       assert result == :not_found,
              "Priest at distance 11 should NOT be found (VB6 limit is 10)"
     end
