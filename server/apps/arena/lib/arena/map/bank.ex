@@ -17,6 +17,15 @@ defmodule Arena.Map.Bank do
       {:ok, entity} when entity.trade_partner_id != nil ->
         {:reply, {:error, :already_trading}, state}
 
+      {:ok, entity} when entity.meditating ->
+        {:reply, {:error, :meditating}, state}
+
+      {:ok, entity} when entity.navigating ->
+        {:reply, {:error, :navigating}, state}
+
+      {:ok, entity} when entity.paralyzed ->
+        {:reply, {:error, :paralyzed}, state}
+
       {:ok, entity} ->
         npc =
           if target_x && target_y do

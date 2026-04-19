@@ -9,13 +9,13 @@
 
 3. ~~Restore commerce open on merchant double-click.~~ Done.
 4. ~~Close bank and commerce sessions when the player walks away from the NPC.~~ Done.
-5. Implement the remaining bank-open guards from VB6.
-6. Match timbero account-state counters and values to VB6 (message format done).
-7. Finish remaining NPC AI edge-case parity.
-8. Finish remaining spell-selection edge-case parity.
-9. Implement the /REWARD NPC request flow (rank-up rewards already work in faction.ex).
-10. Match banker, timbero, priest, and enlistador response text and values to VB6.
-11. Fix remaining guild relation stubs.
+5. ~~Implement the remaining bank-open guards from VB6.~~ Done.
+6. ~~Match timbero account-state counters and values to VB6 (message format done).~~ Done.
+7. ~~Finish remaining NPC AI edge-case parity.~~ Done.
+8. ~~Finish remaining spell-selection edge-case parity.~~ Done.
+9. ~~Implement the /REWARD NPC request flow (rank-up rewards already work in faction.ex).~~ Done.
+10. ~~Match banker, timbero, priest, and enlistador response text and values to VB6.~~ Done.
+11. ~~Fix remaining guild relation stubs.~~ Done.
 12. Decide the GM/admin packet target.
 13. Implement the remaining GM/admin commands for the chosen target.
 14. Remove the remaining GM/admin stubs for the chosen target.

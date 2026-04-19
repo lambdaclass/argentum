@@ -360,7 +360,7 @@ defmodule Arena.Map.NpcInteraction do
                 msg(state, char_id, "No hay un timbero cerca.")
                 {:noreply, state}
 
-              {:ok, _npc, _npc_def} ->
+              {:ok, _npc, npc_def} ->
                 won = :rand.uniform(2) == 1
 
                 entity =
@@ -386,9 +386,9 @@ defmodule Arena.Map.NpcInteraction do
                 )
 
                 if won do
-                  msg(state, char_id, "Timbero te dice: Has ganado #{amount} monedas de oro!")
+                  msg(state, char_id, "#{npc_def.name} te dice: Has ganado #{amount} monedas de oro!")
                 else
-                  msg(state, char_id, "Timbero te dice: Has perdido #{amount} monedas de oro.")
+                  msg(state, char_id, "#{npc_def.name} te dice: Has perdido #{amount} monedas de oro.")
                 end
 
                 {:noreply, state}

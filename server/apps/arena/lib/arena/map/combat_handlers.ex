@@ -622,12 +622,29 @@ defmodule Arena.Map.CombatHandlers do
                 magic_skill = Map.get(entity.skills, :magic, 0)
                 req = if spell_def, do: spell_def.requirement_mask, else: 0
 
+                # VB6: Target field validation
+                # 1=user only, 2=NPC only, 3=user+NPC, 4=terrain/self
+                target_occ =
+                  if target_x != nil and target_y != nil and not target_oob do
+                    Helpers.get_occupancy(state.occupancy, target_x, target_y)
+                  else
+                    nil
+                  end
+
+                invalid_target =
+                  spell_def != nil and target_x != nil and target_y != nil and
+                    not valid_spell_target?(spell_def.target, target_occ)
+
                 cond do
                   spell_def == nil ->
                     {:reply, {:error, :unknown_spell}, state}
 
                   not spell_in_range ->
                     {:reply, {:error, :out_of_range}, state}
+
+                  # VB6: spell target type mismatch
+                  invalid_target ->
+                    spell_req_fail_target(state, char_id)
 
                   spell_def.min_skill > 0 and magic_skill < spell_def.min_skill ->
                     {:reply, {:error, :skill_too_low}, state}
@@ -708,6 +725,9 @@ defmodule Arena.Map.CombatHandlers do
                     spell_req_fail(state, char_id, "Necesitas el tipo de arma correcto para lanzar ese hechizo.")
 
                   true ->
+                    # VB6: casting breaks meditation and rest
+                    entity = %{entity | meditating: false, resting: false}
+
                     # VB6 26c: offensive spell casting breaks invisible + oculto
                     # Only negative/offensive spells (TargetEffectType=2) break invis
                     entity =
@@ -1038,4 +1058,38 @@ defmodule Arena.Map.CombatHandlers do
   #
   # Poison: EfectoVeneno called from MaybeRunGameEvents (40ms timer).
   #   IntervaloVeneno = 90 counter ticks at 40ms = 3600ms between damage ticks.
+
+  # ==================================================================
+  # VB6: spell target type validation
+  # ==================================================================
+
+  # VB6 Hechizos.dat Target field:
+  #   1 = user/player only (heals, buffs, cure poison, resurrect)
+  #   2 = NPC only (stun, petrify)
+  #   3 = user + NPC (damage spells)
+  #   4 = terrain/self (summons)
+  #   0 = unset/any (treat as 3 for compatibility)
+
+  defp valid_spell_target?(0, _occ), do: true
+  defp valid_spell_target?(3, _occ), do: true
+  defp valid_spell_target?(4, _occ), do: true
+  defp valid_spell_target?(1, nil), do: true
+  defp valid_spell_target?(1, {:player, _}), do: true
+  defp valid_spell_target?(1, _), do: false
+  defp valid_spell_target?(2, {:npc, _}), do: true
+  defp valid_spell_target?(2, _), do: false
+  defp valid_spell_target?(_, _), do: true
+
+  defp spell_req_fail_target(state, char_id) do
+    Helpers.send_to_session(
+      state.sessions,
+      char_id,
+      {:send_raw,
+       Encoder.encode(
+         {:console_msg, %{message: "Objetivo invalido.", font_index: 0}}
+       )}
+    )
+
+    {:reply, {:error, :invalid_target}, state}
+  end
 end

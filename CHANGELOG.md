@@ -4,6 +4,26 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **Backend parity: bank guards, NPC AI, spells, rewards, timbero, guild relations (2026-04-19):**
+  - **Bank-open guards**: meditating, navigating, and paralyzed players can no
+    longer open the bank (VB6 parity). 4 tests in `bank_guards_parity_test.exs`.
+  - **NPC AI parity**: NPC melee poison (`veneno` field), diagonal movement, and
+    Chebyshev distance for target selection. 8 tests in
+    `npc_ai_parity_test.exs`.
+  - **Spell target validation**: spell `target` field (1=user, 2=NPC, 3=both,
+    4=terrain) now enforced before mana is consumed. Casting breaks
+    meditation/rest. 9 tests in `spell_selection_parity_test.exs`.
+  - **/REWARD NPC flow**: players can now claim faction rank-up rewards from
+    enlistador NPCs. Validates level, score, max rank. Grants items to
+    inventory. 12 tests in `reward_npc_parity_test.exs`.
+  - **Timbero account-state**: fixed wrong "Ganancias" computation (was
+    subtracting counters), now shows wins/losses/plays separately. Gamble
+    messages use `npc_def.name` instead of hardcoded "Timbero". 2 tests in
+    `npc_text_parity_test.exs`.
+  - **Guild relation stubs**: wired `/PROPONERPAZ` and `/ALIANZA` text commands,
+    added idempotency guards to war declaration and conflict/duplicate checks to
+    alliance proposals. 24 tests in `guild_relations_parity_test.exs`.
+
 - **Commerce double-click fix + walk-away session cleanup (2026-04-19):**
   - **Commerce on NPC double-click**: double-clicking a merchant NPC now opens
     the commerce window directly instead of casting to a nonexistent internal

@@ -20,6 +20,8 @@ defmodule Arena.NpcAi do
 
   @aggro_range 10
   @leash_distance 15
+  # VB6: poison tick interval in milliseconds (matches status_ticks.ex)
+  @poison_tick_interval 3600
 
   # ---- Effect Dispatcher ----
 
@@ -397,13 +399,15 @@ defmodule Arena.NpcAi do
     end
   end
 
+  # VB6: nearest player uses Chebyshev distance (max of abs deltas),
+  # consistent with the aggro range filter which also uses Chebyshev.
   defp find_nearest_player(state, npc) do
     state.players
     |> Enum.filter(fn {_id, p} ->
       not p.dead and not p.invisible and not Map.get(p, :oculto, false) and abs(p.x - npc.x) <= @aggro_range and
         abs(p.y - npc.y) <= @aggro_range
     end)
-    |> Enum.min_by(fn {_id, p} -> abs(p.x - npc.x) + abs(p.y - npc.y) end, fn -> nil end)
+    |> Enum.min_by(fn {_id, p} -> max(abs(p.x - npc.x), abs(p.y - npc.y)) end, fn -> nil end)
     |> case do
       nil -> nil
       {id, _p} -> id
@@ -716,6 +720,28 @@ defmodule Arena.NpcAi do
                     {:send_to_session, target_char_id, Encoder.encode({:update_hp, %{min_hp: new_hp}})}
                   ]
 
+              # VB6: NPC melee poison — if npc_def.veneno > 0 and player is not already
+              # poisoned, apply a poison debuff. Duration = veneno * 1000 ms.
+              {player, effects} =
+                if npc_def.veneno > 0 and not Map.get(player, :poisoned, false) and new_hp > 0 do
+                  poison_now = System.monotonic_time(:millisecond)
+                  duration_ms = npc_def.veneno * 1000
+                  buff = %{type: :poisoned, expires_at: poison_now + duration_ms, next_tick: poison_now + @poison_tick_interval}
+                  buffs = [buff | Enum.reject(Map.get(player, :buffs, []), &(&1.type == :poisoned))]
+                  player = %{player | poisoned: true, buffs: buffs}
+
+                  effects =
+                    effects ++
+                      [
+                        {:send_to_session, target_char_id,
+                         Encoder.encode({:console_msg, %{message: "Has sido envenenado!", font_index: 5}})}
+                      ]
+
+                  {player, effects}
+                else
+                  {player, effects}
+                end
+
               {player, state, effects} =
                 if new_hp <= 0 do
                   effects =
@@ -757,6 +783,8 @@ defmodule Arena.NpcAi do
 
   defp adjacent?(x1, y1, x2, y2), do: abs(x1 - x2) <= 1 and abs(y1 - y2) <= 1
 
+  # VB6: NPCs move diagonally when both dx and dy are nonzero.
+  # Returns {dx, dy} where both can be nonzero for diagonal movement.
   defp direction_toward(x1, y1, x2, y2) do
     dx =
       cond do
@@ -772,7 +800,6 @@ defmodule Arena.NpcAi do
         true -> 0
       end
 
-    # Prefer the axis with greater distance
-    if abs(x2 - x1) >= abs(y2 - y1), do: {dx, 0}, else: {0, dy}
+    {dx, dy}
   end
 end

@@ -734,10 +734,13 @@ defmodule Arena.Map.Social do
                 {:noreply, state}
 
               npc_def.npc_type == @npc_type_timbero and within_selected_npc_range?(entity, npc, 3) ->
+                # VB6: HandleRequestAccountState shows three separate gambling counters
                 wins = Map.get(entity, :gamble_wins, 0)
                 losses = Map.get(entity, :gamble_losses, 0)
-                earnings = wins - losses
-                msg(state, char_id, "Ganancias: #{earnings} monedas de oro.")
+                plays = Map.get(entity, :gamble_plays, 0)
+                msg(state, char_id, "Apuestas ganadas: #{wins}")
+                msg(state, char_id, "Apuestas perdidas: #{losses}")
+                msg(state, char_id, "Veces jugadas: #{plays}")
                 {:noreply, state}
 
               npc_def.npc_type in [@npc_type_banquero, @npc_type_timbero] ->
@@ -790,10 +793,10 @@ defmodule Arena.Map.Social do
                 {:noreply, state}
 
               true ->
-                # VB6: checks faction_score vs rank requirements, then awards items.
-                # TODO: Implement rank thresholds and reward items when faction data is loaded.
-                msg(state, char_id, "No hay recompensas disponibles en este momento.")
-                {:noreply, state}
+                # VB6: HandleReward — check faction_score & level vs rank
+                # requirements, then award rank-up + items for any newly-
+                # qualified rank.
+                do_reward_npc(state, char_id, entity)
             end
 
           {:error, :stale_selection} ->
@@ -810,6 +813,74 @@ defmodule Arena.Map.Social do
     end
   end
 
+
+  # ── /REWARD NPC rank-check + reward granting ──────────────────────────
+
+  defp do_reward_npc(state, char_id, entity) do
+    faction = entity.faction
+    current_rank = current_faction_rank(entity, faction)
+    ranks = GameData.faction_ranks(faction)
+    next_rank_def = Enum.find(ranks, fn r -> r.rank == current_rank + 1 end)
+
+    cond do
+      next_rank_def == nil ->
+        msg(state, char_id, "Ya tienes el rango maximo.")
+        {:noreply, state}
+
+      entity.level < next_rank_def.required_level ->
+        needed = next_rank_def.required_level - entity.level
+        msg(state, char_id, "Te faltan #{needed} niveles para poder recibir la proxima recompensa.")
+        {:noreply, state}
+
+      entity.faction_score < next_rank_def.required_score ->
+        needed = next_rank_def.required_score - entity.faction_score
+        msg(state, char_id, "Te faltan #{needed} puntos de faccion para subir de rango.")
+        {:noreply, state}
+
+      true ->
+        new_rank = next_rank_def.rank
+        entity = assign_faction_rank(entity, faction, new_rank)
+        {entity, state} = give_reward_items(entity, state, char_id, faction, current_rank, new_rank)
+        players = Map.put(state.players, char_id, entity)
+        state = %{state | players: players}
+
+        msg(state, char_id, "Has ascendido al rango #{new_rank}: #{next_rank_def.title}!")
+        {:noreply, state}
+    end
+  end
+
+  defp current_faction_rank(entity, :royal_army), do: entity.faction_rank_armada
+  defp current_faction_rank(entity, :chaos_legion), do: entity.faction_rank_chaos
+
+  defp assign_faction_rank(entity, :royal_army, rank), do: %{entity | faction_rank_armada: rank}
+  defp assign_faction_rank(entity, :chaos_legion, rank), do: %{entity | faction_rank_chaos: rank}
+
+  defp give_reward_items(entity, state, char_id, faction, old_rank, new_rank) do
+    rewards = GameData.faction_rewards(faction)
+
+    rewards_to_give =
+      Enum.filter(rewards, fn r -> r.rank > old_rank and r.rank <= new_rank end)
+
+    Enum.reduce(rewards_to_give, {entity, state}, fn reward, {ent, st} ->
+      item_def = GameData.get_item(reward.obj_index)
+
+      if item_def == nil do
+        {ent, st}
+      else
+        case Arena.Inventory.add_item(ent.inventory, reward.obj_index, 1) do
+          {:ok, new_inv, slot} ->
+            ent = %{ent | inventory: new_inv}
+            Helpers.send_inventory_slot(st.sessions, char_id, new_inv, slot)
+            msg(st, char_id, "Has recibido #{item_def.name}.")
+            {ent, st}
+
+          _ ->
+            msg(st, char_id, "No tienes espacio para #{item_def.name}.")
+            {ent, st}
+        end
+      end
+    end)
+  end
 
   # Quest handlers delegated to Arena.Map.QuestHandlers
 end

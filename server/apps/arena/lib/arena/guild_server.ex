@@ -525,16 +525,21 @@ defmodule Arena.GuildServer do
             {:reply, {:error, :same_guild}, state}
 
           {:ok, target_guild_id, target_guild} ->
-            case persist_relation(my_guild_id, target_guild_id, :set, "war") do
-              :ok ->
-                set_relation_ets(my_guild_id, target_guild_id, "war")
-                broadcast_guild(my_guild.members, "Se ha declarado la guerra contra '#{target_guild.name}'!")
-                broadcast_guild(target_guild.members, "El clan '#{my_guild.name}' les ha declarado la guerra!")
-                {:reply, :ok, state}
+            if at_war?(my_guild_id, target_guild_id) do
+              notify(char_id, "Ya estan en guerra con '#{target_guild.name}'.")
+              {:reply, {:error, :already_at_war}, state}
+            else
+              case persist_relation(my_guild_id, target_guild_id, :set, "war") do
+                :ok ->
+                  set_relation_ets(my_guild_id, target_guild_id, "war")
+                  broadcast_guild(my_guild.members, "Se ha declarado la guerra contra '#{target_guild.name}'!")
+                  broadcast_guild(target_guild.members, "El clan '#{my_guild.name}' les ha declarado la guerra!")
+                  {:reply, :ok, state}
 
-              :error ->
-                notify(char_id, "Error al declarar la guerra. Intenta de nuevo.")
-                {:reply, {:error, :db_error}, state}
+                :error ->
+                  notify(char_id, "Error al declarar la guerra. Intenta de nuevo.")
+                  {:reply, {:error, :db_error}, state}
+              end
             end
 
           :not_found ->
@@ -590,16 +595,29 @@ defmodule Arena.GuildServer do
             {:reply, {:error, :same_guild}, state}
 
           {:ok, target_guild_id, target_guild} ->
-            case persist_relation(my_guild_id, target_guild_id, :set, "alliance") do
-              :ok ->
-                set_relation_ets(my_guild_id, target_guild_id, "alliance")
-                broadcast_guild(my_guild.members, "Se ha formado una alianza con '#{target_guild.name}'.")
-                broadcast_guild(target_guild.members, "El clan '#{my_guild.name}' les ha propuesto una alianza.")
-                {:reply, :ok, state}
+            current_relation = get_relation(my_guild_id, target_guild_id)
 
-              :error ->
-                notify(char_id, "Error al proponer la alianza. Intenta de nuevo.")
-                {:reply, {:error, :db_error}, state}
+            cond do
+              current_relation == "war" ->
+                notify(char_id, "No puedes aliarte con un clan en guerra. Propone la paz primero.")
+                {:reply, {:error, :at_war}, state}
+
+              current_relation == "alliance" ->
+                notify(char_id, "Ya estan aliados con '#{target_guild.name}'.")
+                {:reply, {:error, :already_allied}, state}
+
+              true ->
+                case persist_relation(my_guild_id, target_guild_id, :set, "alliance") do
+                  :ok ->
+                    set_relation_ets(my_guild_id, target_guild_id, "alliance")
+                    broadcast_guild(my_guild.members, "Se ha formado una alianza con '#{target_guild.name}'.")
+                    broadcast_guild(target_guild.members, "El clan '#{my_guild.name}' les ha propuesto una alianza.")
+                    {:reply, :ok, state}
+
+                  :error ->
+                    notify(char_id, "Error al proponer la alianza. Intenta de nuevo.")
+                    {:reply, {:error, :db_error}, state}
+                end
             end
 
           :not_found ->

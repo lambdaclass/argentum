@@ -126,14 +126,14 @@ defmodule AoTcpGateway.SessionCommands.Guild do
     {state, []}
   end
 
-  def handle_talk_guild(state, {:guild_peace, _target_name}) do
-    msg = AoProtocol.Server.Encoder.encode({:console_msg, %{message: @guild_relations_disabled, font_index: 0}})
-    {state, [{:send_raw, msg}]}
+  def handle_talk_guild(state, {:guild_peace, target_name}) do
+    Arena.GuildServer.propose_peace(state.character_id, target_name)
+    {state, []}
   end
 
-  def handle_talk_guild(state, {:guild_alliance, _target_name}) do
-    msg = AoProtocol.Server.Encoder.encode({:console_msg, %{message: @guild_relations_disabled, font_index: 0}})
-    {state, [{:send_raw, msg}]}
+  def handle_talk_guild(state, {:guild_alliance, target_name}) do
+    Arena.GuildServer.propose_alliance(state.character_id, target_name)
+    {state, []}
   end
 
   def handle_talk_guild(state, {:guild_request, guild_name, desc}) do
