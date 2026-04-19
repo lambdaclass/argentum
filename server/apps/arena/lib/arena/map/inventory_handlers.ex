@@ -68,121 +68,256 @@ defmodule Arena.Map.InventoryHandlers do
     end)
   end
 
+  @gold_slot 200
+  @gold_item_id 12
+  @max_gold_drop 100_000
+
   def handle_drop_item(state, char_id, slot, amount) do
     Helpers.with_player_call(state, char_id, fn entity ->
-      if entity.dead do
-        {:reply, {:error, :dead}, state}
-      else
-        pos = {entity.x, entity.y}
+      cond do
+        # VB6: dead players cannot drop
+        entity.dead ->
+          {:reply, {:error, :dead}, state}
 
-        case Inventory.get_slot(entity.inventory, slot) do
-          nil ->
-            {:reply, {:error, :empty_slot}, state}
+        # D9: VB6 Comerciando — block drop while trading
+        entity.trade_partner_id != nil ->
+          Helpers.send_to_session(
+            state.sessions,
+            char_id,
+            {:send_raw,
+             Encoder.encode(
+               {:console_msg,
+                %{message: "No puedes tirar objetos mientras comercias.", font_index: 0}}
+             )}
+          )
 
-          item ->
-            item_def = GameData.get_item(item.item_id)
+          {:reply, {:error, :trading}, state}
 
-            # VB6: newbie items cannot be dropped, intirable=0 means non-throwable
+        # D9: VB6 Montado — block drop while mounted
+        entity.mounted ->
+          Helpers.send_to_session(
+            state.sessions,
+            char_id,
+            {:send_raw,
+             Encoder.encode(
+               {:console_msg,
+                %{
+                  message: "Debes descender de tu montura para dejar objetos en el suelo.",
+                  font_index: 0
+                }}
+             )}
+          )
+
+          {:reply, {:error, :mounted}, state}
+
+        # D10: VB6 FLAGORO (slot 200) — gold drop
+        slot == @gold_slot ->
+          handle_gold_drop(state, char_id, entity, amount)
+
+        true ->
+          handle_item_drop(state, char_id, entity, slot, amount)
+      end
+    end)
+  end
+
+  # D10: Gold drop — VB6 TirarOro
+  defp handle_gold_drop(state, char_id, entity, amount) do
+    # VB6: cap at 100000
+    drop_amount = min(amount, @max_gold_drop)
+
+    if entity.gold < drop_amount do
+      {:reply, {:error, :insufficient_gold}, state}
+    else
+      pos = {entity.x, entity.y}
+      entity = %{entity | gold: entity.gold - drop_amount}
+      players = Map.put(state.players, char_id, entity)
+
+      # Place gold on the ground (stack with existing gold)
+      existing = Map.get(state.ground_items, pos)
+
+      {ground_items, ground_amount} =
+        cond do
+          existing != nil and existing.item_id == @gold_item_id ->
+            new_amount = existing.amount + drop_amount
+            {Map.put(state.ground_items, pos, %{existing | amount: new_amount}), new_amount}
+
+          existing != nil ->
+            # Tile occupied by a different item; just deduct gold (VB6 tries adjacent tiles,
+            # but for now we drop on the same tile or skip ground placement)
+            {state.ground_items, 0}
+
+          true ->
+            item = %{item_id: @gold_item_id, amount: drop_amount, elemental_tags: 0}
+            {Map.put(state.ground_items, pos, item), drop_amount}
+        end
+
+      state = %{state | players: players, ground_items: ground_items}
+
+      Helpers.send_to_session(
+        state.sessions,
+        char_id,
+        {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
+      )
+
+      if ground_amount > 0 do
+        Helpers.broadcast_object_create(
+          state,
+          entity.x,
+          entity.y,
+          @gold_item_id,
+          ground_amount,
+          0
+        )
+      end
+
+      {:reply, :ok, state}
+    end
+  end
+
+  # Regular item drop (non-gold slots)
+  defp handle_item_drop(state, char_id, entity, slot, amount) do
+    pos = {entity.x, entity.y}
+
+    case Inventory.get_slot(entity.inventory, slot) do
+      nil ->
+        {:reply, {:error, :empty_slot}, state}
+
+      item ->
+        item_def = GameData.get_item(item.item_id)
+
+        # VB6: newbie items cannot be dropped; intirable=1 blocks drop;
+        # instransferible=1 blocks drop
+        cond do
+          item_def != nil and item_def.newbie ->
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw,
+               Encoder.encode(
+                 {:console_msg,
+                  %{message: "Objetos newbies no se pueden tirar.", font_index: 0}}
+               )}
+            )
+
+            {:reply, {:error, :newbie_item}, state}
+
+          # D11 fix: intirable=true means "non-throwable" (Intirable=1 in VB6).
+          # Block when intirable IS true.
+          item_def != nil and item_def.intirable ->
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw,
+               Encoder.encode(
+                 {:console_msg,
+                  %{message: "Este objeto no se puede tirar.", font_index: 0}}
+               )}
+            )
+
+            {:reply, {:error, :not_throwable}, state}
+
+          # D9: instransferible items cannot be dropped
+          item_def != nil and item_def.instransferible ->
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw,
+               Encoder.encode(
+                 {:console_msg, %{message: "Este objeto no se puede tirar.", font_index: 0}}
+               )}
+            )
+
+            {:reply, {:error, :instransferible}, state}
+
+          true ->
+            # VB6: allow stacking same item on ground tile
+            existing = Map.get(state.ground_items, pos)
+
             cond do
-              item_def != nil and item_def.newbie ->
-                Helpers.send_to_session(
-                  state.sessions,
-                  char_id,
-                  {:send_raw,
-                   Encoder.encode({:console_msg, %{message: "Objetos newbies no se pueden tirar.", font_index: 0}})}
-                )
-
-                {:reply, {:error, :newbie_item}, state}
-
-              item_def != nil and not item_def.intirable ->
-                Helpers.send_to_session(
-                  state.sessions,
-                  char_id,
-                  {:send_raw,
-                   Encoder.encode({:console_msg, %{message: "Este objeto no se puede tirar.", font_index: 0}})}
-                )
-
-                {:reply, {:error, :not_throwable}, state}
+              existing != nil and existing.item_id != item.item_id ->
+                {:reply, {:error, :tile_occupied}, state}
 
               true ->
-                # VB6: allow stacking same item on ground tile
-                existing = Map.get(state.ground_items, pos)
+                drop_amount = min(amount, item.amount)
 
-                cond do
-                  existing != nil and existing.item_id != item.item_id ->
-                    {:reply, {:error, :tile_occupied}, state}
-
-                  true ->
-                    drop_amount = min(amount, item.amount)
-
-                    case Inventory.remove_from_slot(entity.inventory, slot, drop_amount) do
-                      {:ok, new_inventory, _slot} ->
-                        # If the dropped item was equipped, clear the equipment slot
-                        new_equipment =
-                          if item.equipped do
-                            if item_def && item_def.equip_slot do
-                              Map.put(entity.equipment, item_def.equip_slot, nil)
-                            else
-                              entity.equipment
-                            end
-                          else
-                            entity.equipment
-                          end
-
-                        visual_changed = item.equipped and entity.equipment != new_equipment
-
-                        new_body_id =
-                          if visual_changed and item_def && item_def.equip_slot == :armor do
-                            entity.base_body_id
-                          else
-                            entity.body_id
-                          end
-
-                        entity = %{entity | inventory: new_inventory, equipment: new_equipment, body_id: new_body_id}
-                        players = Map.put(state.players, char_id, entity)
-
-                        if item_def && item_def.destruye do
-                          # Destruye items are destroyed on drop, not placed on ground
-                          state = %{state | players: players}
-                          Helpers.send_inventory_slot(state.sessions, char_id, new_inventory, slot)
-                          if visual_changed, do: Helpers.broadcast_character_change(state, entity)
-                          {:reply, :ok, state}
+                case Inventory.remove_from_slot(entity.inventory, slot, drop_amount) do
+                  {:ok, new_inventory, _slot} ->
+                    # If the dropped item was equipped, clear the equipment slot
+                    new_equipment =
+                      if item.equipped do
+                        if item_def && item_def.equip_slot do
+                          Map.put(entity.equipment, item_def.equip_slot, nil)
                         else
-                          # Stack with existing ground item or create new
-                          new_amount = drop_amount + if existing, do: existing.amount, else: 0
-                          item_tags = Map.get(item, :elemental_tags, 0)
-
-                          ground_items =
-                            Map.put(state.ground_items, pos, %{
-                              item_id: item.item_id,
-                              amount: new_amount,
-                              elemental_tags: item_tags
-                            })
-
-                          state = %{state | players: players, ground_items: ground_items}
-                          Helpers.send_inventory_slot(state.sessions, char_id, new_inventory, slot)
-
-                          Helpers.broadcast_object_create(
-                            state,
-                            entity.x,
-                            entity.y,
-                            item.item_id,
-                            new_amount,
-                            item_tags
-                          )
-
-                          if visual_changed, do: Helpers.broadcast_character_change(state, entity)
-                          {:reply, :ok, state}
+                          entity.equipment
                         end
+                      else
+                        entity.equipment
+                      end
 
-                      {:error, reason} ->
-                        {:reply, {:error, reason}, state}
+                    visual_changed = item.equipped and entity.equipment != new_equipment
+
+                    new_body_id =
+                      if visual_changed and item_def && item_def.equip_slot == :armor do
+                        entity.base_body_id
+                      else
+                        entity.body_id
+                      end
+
+                    entity = %{
+                      entity
+                      | inventory: new_inventory,
+                        equipment: new_equipment,
+                        body_id: new_body_id
+                    }
+
+                    players = Map.put(state.players, char_id, entity)
+
+                    if item_def && item_def.destruye do
+                      # Destruye items are destroyed on drop, not placed on ground
+                      state = %{state | players: players}
+                      Helpers.send_inventory_slot(state.sessions, char_id, new_inventory, slot)
+                      if visual_changed, do: Helpers.broadcast_character_change(state, entity)
+                      {:reply, :ok, state}
+                    else
+                      # Stack with existing ground item or create new
+                      new_amount = drop_amount + if existing, do: existing.amount, else: 0
+                      item_tags = Map.get(item, :elemental_tags, 0)
+
+                      ground_items =
+                        Map.put(state.ground_items, pos, %{
+                          item_id: item.item_id,
+                          amount: new_amount,
+                          elemental_tags: item_tags
+                        })
+
+                      state = %{state | players: players, ground_items: ground_items}
+
+                      Helpers.send_inventory_slot(
+                        state.sessions,
+                        char_id,
+                        new_inventory,
+                        slot
+                      )
+
+                      Helpers.broadcast_object_create(
+                        state,
+                        entity.x,
+                        entity.y,
+                        item.item_id,
+                        new_amount,
+                        item_tags
+                      )
+
+                      if visual_changed, do: Helpers.broadcast_character_change(state, entity)
+                      {:reply, :ok, state}
                     end
+
+                  {:error, reason} ->
+                    {:reply, {:error, reason}, state}
                 end
             end
         end
-      end
-    end)
+    end
   end
 
   def handle_equip_item(state, char_id, slot) do
