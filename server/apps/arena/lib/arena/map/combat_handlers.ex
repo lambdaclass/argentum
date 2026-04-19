@@ -81,7 +81,7 @@ defmodule Arena.Map.CombatHandlers do
               {tx, ty} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
               target = Helpers.get_occupancy(state.occupancy, tx, ty)
 
-              entity = %{entity | next_attack_at: now + attack_cooldown_ms()}
+              entity = %{entity | next_attack_at: now + attack_cooldown_ms(), last_attacked_at: now}
 
               swing_raw = Encoder.encode({:char_swing, %{char_index: entity.char_index}})
 
@@ -138,7 +138,7 @@ defmodule Arena.Map.CombatHandlers do
         else
           ammo_def = GameData.get_item(ammo_id)
           entity = consume_ammo(entity, state, char_id, ammo_slot_idx, ammo_id)
-          entity = %{entity | next_attack_at: now + attack_cooldown_ms()}
+          entity = %{entity | next_attack_at: now + attack_cooldown_ms(), last_attacked_at: now}
 
           swing_raw = Encoder.encode({:char_swing, %{char_index: entity.char_index}})
 

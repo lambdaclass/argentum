@@ -128,6 +128,8 @@ defmodule AoEntities.PlayerEntity do
     next_attack_at: -1_000_000_000_000,
     next_spell_at: -1_000_000_000_000,
     next_item_use_at: -1_000_000_000_000,
+    # VB6: Counters.LastAttackTime — when this player last performed an attack (monotonic ms)
+    last_attacked_at: -1_000_000_000_000,
     # VB6: per-spell-slot cooldowns — %{spell_slot => next_cast_at_ms}
     spell_cooldowns: %{},
 

@@ -574,17 +574,88 @@ defmodule Arena.Map.Social do
     end
   end
 
+  # ==================================================================
+  # Ocultarse (hiding skill) — drift #30 VB6 parity
+  # ==================================================================
+
+  # VB6: iFragataFantasmal = 87
+  @ghost_ship_body 87
+  # VB6: HideAfterHitTime — cooldown after attacking before hiding is allowed (ms)
+  @hide_after_hit_cooldown_ms 3_000
+  # VB6: IntervaloOculto = 36_000 (server tick intervals, ~1s each)
+  @intervalo_oculto 36_000
+
   @doc """
-  Handle divorce.
+  VB6 cubic polynomial success chance.
 
-  VB6 uses a special potion, but we also support a /DIVORCIAR command.
-  Both players must be on the same map. Sets spouse_id = 0 on both.
+  Formula: `(((0.000002 * Skill - 0.0002) * Skill + 0.0064) * Skill + 0.1124) * 100`
+  Returns a float in [0, 100].
   """
-  # ==================================================================
-  # Ocultarse (hiding skill) — task 26b
-  # ==================================================================
+  def hiding_success_chance(skill) do
+    (((0.000002 * skill - 0.0002) * skill + 0.0064) * skill + 0.1124) * 100
+  end
 
-  def handle_ocultarse(state, char_id, skill_level) do
+  @doc """
+  VB6 class-specific hide duration range.
+
+  Returns `{min_ticks, max_ticks}`.
+  - Bandit/Thief: random range `[base/2.5, base/2]`
+  - Hunter: exactly `base/2`
+  - Others: exactly `base/3`
+  - Pirate navigating: full IntervaloOculto
+
+  Accepts `opts` keyword list; when `navigating: true` is set,
+  pirate class gets full `@intervalo_oculto`.
+  """
+  def hiding_duration_range(class, skill, opts \\ []) do
+    navigating = Keyword.get(opts, :navigating, false)
+
+    if navigating and class == :pirate do
+      {@intervalo_oculto, @intervalo_oculto}
+    else
+      base = hiding_duration_base(skill)
+
+      case class do
+        c when c in [:bandit, :thief] ->
+          {trunc(base / 2.5), trunc(base / 2)}
+
+        :hunter ->
+          val = trunc(base / 2)
+          {val, val}
+
+        _other ->
+          val = trunc(base / 3)
+          {val, val}
+      end
+    end
+  end
+
+  @doc """
+  Apply ghost-ship body for pirate navigating, identity otherwise.
+  """
+  def apply_hiding_body(entity) do
+    if entity.navigating and entity.class == :pirate do
+      %{entity | body_id: @ghost_ship_body}
+    else
+      entity
+    end
+  end
+
+  # VB6 duration base polynomial:
+  #   Suerte = (-0.000001*(100-Skill)^3) + (0.00009229*(100-Skill)^2) + (-0.0088*(100-Skill)) + 0.9571
+  #   Suerte = Suerte * IntervaloOculto
+  defp hiding_duration_base(skill) do
+    inv = 100 - skill
+    suerte = -0.000001 * :math.pow(inv, 3)
+    suerte = suerte + 0.00009229 * :math.pow(inv, 2)
+    suerte = suerte + -0.0088 * inv
+    suerte = suerte + 0.9571
+    suerte * @intervalo_oculto
+  end
+
+  def handle_ocultarse(state, char_id, skill_level, opts \\ []) do
+    now = Keyword.get(opts, :now, System.monotonic_time(:millisecond))
+
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         cond do
@@ -600,17 +671,47 @@ defmodule Arena.Map.Social do
             msg(state, char_id, "No tienes habilidad suficiente para ocultarte.")
             {:noreply, state}
 
+          # VB6: non-pirate cannot hide while navigating
+          entity.navigating and entity.class != :pirate ->
+            msg(state, char_id, "No puedes ocultarte mientras navegas.")
+            {:noreply, state}
+
+          # VB6: recent-hit cooldown — block hiding if attacked too recently
+          now - entity.last_attacked_at < @hide_after_hit_cooldown_ms ->
+            msg(state, char_id, "No puedes ocultarte tan pronto despues de atacar.")
+            {:noreply, state}
+
           true ->
-            # VB6: success roll — random(1..100) <= hiding skill
-            if :rand.uniform(100) <= skill_level do
-              # VB6: hide timer = skill_level / 2 regen ticks
-              timer = max(div(skill_level, 2), 1)
+            # VB6: nonlinear cubic polynomial success roll
+            chance = hiding_success_chance(skill_level)
+
+            if :rand.uniform(100) <= chance do
+              # VB6: class-specific duration
+              {min_d, max_d} =
+                hiding_duration_range(entity.class, skill_level, navigating: entity.navigating)
+
+              timer =
+                if min_d == max_d do
+                  max(min_d, 1)
+                else
+                  max(Enum.random(min_d..max_d), 1)
+                end
+
+              # VB6: pirate navigating sets ghost-ship body
+              entity = apply_hiding_body(entity)
+
               entity = %{entity | oculto: true, oculto_timer: timer, invisible: true}
               players = Map.put(state.players, char_id, entity)
               state = %{state | players: players}
 
               Arena.Map.Visibility.hide_from_non_gm(state, entity)
-              msg(state, char_id, "Te has ocultado entre las sombras.")
+
+              if entity.navigating and entity.class == :pirate do
+                msg(state, char_id, "Te has camuflado como barco fantasma!")
+              else
+                msg(state, char_id, "Te has ocultado entre las sombras.")
+              end
+
               {:noreply, state}
             else
               msg(state, char_id, "No has logrado ocultarte.")
@@ -653,6 +754,12 @@ defmodule Arena.Map.Social do
     end
   end
 
+  @doc """
+  Handle divorce.
+
+  VB6 uses a special potion, but we also support a /DIVORCIAR command.
+  Both players must be on the same map. Sets spouse_id = 0 on both.
+  """
   def handle_divorce(state, char_id) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
