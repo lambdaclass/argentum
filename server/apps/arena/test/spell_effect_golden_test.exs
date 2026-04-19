@@ -1307,4 +1307,917 @@ defmodule Arena.SpellEffectGoldenTest do
       :ets.delete(:arena_game_data, {:spell, spell_id})
     end
   end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 24. Spell damage to NPC (apply_spell_damage_to_npc path)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "apply_spell_damage -- NPC target (non-lethal)" do
+    test "damage spell reduces NPC HP" do
+      caster = make_entity(%{mana: 180, level: 25, class: :mago})
+      npc = %{
+        npc_id: 99999, instance_id: 1, x: 51, y: 50, hp: 200, max_hp: 200,
+        alive: true, char_index: 2, target_id: nil, owner_id: nil, exp_count: 100
+      }
+
+      occupancy = %{{51, 50} => {:npc, 1}}
+      state = make_state(%{caster: caster}, occupancy: occupancy, npcs_live: %{1 => npc})
+
+      # Apply 30 damage directly (bypassing random roll)
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 30, 51, 50)
+
+      # npc_id 99999 has no NPC def, so magic_resistance = 0, full damage passes
+      updated_npc = new_state.npcs_live[1]
+      assert updated_npc.hp == 170
+    end
+
+    test "NPC acquires aggro target after being hit by spell" do
+      caster = make_entity(%{mana: 180, level: 25})
+      npc = %{
+        npc_id: 99999, instance_id: 1, x: 51, y: 50, hp: 200, max_hp: 200,
+        alive: true, char_index: 2, target_id: nil, owner_id: nil, exp_count: 100
+      }
+
+      occupancy = %{{51, 50} => {:npc, 1}}
+      state = make_state(%{caster: caster}, occupancy: occupancy, npcs_live: %{1 => npc})
+
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 20, 51, 50)
+
+      updated_npc = new_state.npcs_live[1]
+      assert updated_npc.target_id == :caster
+    end
+
+    test "damage to dead NPC is a no-op" do
+      caster = make_entity(%{mana: 180})
+      npc = %{
+        npc_id: 99999, instance_id: 1, x: 51, y: 50, hp: 0, max_hp: 200,
+        alive: false, char_index: 2, target_id: nil, owner_id: nil, exp_count: 100
+      }
+
+      occupancy = %{{51, 50} => {:npc, 1}}
+      state = make_state(%{caster: caster}, occupancy: occupancy, npcs_live: %{1 => npc})
+
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, 51, 50)
+
+      # NPC HP unchanged
+      assert new_state.npcs_live[1].hp == 0
+    end
+
+    test "NPC with magic resistance reduces spell damage" do
+      # Insert a custom NPC def with magic_resistance into ETS
+      npc_def = %{magic_resistance: 50, elemental_tags: 0, intervalo_respawn: 60,
+                   npc_level: 10, exp_count: 100, poder_evasion: 0, def: 0,
+                   min_hit: 1, max_hit: 5, poder_ataque: 10, give_exp: 100,
+                   max_hp: 200, loot_table: []}
+      :ets.insert(:arena_game_data, {{:npc, 88888}, npc_def})
+
+      caster = make_entity(%{mana: 180})
+      npc = %{
+        npc_id: 88888, instance_id: 1, x: 51, y: 50, hp: 200, max_hp: 200,
+        alive: true, char_index: 2, target_id: nil, owner_id: nil, exp_count: 100
+      }
+
+      occupancy = %{{51, 50} => {:npc, 1}}
+      state = make_state(%{caster: caster}, occupancy: occupancy, npcs_live: %{1 => npc})
+
+      # 100 raw damage, 50% resistance -> 50 final damage
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 100, 51, 50)
+
+      assert new_state.npcs_live[1].hp == 150
+
+      :ets.delete(:arena_game_data, {:npc, 88888})
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 25. Spell damage to player (apply_spell_damage_to_player path)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "apply_spell_damage -- player target (non-lethal)" do
+    test "damage spell reduces defender HP using resistance skill" do
+      caster = make_entity(%{char_id: :caster, mana: 180})
+      # Defender has 30% magic resistance skill
+      defender = make_entity(%{
+        char_id: :defender, hp: 200, max_hp: 300, x: 51, y: 50, char_index: 2,
+        skills: %{resistance: 30}
+      })
+
+      occupancy = %{{51, 50} => {:player, :defender}}
+      state = make_state(%{caster: caster, defender: defender}, occupancy: occupancy)
+
+      # 100 raw damage, 30% resistance -> round(100 * 0.7) = 70 final
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 100, 51, 50)
+
+      assert new_state.players[:defender].hp == 130
+    end
+
+    test "damage on player in safe zone is blocked" do
+      caster = make_entity(%{char_id: :caster, mana: 180, faction: :none})
+      defender = make_entity(%{
+        char_id: :defender, hp: 200, max_hp: 300, x: 51, y: 50, char_index: 2, faction: :none
+      })
+
+      occupancy = %{{51, 50} => {:player, :defender}}
+      state = map_state(
+        players: %{caster: caster, defender: defender},
+        occupancy: occupancy,
+        meta: %{safe_zone: true, sin_invi_ocul: false}
+      )
+
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 100, 51, 50)
+
+      # Defender HP unchanged -- safe zone blocked it
+      assert new_state.players[:defender].hp == 200
+    end
+
+    test "attacking non-criminal player sets criminal flag on caster" do
+      caster = make_entity(%{char_id: :caster, mana: 180, criminal: false})
+      defender = make_entity(%{
+        char_id: :defender, hp: 200, max_hp: 300, x: 51, y: 50, char_index: 2,
+        criminal: false, skills: %{resistance: 0}
+      })
+
+      occupancy = %{{51, 50} => {:player, :defender}}
+      state = make_state(%{caster: caster, defender: defender}, occupancy: occupancy)
+
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, 51, 50)
+
+      # Caster becomes criminal for attacking a non-criminal
+      assert new_state.players[:caster].criminal == true
+    end
+
+    test "attacking criminal player does not set criminal flag" do
+      caster = make_entity(%{char_id: :caster, mana: 180, criminal: false})
+      defender = make_entity(%{
+        char_id: :defender, hp: 200, max_hp: 300, x: 51, y: 50, char_index: 2,
+        criminal: true, skills: %{resistance: 0}
+      })
+
+      occupancy = %{{51, 50} => {:player, :defender}}
+      state = make_state(%{caster: caster, defender: defender}, occupancy: occupancy)
+
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, 51, 50)
+
+      assert new_state.players[:caster].criminal == false
+    end
+
+    test "same-faction spell damage is blocked" do
+      caster = make_entity(%{char_id: :caster, mana: 180, faction: :royal_army})
+      defender = make_entity(%{
+        char_id: :defender, hp: 200, max_hp: 300, x: 51, y: 50, char_index: 2,
+        faction: :royal_army, skills: %{resistance: 0}
+      })
+
+      occupancy = %{{51, 50} => {:player, :defender}}
+      state = make_state(%{caster: caster, defender: defender}, occupancy: occupancy)
+
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, 51, 50)
+
+      # HP unchanged -- same faction blocked it
+      assert new_state.players[:defender].hp == 200
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 26. Self-cast damage spell (targeting own tile or nil)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "apply_spell_damage -- self-target or empty tile" do
+    test "damage spell on nil target is a no-op (just stores entity)" do
+      caster = make_entity(%{mana: 180, hp: 100})
+      state = make_state(%{caster: caster})
+
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, nil, nil)
+
+      # No damage to self -- damage spells require a valid target
+      assert new_state.players[:caster].hp == 100
+    end
+
+    test "damage spell on empty tile is a no-op" do
+      caster = make_entity(%{mana: 180, hp: 100})
+      state = make_state(%{caster: caster})
+
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, 60, 60)
+
+      assert new_state.players[:caster].hp == 100
+    end
+
+    test "damage spell on own tile does not self-damage" do
+      caster = make_entity(%{mana: 180, hp: 100, x: 50, y: 50})
+      occupancy = %{{50, 50} => {:player, :caster}}
+      state = make_state(%{caster: caster}, occupancy: occupancy)
+
+      # {:player, :caster} with target_id == char_id falls through to no-op
+      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, 50, 50)
+
+      assert new_state.players[:caster].hp == 100
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 27. AoE spell behavior (area_radio + area_afecta filtering)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "apply_spell_aoe -- area targeting" do
+    test "AoE heal (area_afecta=1) hits only players in radius" do
+      caster = make_entity(%{char_id: :caster, mana: 180, hp: 60, max_hp: 100, x: 50, y: 50})
+      ally = make_entity(%{char_id: :ally, hp: 40, max_hp: 100, x: 51, y: 50, char_index: 2})
+      # NPC should not be healed
+      npc = %{
+        npc_id: 99999, instance_id: 1, x: 52, y: 50, hp: 50, max_hp: 200,
+        alive: true, char_index: 3, target_id: nil, owner_id: nil, exp_count: 100
+      }
+
+      occupancy = %{
+        {50, 50} => {:player, :caster},
+        {51, 50} => {:player, :ally},
+        {52, 50} => {:npc, 1}
+      }
+
+      state = make_state(
+        %{caster: caster, ally: ally},
+        occupancy: occupancy,
+        npcs_live: %{1 => npc}
+      )
+
+      # AoE heal: area_radio=2, area_afecta=1 (players only)
+      spell = make_spell(%{sube_hp: 1, min_hp: 20, max_hp: 20, area_radio: 2, area_afecta: 1})
+
+      new_state = SpellEffects.apply_spell_aoe(state, :caster, caster, spell, 51, 50)
+
+      # Both players in radius get healed
+      assert new_state.players[:caster].hp == 80
+      assert new_state.players[:ally].hp == 60
+      # NPC unaffected (area_afecta=1 filters NPCs out)
+      assert new_state.npcs_live[1].hp == 50
+    end
+
+    test "AoE with area_afecta=2 only affects NPCs" do
+      caster = make_entity(%{char_id: :caster, mana: 180, hp: 100, x: 50, y: 50})
+      npc1 = %{
+        npc_id: 99999, instance_id: 1, x: 51, y: 50, hp: 100, max_hp: 200,
+        alive: true, char_index: 2, target_id: nil, owner_id: nil, exp_count: 100
+      }
+      npc2 = %{
+        npc_id: 99999, instance_id: 2, x: 52, y: 50, hp: 100, max_hp: 200,
+        alive: true, char_index: 3, target_id: nil, owner_id: nil, exp_count: 100
+      }
+
+      occupancy = %{
+        {50, 50} => {:player, :caster},
+        {51, 50} => {:npc, 1},
+        {52, 50} => {:npc, 2}
+      }
+
+      state = make_state(
+        %{caster: caster},
+        occupancy: occupancy,
+        npcs_live: %{1 => npc1, 2 => npc2}
+      )
+
+      # AoE damage: area_afecta=2 (NPC only), radius=2
+      spell = make_spell(%{sube_hp: 2, min_hp: 30, max_hp: 30, area_radio: 2, area_afecta: 2})
+
+      new_state = SpellEffects.apply_spell_aoe(state, :caster, caster, spell, 51, 50)
+
+      # npc_id 99999 has no NPC def -> magic_resistance=0 -> full spell damage
+      # spell_damage(30, 30, 25, false) = 30 + floor(30*0.03*25) = 30 + 22 = 52
+      assert new_state.npcs_live[1].hp == 100 - 52
+      assert new_state.npcs_live[2].hp == 100 - 52
+      # Caster HP unchanged (not targeted by area_afecta=2)
+      assert new_state.players[:caster].hp == 100
+    end
+
+    test "AoE with area_afecta=3 affects both players and NPCs" do
+      caster = make_entity(%{char_id: :caster, mana: 180, hp: 60, max_hp: 100, x: 50, y: 50})
+      ally = make_entity(%{char_id: :ally, hp: 40, max_hp: 100, x: 51, y: 50, char_index: 2})
+      npc = %{
+        npc_id: 99999, instance_id: 1, x: 52, y: 50, hp: 100, max_hp: 200,
+        alive: true, char_index: 3, target_id: nil, owner_id: nil, exp_count: 100
+      }
+
+      occupancy = %{
+        {50, 50} => {:player, :caster},
+        {51, 50} => {:player, :ally},
+        {52, 50} => {:npc, 1}
+      }
+
+      state = make_state(
+        %{caster: caster, ally: ally},
+        occupancy: occupancy,
+        npcs_live: %{1 => npc}
+      )
+
+      # AoE heal: area_afecta=3 (both), radius=3
+      spell = make_spell(%{sube_hp: 1, min_hp: 15, max_hp: 15, area_radio: 3, area_afecta: 3})
+
+      new_state = SpellEffects.apply_spell_aoe(state, :caster, caster, spell, 51, 50)
+
+      # Caster healed twice: once from own tile (50,50) and once from NPC tile (52,50)
+      # which falls through to self-heal in apply_spell_heal's wildcard branch.
+      # 60 + 15 + 15 = 90
+      assert new_state.players[:caster].hp == 90
+      # Ally healed once
+      assert new_state.players[:ally].hp == 55
+      # NPC HP unchanged (heal spell on NPC tile triggers self-heal on caster, not NPC heal)
+      assert new_state.npcs_live[1].hp == 100
+    end
+
+    test "AoE does not affect entities outside radius" do
+      caster = make_entity(%{char_id: :caster, mana: 180, hp: 100, x: 50, y: 50})
+      # Far away player, outside radius
+      far_player = make_entity(%{char_id: :far, hp: 40, max_hp: 100, x: 60, y: 60, char_index: 2})
+
+      occupancy = %{
+        {50, 50} => {:player, :caster},
+        {60, 60} => {:player, :far}
+      }
+
+      state = make_state(%{caster: caster, far: far_player}, occupancy: occupancy)
+
+      # AoE heal: radius=1, centered at 50,50
+      spell = make_spell(%{sube_hp: 1, min_hp: 30, max_hp: 30, area_radio: 1, area_afecta: 1})
+
+      new_state = SpellEffects.apply_spell_aoe(state, :caster, caster, spell, 50, 50)
+
+      # Only caster is in radius, gets healed
+      assert new_state.players[:caster].hp == 100  # already full
+      # Far player unchanged
+      assert new_state.players[:far].hp == 40
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 28. apply_spell routing: AoE vs single target
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "apply_spell -- AoE vs single routing" do
+    test "spell with area_radio > 0 routes to AoE path" do
+      caster = make_entity(%{char_id: :caster, mana: 180, hp: 50, max_hp: 100, x: 50, y: 50})
+      ally = make_entity(%{char_id: :ally, hp: 40, max_hp: 100, x: 51, y: 50, char_index: 2})
+
+      occupancy = %{
+        {50, 50} => {:player, :caster},
+        {51, 50} => {:player, :ally}
+      }
+
+      state = make_state(%{caster: caster, ally: ally}, occupancy: occupancy)
+
+      spell = make_spell(%{sube_hp: 1, min_hp: 10, max_hp: 10, area_radio: 1, area_afecta: 1, fx_grh: 0})
+
+      new_state = SpellEffects.apply_spell(state, :caster, caster, spell, 50, 50)
+
+      # Both in radius=1 of center (50,50)
+      assert new_state.players[:caster].hp == 60
+      assert new_state.players[:ally].hp == 50
+    end
+
+    test "spell with area_radio == 0 routes to single target path" do
+      caster = make_entity(%{char_id: :caster, mana: 180, hp: 50, max_hp: 100, x: 50, y: 50})
+
+      state = make_state(%{caster: caster})
+
+      spell = make_spell(%{sube_hp: 1, min_hp: 10, max_hp: 10, area_radio: 0, area_afecta: 0, fx_grh: 0})
+
+      new_state = SpellEffects.apply_spell(state, :caster, caster, spell, nil, nil)
+
+      # Self-heal via single target path
+      assert new_state.players[:caster].hp == 60
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 29. Remove invisibility spell
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "apply_spell_remove_invisibility" do
+    test "reveals invisible player within 11-tile radius" do
+      caster = make_entity(%{char_id: :caster, mana: 180, x: 50, y: 50})
+      invis = make_entity(%{
+        char_id: :hidden, x: 55, y: 50, char_index: 2,
+        invisible: true, no_detectable: false,
+        buffs: [%{type: :invisible, expires_at: 999_999_999_999}]
+      })
+
+      state = make_state(%{caster: caster, hidden: invis})
+
+      spell = make_spell(%{remove_invisibility: true, fx_grh: 0})
+
+      new_state = SpellEffects.apply_spell_remove_invisibility(state, :caster, caster, spell, 50, 50)
+
+      assert new_state.players[:hidden].invisible == false
+      assert Enum.filter(new_state.players[:hidden].buffs, &(&1.type == :invisible)) == []
+    end
+
+    test "does not reveal player with no_detectable flag" do
+      caster = make_entity(%{char_id: :caster, mana: 180, x: 50, y: 50})
+      stealthy = make_entity(%{
+        char_id: :stealthy, x: 55, y: 50, char_index: 2,
+        invisible: true, no_detectable: true,
+        buffs: [%{type: :invisible, expires_at: 999_999_999_999}]
+      })
+
+      state = make_state(%{caster: caster, stealthy: stealthy})
+
+      spell = make_spell(%{remove_invisibility: true, fx_grh: 0})
+
+      new_state = SpellEffects.apply_spell_remove_invisibility(state, :caster, caster, spell, 50, 50)
+
+      # Stealthy player remains invisible
+      assert new_state.players[:stealthy].invisible == true
+    end
+
+    test "does not reveal player beyond 11-tile radius" do
+      caster = make_entity(%{char_id: :caster, mana: 180, x: 50, y: 50})
+      far_invis = make_entity(%{
+        char_id: :far, x: 62, y: 50, char_index: 2,
+        invisible: true, no_detectable: false,
+        buffs: [%{type: :invisible, expires_at: 999_999_999_999}]
+      })
+
+      state = make_state(%{caster: caster, far: far_invis})
+
+      spell = make_spell(%{remove_invisibility: true, fx_grh: 0})
+
+      new_state = SpellEffects.apply_spell_remove_invisibility(state, :caster, caster, spell, 50, 50)
+
+      # Distance = |62 - 50| = 12 > 11, stays invisible
+      assert new_state.players[:far].invisible == true
+    end
+
+    test "does not reveal the caster themselves" do
+      caster = make_entity(%{
+        char_id: :caster, mana: 180, x: 50, y: 50,
+        invisible: true, no_detectable: false,
+        buffs: [%{type: :invisible, expires_at: 999_999_999_999}]
+      })
+
+      state = make_state(%{caster: caster})
+
+      spell = make_spell(%{remove_invisibility: true, fx_grh: 0})
+
+      new_state = SpellEffects.apply_spell_remove_invisibility(state, :caster, caster, spell, 50, 50)
+
+      # Caster's invisibility is not removed (pid != char_id check)
+      assert new_state.players[:caster].invisible == true
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 30. Offensive status spells blocked in safe zone
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "apply_spell_status -- safe zone blocking" do
+    test "paralysis on other player is blocked in safe zone" do
+      caster = make_entity(%{char_id: :caster, mana: 180, faction: :none})
+      target = make_entity(%{char_id: :target, x: 51, y: 50, char_index: 2, buffs: [], faction: :none})
+
+      occupancy = %{{51, 50} => {:player, :target}}
+      state = map_state(
+        players: %{caster: caster, target: target},
+        occupancy: occupancy,
+        meta: %{safe_zone: true, sin_invi_ocul: false}
+      )
+
+      spell = make_spell(%{paraliza: true, duration: 10})
+
+      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, 51, 50)
+
+      # Target NOT paralyzed -- safe zone blocked it
+      assert new_state.players[:target].paralyzed == false
+    end
+
+    test "poison on other player is blocked in safe zone" do
+      caster = make_entity(%{char_id: :caster, mana: 180, faction: :none})
+      target = make_entity(%{char_id: :target, x: 51, y: 50, char_index: 2, buffs: [], faction: :none})
+
+      occupancy = %{{51, 50} => {:player, :target}}
+      state = map_state(
+        players: %{caster: caster, target: target},
+        occupancy: occupancy,
+        meta: %{safe_zone: true, sin_invi_ocul: false}
+      )
+
+      spell = make_spell(%{envenena: true, duration: 10})
+
+      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, 51, 50)
+
+      assert new_state.players[:target].poisoned == false
+    end
+
+    test "self-cast status spell is allowed even in safe zone" do
+      caster = make_entity(%{char_id: :caster, mana: 180, invisible: false, buffs: []})
+
+      state = map_state(
+        players: %{caster: caster},
+        meta: %{safe_zone: true, sin_invi_ocul: false}
+      )
+
+      spell = make_spell(%{invisibilidad: true, duration: 10})
+
+      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, nil, nil)
+
+      # Self-cast is allowed
+      assert new_state.players[:caster].invisible == true
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 31. Mana/stamina spells on target player
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "apply_spell_mana -- target player" do
+    test "mana restore on target player increases their mana" do
+      caster = make_entity(%{char_id: :caster, mana: 180, max_mana: 200})
+      target = make_entity(%{char_id: :target, mana: 50, max_mana: 200, x: 51, y: 50, char_index: 2})
+
+      occupancy = %{{51, 50} => {:player, :target}}
+      state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
+
+      spell = make_spell(%{sube_mana: 1, min_mana: 40, max_mana: 40})
+
+      new_state = SpellEffects.apply_spell_mana(state, :caster, caster, spell, 51, 50)
+
+      assert new_state.players[:target].mana == 90
+      # Caster mana unchanged by the effect itself (mana cost deducted separately)
+      assert new_state.players[:caster].mana == 180
+    end
+
+    test "mana drain on target player decreases their mana" do
+      caster = make_entity(%{char_id: :caster, mana: 180})
+      target = make_entity(%{char_id: :target, mana: 100, max_mana: 200, x: 51, y: 50, char_index: 2})
+
+      occupancy = %{{51, 50} => {:player, :target}}
+      state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
+
+      spell = make_spell(%{sube_mana: 2, min_mana: 60, max_mana: 60})
+
+      new_state = SpellEffects.apply_spell_mana(state, :caster, caster, spell, 51, 50)
+
+      assert new_state.players[:target].mana == 40
+    end
+  end
+
+  describe "apply_spell_stamina -- target player" do
+    test "stamina restore on target player" do
+      caster = make_entity(%{char_id: :caster, mana: 180})
+      target = make_entity(%{char_id: :target, stamina: 30, max_stamina: 100, x: 51, y: 50, char_index: 2})
+
+      occupancy = %{{51, 50} => {:player, :target}}
+      state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
+
+      spell = make_spell(%{sube_sta: 1, min_sta: 50, max_sta: 50})
+
+      new_state = SpellEffects.apply_spell_stamina(state, :caster, caster, spell, 51, 50)
+
+      assert new_state.players[:target].stamina == 80
+    end
+
+    test "stamina drain on target player" do
+      caster = make_entity(%{char_id: :caster, mana: 180})
+      target = make_entity(%{char_id: :target, stamina: 60, max_stamina: 100, x: 51, y: 50, char_index: 2})
+
+      occupancy = %{{51, 50} => {:player, :target}}
+      state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
+
+      spell = make_spell(%{sube_sta: 2, min_sta: 40, max_sta: 40})
+
+      new_state = SpellEffects.apply_spell_stamina(state, :caster, caster, spell, 51, 50)
+
+      assert new_state.players[:target].stamina == 20
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 32. Attribute buff on target player
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "apply_spell_attribute_buff -- target player" do
+    test "strength buff on target player increases their str_buff" do
+      caster = make_entity(%{char_id: :caster, mana: 180})
+      target = make_entity(%{char_id: :target, str_buff: 0, buffs: [], x: 51, y: 50, char_index: 2})
+
+      occupancy = %{{51, 50} => {:player, :target}}
+      state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
+
+      spell = make_spell(%{sube_fu: 1, min_fu: 12, max_fu: 12, duration: 20})
+
+      new_state = SpellEffects.apply_spell_attribute_buff(state, :caster, caster, spell, :str, 51, 50)
+
+      assert new_state.players[:target].str_buff == 12
+      # Caster str_buff unchanged
+      assert new_state.players[:caster].str_buff == 0
+    end
+
+    test "agility debuff on target player" do
+      caster = make_entity(%{char_id: :caster, mana: 180})
+      target = make_entity(%{char_id: :target, agi_buff: 0, buffs: [], x: 51, y: 50, char_index: 2})
+
+      occupancy = %{{51, 50} => {:player, :target}}
+      state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
+
+      spell = make_spell(%{sube_ag: 2, min_ag: 8, max_ag: 8, duration: 20})
+
+      new_state = SpellEffects.apply_spell_attribute_buff(state, :caster, caster, spell, :agi, 51, 50)
+
+      assert new_state.players[:target].agi_buff == -8
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 33. Resurrect edge cases
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "apply_spell_resurrect -- edge cases" do
+    test "resurrect on empty tile does nothing" do
+      caster = make_entity(%{char_id: :caster, mana: 180})
+      state = make_state(%{caster: caster})
+
+      spell = make_spell(%{revivir: true, min_hp: 10, work_on_dead: true})
+
+      new_state = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 60, 60)
+
+      # No change, caster just gets mana update message
+      assert new_state.players[:caster].mana == 180
+    end
+
+    test "resurrect on NPC tile does nothing (only players can be resurrected)" do
+      caster = make_entity(%{char_id: :caster, mana: 180})
+      npc = %{
+        npc_id: 99999, instance_id: 1, x: 51, y: 50, hp: 0, max_hp: 200,
+        alive: false, char_index: 2, target_id: nil, owner_id: nil, exp_count: 100
+      }
+
+      occupancy = %{{51, 50} => {:npc, 1}}
+      state = make_state(%{caster: caster}, occupancy: occupancy, npcs_live: %{1 => npc})
+
+      spell = make_spell(%{revivir: true, min_hp: 10, work_on_dead: true})
+
+      new_state = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 51, 50)
+
+      # NPC not resurrected
+      assert new_state.npcs_live[1].alive == false
+    end
+
+    test "resurrect clears oculto flag" do
+      caster = make_entity(%{char_id: :caster, mana: 180})
+      target = make_entity(%{
+        char_id: :target, hp: 0, max_hp: 100, dead: true,
+        oculto: true, invisible: true, poisoned: true,
+        buffs: [%{type: :poisoned, expires_at: 999}],
+        x: 51, y: 50, char_index: 2
+      })
+
+      occupancy = %{{51, 50} => {:player, :target}}
+      state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
+
+      spell = make_spell(%{revivir: true, min_hp: 10, work_on_dead: true})
+
+      new_state = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 51, 50)
+
+      revived = new_state.players[:target]
+      assert revived.oculto == false
+      assert revived.invisible == false
+      assert revived.poisoned == false
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 34. Elemental modifier golden values
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "Combat.apply_elemental_modifiers/3 golden values" do
+    test "both tags zero: damage unchanged" do
+      assert Combat.apply_elemental_modifiers(100, 0, 0) == 100
+    end
+
+    test "attacker tags zero: damage unchanged" do
+      assert Combat.apply_elemental_modifiers(100, 0, 0b0001) == 100
+    end
+
+    test "defender tags zero: damage unchanged" do
+      assert Combat.apply_elemental_modifiers(100, 0b0001, 0) == 100
+    end
+
+    test "same element tags use diagonal matrix entry" do
+      # When both attacker and defender have same element (bit 0 = Fire),
+      # the matrix entry (1,1) is applied. Default matrix value is 1.0
+      # since no custom matrix is loaded in test.
+      result = Combat.apply_elemental_modifiers(100, 0b0001, 0b0001)
+      # Default elemental_matrix(1,1) = 1.0, so damage = 100 * 1.0 = 100
+      assert result == 100
+    end
+
+    test "zero damage stays zero regardless of tags" do
+      assert Combat.apply_elemental_modifiers(0, 0b0001, 0b0010) == 0
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 35. Heal on NPC target (no-op path)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "apply_spell_heal -- NPC target (no-op)" do
+    test "heal spell targeting NPC tile falls through to self-heal" do
+      caster = make_entity(%{char_id: :caster, mana: 180, hp: 60, max_hp: 100})
+      npc = %{
+        npc_id: 99999, instance_id: 1, x: 51, y: 50, hp: 50, max_hp: 200,
+        alive: true, char_index: 2, target_id: nil, owner_id: nil, exp_count: 100
+      }
+
+      occupancy = %{{51, 50} => {:npc, 1}}
+      state = make_state(%{caster: caster}, occupancy: occupancy, npcs_live: %{1 => npc})
+
+      spell = make_spell(%{sube_hp: 1, min_hp: 20, max_hp: 20})
+
+      # NPC target falls through to the _ (default) case in apply_spell_heal,
+      # which is the self-heal path -- but it does NOT heal self when a tile is targeted
+      # because the target matched {:npc, _} which doesn't match {:player, _} or nil
+      # The code actually falls to the wildcard _ branch which does self-heal
+      new_state = SpellEffects.apply_spell_heal(state, :caster, caster, 20, spell, 51, 50)
+
+      # The _ branch performs self-heal
+      assert new_state.players[:caster].hp == 80
+      # NPC HP unchanged
+      assert new_state.npcs_live[1].hp == 50
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 36. Spell routing: remove_invisibility, sube_fu, sube_ag, sube_mana, sube_sta
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "apply_spell_single -- additional routing" do
+    test "remove_invisibility spell routes correctly" do
+      caster = make_entity(%{char_id: :caster, mana: 180, x: 50, y: 50})
+      invis_player = make_entity(%{
+        char_id: :hidden, x: 55, y: 50, char_index: 2,
+        invisible: true, no_detectable: false,
+        buffs: [%{type: :invisible, expires_at: 999_999_999_999}]
+      })
+
+      state = make_state(%{caster: caster, hidden: invis_player})
+
+      spell = make_spell(%{remove_invisibility: true, fx_grh: 0})
+
+      new_state = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
+
+      # Routed to remove_invisibility path; caster checks nearby players
+      # :hidden is within 11 tiles, so gets revealed
+      assert new_state.players[:hidden].invisible == false
+    end
+
+    test "sube_fu spell routes to attribute buff" do
+      caster = make_entity(%{char_id: :caster, mana: 180, str_buff: 0, buffs: []})
+      state = make_state(%{caster: caster})
+
+      spell = make_spell(%{sube_fu: 1, min_fu: 5, max_fu: 5, duration: 10})
+
+      new_state = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
+
+      assert new_state.players[:caster].str_buff == 5
+    end
+
+    test "sube_ag spell routes to attribute buff" do
+      caster = make_entity(%{char_id: :caster, mana: 180, agi_buff: 0, buffs: []})
+      state = make_state(%{caster: caster})
+
+      spell = make_spell(%{sube_ag: 1, min_ag: 3, max_ag: 3, duration: 10})
+
+      new_state = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
+
+      assert new_state.players[:caster].agi_buff == 3
+    end
+
+    test "sube_mana spell routes to mana restore" do
+      caster = make_entity(%{char_id: :caster, mana: 100, max_mana: 200, buffs: []})
+      state = make_state(%{caster: caster})
+
+      spell = make_spell(%{sube_mana: 1, min_mana: 25, max_mana: 25})
+
+      new_state = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
+
+      assert new_state.players[:caster].mana == 125
+    end
+
+    test "sube_sta spell routes to stamina restore" do
+      caster = make_entity(%{char_id: :caster, mana: 180, stamina: 50, max_stamina: 100, buffs: []})
+      state = make_state(%{caster: caster})
+
+      spell = make_spell(%{sube_sta: 1, min_sta: 20, max_sta: 20})
+
+      new_state = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
+
+      assert new_state.players[:caster].stamina == 70
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 37. Spell damage with range (min != max)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "Combat.spell_damage/4 -- range values (min != max)" do
+    test "damage is always within expected range" do
+      # Run 50 times to verify randomness stays in bounds
+      results =
+        for _ <- 1..50 do
+          Combat.spell_damage(10, 20, 25, false)
+        end
+
+      # min base=10, max base=20
+      # level_bonus at min: floor(10 * 0.03 * 25) = floor(7.5) = 7 -> 10+7 = 17
+      # level_bonus at max: floor(20 * 0.03 * 25) = floor(15) = 15 -> 20+15 = 35
+      assert Enum.all?(results, &(&1 >= 17))
+      assert Enum.all?(results, &(&1 <= 35))
+    end
+
+    test "mage modifier applied to range result" do
+      results =
+        for _ <- 1..50 do
+          Combat.spell_damage(10, 20, 25, true)
+        end
+
+      # Non-mage range: 17..35
+      # Mage: round(17 * 0.7)=12 .. round(35 * 0.7)=25 (but could vary within due to randomness)
+      assert Enum.all?(results, &(&1 >= 12))
+      assert Enum.all?(results, &(&1 <= 25))
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 38. Spell with no effect (default path in apply_spell_single)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "apply_spell_single -- no-effect spell (default path)" do
+    test "spell with no effect flags just stores entity in state" do
+      caster = make_entity(%{char_id: :caster, mana: 180, hp: 50})
+      state = make_state(%{caster: caster})
+
+      # A spell with no active effect flags
+      spell = make_spell(%{})
+
+      new_state = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
+
+      # State has caster stored, no changes to HP/mana/etc.
+      assert new_state.players[:caster].hp == 50
+      assert new_state.players[:caster].mana == 180
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 39. Mana/stamina on nonexistent target player
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "apply_spell_mana/stamina -- nonexistent target" do
+    test "mana spell targeting nonexistent player is a no-op" do
+      caster = make_entity(%{char_id: :caster, mana: 180})
+
+      occupancy = %{{51, 50} => {:player, :ghost}}
+      state = make_state(%{caster: caster}, occupancy: occupancy)
+
+      spell = make_spell(%{sube_mana: 1, min_mana: 50, max_mana: 50})
+
+      new_state = SpellEffects.apply_spell_mana(state, :caster, caster, spell, 51, 50)
+
+      # Caster just stored
+      assert new_state.players[:caster].mana == 180
+    end
+
+    test "stamina spell targeting nonexistent player is a no-op" do
+      caster = make_entity(%{char_id: :caster, mana: 180, stamina: 50})
+
+      occupancy = %{{51, 50} => {:player, :ghost}}
+      state = make_state(%{caster: caster}, occupancy: occupancy)
+
+      spell = make_spell(%{sube_sta: 1, min_sta: 30, max_sta: 30})
+
+      new_state = SpellEffects.apply_spell_stamina(state, :caster, caster, spell, 51, 50)
+
+      assert new_state.players[:caster].stamina == 50
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 40. Poison tick interval constant
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "poison buff -- next_tick timing" do
+    test "poison next_tick is set at @poison_tick_interval (3600ms) from now" do
+      caster = make_entity(%{mana: 180, buffs: []})
+      state = make_state(%{caster: caster})
+      now_before = System.monotonic_time(:millisecond)
+
+      spell = make_spell(%{envenena: true, duration: 30})
+
+      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, nil, nil)
+
+      now_after = System.monotonic_time(:millisecond)
+      updated = new_state.players[:caster]
+      [buff] = Enum.filter(updated.buffs, &(&1.type == :poisoned))
+
+      # VB6: @poison_tick_interval = 3600ms
+      assert buff.next_tick >= now_before + 3600
+      assert buff.next_tick <= now_after + 3600 + 10
+    end
+  end
 end
