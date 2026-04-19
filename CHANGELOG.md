@@ -4,6 +4,27 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **Event systems: capture, siege, rewards, scheduler — ROADMAP #15-18 closed (2026-04-19):**
+  - **Capture events** (#15): `Arena.Events.CaptureServer` GenServer — team-based flag
+    capture with registration validation (level/gold/state checks), level-balanced
+    team assignment, round progression (best-of-N), escalating death timers, flag
+    pickup/hold-to-capture/drop-on-death mechanics, registration retry with extension.
+    62 tests in `capture_server_test.exs`.
+  - **Siege events** (#16): `Arena.Events.SiegeServer` GenServer — wall HP objective,
+    configurable spawn boxes with wave spawning, max NPC limits, top-10 scoreboard
+    with sorted insertion, defender/attacker win conditions, duration timeout,
+    GM commands (start/stop/status/list). 51 tests in `siege_server_test.exs`.
+  - **Event rewards + validation** (#17): `Arena.Events.Rewards` pure module —
+    capture (entry_fee * 2 to winners), siege (50K * gold_mult to top-10 defenders),
+    tournament (configurable prize pool split). `Arena.Events.ParticipantValidation`
+    with 11-point registration checks (level, gold, dead, jailed, trading, navigating,
+    mounted, meditating, resting, in_commerce, already_registered). 40 tests across
+    `event_rewards_test.exs` and `participant_validation_test.exs`.
+  - **Event scheduler** (#18): `Arena.Events.EventScheduler` GenServer — 24 hourly
+    slots, auto-start on hour match, duration tracking with auto-cleanup, manual
+    override via `force_event/2`, injectable clock function for deterministic testing.
+    34 tests in `event_scheduler_test.exs`.
+
 - **GM commands + stub fixes + ROADMAP #12-14, #19-21 closed (2026-04-19):**
   - **GM target locked to VB6 parity** (#12): tiered text commands over both TCP
     and WS. 4-tier hierarchy (admin > dios > semi_dios > consejero) preserved.

@@ -19,10 +19,10 @@
 12. ~~Decide the GM/admin packet target.~~ Done — VB6 parity, tiered text commands over both TCP and WS.
 13. ~~Implement the remaining GM/admin commands for the chosen target.~~ Done — 14 new commands added.
 14. ~~Remove the remaining GM/admin stubs for the chosen target.~~ Done — no dead stubs found.
-15. Implement capture and control-point events.
-16. Implement siege and castle events.
-17. Implement event participant tracking and rewards.
-18. Implement event scheduling and duration flows.
+15. ~~Implement capture and control-point events.~~ Done — CaptureServer GenServer with team-based flag capture, registration validation, round progression, death timers, hold-to-capture mechanic.
+16. ~~Implement siege and castle events.~~ Done — SiegeServer GenServer with wall HP, wave spawning, top-10 scoreboard, defender/attacker win conditions, rewards.
+17. ~~Implement event participant tracking and rewards.~~ Done — Rewards pure module (capture/siege/tournament) + ParticipantValidation with 11-point registration checks.
+18. ~~Implement event scheduling and duration flows.~~ Done — EventScheduler GenServer with hourly triggers, duration tracking, manual override, injectable clock for testing.
 19. ~~Decide whether AO20-era account, lobby, and control packet surfaces remain in scope.~~ Done — no AO20-only binary surfaces exist; account/lobby is REST, already implemented.
 20. ~~Implement AO20-era account, lobby, and control packet surfaces if they remain in scope.~~ Done — N/A (no binary surfaces to implement; REST API already exists).
 21. ~~Implement remaining decoded-but-stubbed parity packet handlers that stay in scope.~~ Done — `server_open_toggle` and `warp_me_to_target` fixed; remaining stubs documented as intentional.
