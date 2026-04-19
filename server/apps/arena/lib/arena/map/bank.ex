@@ -154,11 +154,47 @@ defmodule Arena.Map.Bank do
               else
                 # DB write first — only modify inventory on success
                 inv_tags = Map.get(inv_item, :elemental_tags, 0)
+                max_stack = max_stack_for_item(inv_item.item_id)
 
+                # VB6 parity (modBanco.bas:223-258):
+                # If slot_destino specified, validate it's either empty or
+                # same item with room. Otherwise fall through to auto-search.
                 bank_slot =
-                  if slot_destino > 0,
-                    do: slot_destino,
-                    else: find_bank_slot(entity.char_id, inv_item.item_id, inv_tags)
+                  if slot_destino > 0 do
+                    bank_items = GameBackend.BankItems.get_bank(entity.char_id)
+                    dest_item = Enum.find(bank_items, fn bi -> bi.slot == slot_destino end)
+
+                    cond do
+                      # Empty slot — valid
+                      dest_item == nil -> slot_destino
+                      # Same item + tags with room — valid (VB6 line 227-228)
+                      dest_item.item_id == inv_item.item_id and
+                        (dest_item.elemental_tags || 0) == inv_tags and
+                          dest_item.amount + amount <= max_stack -> slot_destino
+                      # Invalid — fall through to auto-search
+                      true -> find_bank_slot(entity.char_id, inv_item.item_id, inv_tags, amount)
+                    end
+                  else
+                    find_bank_slot(entity.char_id, inv_item.item_id, inv_tags, amount)
+                  end
+
+                # VB6 parity (modBanco.bas:261): final overflow guard before writing
+                bank_items = GameBackend.BankItems.get_bank(entity.char_id)
+                existing_in_slot = Enum.find(bank_items, fn bi -> bi.slot == bank_slot end)
+                existing_amount = if existing_in_slot, do: existing_in_slot.amount, else: 0
+
+                if existing_amount + amount > max_stack do
+                  Helpers.send_to_session(
+                    state.sessions,
+                    char_id,
+                    {:send_raw,
+                     Encoder.encode(
+                       {:console_msg, %{message: "El banco no puede cargar tantos objetos.", font_index: 0}}
+                     )}
+                  )
+
+                  {:reply, {:error, :stack_full}, state}
+                else
 
                 case upsert_bank_item(entity.char_id, bank_slot, inv_item.item_id, amount, inv_tags) do
                   {:ok, _} ->
@@ -218,6 +254,7 @@ defmodule Arena.Map.Bank do
                     )
 
                     {:reply, {:error, :db_error}, state}
+                end
                 end
               end
           end
@@ -514,10 +551,17 @@ defmodule Arena.Map.Bank do
     end
   end
 
-  def find_bank_slot(char_id, item_id, elemental_tags \\ 0) do
+  def find_bank_slot(char_id, item_id, elemental_tags \\ 0, deposit_amount \\ 1) do
     bank_items = GameBackend.BankItems.get_bank(char_id)
-    # Try to stack on existing slot with same item AND same elemental_tags
-    case Enum.find(bank_items, fn bi -> bi.item_id == item_id and (bi.elemental_tags || 0) == elemental_tags end) do
+    max_stack = max_stack_for_item(item_id)
+
+    # VB6 parity (modBanco.bas:235-236): only match a slot if adding deposit_amount
+    # would not exceed GetMaxInvOBJ() (max_stack).
+    case Enum.find(bank_items, fn bi ->
+           bi.item_id == item_id and
+             (bi.elemental_tags || 0) == elemental_tags and
+             bi.amount + deposit_amount <= max_stack
+         end) do
       nil ->
         # Find first empty slot (1-based)
         used = MapSet.new(bank_items, & &1.slot)
@@ -528,9 +572,20 @@ defmodule Arena.Map.Bank do
     end
   end
 
+  @default_max_stack 10_000
+
+  defp max_stack_for_item(item_id) do
+    case GameData.get_item(item_id) do
+      %{max_hit: max_hit} when is_integer(max_hit) and max_hit > 0 -> max_hit
+      _ -> @default_max_stack
+    end
+  end
+
   def upsert_bank_item(char_id, bank_slot, item_id, amount, elemental_tags \\ 0) do
+    max_stack = max_stack_for_item(item_id)
+
     try do
-      GameBackend.BankItems.upsert(char_id, bank_slot, item_id, amount, elemental_tags)
+      GameBackend.BankItems.upsert(char_id, bank_slot, item_id, amount, elemental_tags, max_stack)
     rescue
       e -> {:error, e}
     end

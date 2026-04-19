@@ -38,24 +38,30 @@ defmodule GameBackend.BankItems do
     |> Repo.all()
   end
 
-  @doc "Upsert a bank item: add to existing slot or insert new."
-  def upsert(character_id, slot, item_id, amount, elemental_tags \\ 0) do
+  @default_max_stack 10_000
+
+  @doc "Upsert a bank item: add to existing slot or insert new. Caps at max_stack."
+  def upsert(character_id, slot, item_id, amount, elemental_tags \\ 0, max_stack \\ @default_max_stack) do
     existing =
       __MODULE__
       |> where(character_id: ^character_id, slot: ^slot)
       |> Repo.one()
 
     if existing do
+      new_amount = min(existing.amount + amount, max_stack)
+
       existing
-      |> change(%{amount: existing.amount + amount, item_id: item_id, elemental_tags: elemental_tags})
+      |> change(%{amount: new_amount, item_id: item_id, elemental_tags: elemental_tags})
       |> Repo.update()
     else
+      capped_amount = min(amount, max_stack)
+
       %__MODULE__{}
       |> changeset(%{
         character_id: character_id,
         slot: slot,
         item_id: item_id,
-        amount: amount,
+        amount: capped_amount,
         elemental_tags: elemental_tags
       })
       |> Repo.insert()
