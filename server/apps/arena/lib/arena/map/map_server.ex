@@ -181,10 +181,11 @@ defmodule Arena.Map.MapServer do
   def enlist_faction(map_id, char_id, faction), do: GenServer.cast(via(map_id), {:enlist_faction, char_id, faction})
   def leave_faction(map_id, char_id), do: GenServer.cast(via(map_id), {:leave_faction, char_id})
   def faction_chat(map_id, char_id, message), do: GenServer.cast(via(map_id), {:faction_chat, char_id, message})
-  def pet_stand(map_id, char_id), do: GenServer.cast(via(map_id), {:pet_stand, char_id})
-  def pet_follow(map_id, char_id), do: GenServer.cast(via(map_id), {:pet_follow, char_id})
+  def pet_stand(map_id, char_id, pet_id), do: GenServer.cast(via(map_id), {:pet_stand, char_id, pet_id})
+  def pet_follow(map_id, char_id, pet_id), do: GenServer.cast(via(map_id), {:pet_follow, char_id, pet_id})
   def pet_leave(map_id, char_id, pet_id), do: GenServer.cast(via(map_id), {:pet_leave, char_id, pet_id})
   def pet_leave_all(map_id, char_id), do: GenServer.cast(via(map_id), {:pet_leave_all, char_id})
+  def pet_follow_all(map_id, char_id), do: GenServer.cast(via(map_id), {:pet_follow_all, char_id})
   def move_spell(map_id, char_id, upwards, slot), do: GenServer.cast(via(map_id), {:move_spell, char_id, upwards, slot})
   def modify_skills(map_id, char_id, points), do: GenServer.cast(via(map_id), {:modify_skills, char_id, points})
   def change_description(map_id, char_id, desc), do: GenServer.cast(via(map_id), {:change_description, char_id, desc})
@@ -661,13 +662,15 @@ defmodule Arena.Map.MapServer do
   @impl true
   def handle_cast({:faction_chat, char_id, message}, state), do: Faction.handle_faction_chat(state, char_id, message)
   @impl true
-  def handle_cast({:pet_stand, char_id}, state), do: Pets.handle_pet_stand(state, char_id)
+  def handle_cast({:pet_stand, char_id, pet_id}, state), do: Pets.handle_pet_stand(state, char_id, pet_id)
   @impl true
-  def handle_cast({:pet_follow, char_id}, state), do: Pets.handle_pet_follow(state, char_id)
+  def handle_cast({:pet_follow, char_id, pet_id}, state), do: Pets.handle_pet_follow(state, char_id, pet_id)
   @impl true
   def handle_cast({:pet_leave, char_id, pet_id}, state), do: Pets.handle_pet_leave(state, char_id, pet_id)
   @impl true
   def handle_cast({:pet_leave_all, char_id}, state), do: Pets.handle_pet_leave_all(state, char_id)
+  @impl true
+  def handle_cast({:pet_follow_all, char_id}, state), do: Pets.handle_pet_follow_all(state, char_id)
   @impl true
   def handle_cast({:move_spell, char_id, upwards, slot}, state),
     do: Social.handle_move_spell(state, char_id, upwards, slot)

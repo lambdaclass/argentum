@@ -5,16 +5,21 @@ defmodule Arena.Map.Pets do
 
   defp msg(state, char_id, message), do: Helpers.msg(state, char_id, message)
 
-  def handle_pet_stand(state, char_id) do
+  def handle_pet_stand(state, char_id, pet_id) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         if entity.dead do
           msg(state, char_id, "Estas muerto!")
           {:noreply, state}
         else
-          state = set_pet_mode(state, char_id, :stand)
-          msg(state, char_id, "Tus mascotas se quedan quietas.")
-          {:noreply, state}
+          if pet_id in (entity.pet_ids || []) do
+            state = set_single_pet_mode(state, pet_id, :stand)
+            msg(state, char_id, "Tu mascota se queda quieta.")
+            {:noreply, state}
+          else
+            msg(state, char_id, "No tienes mascotas.")
+            {:noreply, state}
+          end
         end
 
       :error ->
@@ -22,14 +27,36 @@ defmodule Arena.Map.Pets do
     end
   end
 
-  def handle_pet_follow(state, char_id) do
+  def handle_pet_follow(state, char_id, pet_id) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         if entity.dead do
           msg(state, char_id, "Estas muerto!")
           {:noreply, state}
         else
-          state = set_pet_mode(state, char_id, :follow)
+          if pet_id in (entity.pet_ids || []) do
+            state = set_single_pet_mode(state, pet_id, :follow)
+            msg(state, char_id, "Tu mascota te sigue.")
+            {:noreply, state}
+          else
+            msg(state, char_id, "No tienes mascotas.")
+            {:noreply, state}
+          end
+        end
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_pet_follow_all(state, char_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        if entity.dead do
+          msg(state, char_id, "Estas muerto!")
+          {:noreply, state}
+        else
+          state = set_all_pets_mode(state, char_id, :follow)
           msg(state, char_id, "Tus mascotas te siguen.")
           {:noreply, state}
         end
@@ -102,8 +129,16 @@ defmodule Arena.Map.Pets do
     end
   end
 
-  # Set pet behavior mode — :stand stops movement/attack, :follow resumes normal AI
-  defp set_pet_mode(state, char_id, mode) do
+  # Set pet behavior mode for a single pet by instance_id
+  defp set_single_pet_mode(state, pet_id, mode) do
+    case Map.get(state.npcs_live, pet_id) do
+      nil -> state
+      npc -> %{state | npcs_live: Map.put(state.npcs_live, pet_id, %{npc | pet_mode: mode})}
+    end
+  end
+
+  # Set pet behavior mode for all pets owned by a player
+  defp set_all_pets_mode(state, char_id, mode) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         npcs_live =

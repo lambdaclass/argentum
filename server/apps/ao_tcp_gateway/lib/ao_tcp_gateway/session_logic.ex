@@ -529,13 +529,13 @@ defmodule AoTcpGateway.SessionLogic do
 
   # ---- Pets ----
 
-  def handle_command(state, {:pet_stand, _}) when state.character_id != nil do
-    Arena.Map.MapServer.pet_stand(state.map_id, state.character_id)
+  def handle_command(state, {:pet_stand, %{pet_id: pet_id}}) when state.character_id != nil do
+    Arena.Map.MapServer.pet_stand(state.map_id, state.character_id, pet_id)
     {state, []}
   end
 
-  def handle_command(state, {:pet_follow, _}) when state.character_id != nil do
-    Arena.Map.MapServer.pet_follow(state.map_id, state.character_id)
+  def handle_command(state, {:pet_follow, %{pet_id: pet_id}}) when state.character_id != nil do
+    Arena.Map.MapServer.pet_follow(state.map_id, state.character_id, pet_id)
     {state, []}
   end
 
@@ -546,6 +546,11 @@ defmodule AoTcpGateway.SessionLogic do
 
   def handle_command(state, {:pet_leave_all, _}) when state.character_id != nil do
     Arena.Map.MapServer.pet_leave_all(state.map_id, state.character_id)
+    {state, []}
+  end
+
+  def handle_command(state, {:pet_follow_all, _}) when state.character_id != nil do
+    Arena.Map.MapServer.pet_follow_all(state.map_id, state.character_id)
     {state, []}
   end
 

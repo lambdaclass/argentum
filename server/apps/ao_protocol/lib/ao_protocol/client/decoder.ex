@@ -246,11 +246,19 @@ defmodule AoProtocol.Client.Decoder do
   # RequestAccountState (ID 41)
   defp decode_packet(41, rest), do: {:ok, {:request_account_state, %{}}, rest}
 
-  # PetStand (ID 42)
-  defp decode_packet(42, rest), do: {:ok, {:pet_stand, %{}}, rest}
+  # PetStand (ID 42) — client sends the instance ID of the target pet
+  defp decode_packet(42, rest) do
+    with {:ok, pet_id, rest} <- Reader.read_int16(rest) do
+      {:ok, {:pet_stand, %{pet_id: pet_id}}, rest}
+    end
+  end
 
-  # PetFollow (ID 43)
-  defp decode_packet(43, rest), do: {:ok, {:pet_follow, %{}}, rest}
+  # PetFollow (ID 43) — client sends the instance ID of the target pet
+  defp decode_packet(43, rest) do
+    with {:ok, pet_id, rest} <- Reader.read_int16(rest) do
+      {:ok, {:pet_follow, %{pet_id: pet_id}}, rest}
+    end
+  end
 
   # PetLeave (ID 44) — client sends the instance ID of the pet to release
   defp decode_packet(44, rest) do
@@ -295,6 +303,9 @@ defmodule AoProtocol.Client.Decoder do
 
   # PetLeaveAll (ID 282) — no payload
   defp decode_packet(282, rest), do: {:ok, {:pet_leave_all, %{}}, rest}
+
+  # PetFollowAll (ID 309) — no payload
+  defp decode_packet(309, rest), do: {:ok, {:pet_follow_all, %{}}, rest}
 
   # ---- Packets with payloads ----
 
