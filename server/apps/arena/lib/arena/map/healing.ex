@@ -7,6 +7,12 @@ defmodule Arena.Map.Healing do
   @magical_classes [:mage, :cleric, :druid, :bard, :paladin]
   @npc_type_revividor 1
   @npc_type_resucitador_newbie 9
+  # VB6: MAP_HOME_IN_JAIL = 66
+  @jail_map_id 66
+  # VB6: FOGATA object id (OBJ_INDEX_FOGATA = 21)
+  @fogata_obj_index 21
+  # VB6: HayOBJarea checks within 8 tiles
+  @fogata_radius 8
 
   def handle_rest(state, char_id) do
     case Map.fetch(state.players, char_id) do
@@ -26,6 +32,19 @@ defmodule Arena.Map.Healing do
               state.sessions,
               char_id,
               {:send_raw, Encoder.encode({:console_msg, %{message: "Estas sano.", font_index: 0}})}
+            )
+
+            {:noreply, state}
+
+          # VB6: If HayOBJarea(.pos, FOGATA) Then — resting requires nearby campfire
+          not has_nearby_fogata?(state, entity) ->
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw,
+               Encoder.encode(
+                 {:console_msg, %{message: "No hay fogata cerca.", font_index: 0}}
+               )}
             )
 
             {:noreply, state}
@@ -60,6 +79,19 @@ defmodule Arena.Map.Healing do
               state.sessions,
               char_id,
               {:send_raw, Encoder.encode({:console_msg, %{message: "Estas muerto.", font_index: 0}})}
+            )
+
+            {:noreply, state}
+
+          # VB6: If .flags.Montado = 1 Then → "No podes meditar estando montado"
+          entity.mounted ->
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw,
+               Encoder.encode(
+                 {:console_msg, %{message: "No podes meditar estando montado.", font_index: 0}}
+               )}
             )
 
             {:noreply, state}
@@ -135,37 +167,54 @@ defmodule Arena.Map.Healing do
 
           true ->
             # VB6: heal is NPC interaction -- full heal from Revividor NPC.
+            # VB6: If .pos.Map = MAP_HOME_IN_JAIL And NpcList(...).npcType = Revividor Then Exit Sub
             case Helpers.find_nearby_npc_of_type(state, entity, [@npc_type_revividor, @npc_type_resucitador_newbie]) do
               {:ok, _npc, npc_def} ->
-                # VB6: ResucitadorNewbie only serves newbies (level <= 12)
-                if npc_def.npc_type == @npc_type_resucitador_newbie and entity.level > 12 do
-                  Helpers.send_to_session(
-                    state.sessions,
-                    char_id,
-                    {:send_raw,
-                     Encoder.encode(
-                       {:console_msg, %{message: "Solo los newbies pueden ser curados aqui.", font_index: 0}}
-                     )}
-                  )
+                cond do
+                  # VB6: If .pos.Map = MAP_HOME_IN_JAIL And NpcList(...).npcType = Revividor Then Exit Sub
+                  state.map_id == @jail_map_id and npc_def.npc_type == @npc_type_revividor ->
+                    Helpers.send_to_session(
+                      state.sessions,
+                      char_id,
+                      {:send_raw,
+                       Encoder.encode(
+                         {:console_msg,
+                          %{message: "No puedes curarte en la carcel.", font_index: 0}}
+                       )}
+                    )
 
-                  {:noreply, state}
-                else
-                  entity = %{entity | hp: entity.max_hp}
-                  players = Map.put(state.players, char_id, entity)
+                    {:noreply, state}
 
-                  Helpers.send_to_session(
-                    state.sessions,
-                    char_id,
-                    {:send_raw, Encoder.encode({:console_msg, %{message: "Has sido curado.", font_index: 0}})}
-                  )
+                  # VB6: ResucitadorNewbie only serves newbies (level <= 12)
+                  npc_def.npc_type == @npc_type_resucitador_newbie and entity.level > 12 ->
+                    Helpers.send_to_session(
+                      state.sessions,
+                      char_id,
+                      {:send_raw,
+                       Encoder.encode(
+                         {:console_msg, %{message: "Solo los newbies pueden ser curados aqui.", font_index: 0}}
+                       )}
+                    )
 
-                  Helpers.send_to_session(
-                    state.sessions,
-                    char_id,
-                    {:send_raw, Encoder.encode({:update_hp, %{min_hp: entity.max_hp, shield: 0}})}
-                  )
+                    {:noreply, state}
 
-                  {:noreply, %{state | players: players}}
+                  true ->
+                    entity = %{entity | hp: entity.max_hp}
+                    players = Map.put(state.players, char_id, entity)
+
+                    Helpers.send_to_session(
+                      state.sessions,
+                      char_id,
+                      {:send_raw, Encoder.encode({:console_msg, %{message: "Has sido curado.", font_index: 0}})}
+                    )
+
+                    Helpers.send_to_session(
+                      state.sessions,
+                      char_id,
+                      {:send_raw, Encoder.encode({:update_hp, %{min_hp: entity.max_hp, shield: 0}})}
+                    )
+
+                    {:noreply, %{state | players: players}}
                 end
 
               :not_found ->
@@ -204,11 +253,11 @@ defmodule Arena.Map.Healing do
 
                 {:noreply, state}
               else
+                # VB6: NPC resurrect does NOT zero mana (only spell-based revive does)
                 entity = %{
                   entity
                   | dead: false,
                     hp: entity.max_hp,
-                    mana: 0,
                     buffs: [],
                     paralyzed: false,
                     poisoned: false,
@@ -226,7 +275,7 @@ defmodule Arena.Map.Healing do
                 Helpers.send_to_session(
                   state.sessions,
                   char_id,
-                  {:send_raw, Encoder.encode({:update_mana, %{min_mana: 0}})}
+                  {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
                 )
 
                 Helpers.send_to_session(
@@ -270,5 +319,17 @@ defmodule Arena.Map.Healing do
       :error ->
         {:noreply, state}
     end
+  end
+
+  # VB6: HayOBJarea(.pos, FOGATA) — checks if a campfire ground object
+  # exists within @fogata_radius tiles of the entity.
+  defp has_nearby_fogata?(state, entity) do
+    ground_items = state.ground_items || %{}
+
+    Enum.any?(ground_items, fn {{gx, gy}, item} ->
+      item.item_id == @fogata_obj_index and
+        abs(gx - entity.x) <= @fogata_radius and
+        abs(gy - entity.y) <= @fogata_radius
+    end)
   end
 end
