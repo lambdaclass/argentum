@@ -4,6 +4,18 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **Commerce double-click fix + walk-away session cleanup (2026-04-19):**
+  - **Commerce on NPC double-click**: double-clicking a merchant NPC now opens
+    the commerce window directly instead of casting to a nonexistent internal
+    handler. Calls `Commerce.open_npc_commerce/4` inline from
+    `NpcInteraction.handle_npc_double_click/4`.
+  - **Walk-away session cleanup**: moving away from a commerce NPC (> 3 tiles)
+    or a banker NPC (> 6 tiles) now auto-closes the session and sends the
+    appropriate `commerce_end` / `bank_end` packet to the client.
+    `Movement.check_npc_session_proximity/2` runs after every successful move.
+    Handles NPC despawn (nil lookup) by closing the session.
+  - 7 tests in `walk_away_parity_test.exs`.
+
 - **Invisibility visibility layer fix + equipped item sell block (2026-04-18):**
   - **Invisibility visibility**: invisible players are now hidden from
     non-GM clients at the broadcast/visibility layer. `enter_visibility`,

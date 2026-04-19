@@ -1,7 +1,7 @@
 defmodule Arena.Map.NpcInteraction do
   @moduledoc "NPC interaction handlers (double-click, training, gambling, forgive, arena entry)."
 
-  alias Arena.Map.{Helpers, Faction}
+  alias Arena.Map.{Helpers, Faction, Commerce}
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
@@ -86,8 +86,10 @@ defmodule Arena.Map.NpcInteraction do
 
           cond do
             npc_def.comercia ->
-              GenServer.cast(self(), {:open_commerce_internal, char_id, entity.x, entity.y, npc, npc_def})
-              {:noreply, state}
+              case Commerce.open_npc_commerce(state, char_id, entity, npc) do
+                {:reply, _result, new_state} -> {:noreply, new_state}
+                other -> other
+              end
 
             npc_def.npc_type in [@npc_type_revividor, @npc_type_resucitador_newbie] ->
               if entity.dead do

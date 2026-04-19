@@ -256,7 +256,8 @@ defmodule Arena.Map.Movement do
       Helpers.send_to_session(state.sessions, char_id, {:send_raw, raw})
     end
 
-    state
+    # VB6: close commerce/bank if player walked away from the NPC
+    check_npc_session_proximity(state, char_id)
   end
 
   @doc """
@@ -286,6 +287,72 @@ defmodule Arena.Map.Movement do
       :bandido -> hiding >= 50
       :cazador -> hiding >= 75
       _ -> false
+    end
+  end
+
+  @doc """
+  Close commerce/bank sessions if the player has moved too far from the NPC.
+  Called after every successful move.
+  """
+  def check_npc_session_proximity(state, char_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        state = maybe_close_commerce_session(state, char_id, entity)
+        entity = state.players[char_id]
+        maybe_close_bank_session(state, char_id, entity)
+
+      :error ->
+        state
+    end
+  end
+
+  defp maybe_close_commerce_session(state, char_id, entity) do
+    case entity.commerce_npc_instance_id do
+      nil ->
+        state
+
+      inst_id ->
+        npc = Map.get(state.npcs_live, inst_id)
+
+        if npc == nil or abs(entity.x - npc.x) > 3 or abs(entity.y - npc.y) > 3 do
+          entity = %{entity | commerce_npc_id: nil, commerce_npc_instance_id: nil}
+          players = Map.put(state.players, char_id, entity)
+
+          Helpers.send_to_session(
+            state.sessions,
+            char_id,
+            {:send_raw, Encoder.encode({:commerce_end, %{}})}
+          )
+
+          %{state | players: players}
+        else
+          state
+        end
+    end
+  end
+
+  defp maybe_close_bank_session(state, char_id, entity) do
+    case entity.bank_npc_id do
+      nil ->
+        state
+
+      inst_id ->
+        npc = Map.get(state.npcs_live, inst_id)
+
+        if npc == nil or abs(entity.x - npc.x) > 6 or abs(entity.y - npc.y) > 6 do
+          entity = %{entity | bank_npc_id: nil}
+          players = Map.put(state.players, char_id, entity)
+
+          Helpers.send_to_session(
+            state.sessions,
+            char_id,
+            {:send_raw, Encoder.encode({:bank_end, %{}})}
+          )
+
+          %{state | players: players}
+        else
+          state
+        end
     end
   end
 

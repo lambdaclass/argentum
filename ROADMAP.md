@@ -7,8 +7,8 @@
 
 ## Phase 2. Parity-Required Rules And Backend Behavior — close the remaining backend drift
 
-3. Restore commerce open on merchant double-click.
-4. Close bank and commerce sessions when the player walks away from the NPC.
+3. ~~Restore commerce open on merchant double-click.~~ Done.
+4. ~~Close bank and commerce sessions when the player walks away from the NPC.~~ Done.
 5. Implement the remaining bank-open guards from VB6.
 6. Match timbero account-state counters and values to VB6 (message format done).
 7. Finish remaining NPC AI edge-case parity.
