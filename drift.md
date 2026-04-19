@@ -10,17 +10,7 @@ Scope rules:
 
 ## NPC, Service, and Gameplay Flows
 
-1. `/HOGAR` timers are still simplified.
-Current:
-- `server/apps/ao_tcp_gateway/lib/ao_tcp_gateway/session_transfer.ex`
-VB6:
-- `old/server/Codigo/Hogar.bas:33`
-Notes:
-- The duel/reto block is already in place.
-- Current code only distinguishes GM `5s` vs non-GM `10s`.
-- VB6 has separate non-GM timer buckets by user type.
-
-2. Crafting production is still structurally different.
+1. Crafting production is still structurally different.
 Current:
 - `server/apps/arena/lib/arena/map/crafting.ex`
 VB6:

@@ -1,12 +1,14 @@
 defmodule GameBackend.Account do
   use Ecto.Schema
   import Ecto.Changeset
+  alias AoEntities.PlayerEntity
   alias GameBackend.Repo
 
   @primary_key {:id, :id, autogenerate: true}
   schema "accounts" do
     field(:username, :string)
     field(:password_hash, :string)
+    field(:is_active_patron, :integer, default: 0)
     field(:banned_until, :utc_datetime)
     has_many(:characters, GameBackend.Characters, foreign_key: :account_id)
     timestamps()
@@ -86,9 +88,18 @@ defmodule GameBackend.Account do
     DateTime.compare(until, DateTime.utc_now()) == :gt
   end
 
+  @doc "Map the legacy VB6 account patron integer to an online user tier atom."
+  def user_tier(%__MODULE__{is_active_patron: value}) do
+    PlayerEntity.normalize_user_tier(value)
+  end
+
+  def user_tier(value) do
+    PlayerEntity.normalize_user_tier(value)
+  end
+
   defp changeset(account, attrs) do
     account
-    |> cast(attrs, [:username, :password_hash])
+    |> cast(attrs, [:username, :password_hash, :is_active_patron])
     |> validate_required([:username, :password_hash])
     |> validate_length(:username, min: 3, max: 30)
     |> unique_constraint(:username)

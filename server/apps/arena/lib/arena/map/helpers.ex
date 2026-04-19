@@ -2,6 +2,7 @@ defmodule Arena.Map.Helpers do
   @moduledoc "Shared helpers for MapServer domain modules."
 
   alias Arena.Data.GameData
+  alias AoEntities.PlayerEntity
   alias AoProtocol.Server.Encoder
 
   @map_width 100
@@ -117,6 +118,7 @@ defmodule Arena.Map.Helpers do
        min_mana: entity.mana,
        max_mana: entity.max_mana,
        speed: entity.speeding,
+       tipo_usuario: PlayerEntity.user_tier_to_protocol(Map.get(entity, :user_tier, :normal)),
        clan_index: Map.get(entity, :guild_id, 0),
        clan_nivel: Map.get(entity, :guild_level, 0)
      }}

@@ -7,6 +7,7 @@ defmodule AoTcpGateway.SessionTransfer do
 
   require Logger
 
+  alias AoEntities.PlayerEntity
   alias AoTcpGateway.SessionWorld
 
   # VB6 e_Ciudad enum order (reverse of character_creation @home_city_atom)
@@ -17,11 +18,16 @@ defmodule AoTcpGateway.SessionTransfer do
 
   @jail_map_id 66
 
-  # VB6 Hogar.bas:37-50 — GM gets 5s, non-GM user types have per-type timers
-  # (HomeTimerAdventurer, HomeTimerHero, HomeTimerLegend, HomeTimer).
-  # We only distinguish GM vs non-GM for now; default 10s for all non-GM.
-  @hogar_travel_delay_gm_ms 5_000
-  @hogar_travel_delay_default_ms 10_000
+  # VB6 Hogar.bas:37-50 — GM gets 5s, non-GM user types have per-type timers.
+  # We keep the per-tier buckets runtime-configurable under
+  # :ao_tcp_gateway, :hogar_travel_delay_ms.
+  @hogar_travel_delay_defaults %{
+    gm: 5_000,
+    normal: 10_000,
+    adventurer: 10_000,
+    hero: 10_000,
+    legend: 10_000
+  }
 
   # ---- Map transfer ----
 
@@ -255,12 +261,22 @@ defmodule AoTcpGateway.SessionTransfer do
   @doc """
   VB6 Hogar.bas:37-50 travel delay in milliseconds.
 
-  GMs get 5 seconds; non-GM players get 10 seconds (default).
-  VB6 has per-user-type timers (HomeTimerAdventurer, HomeTimerHero,
-  HomeTimerLegend, HomeTimer) but we don't have those user types yet.
+  GMs get 5 seconds. Non-GM players use the old per-user-type buckets:
+  HomeTimerAdventurer, HomeTimerHero, HomeTimerLegend, and HomeTimer.
   """
-  def hogar_travel_delay(%{gm: true}), do: @hogar_travel_delay_gm_ms
-  def hogar_travel_delay(_entity), do: @hogar_travel_delay_default_ms
+  def hogar_travel_delay(%{gm: true}), do: hogar_travel_delay_for(:gm)
+
+  def hogar_travel_delay(entity) do
+    entity
+    |> Map.get(:user_tier, :normal)
+    |> PlayerEntity.normalize_user_tier()
+    |> hogar_travel_delay_for()
+  end
+
+  defp hogar_travel_delay_for(tier) do
+    Application.get_env(:ao_tcp_gateway, :hogar_travel_delay_ms, @hogar_travel_delay_defaults)
+    |> Map.get(tier, Map.fetch!(@hogar_travel_delay_defaults, tier))
+  end
 
   defp hogar_gold_cost(level) when level > 24, do: level * level
   defp hogar_gold_cost(level), do: level * 15 + trunc(:math.pow(level, 1.5))

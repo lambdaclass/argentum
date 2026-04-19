@@ -17,6 +17,28 @@ defmodule Arena.HogarDriftTest do
   alias AoTcpGateway.SessionTransfer
   alias AoEntities.PlayerEntity
 
+  setup do
+    previous = Application.get_env(:ao_tcp_gateway, :hogar_travel_delay_ms)
+
+    Application.put_env(:ao_tcp_gateway, :hogar_travel_delay_ms, %{
+      gm: 5_000,
+      normal: 10_000,
+      adventurer: 9_000,
+      hero: 8_000,
+      legend: 7_000
+    })
+
+    on_exit(fn ->
+      if previous == nil do
+        Application.delete_env(:ao_tcp_gateway, :hogar_travel_delay_ms)
+      else
+        Application.put_env(:ao_tcp_gateway, :hogar_travel_delay_ms, previous)
+      end
+    end)
+
+    :ok
+  end
+
   # ---- Helpers (same pattern as hogar_test.exs) ----
 
   defp base_entity(overrides \\ %{}) do
@@ -94,10 +116,24 @@ defmodule Arena.HogarDriftTest do
       assert SessionTransfer.hogar_travel_delay(entity) == 5_000
     end
 
-    test "hogar_travel_delay returns 10_000 for non-GM" do
-      entity = base_entity(%{gm: false})
-      # VB6 has per-type timers (Adventurer/Hero/Legend) but we default to 10s
+    test "hogar_travel_delay returns normal bucket for non-GM default tier" do
+      entity = base_entity(%{gm: false, user_tier: :normal})
       assert SessionTransfer.hogar_travel_delay(entity) == 10_000
+    end
+
+    test "hogar_travel_delay returns adventurer bucket" do
+      entity = base_entity(%{gm: false, user_tier: :adventurer})
+      assert SessionTransfer.hogar_travel_delay(entity) == 9_000
+    end
+
+    test "hogar_travel_delay returns hero bucket" do
+      entity = base_entity(%{gm: false, user_tier: :hero})
+      assert SessionTransfer.hogar_travel_delay(entity) == 8_000
+    end
+
+    test "hogar_travel_delay returns legend bucket" do
+      entity = base_entity(%{gm: false, user_tier: :legend})
+      assert SessionTransfer.hogar_travel_delay(entity) == 7_000
     end
   end
 end

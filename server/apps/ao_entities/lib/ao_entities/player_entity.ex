@@ -10,6 +10,12 @@ defmodule AoEntities.PlayerEntity do
   creating a circular dependency.
   """
 
+  @patron_tier_aventurero 6_057_393
+  @patron_tier_heroe 6_057_394
+  @patron_tier_leyenda 6_057_395
+
+  @type user_tier :: :normal | :adventurer | :hero | :legend
+
   defstruct [
     # Identity
     :char_id,
@@ -116,6 +122,8 @@ defmodule AoEntities.PlayerEntity do
     gm: false,
     # VB6 GM tiers: :admin, :dios, :semi_dios, :consejero, or nil (not GM)
     gm_level: nil,
+    # VB6 Stats.tipoUsuario / account.is_active_patron
+    user_tier: :normal,
     faction: :none,
 
     # Guild cache (populated on login, updated on guild join/leave/level-up)
@@ -206,4 +214,30 @@ defmodule AoEntities.PlayerEntity do
     # Monotonic ms timestamp of last /BOVTRANSFERIR usage. 10s cooldown.
     last_transfer_gold_at: -1_000_000_000_000
   ]
+
+  def normalize_user_tier(:adventurer), do: :adventurer
+  def normalize_user_tier(:hero), do: :hero
+  def normalize_user_tier(:legend), do: :legend
+  def normalize_user_tier(:normal), do: :normal
+  def normalize_user_tier("adventurer"), do: :adventurer
+  def normalize_user_tier("hero"), do: :hero
+  def normalize_user_tier("legend"), do: :legend
+  def normalize_user_tier("normal"), do: :normal
+  def normalize_user_tier(@patron_tier_aventurero), do: :adventurer
+  def normalize_user_tier(@patron_tier_heroe), do: :hero
+  def normalize_user_tier(@patron_tier_leyenda), do: :legend
+  def normalize_user_tier(1), do: :adventurer
+  def normalize_user_tier(2), do: :hero
+  def normalize_user_tier(3), do: :legend
+  def normalize_user_tier(_), do: :normal
+
+  def user_tier_to_protocol(:adventurer), do: 1
+  def user_tier_to_protocol(:hero), do: 2
+  def user_tier_to_protocol(:legend), do: 3
+  def user_tier_to_protocol(_), do: 0
+
+  def user_tier_to_db(:adventurer), do: @patron_tier_aventurero
+  def user_tier_to_db(:hero), do: @patron_tier_heroe
+  def user_tier_to_db(:legend), do: @patron_tier_leyenda
+  def user_tier_to_db(_), do: 0
 end

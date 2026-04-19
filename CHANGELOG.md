@@ -4,6 +4,19 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **`/HOGAR` tiered timer parity + account patron tiers (2026-04-19):**
+  - Added legacy `accounts.is_active_patron` support to the backend account
+    schema and mapped the old VB6 patron ids to online user tiers
+    (`normal/adventurer/hero/legend`).
+  - Login now injects the account tier into `PlayerEntity`, and
+    `character_create_packet` now populates the AO20 `tipo_usuario` field from
+    that online tier instead of always dropping it.
+  - `/HOGAR` no longer treats all non-GM players the same: it now selects the
+    travel delay from runtime-configurable per-tier buckets
+    (`gm/normal/adventurer/hero/legend`) instead of only `GM 5s / everyone 10s`.
+  - Added focused tests in `hogar_drift_test.exs`, `account_test.exs`, and
+    `user_tier_packet_test.exs`.
+
 - **Phase 3 proof tests — ROADMAP #23-29 closed (2026-04-19):**
   - **Pet/taming parity** (#26): 35 tests — stat inheritance from NPC def, attack
     damage formula, adjacent-only range, aggro range, death handling (no XP, no

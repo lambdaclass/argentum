@@ -99,7 +99,11 @@ defmodule AoTcpGateway.SessionLogin do
          {:error_msg, %{message: "Account banned."}}
        ]}
     else
-      entity = GameBackend.Characters.to_entity(character)
+      entity =
+        character
+        |> GameBackend.Characters.to_entity()
+        |> Map.put(:user_tier, GameBackend.Account.user_tier(account))
+
       char_id = entity.char_id
 
       # Populate guild cache on the entity (one RPC per login is fine)
