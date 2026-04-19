@@ -161,6 +161,7 @@ defmodule Arena.Map.MapServer do
   def craft_item(map_id, char_id, skill_atom, item_id, amount),
     do: GenServer.cast(via(map_id), {:craft_item, char_id, skill_atom, item_id, amount})
 
+  def information(map_id, char_id), do: GenServer.cast(via(map_id), {:information, char_id})
   def double_click(map_id, char_id, x, y), do: GenServer.cast(via(map_id), {:double_click, char_id, x, y})
   def snapshot_entity(map_id, char_id), do: GenServer.call(via(map_id), {:snapshot, char_id})
   def snapshot_npc(map_id, instance_id), do: GenServer.call(via(map_id), {:snapshot_npc, instance_id})
@@ -649,6 +650,8 @@ defmodule Arena.Map.MapServer do
   def handle_cast({:request_skills, char_id}, state), do: Social.handle_request_skills(state, char_id)
   @impl true
   def handle_cast({:request_mini_stats, char_id}, state), do: Social.handle_request_mini_stats(state, char_id)
+  @impl true
+  def handle_cast({:information, char_id}, state), do: NpcInteraction.handle_information(state, char_id)
   @impl true
   def handle_cast({:double_click, char_id, x, y}, state), do: NpcInteraction.handle_double_click(state, char_id, x, y)
   @impl true

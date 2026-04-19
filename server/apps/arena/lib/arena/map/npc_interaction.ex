@@ -28,6 +28,51 @@ defmodule Arena.Map.NpcInteraction do
   defp msg(state, char_id, message), do: Helpers.msg(state, char_id, message)
   defdelegate find_nearby_npc_of_type(state, entity, npc_types), to: Helpers
 
+  @doc """
+  Handle the eInformation packet (VB6: HandleInformation).
+
+  VB6 behaviour: enlistador-specific flow — validates nearby enlistador NPC
+  within range 4, checks player alive, then shows faction-specific duty messages.
+  """
+  def handle_information(state, char_id) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        if entity.dead do
+          msg(state, char_id, "Estas muerto!")
+          {:noreply, state}
+        else
+          case Helpers.find_nearby_npc_of_type(state, entity, [@npc_type_enlistador], 4) do
+            {:ok, _npc, npc_def} ->
+              npc_faction = npc_faccion_to_atom(npc_def.faccion)
+
+              cond do
+                npc_faction == :royal_army and entity.faction == :royal_army ->
+                  msg(state, char_id, "Tu deber es luchar contra criminales, cada 100 criminales derrotados recibes recompensa")
+                  {:noreply, state}
+
+                npc_faction == :chaos_legion and entity.faction == :chaos_legion ->
+                  msg(state, char_id, "Tu deber es sembrar caos y desesperacion, cada 100 ciudadanos derrotados recibes recompensa")
+                  {:noreply, state}
+
+                true ->
+                  msg(state, char_id, "No perteneces a esta faccion!")
+                  {:noreply, state}
+              end
+
+            :not_found ->
+              {:noreply, state}
+          end
+        end
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  defp npc_faccion_to_atom(3), do: :royal_army
+  defp npc_faccion_to_atom(2), do: :chaos_legion
+  defp npc_faccion_to_atom(_), do: :none
+
   def handle_double_click(state, char_id, x, y) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
@@ -701,7 +746,7 @@ defmodule Arena.Map.NpcInteraction do
         Helpers.send_to_session(
           state.sessions,
           char_id,
-          {:send_raw, Encoder.encode({:npc_quest_list_send, npc_quest_params})}
+          {:send_raw, Encoder.encode({:npc_quest_list_send, %{quests: npc_quest_params}})}
         )
 
         entity = %{entity | quest_npc_id: npc_def.id}

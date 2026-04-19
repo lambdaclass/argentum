@@ -5,6 +5,8 @@ defmodule Arena.Map.QuestHandlers do
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
+  @npc_type_quest 17
+
   defp msg(state, char_id, message), do: Helpers.msg(state, char_id, message)
 
   @doc "Handle quest list request: send the player their active quests."
@@ -137,8 +139,86 @@ defmodule Arena.Map.QuestHandlers do
     end
   end
 
-  @doc "Handle the quest button click: opens quest list or NPC quest interaction."
+  @doc """
+  Handle the eQuest packet (VB6: HandleQuest).
+
+  VB6 behaviour: find a nearby quest NPC within range 5 and show that NPC's
+  available quests. If no quest NPC is nearby, send an error message.
+  """
   def handle_quest(state, char_id) do
-    handle_quest_list_request(state, char_id)
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        case Helpers.find_nearby_npc_of_type(state, entity, [@npc_type_quest], 5) do
+          {:ok, _npc, npc_def} ->
+            quest_ids_set = MapSet.new(npc_def.quest_numbers)
+
+            completable =
+              entity.active_quests
+              |> Enum.with_index()
+              |> Enum.filter(fn {aq, idx} ->
+                MapSet.member?(quest_ids_set, aq.quest_id) and
+                  Arena.QuestServer.quest_complete?(entity, idx)
+              end)
+
+            if completable != [] do
+              {aq, slot} = hd(completable)
+              quest_def = GameData.get_quest(aq.quest_id)
+              updated_entity = Arena.QuestServer.complete_quest(entity, slot)
+
+              if updated_entity != entity and quest_def != nil do
+                if quest_def.desc_final != "" do
+                  msg(state, char_id, npc_def.name <> " dice: " <> quest_def.desc_final)
+                end
+
+                if quest_def.reward_gld > 0 do
+                  msg(state, char_id, "Recibiste #{quest_def.reward_gld} monedas de oro.")
+
+                  Helpers.send_to_session(
+                    state.sessions,
+                    char_id,
+                    {:send_raw,
+                     Encoder.encode({:update_gold, %{gold: updated_entity.gold}})}
+                  )
+                end
+
+                if quest_def.reward_exp > 0 do
+                  msg(state, char_id, "Recibiste #{quest_def.reward_exp} puntos de experiencia.")
+                end
+
+                state = put_in(state.players[char_id], updated_entity)
+                {:noreply, state}
+              else
+                msg(state, char_id, "No se pudo completar la mision.")
+                {:noreply, state}
+              end
+            else
+              available = Arena.QuestServer.available_quests_for_npc(entity, npc_def)
+
+              if available == [] do
+                msg(state, char_id, npc_def.name <> " dice: No tengo misiones disponibles para ti.")
+                {:noreply, state}
+              else
+                npc_quest_params = Arena.QuestServer.build_npc_quest_list(available)
+
+                Helpers.send_to_session(
+                  state.sessions,
+                  char_id,
+                  {:send_raw, Encoder.encode({:npc_quest_list_send, %{quests: npc_quest_params}})}
+                )
+
+                entity = %{entity | quest_npc_id: npc_def.id}
+                state = put_in(state.players[char_id], entity)
+                {:noreply, state}
+              end
+            end
+
+          :not_found ->
+            msg(state, char_id, "No hay un NPC de misiones cerca.")
+            {:noreply, state}
+        end
+
+      :error ->
+        {:noreply, state}
+    end
   end
 end

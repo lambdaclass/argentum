@@ -467,13 +467,7 @@ defmodule AoTcpGateway.SessionLogic do
   end
 
   def handle_command(state, {:information, _}) when state.character_id != nil do
-    Arena.Map.MapServer.double_click(
-      state.map_id,
-      state.character_id,
-      state.target_x,
-      state.target_y
-    )
-
+    Arena.Map.MapServer.information(state.map_id, state.character_id)
     {state, []}
   end
 
