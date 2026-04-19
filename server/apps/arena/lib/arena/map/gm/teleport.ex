@@ -3,6 +3,11 @@ defmodule Arena.Map.Gm.Teleport do
 
   alias Arena.AuditLog
   alias Arena.Map.Helpers
+  alias Arena.Map.Gm.Permissions
+
+  # VB6 parity: high-tier GMs (admin, dios, semi_dios) can /GOTO anyone.
+  # Lower-tier GMs (consejero) can only /GOTO players with active SOS requests.
+  @high_tier_for_goto :semi_dios
 
   def gm_teleport(state, char_id, entity, map_str, x_str, y_str) do
     with {map_id, ""} <- Integer.parse(map_str),
@@ -22,19 +27,14 @@ defmodule Arena.Map.Gm.Teleport do
   def gm_goto(state, char_id, entity, target_name) do
     case Helpers.find_player_by_name(state, target_name) do
       {:ok, _target_id, target} ->
-        AuditLog.log_gm_action(char_id, "goto", target.name)
-
-        if target.map_id == entity.map_id do
-          Helpers.send_to_session(state.sessions, char_id, {:transfer, entity.map_id, target.x, target.y, entity})
-          Helpers.gm_console(state, char_id, "Teleporting to #{target.name} at (#{target.x}, #{target.y})...")
-          {:noreply, state}
+        # VB6 parity (Protocol_GmCommands.bas:367): lower-tier GMs need Ayuda.Existe(username)
+        if goto_allowed?(entity, target_name) do
+          do_goto(state, char_id, entity, target)
         else
-          Helpers.send_to_session(state.sessions, char_id, {:transfer, target.map_id, target.x, target.y, entity})
-
           Helpers.gm_console(
             state,
             char_id,
-            "Teleporting to #{target.name} on map #{target.map_id} (#{target.x}, #{target.y})..."
+            "No podes ir cerca de ningun Usuario si no pidio SOS."
           )
 
           {:noreply, state}
@@ -43,6 +43,45 @@ defmodule Arena.Map.Gm.Teleport do
       :not_found ->
         Helpers.gm_console(state, char_id, "Player '#{target_name}' not found on this map.")
         {:noreply, state}
+    end
+  end
+
+  defp goto_allowed?(entity, target_name) do
+    Permissions.has_tier?(entity, @high_tier_for_goto) or
+      AoSession.SosQueue.has_request?(target_name)
+  end
+
+  defp do_goto(state, char_id, entity, target) do
+    AuditLog.log_gm_action(char_id, "goto", target.name)
+
+    if target.map_id == entity.map_id do
+      Helpers.send_to_session(
+        state.sessions,
+        char_id,
+        {:transfer, entity.map_id, target.x, target.y, entity}
+      )
+
+      Helpers.gm_console(
+        state,
+        char_id,
+        "Teleporting to #{target.name} at (#{target.x}, #{target.y})..."
+      )
+
+      {:noreply, state}
+    else
+      Helpers.send_to_session(
+        state.sessions,
+        char_id,
+        {:transfer, target.map_id, target.x, target.y, entity}
+      )
+
+      Helpers.gm_console(
+        state,
+        char_id,
+        "Teleporting to #{target.name} on map #{target.map_id} (#{target.x}, #{target.y})..."
+      )
+
+      {:noreply, state}
     end
   end
 

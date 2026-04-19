@@ -110,7 +110,7 @@ defmodule AoTcpGateway.SupportRequestRateLimitTest do
       gm_pid = gm_probe(:gm)
 
       AoSession.OnlineDirectory.register(70001, "RolePlayer", 1, self())
-      AoSession.OnlineDirectory.register(70099, "GMAdmin", 1, gm_pid, is_gm: true)
+      AoSession.OnlineDirectory.register(70099, "GMAdmin", 1, gm_pid, is_gm: true, role_master: true)
 
       on_exit(fn ->
         AoSession.OnlineDirectory.unregister(70001)

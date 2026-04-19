@@ -478,14 +478,38 @@ defmodule AoTcpGateway.SessionCommands.Gm do
   # underlying queue is not yet implemented — support requests go to Logger only.
 
   def handle_command(state, {:sos_show_list, _}) do
-    {state, [{:console_msg, %{message: "Lista de SOS: (vacia)", font_index: 0}}]}
+    requests = AoSession.SosQueue.list_requests()
+
+    if requests == [] do
+      {state, [{:console_msg, %{message: "Lista de SOS: (vacia)", font_index: 0}}]}
+    else
+      header = {:console_msg, %{message: "Lista de SOS (#{length(requests)}):", font_index: 0}}
+
+      entries =
+        requests
+        |> Enum.with_index(1)
+        |> Enum.map(fn {req, idx} ->
+          {:console_msg,
+           %{message: "#{idx}. #{req.name}: #{req.message}", font_index: 0}}
+        end)
+
+      {state, [header | entries]}
+    end
   end
 
-  def handle_command(state, {:sos_remove, %{name: _name}}) do
-    {state, [{:console_msg, %{message: "SOS removido.", font_index: 0}}]}
+  def handle_command(state, {:sos_remove, %{name: name}}) do
+    case AoSession.SosQueue.remove_request(name) do
+      :ok ->
+        {state, [{:console_msg, %{message: "SOS de #{name} removido.", font_index: 0}}]}
+
+      {:error, :not_found} ->
+        {state,
+         [{:console_msg, %{message: "No se encontro SOS de #{name}.", font_index: 0}}]}
+    end
   end
 
   def handle_command(state, {:clean_sos, _}) do
+    AoSession.SosQueue.clear()
     {state, [{:console_msg, %{message: "Lista de SOS limpiada.", font_index: 0}}]}
   end
 

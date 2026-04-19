@@ -68,7 +68,7 @@ defmodule AoTcpGateway.RoleMasterRequestTest do
         end)
 
       AoSession.OnlineDirectory.register(70001, "TestPlayer", 1, self())
-      AoSession.OnlineDirectory.register(70099, "GMAdmin", 1, gm_pid, is_gm: true)
+      AoSession.OnlineDirectory.register(70099, "GMAdmin", 1, gm_pid, is_gm: true, role_master: true)
 
       on_exit(fn ->
         AoSession.OnlineDirectory.unregister(70001)

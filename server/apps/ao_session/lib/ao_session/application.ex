@@ -8,6 +8,7 @@ defmodule AoSession.Application do
     children = [
       {Registry, keys: :unique, name: AoSession.SessionRegistry},
       AoSession.OnlineDirectory,
+      AoSession.SosQueue,
       AoSession.SessionMonitor
     ]
 

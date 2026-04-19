@@ -812,7 +812,10 @@ defmodule AoTcpGateway.SessionLogic do
 
   # ---- Support ----
 
-  @support_cooldown_ms 30_000
+  # VB6 parity: IntervaloConsultaGM = 300000 (5 minutes)
+  @question_gm_cooldown_ms 300_000
+  # Role master requests have their own separate cooldown
+  @role_master_cooldown_ms 300_000
 
   def handle_command(state, {:role_master_request, %{request: request}})
       when state.character_id != nil do
@@ -820,7 +823,7 @@ defmodule AoTcpGateway.SessionLogic do
       request == "" ->
         {state, []}
 
-      support_rate_limited?(state.character_id) ->
+      role_master_rate_limited?(state.character_id) ->
         {state,
          [
            {:console_msg,
@@ -835,7 +838,8 @@ defmodule AoTcpGateway.SessionLogic do
             {:console_msg, %{message: "#{player_name} PREGUNTA ROL: #{request}", font_index: 3}}
           )
 
-        AoSession.OnlineDirectory.broadcast_to_gms({:send_raw, raw})
+        # VB6 parity: SendTarget.ToRolesMasters (not all GMs)
+        AoSession.OnlineDirectory.broadcast_to_role_masters({:send_raw, raw})
         {state, [{:console_msg, %{message: "Su solicitud ha sido enviada.", font_index: 0}}]}
     end
   end
@@ -846,7 +850,7 @@ defmodule AoTcpGateway.SessionLogic do
       consulta == "" ->
         {state, []}
 
-      support_rate_limited?(state.character_id) ->
+      question_gm_rate_limited?(state.character_id) ->
         {state,
          [
            {:console_msg,
@@ -866,6 +870,10 @@ defmodule AoTcpGateway.SessionLogic do
           )
 
         AoSession.OnlineDirectory.broadcast_to_gms({:send_raw, raw})
+
+        # VB6 parity: Ayuda.Push (enqueue into SOS queue)
+        AoSession.SosQueue.add_request(state.character_id, player_name, consulta)
+
         Logger.info("QuestionGM from #{player_name} (#{tipo}): #{consulta}")
 
         {state,
@@ -885,21 +893,31 @@ defmodule AoTcpGateway.SessionLogic do
 
   # ---- Private helpers ----
 
-  defp support_rate_limited?(char_id) do
+  # Separate cooldown for QuestionGM (VB6: IntervaloConsultaGM = 300_000ms)
+  defp question_gm_rate_limited?(char_id) do
+    rate_limited?(char_id, :ao_question_gm_cooldown, @question_gm_cooldown_ms)
+  end
+
+  # Separate cooldown for RoleMasterRequest
+  defp role_master_rate_limited?(char_id) do
+    rate_limited?(char_id, :ao_role_master_cooldown, @role_master_cooldown_ms)
+  end
+
+  defp rate_limited?(char_id, table_name, cooldown_ms) do
     try do
-      :ets.new(:ao_support_rate_limit, [:named_table, :public, :set])
+      :ets.new(table_name, [:named_table, :public, :set])
     catch
       :error, :badarg -> :ok
     end
 
     now = System.monotonic_time(:millisecond)
 
-    case :ets.lookup(:ao_support_rate_limit, char_id) do
-      [{^char_id, last_at}] when now - last_at < @support_cooldown_ms ->
+    case :ets.lookup(table_name, char_id) do
+      [{^char_id, last_at}] when now - last_at < cooldown_ms ->
         true
 
       _ ->
-        :ets.insert(:ao_support_rate_limit, {char_id, now})
+        :ets.insert(table_name, {char_id, now})
         false
     end
   end
