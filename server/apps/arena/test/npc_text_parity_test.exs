@@ -247,7 +247,15 @@ defmodule Arena.NpcTextParityTest do
       {win_msgs, loss_msgs} =
         Enum.reduce(1..40, {win_msgs, loss_msgs}, fn _, {wins, losses} ->
           # Reset entity gold each iteration to avoid running out
-          fresh_entity = make_entity(%{gold: 5000, gamble_wins: 0, gamble_losses: 0, gamble_plays: 0})
+          fresh_entity =
+            make_entity(%{
+              gold: 5000,
+              gamble_wins: 0,
+              gamble_losses: 0,
+              gamble_plays: 0,
+              last_clicked_npc_instance_id: :timbero,
+              last_clicked_npc_type: 6
+            })
           fresh_state = make_map_state(fresh_entity, %{timbero: timbero})
           drain_messages()
 

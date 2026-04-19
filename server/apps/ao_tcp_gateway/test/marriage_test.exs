@@ -66,7 +66,9 @@ defmodule AoTcpGateway.MarriageTest do
         x: 50,
         y: 51,
         spouse_id: 0,
-        marriage_proposal_target: nil
+        marriage_proposal_target: nil,
+        last_clicked_npc_instance_id: 1001,
+        last_clicked_npc_type: 1
       }
 
       player_b = %AoEntities.PlayerEntity{
@@ -76,7 +78,9 @@ defmodule AoTcpGateway.MarriageTest do
         x: 50,
         y: 52,
         spouse_id: 0,
-        marriage_proposal_target: nil
+        marriage_proposal_target: nil,
+        last_clicked_npc_instance_id: 1001,
+        last_clicked_npc_type: 1
       }
 
       me = self()
@@ -98,6 +102,20 @@ defmodule AoTcpGateway.MarriageTest do
 
       assert new_state.players[1].spouse_id == 0
       assert new_state.players[2].spouse_id == 0
+    end
+
+    test "proposal without selected priest is rejected", %{state: state} do
+      state =
+        put_in(
+          state.players[1],
+          %{state.players[1] | last_clicked_npc_instance_id: nil, last_clicked_npc_type: nil}
+        )
+
+      {:noreply, new_state} = Arena.Map.Social.handle_propose_marriage(state, 1, 2)
+
+      assert new_state.players[1].spouse_id == 0
+      assert new_state.players[2].spouse_id == 0
+      assert new_state.players[1].marriage_proposal_target == nil
     end
 
     test "cannot marry yourself", %{state: state} do

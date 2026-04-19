@@ -498,7 +498,7 @@ defmodule Arena.Map.Social do
   end
 
   defp do_propose_marriage(state, char_id, entity, target_char_id, target_entity) do
-    priest_result = Helpers.resolve_nearby_npc(state, entity, [@npc_type_revividor], 10)
+    priest_result = Helpers.resolve_selected_npc(state, entity, [@npc_type_revividor], 10)
 
     cond do
       # Must be near a priest
@@ -506,7 +506,7 @@ defmodule Arena.Map.Social do
         msg(state, char_id, "Primero haz click sobre un sacerdote.")
         {:noreply, state}
 
-      # Priest too far (resolve_nearby_npc checks VB6 Distancia <= 10)
+      # Priest too far (resolve_selected_npc checks VB6 Distancia <= 10)
       # If we got here, priest is nearby. Check other conditions.
 
       # Cannot marry yourself

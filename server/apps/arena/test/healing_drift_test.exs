@@ -210,13 +210,35 @@ defmodule Arena.HealingDriftTest do
   #   Then Exit Sub
   # ==================================================================
   describe "Drift #22: heal blocked in jail map" do
+    test "heal requires selected priest even when one is nearby" do
+      revividor_npc = %{npc_id: 500, x: 51, y: 50, instance_id: :rev1}
+
+      state =
+        make_state(
+          %{hp: 50, max_hp: 100, map_id: 1},
+          npcs_live: %{rev1: revividor_npc},
+          map_id: 1
+        )
+
+      {:noreply, new_state} = Healing.handle_heal(state, :player)
+
+      assert new_state.players[:player].hp == 50,
+             "heal should reject when priest is nearby but not selected"
+    end
+
     test "revividor NPC heal is blocked when player is on jail map" do
       # Jail map is map_id 66 (from Arena.Map.Gm.Moderation @jail_map_id)
       revividor_npc = %{npc_id: 500, x: 51, y: 50, instance_id: :rev1}
 
       state =
         make_state(
-          %{hp: 50, max_hp: 100, map_id: @jail_map_id},
+          %{
+            hp: 50,
+            max_hp: 100,
+            map_id: @jail_map_id,
+            last_clicked_npc_instance_id: :rev1,
+            last_clicked_npc_type: @npc_type_revividor
+          },
           npcs_live: %{rev1: revividor_npc},
           map_id: @jail_map_id
         )
@@ -233,7 +255,13 @@ defmodule Arena.HealingDriftTest do
 
       state =
         make_state(
-          %{hp: 50, max_hp: 100, map_id: 1},
+          %{
+            hp: 50,
+            max_hp: 100,
+            map_id: 1,
+            last_clicked_npc_instance_id: :rev1,
+            last_clicked_npc_type: @npc_type_revividor
+          },
           npcs_live: %{rev1: revividor_npc},
           map_id: 1
         )
@@ -256,7 +284,15 @@ defmodule Arena.HealingDriftTest do
 
       state =
         make_state(
-          %{dead: true, hp: 0, max_hp: 100, mana: 150, max_mana: 200},
+          %{
+            dead: true,
+            hp: 0,
+            max_hp: 100,
+            mana: 150,
+            max_mana: 200,
+            last_clicked_npc_instance_id: :rev1,
+            last_clicked_npc_type: @npc_type_revividor
+          },
           npcs_live: %{rev1: revividor_npc}
         )
 

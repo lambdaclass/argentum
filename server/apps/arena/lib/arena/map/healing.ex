@@ -14,6 +14,15 @@ defmodule Arena.Map.Healing do
   # VB6: HayOBJarea checks within 8 tiles
   @fogata_radius 8
 
+  defp selected_priest(state, entity, max_distance) do
+    Helpers.resolve_selected_npc(
+      state,
+      entity,
+      [@npc_type_revividor, @npc_type_resucitador_newbie],
+      max_distance
+    )
+  end
+
   def handle_rest(state, char_id) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
@@ -168,12 +177,7 @@ defmodule Arena.Map.Healing do
           true ->
             # VB6: heal is NPC interaction -- full heal from Revividor NPC.
             # VB6: If .pos.Map = MAP_HOME_IN_JAIL And NpcList(...).npcType = Revividor Then Exit Sub
-            case Helpers.resolve_nearby_npc(
-                   state,
-                   entity,
-                   [@npc_type_revividor, @npc_type_resucitador_newbie],
-                   10
-                 ) do
+            case selected_priest(state, entity, 10) do
               {:ok, _npc, npc_def} ->
                 cond do
                   # VB6: If .pos.Map = MAP_HOME_IN_JAIL And NpcList(...).npcType = Revividor Then Exit Sub
@@ -243,12 +247,7 @@ defmodule Arena.Map.Healing do
       {:ok, entity} ->
         if entity.dead do
           # VB6: resurrection requires Revividor NPC nearby
-          case Helpers.resolve_nearby_npc(
-                 state,
-                 entity,
-                 [@npc_type_revividor, @npc_type_resucitador_newbie],
-                 10
-               ) do
+          case selected_priest(state, entity, 10) do
             {:ok, _npc, npc_def} ->
               # VB6: ResucitadorNewbie only serves newbies (level <= 12)
               if npc_def.npc_type == @npc_type_resucitador_newbie and entity.level > 12 do

@@ -144,7 +144,7 @@ defmodule Arena.Map.Training do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         trainer =
-          case Helpers.resolve_nearby_npc(state, entity, [@npc_type_entrenador], 10) do
+          case Helpers.resolve_selected_npc(state, entity, [@npc_type_entrenador], 10) do
             {:ok, _npc, npc_def} -> npc_def
             :not_found -> nil
           end

@@ -197,7 +197,13 @@ defmodule Arena.BugRegressionTest do
 
   describe "BUG 4: gamble requires nearby timbero NPC" do
     test "gamble without any NPC nearby is rejected" do
-      entity = make_entity(%{char_id: :player, gold: 100})
+      entity =
+        make_entity(%{
+          char_id: :player,
+          gold: 100,
+          last_clicked_npc_instance_id: :npc1,
+          last_clicked_npc_type: 6
+        })
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{})
 

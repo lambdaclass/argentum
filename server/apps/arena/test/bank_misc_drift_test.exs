@@ -242,13 +242,33 @@ defmodule Arena.BankMiscDriftTest do
   # ═══════════════════════════════════════════════════════════════════════════
 
   describe "T6: handle_train_list range should be 10, not 5" do
+    test "trainer list requires selected trainer even when one is nearby" do
+      trainer_npc_id = find_trainer_npc_id()
+      assert trainer_npc_id != nil
+
+      trainer = %{npc_id: trainer_npc_id, x: 50, y: 50, instance_id: :trainer_1}
+      entity = make_entity(%{x: 56, y: 50})
+      state = make_map_state(entity, npcs_live: %{trainer_1: trainer})
+
+      assert :not_found =
+               Helpers.resolve_selected_npc(state, entity, [@npc_type_entrenador], 10)
+
+      {:noreply, _state} = NpcInteraction.handle_train_list(state, :player)
+    end
+
     test "trainer at distance 6 should produce a creature list (VB6 allows <= 10)" do
       trainer_npc_id = find_trainer_npc_id()
       assert trainer_npc_id != nil, "Need a trainer NPC in game data"
 
       # Trainer at (50, 50), player at (56, 50) — distance 6 Chebyshev
       trainer = %{npc_id: trainer_npc_id, x: 50, y: 50, instance_id: :trainer_1}
-      entity = make_entity(%{x: 56, y: 50})
+      entity =
+        make_entity(%{
+          x: 56,
+          y: 50,
+          last_clicked_npc_instance_id: :trainer_1,
+          last_clicked_npc_type: @npc_type_entrenador
+        })
       state = make_map_state(entity, npcs_live: %{trainer_1: trainer})
 
       {:noreply, _state} = NpcInteraction.handle_train_list(state, :player)
@@ -267,7 +287,13 @@ defmodule Arena.BankMiscDriftTest do
       assert trainer_npc_id != nil
 
       trainer = %{npc_id: trainer_npc_id, x: 50, y: 50, instance_id: :trainer_1}
-      entity = make_entity(%{x: 60, y: 50})
+      entity =
+        make_entity(%{
+          x: 60,
+          y: 50,
+          last_clicked_npc_instance_id: :trainer_1,
+          last_clicked_npc_type: @npc_type_entrenador
+        })
       state = make_map_state(entity, npcs_live: %{trainer_1: trainer})
 
       # Call handle_train_list — it uses an inline range check.
@@ -276,24 +302,15 @@ defmodule Arena.BankMiscDriftTest do
       # with a range check. If trainer is found AND has creatures, a packet is sent.
       # We test by using the same inline logic the function uses.
 
-      # Direct test: replicate the trainer lookup logic
+      # Direct test: selected trainer lookup with VB6 distance 10
       trainer_def = GameData.get_npc(trainer_npc_id)
       assert trainer_def != nil
 
-      found =
-        Enum.find_value(state.npcs_live, fn {_id, npc} ->
-          npc_def = GameData.get_npc(npc.npc_id)
-
-          if npc_def != nil and
-               npc_def.npc_type == @npc_type_entrenador and
-               abs(npc.x - entity.x) <= 10 and
-               abs(npc.y - entity.y) <= 10 do
-            npc_def
-          end
-        end)
+      assert {:ok, _npc, found} =
+               Helpers.resolve_selected_npc(state, entity, [@npc_type_entrenador], 10)
 
       assert found != nil,
-             "Trainer at distance 10 should be found with range 10 (VB6 Distancia <= 10)"
+             "Selected trainer at distance 10 should be found with VB6 Distancia <= 10"
 
       # Now verify the actual function also finds it by calling it
       {:noreply, _state} = NpcInteraction.handle_train_list(state, :player)

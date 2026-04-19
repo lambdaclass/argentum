@@ -245,7 +245,7 @@ defmodule Arena.Map.NpcInteraction do
             {:noreply, state}
 
           true ->
-            case Helpers.resolve_nearby_npc(state, entity, [@npc_type_timbero], 10) do
+            case Helpers.resolve_selected_npc(state, entity, [@npc_type_timbero], 10) do
               :not_found ->
                 msg(state, char_id, "No hay un timbero cerca.")
                 {:noreply, state}
@@ -316,7 +316,7 @@ defmodule Arena.Map.NpcInteraction do
             {:noreply, state}
 
           true ->
-            case find_nearby_priest(state, entity) do
+            case find_selected_priest(state, entity) do
               :not_found ->
                 msg(state, char_id, "Necesitas estar cerca de un sacerdote.")
                 {:noreply, state}
@@ -361,9 +361,9 @@ defmodule Arena.Map.NpcInteraction do
     end
   end
 
-  # Find a priest within VB6 range (Distancia <= 3)
-  defp find_nearby_priest(state, entity) do
-    Helpers.resolve_nearby_npc(
+  # Find the selected priest within VB6 range (Distancia <= 3)
+  defp find_selected_priest(state, entity) do
+    Helpers.resolve_selected_npc(
       state,
       entity,
       [@npc_type_revividor, @npc_type_resucitador_newbie],

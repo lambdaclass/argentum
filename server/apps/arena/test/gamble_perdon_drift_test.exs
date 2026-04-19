@@ -201,8 +201,29 @@ defmodule Arena.GamblePerdonDriftTest do
   # ==================================================================
 
   describe "Drift #17: gambling win rate must be ~10%, not 50%" do
+    test "gamble is rejected when timbero is nearby but not selected" do
+      entity = make_entity(%{gold: 5_000})
+
+      state =
+        make_map_state_from(
+          %{player: entity},
+          sessions: %{player: self()},
+          npcs_live: %{timbero_inst: @timbero_npc}
+        )
+
+      {:noreply, new_state} = NpcInteraction.handle_gamble(state, :player, 100, nil)
+
+      assert new_state.players[:player].gold == 5_000
+      assert new_state.players[:player].gamble_plays == 0
+    end
+
     test "over 1000 gambles, win rate is approximately 10% (not 50%)" do
-      entity = make_entity(%{gold: 5_000_000})
+      entity =
+        make_entity(%{
+          gold: 5_000_000,
+          last_clicked_npc_instance_id: :timbero_inst,
+          last_clicked_npc_type: 6
+        })
       state = make_map_state_from(
         %{player: entity},
         sessions: %{player: self()},
@@ -245,7 +266,14 @@ defmodule Arena.GamblePerdonDriftTest do
     test "handle_forgive requires gold amount argument" do
       # VB6 HandleDonateGold takes a gold amount. The Elixir handler
       # must now accept (state, char_id, gold_amount).
-      entity = make_entity(%{criminal: true, gold: 50_000, citizens_killed: 0})
+      entity =
+        make_entity(%{
+          criminal: true,
+          gold: 50_000,
+          citizens_killed: 0,
+          last_clicked_npc_instance_id: :priest_inst,
+          last_clicked_npc_type: 1
+        })
       state = make_map_state_from(
         %{player: entity},
         sessions: %{player: self()},
@@ -261,7 +289,14 @@ defmodule Arena.GamblePerdonDriftTest do
     end
 
     test "forgive deducts gold from player" do
-      entity = make_entity(%{criminal: true, gold: 50_000, citizens_killed: 0})
+      entity =
+        make_entity(%{
+          criminal: true,
+          gold: 50_000,
+          citizens_killed: 0,
+          last_clicked_npc_instance_id: :priest_inst,
+          last_clicked_npc_type: 1
+        })
       state = make_map_state_from(
         %{player: entity},
         sessions: %{player: self()},
@@ -276,7 +311,14 @@ defmodule Arena.GamblePerdonDriftTest do
     test "forgive rejected when donated gold is below threshold (citizens_killed > 0)" do
       # VB6: donation = citizens_killed * GoldMult * CostoPerdonPorCiudadano
       # With citizens_killed = 5, GoldMult = 1, CostoPorCiudadano = 5000 → 25000 required
-      entity = make_entity(%{criminal: true, gold: 50_000, citizens_killed: 5})
+      entity =
+        make_entity(%{
+          criminal: true,
+          gold: 50_000,
+          citizens_killed: 5,
+          last_clicked_npc_instance_id: :priest_inst,
+          last_clicked_npc_type: 1
+        })
       state = make_map_state_from(
         %{player: entity},
         sessions: %{player: self()},
@@ -293,7 +335,14 @@ defmodule Arena.GamblePerdonDriftTest do
 
     test "forgive rejected when donated gold is below threshold (citizens_killed == 0)" do
       # VB6: donation = CostoPerdonPorCiudadano / 2 = 2500
-      entity = make_entity(%{criminal: true, gold: 50_000, citizens_killed: 0})
+      entity =
+        make_entity(%{
+          criminal: true,
+          gold: 50_000,
+          citizens_killed: 0,
+          last_clicked_npc_instance_id: :priest_inst,
+          last_clicked_npc_type: 1
+        })
       state = make_map_state_from(
         %{player: entity},
         sessions: %{player: self()},
@@ -307,7 +356,14 @@ defmodule Arena.GamblePerdonDriftTest do
     end
 
     test "forgive rejected when player has insufficient gold" do
-      entity = make_entity(%{criminal: true, gold: 100, citizens_killed: 0})
+      entity =
+        make_entity(%{
+          criminal: true,
+          gold: 100,
+          citizens_killed: 0,
+          last_clicked_npc_instance_id: :priest_inst,
+          last_clicked_npc_type: 1
+        })
       state = make_map_state_from(
         %{player: entity},
         sessions: %{player: self()},
@@ -320,7 +376,14 @@ defmodule Arena.GamblePerdonDriftTest do
     end
 
     test "forgive blocked for :royal_army faction" do
-      entity = make_entity(%{criminal: true, gold: 50_000, faction: :royal_army})
+      entity =
+        make_entity(%{
+          criminal: true,
+          gold: 50_000,
+          faction: :royal_army,
+          last_clicked_npc_instance_id: :priest_inst,
+          last_clicked_npc_type: 1
+        })
       state = make_map_state_from(
         %{player: entity},
         sessions: %{player: self()},
@@ -333,7 +396,14 @@ defmodule Arena.GamblePerdonDriftTest do
     end
 
     test "forgive blocked for :chaos_legion faction" do
-      entity = make_entity(%{criminal: true, gold: 50_000, faction: :chaos_legion})
+      entity =
+        make_entity(%{
+          criminal: true,
+          gold: 50_000,
+          faction: :chaos_legion,
+          last_clicked_npc_instance_id: :priest_inst,
+          last_clicked_npc_type: 1
+        })
       state = make_map_state_from(
         %{player: entity},
         sessions: %{player: self()},
@@ -346,7 +416,14 @@ defmodule Arena.GamblePerdonDriftTest do
     end
 
     test "forgive blocked when priest is too far (range > 3)" do
-      entity = make_entity(%{criminal: true, gold: 50_000, citizens_killed: 0})
+      entity =
+        make_entity(%{
+          criminal: true,
+          gold: 50_000,
+          citizens_killed: 0,
+          last_clicked_npc_instance_id: :priest_far_inst,
+          last_clicked_npc_type: 1
+        })
       state = make_map_state_from(
         %{player: entity},
         sessions: %{player: self()},
@@ -360,7 +437,14 @@ defmodule Arena.GamblePerdonDriftTest do
 
     test "forgive works when priest is within range 3" do
       # Priest at (52, 50), player at (50, 50) → distance 2, within range 3
-      entity = make_entity(%{criminal: true, gold: 50_000, citizens_killed: 0})
+      entity =
+        make_entity(%{
+          criminal: true,
+          gold: 50_000,
+          citizens_killed: 0,
+          last_clicked_npc_instance_id: :priest_inst,
+          last_clicked_npc_type: 1
+        })
       state = make_map_state_from(
         %{player: entity},
         sessions: %{player: self()},
