@@ -16,7 +16,12 @@ defmodule AoTcpGateway.SessionTransfer do
   }
 
   @jail_map_id 66
-  @hogar_travel_delay_ms 10_000
+
+  # VB6 Hogar.bas:37-50 — GM gets 5s, non-GM user types have per-type timers
+  # (HomeTimerAdventurer, HomeTimerHero, HomeTimerLegend, HomeTimer).
+  # We only distinguish GM vs non-GM for now; default 10s for all non-GM.
+  @hogar_travel_delay_gm_ms 5_000
+  @hogar_travel_delay_default_ms 10_000
 
   # ---- Map transfer ----
 
@@ -164,6 +169,10 @@ defmodule AoTcpGateway.SessionTransfer do
       (entity.penalty || 0) > 0 ->
         {state, [{:console_msg, %{message: "No puedes usar este comando en prisión.", font_index: 0}}]}
 
+      # VB6 step 5: EnReto (duel) blocks /HOGAR (Protocol.bas:7439)
+      entity.in_duel ->
+        {state, [{:console_msg, %{message: "No podés regresar desde un reto. Usá /ABANDONAR para admitir la derrota y volver a la ciudad.", font_index: 0}}]}
+
       # VB6 step 7: already traveling — cancel the travel
       hogar_ref != nil ->
         Process.cancel_timer(hogar_ref)
@@ -186,7 +195,8 @@ defmodule AoTcpGateway.SessionTransfer do
             # Deduct gold (async cast — also sends :update_gold packet to client)
             Arena.Map.MapServer.modify_gold(state.map_id, state.character_id, -cost)
 
-            ref = Process.send_after(self(), :hogar_arrive, @hogar_travel_delay_ms)
+            delay = hogar_travel_delay(entity)
+            ref = Process.send_after(self(), :hogar_arrive, delay)
             state = Map.put(state, :hogar_timer_ref, ref)
 
             {state, [
@@ -241,6 +251,16 @@ defmodule AoTcpGateway.SessionTransfer do
         {:transfer, spawn.map, spawn.x, spawn.y, entity}
     end
   end
+
+  @doc """
+  VB6 Hogar.bas:37-50 travel delay in milliseconds.
+
+  GMs get 5 seconds; non-GM players get 10 seconds (default).
+  VB6 has per-user-type timers (HomeTimerAdventurer, HomeTimerHero,
+  HomeTimerLegend, HomeTimer) but we don't have those user types yet.
+  """
+  def hogar_travel_delay(%{gm: true}), do: @hogar_travel_delay_gm_ms
+  def hogar_travel_delay(_entity), do: @hogar_travel_delay_default_ms
 
   defp hogar_gold_cost(level) when level > 24, do: level * level
   defp hogar_gold_cost(level), do: level * 15 + trunc(:math.pow(level, 1.5))
