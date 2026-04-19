@@ -3,6 +3,7 @@ defmodule Arena.Map.Trade do
 
   alias Arena.Map.Helpers
   alias Arena.Inventory
+  alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
   @trade_max_items 6
@@ -24,6 +25,32 @@ defmodule Arena.Map.Trade do
           {:reply, {:error, :invalid_offer}, state}
         else
           inv_item = Enum.at(entity.inventory, slot_idx)
+          item_def = GameData.get_item(inv_item.item_id)
+
+          # VB6 parity: instransferible items cannot be traded
+          cond do
+            item_def != nil and Map.get(item_def, :instransferible, false) ->
+              Helpers.send_to_session(
+                state.sessions,
+                char_id,
+                {:send_raw,
+                 Encoder.encode({:console_msg, %{message: "No puedes comerciar objetos instransferibles.", font_index: 0}})}
+              )
+
+              {:reply, {:error, :untradeable}, state}
+
+            # VB6 parity: newbie items cannot be traded
+            item_def != nil and item_def.newbie ->
+              Helpers.send_to_session(
+                state.sessions,
+                char_id,
+                {:send_raw,
+                 Encoder.encode({:console_msg, %{message: "No puedes comerciar objetos newbies.", font_index: 0}})}
+              )
+
+              {:reply, {:error, :newbie_item}, state}
+
+            true ->
           item_tags = Map.get(inv_item, :elemental_tags, 0)
 
           # Check total already offered for this item
@@ -68,6 +95,7 @@ defmodule Arena.Map.Trade do
           state = %{state | players: players}
           send_trade_slot_update(state, char_id, entity)
           {:reply, :ok, state}
+          end
           end
         end
 
