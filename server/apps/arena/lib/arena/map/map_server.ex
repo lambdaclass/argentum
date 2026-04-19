@@ -174,6 +174,10 @@ defmodule Arena.Map.MapServer do
   def spawn_invasion_npc(map_id, npc_def, x, y),
     do: GenServer.call(via(map_id), {:spawn_invasion_npc, npc_def, x, y})
 
+  @doc "Despawn an event NPC by instance_id (permanent removal, no respawn). Returns :ok or {:error, reason}."
+  def despawn_event_npc(map_id, instance_id),
+    do: GenServer.call(via(map_id), {:despawn_event_npc, instance_id})
+
   def player_count(map_id), do: GenServer.call(via(map_id), :player_count)
 
   @doc "Return the zone string for the given map (e.g. \"NEWBIE\", \"CAMPO\", etc.)."
@@ -464,6 +468,18 @@ defmodule Arena.Map.MapServer do
       {:reply, {:ok, instance_id}, state}
     else
       {:reply, {:error, :tile_blocked}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:despawn_event_npc, instance_id}, _from, state) do
+    case Map.get(state.npcs_live, instance_id) do
+      nil ->
+        {:reply, {:error, :npc_not_found}, state}
+
+      npc ->
+        state = Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :gm, permanent: true)
+        {:reply, :ok, state}
     end
   end
 

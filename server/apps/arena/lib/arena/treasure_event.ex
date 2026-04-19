@@ -19,7 +19,11 @@ defmodule Arena.TreasureEvent do
   require Logger
 
   alias Arena.Data.GameData
+  alias Arena.Map.MapServer
   alias AoSession.OnlineDirectory
+
+  # 5 minutes TTL for NPC events to prevent drift (orphaned NPCs on map)
+  @npc_event_ttl_ms 300_000
 
   # ---- Public API ----
 
@@ -74,7 +78,8 @@ defmodule Arena.TreasureEvent do
   @impl true
   def init(_opts) do
     state = %{
-      active_event: nil
+      active_event: nil,
+      ttl_timer_ref: nil
     }
 
     {:ok, state}
@@ -89,7 +94,16 @@ defmodule Arena.TreasureEvent do
       case do_start_event(type) do
         {:ok, event} ->
           broadcast_event_start(event)
-          {:reply, :ok, %{state | active_event: event}}
+
+          # For NPC events, start a TTL timer to auto-despawn
+          ttl_timer_ref =
+            if event.type == :npc do
+              Process.send_after(self(), :npc_event_timeout, @npc_event_ttl_ms)
+            else
+              nil
+            end
+
+          {:reply, :ok, %{state | active_event: event, ttl_timer_ref: ttl_timer_ref}}
 
         {:error, reason} ->
           {:reply, {:error, reason}, state}
@@ -132,15 +146,67 @@ defmodule Arena.TreasureEvent do
   def handle_cast({:npc_killed, npc_instance_id}, state) do
     case state.active_event do
       %{type: :npc, npc_instance_id: ^npc_instance_id} ->
+        cancel_ttl_timer(state.ttl_timer_ref)
         broadcast_console_all("Eventos> El NPC del evento ha sido derrotado. Felicitaciones!")
-        {:noreply, %{state | active_event: nil}}
+        {:noreply, %{state | active_event: nil, ttl_timer_ref: nil}}
 
       _ ->
         {:noreply, state}
     end
   end
 
+  @impl true
+  def handle_info(:npc_event_timeout, state) do
+    case state.active_event do
+      %{type: :npc, map_id: map_id, npc_instance_id: npc_instance_id} ->
+        Logger.info("TreasureEvent: NPC event timed out, despawning NPC #{npc_instance_id} from map #{map_id}")
+        despawn_npc_from_map(map_id, npc_instance_id)
+        broadcast_console_all("Eventos> El tiempo del evento ha expirado. La criatura ha desaparecido.")
+        {:noreply, %{state | active_event: nil, ttl_timer_ref: nil}}
+
+      _ ->
+        # Stale timeout (event already ended or different type), ignore
+        {:noreply, state}
+    end
+  end
+
+  @impl true
+  def terminate(_reason, state) do
+    case state.active_event do
+      %{type: :npc, map_id: map_id, npc_instance_id: npc_instance_id} ->
+        Logger.info("TreasureEvent: shutting down, despawning event NPC #{npc_instance_id} from map #{map_id}")
+        despawn_npc_from_map(map_id, npc_instance_id)
+
+      _ ->
+        :ok
+    end
+
+    :ok
+  end
+
   # ---- Private ----
+
+  defp cancel_ttl_timer(nil), do: :ok
+
+  defp cancel_ttl_timer(ref) do
+    Process.cancel_timer(ref)
+    # Flush any already-delivered timeout message
+    receive do
+      :npc_event_timeout -> :ok
+    after
+      0 -> :ok
+    end
+  end
+
+  defp despawn_npc_from_map(map_id, npc_instance_id) do
+    try do
+      MapServer.despawn_event_npc(map_id, npc_instance_id)
+    rescue
+      _ -> :ok
+    catch
+      :exit, _ -> :ok
+    end
+  end
 
   defp do_start_event(:treasure) do
     config = GameData.get_treasure_config()
@@ -203,16 +269,23 @@ defmodule Arena.TreasureEvent do
     case config do
       %{npc_ids: npc_ids, npc_maps: npc_maps}
       when npc_ids != [] and npc_maps != [] ->
-        # VB6: SpawnNpc at center of random map
+        # VB6: SpawnNpc at center of random map (pos.x=50, pos.y=50)
         map_id = Enum.random(npc_maps)
-        _npc_id = Enum.random(npc_ids)
-        # NPC spawning would go through MapServer, simplified here
-        {:ok,
-         %{
-           type: :npc,
-           map_id: map_id,
-           npc_instance_id: nil
-         }}
+        npc_id = Enum.random(npc_ids)
+
+        case spawn_event_npc(map_id, npc_id) do
+          {:ok, npc_instance_id} ->
+            {:ok,
+             %{
+               type: :npc,
+               map_id: map_id,
+               npc_instance_id: npc_instance_id
+             }}
+
+          {:error, reason} ->
+            Logger.warning("TreasureEvent: failed to spawn NPC #{npc_id} on map #{map_id}: #{inspect(reason)}")
+            {:error, :npc_spawn_failed}
+        end
 
       _ ->
         {:error, :no_npc_config}
@@ -258,6 +331,42 @@ defmodule Arena.TreasureEvent do
       _ -> :ok
     catch
       :exit, _ -> :ok
+    end
+  end
+
+  # VB6: npc_index_evento = SpawnNpc(TesoroNPC(...), pos, True, False, True)
+  # Spawns the event NPC at the center of the map (50, 50) via MapServer.
+  # Falls back to nearby positions if center is blocked.
+  defp spawn_event_npc(map_id, npc_id) do
+    case GameData.get_npc(npc_id) do
+      nil ->
+        {:error, :npc_not_found}
+
+      npc_def ->
+        try_spawn_npc(map_id, npc_def, 50, 50, 20)
+    end
+  end
+
+  defp try_spawn_npc(_map_id, _npc_def, _x, _y, 0), do: {:error, :no_free_tile}
+
+  defp try_spawn_npc(map_id, npc_def, x, y, attempts) do
+    try do
+      case Arena.Map.MapServer.spawn_invasion_npc(map_id, npc_def, x, y) do
+        {:ok, instance_id} ->
+          {:ok, instance_id}
+
+        {:error, :tile_blocked} ->
+          nx = Enum.random(20..80)
+          ny = Enum.random(20..80)
+          try_spawn_npc(map_id, npc_def, nx, ny, attempts - 1)
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    rescue
+      e -> {:error, {:spawn_error, e}}
+    catch
+      :exit, reason -> {:error, {:exit, reason}}
     end
   end
 
