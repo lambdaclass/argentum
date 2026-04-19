@@ -320,7 +320,7 @@ defmodule Arena.Map.Gm.Events do
     faction_name =
       case faction do
         :royal_army -> "Armada Real"
-        :chaos_legion -> "Legion Oscura"
+        :chaos_legion -> "Legion del Caos"
       end
 
     raw =

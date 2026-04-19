@@ -296,7 +296,7 @@ defmodule Arena.Map.Gm.Moderation do
         target = %{target | faction: :none}
         players = Map.put(state.players, target_id, target)
         state = %{state | players: players}
-        label = if faction == :royal_army, do: "Armada Real", else: "Legion Oscura"
+        label = if faction == :royal_army, do: "Armada Real", else: "Legion del Caos"
         AuditLog.log_gm_action(char_id, "faction_kick", "#{target_name} from #{label}")
         Helpers.gm_console(state, char_id, "#{target_name} expelled from #{label}.")
         {:noreply, state}
