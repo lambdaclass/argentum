@@ -162,13 +162,13 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
   # ═══════════════════════════════════════════════════════════════════════════
 
   describe "bank radius drift: deposit gold after walking away" do
-    test "player who opened bank then walked 7+ tiles away cannot deposit gold" do
-      # Player initially at (50,50), banker at (51,50) — within range=6
-      # Player then "walks" to (58,50) — distance=7, exceeds the 6-tile radius
+    test "player who opened bank then walked 11+ tiles away cannot deposit gold" do
+      # Player initially at (50,50), banker at (51,50) — within range=10
+      # Player then "walks" to (58,50) — distance=11, exceeds the 10-tile radius
       entity =
         make_entity(%{
           char_id: :player,
-          x: 58,
+          x: 62,
           y: 50,
           bank_npc_id: :banker1,
           gold: 1000,
@@ -185,11 +185,11 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       assert new_state.players[:player].bank_gold == 500
     end
 
-    test "player who opened bank then walked 7+ tiles away cannot extract gold" do
+    test "player who opened bank then walked 11+ tiles away cannot extract gold" do
       entity =
         make_entity(%{
           char_id: :player,
-          x: 58,
+          x: 62,
           y: 50,
           bank_npc_id: :banker1,
           gold: 0,
@@ -205,13 +205,13 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       assert new_state.players[:player].bank_gold == 1000
     end
 
-    test "player at exactly 6 tiles from banker passes radius check" do
-      # Distance = 6 (boundary): 51 + 6 = 57
-      # validate_bank_session checks abs(entity.x - npc.x) > 6 — at exactly 6 it should pass.
+    test "player at exactly 10 tiles from banker passes radius check" do
+      # Distance = 10 (boundary): 51 + 10 = 61
+      # validate_bank_session checks abs(entity.x - npc.x) > 10 — at exactly 10 it should pass.
       entity =
         make_entity(%{
           char_id: :player,
-          x: 57,
+          x: 61,
           y: 50,
           bank_npc_id: :banker1,
           gold: 1000,
@@ -225,12 +225,12 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       assert Bank.validate_bank_session(state, entity) == :ok
     end
 
-    test "player at exactly 7 tiles from banker is rejected" do
-      # Distance = 7 (one tile past boundary)
+    test "player at exactly 11 tiles from banker is rejected" do
+      # Distance = 11 (one tile past VB6 Distancia boundary of 10)
       entity =
         make_entity(%{
           char_id: :player,
-          x: 58,
+          x: 62,
           y: 50,
           bank_npc_id: :banker1,
           gold: 1000,
@@ -252,7 +252,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       entity =
         make_entity(%{
           char_id: :player,
-          x: 58,
+          x: 62,
           y: 50,
           bank_npc_id: :banker1,
           gold: 1000,
@@ -272,7 +272,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       entity =
         make_entity(%{
           char_id: :player,
-          x: 58,
+          x: 62,
           y: 50,
           bank_npc_id: :banker1,
           gold: 0,

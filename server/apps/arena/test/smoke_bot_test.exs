@@ -209,6 +209,9 @@ defmodule Arena.SmokeBotTest do
       _player = enter_player(50050, "RestPlayer", %{x: 50, y: 50, hp: 50, max_hp: 100})
       flush_mailbox()
 
+      # Get actual position and place a campfire (VB6: resting requires nearby fogata)
+      {:ok, ent} = MapServer.snapshot_entity(@test_map_id, 50050)
+      MapServer.place_event_item(@test_map_id, ent.x, ent.y, 21, 1)
       MapServer.rest(@test_map_id, 50050)
       Process.sleep(100)
 
@@ -220,6 +223,9 @@ defmodule Arena.SmokeBotTest do
       _player = enter_player(50060, "RestMovePlayer", %{x: 50, y: 50, hp: 50, max_hp: 100})
       flush_mailbox()
 
+      # Get actual position and place a campfire (VB6: resting requires nearby fogata)
+      {:ok, ent} = MapServer.snapshot_entity(@test_map_id, 50060)
+      MapServer.place_event_item(@test_map_id, ent.x, ent.y, 21, 1)
       # Start resting
       MapServer.rest(@test_map_id, 50060)
       Process.sleep(100)

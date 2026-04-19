@@ -401,8 +401,8 @@ defmodule Arena.OcultoParityTest do
 
       successes = Enum.count(results, & &1)
 
-      # With skill=100, should always succeed (100% chance)
-      assert successes == 50
+      # With skill=100, VB6 cubic polynomial gives ~75% chance
+      assert successes >= 25, "With skill=100, at least half should succeed"
     end
   end
 

@@ -681,13 +681,15 @@ defmodule Arena.PetTamingExtendedTest do
         npc_char_indices: %{100 => 1, 200 => 2, 300 => 3}
       )
 
-      {:noreply, state} = Pets.handle_pet_stand(state, 7)
+      {:noreply, state} = Pets.handle_pet_stand(state, 7, 1)
+      {:noreply, state} = Pets.handle_pet_stand(state, 7, 2)
+      {:noreply, state} = Pets.handle_pet_stand(state, 7, 3)
 
       assert state.npcs_live[1].pet_mode == :stand
       assert state.npcs_live[2].pet_mode == :stand
       assert state.npcs_live[3].pet_mode == :stand
 
-      {:noreply, state} = Pets.handle_pet_follow(state, 7)
+      {:noreply, state} = Pets.handle_pet_follow_all(state, 7)
 
       assert state.npcs_live[1].pet_mode == :follow
       assert state.npcs_live[2].pet_mode == :follow
@@ -700,11 +702,11 @@ defmodule Arena.PetTamingExtendedTest do
 
       state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
 
-      {:noreply, state_after_stand} = Pets.handle_pet_stand(state, 7)
+      {:noreply, state_after_stand} = Pets.handle_pet_stand(state, 7, 1)
       assert state_after_stand.npcs_live[1].pet_mode == :follow,
              "Dead player's stand command should not change pet mode"
 
-      {:noreply, state_after_follow} = Pets.handle_pet_follow(state, 7)
+      {:noreply, state_after_follow} = Pets.handle_pet_follow(state, 7, 1)
       assert state_after_follow.npcs_live[1].pet_mode == :follow,
              "Dead player's follow command should not change pet mode"
     end

@@ -298,6 +298,12 @@ defmodule Arena.StubHandlersTest do
       _entity = enter_player(20015, "RestWalker", %{hp: 50, max_hp: 100, x: 30, y: 30})
       collect_messages(100)
 
+      # Get actual position (map may have redirected)
+      {:ok, ent} = MapServer.snapshot_entity(@test_map_id, 20015)
+
+      # Place a campfire at player's position (VB6: resting requires nearby fogata)
+      MapServer.place_event_item(@test_map_id, ent.x, ent.y, 21, 1)
+
       # Start resting
       MapServer.rest(@test_map_id, 20015)
       collect_messages(100)

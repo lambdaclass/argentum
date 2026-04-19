@@ -148,10 +148,10 @@ defmodule Arena.GamblingPriestArenaTest do
   # ---- Client decoder: forgive and arena_entry packets ----
 
   describe "client decoder for forgive and arena_entry" do
-    test "forgive packet (ID 68) decodes with no payload" do
-      # Build a minimal packet: ID 68 as Int16LE
-      packet = <<68::little-signed-16>>
-      assert {:ok, {:forgive, %{}}, <<>>} = AoProtocol.Client.Decoder.decode(packet)
+    test "forgive packet (ID 68) decodes with gold_amount payload" do
+      # Build a packet: ID 68 as Int16LE + gold_amount as Int32LE
+      packet = <<68::little-signed-16, 100::little-signed-32>>
+      assert {:ok, {:forgive, %{gold_amount: 100}}, <<>>} = AoProtocol.Client.Decoder.decode(packet)
     end
 
     test "arena_entry packet (ID 259) decodes with no payload" do
