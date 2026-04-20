@@ -631,6 +631,7 @@ defmodule Arena.CraftingTest do
       # Espada Matadragones (402) needs min_skill 100
       entity = %PlayerEntity{
         char_id: 1, dead: false, stamina: 100,
+        x: 50, y: 50,
         equipment: %{weapon: 389},
         skills: %{blacksmithing: 10},
         inventory: [%{item_id: 388, amount: 500, equipped: false} | List.duplicate(nil, 23)]
@@ -643,6 +644,7 @@ defmodule Arena.CraftingTest do
       # Lingote de Hierro (386) needs 2x iron ore (192)
       entity = %PlayerEntity{
         char_id: 1, dead: false, stamina: 100,
+        x: 50, y: 50,
         equipment: %{weapon: 389},
         skills: %{blacksmithing: 50},
         inventory: List.duplicate(nil, 24)
@@ -655,6 +657,7 @@ defmodule Arena.CraftingTest do
       # Lingote de Hierro (386) needs 2x iron ore (192), min_skill 0
       entity = %PlayerEntity{
         char_id: 1, dead: false, stamina: 100,
+        x: 50, y: 50,
         equipment: %{weapon: 389},
         skills: %{blacksmithing: 50},
         inventory: [%{item_id: 192, amount: 5, equipped: false} | List.duplicate(nil, 23)]
@@ -682,6 +685,7 @@ defmodule Arena.CraftingTest do
         char_id: 1,
         dead: false,
         stamina: 100,
+        x: 50, y: 50,
         equipment: %{weapon: 389},
         skills: %{blacksmithing: 50},
         inventory: [%{item_id: 192, amount: 5, equipped: false} | List.duplicate(nil, 23)]

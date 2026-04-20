@@ -202,7 +202,7 @@ defmodule Arena.BugRegressionTest do
           char_id: :player,
           gold: 100,
           last_clicked_npc_instance_id: :npc1,
-          last_clicked_npc_type: 6
+          last_clicked_npc_type: 10
         })
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{})
@@ -225,7 +225,7 @@ defmodule Arena.BugRegressionTest do
         npcs_live: %{npc1: timbero_npc}
       )
 
-      # We need a real NPC def with npc_type=6 (timbero). GameData may not have one,
+      # We need a real NPC def with npc_type=10 (timbero). GameData may not have one,
       # so we test the NPC lookup path. If no NPC def exists, it falls through.
       {:noreply, new_state} = NpcInteraction.handle_gamble(state, :player, 50, nil)
       # If GameData has no timbero NPC, it should reject (no timbero found)

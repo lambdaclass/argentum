@@ -122,12 +122,12 @@ defmodule Arena.MerchantParityTest do
       # Create a timbero NPC nearby
       timbero_npc = %{npc_id: 99999, x: 50, y: 51, instance_id: :timbero_inst}
 
-      # We need an NPC def that has npc_type 6 (timbero)
+      # We need an NPC def that has npc_type 10 (timbero/apostador in shipped data)
       # Insert a mock timbero NPC def into ETS
       timbero_def = %{
         npc_id: 99999,
         name: "Timbero",
-        npc_type: 6,
+        npc_type: 10,
         comercia: false,
         shop_items: [],
         quest_numbers: [],
@@ -140,7 +140,7 @@ defmodule Arena.MerchantParityTest do
         make_entity(%{
           gold: 5000,
           last_clicked_npc_instance_id: :timbero_inst,
-          last_clicked_npc_type: 6
+          last_clicked_npc_type: 10
         })
 
       state = make_map_state(entity, npcs_live: %{timbero_inst: timbero_npc})
@@ -186,7 +186,7 @@ defmodule Arena.MerchantParityTest do
       timbero_def = %{
         npc_id: 99999,
         name: "Timbero",
-        npc_type: 6,
+        npc_type: 10,
         comercia: false,
         shop_items: [],
         quest_numbers: [],
@@ -199,7 +199,7 @@ defmodule Arena.MerchantParityTest do
         make_entity(%{
           gold: 5000,
           last_clicked_npc_instance_id: :timbero_inst,
-          last_clicked_npc_type: 6
+          last_clicked_npc_type: 10
         })
 
       state = make_map_state(entity, npcs_live: %{timbero_inst: timbero_npc})

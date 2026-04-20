@@ -14,7 +14,7 @@ defmodule Arena.Adversarial.SelectedNpcAccountRewardTest do
 
   @npc_type_banquero 4
   @npc_type_enlistador 5
-  @npc_type_timbero 6
+  @npc_type_timbero 10
 
   setup_all do
     case GameData.start_link() do
@@ -165,7 +165,7 @@ defmodule Arena.Adversarial.SelectedNpcAccountRewardTest do
     end
 
     test "nearby timbero alone should not expose gambling stats" do
-      timbero_id = find_npc_id_by_type(6)
+      timbero_id = find_npc_id_by_type(10)
       assert timbero_id != nil
 
       timbero = %{npc_id: timbero_id, x: 51, y: 50, instance_id: :timbero}
@@ -180,7 +180,7 @@ defmodule Arena.Adversarial.SelectedNpcAccountRewardTest do
     end
 
     test "selected timbero must still be in range to expose gambling stats" do
-      timbero_id = find_npc_id_by_type(6)
+      timbero_id = find_npc_id_by_type(10)
       assert timbero_id != nil
 
       timbero = %{npc_id: timbero_id, x: 51, y: 50, instance_id: :timbero}

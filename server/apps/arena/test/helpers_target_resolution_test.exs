@@ -18,7 +18,7 @@ defmodule Arena.Map.HelpersTargetResolutionTest do
 
     :ets.insert(:arena_game_data, {
       {:npc, @timbero_npc_id},
-      %{id: @timbero_npc_id, npc_id: @timbero_npc_id, name: "Timbero", npc_type: 6, quest_numbers: []}
+      %{id: @timbero_npc_id, npc_id: @timbero_npc_id, name: "Timbero", npc_type: 10, quest_numbers: []}
     })
 
     on_exit(fn ->
@@ -71,7 +71,7 @@ defmodule Arena.Map.HelpersTargetResolutionTest do
     entity = %{x: 10, y: 10}
 
     assert :not_found = Helpers.resolve_nearby_npc(state, entity, [4], 4)
-    assert {:ok, _npc, npc_def} = Helpers.resolve_nearby_npc(state, entity, [6], 1)
-    assert npc_def.npc_type == 6
+    assert {:ok, _npc, npc_def} = Helpers.resolve_nearby_npc(state, entity, [10], 1)
+    assert npc_def.npc_type == 10
   end
 end

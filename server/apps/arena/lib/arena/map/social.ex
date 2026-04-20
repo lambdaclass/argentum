@@ -8,7 +8,7 @@ defmodule Arena.Map.Social do
   @npc_type_revividor 1
   @npc_type_banquero 4
   @npc_type_enlistador 5
-  @npc_type_timbero 6
+  @npc_type_timbero 10
 
   # ==================================================================
   # Safe toggle

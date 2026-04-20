@@ -14,7 +14,7 @@ defmodule Arena.NpcTextParityTest do
 
   import Arena.Test.MapStateFactory
 
-  @npc_type_timbero 6
+  @npc_type_timbero 10
 
   setup_all do
     case GameData.start_link() do
@@ -200,7 +200,7 @@ defmodule Arena.NpcTextParityTest do
 
   describe "timbero account-state (VB6 parity)" do
     test "shows gamble_wins, gamble_losses, and gamble_plays separately" do
-      timbero_id = find_npc_id_by_type(6)
+      timbero_id = find_npc_id_by_type(10)
       assert timbero_id != nil
 
       timbero = %{npc_id: timbero_id, x: 51, y: 50, instance_id: :timbero}
@@ -233,7 +233,7 @@ defmodule Arena.NpcTextParityTest do
 
   describe "timbero gamble win/loss message uses NPC name from definition" do
     test "win message includes NPC definition name, not hardcoded 'Timbero'" do
-      timbero_id = find_npc_id_by_type(6)
+      timbero_id = find_npc_id_by_type(10)
       assert timbero_id != nil
       npc_def = GameData.get_npc(timbero_id)
 
@@ -254,7 +254,7 @@ defmodule Arena.NpcTextParityTest do
               gamble_losses: 0,
               gamble_plays: 0,
               last_clicked_npc_instance_id: :timbero,
-              last_clicked_npc_type: 6
+              last_clicked_npc_type: 10
             })
           fresh_state = make_map_state(fresh_entity, %{timbero: timbero})
           drain_messages()

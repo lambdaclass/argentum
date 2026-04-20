@@ -147,6 +147,7 @@ defmodule Arena.CraftingBankTrainDriftTest do
     test "blacksmithing opens from the equipped hammer plus a selected anvil object" do
       entity =
         make_entity(%{
+          char_id: 1,
           x: 50,
           y: 50,
           stamina: 100,
@@ -171,6 +172,7 @@ defmodule Arena.CraftingBankTrainDriftTest do
     test "carpentry opens from the equipped saw with no workstation NPC nearby" do
       entity =
         make_entity(%{
+          char_id: 1,
           stamina: 100,
           equipment: %{weapon: 198},
           inventory: [%{item_id: 198, amount: 1, equipped: true} | List.duplicate(nil, 23)],
@@ -192,6 +194,7 @@ defmodule Arena.CraftingBankTrainDriftTest do
     test "blacksmith crafting rejects when no anvil or forge object is selected" do
       entity =
         make_entity(%{
+          char_id: 1,
           x: 50,
           y: 50,
           stamina: 100,
