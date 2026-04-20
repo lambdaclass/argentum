@@ -321,6 +321,11 @@ defmodule Arena.Map.NpcInteraction do
                 msg(state, char_id, "Necesitas estar cerca de un sacerdote.")
                 {:noreply, state}
 
+              {:ok, _npc, %{npc_type: @npc_type_resucitador_newbie}} when entity.level > 12 ->
+                # VB6: ResucitadorNewbie only serves newbies (EsNewbie check)
+                msg(state, char_id, "Solo los newbies pueden ser atendidos aqui.")
+                {:noreply, state}
+
               {:ok, _npc, _npc_def} ->
                 # VB6: donation threshold based on ciudadanosMatados
                 required_donation =

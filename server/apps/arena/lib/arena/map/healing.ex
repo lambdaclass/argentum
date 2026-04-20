@@ -194,19 +194,6 @@ defmodule Arena.Map.Healing do
 
                     {:noreply, state}
 
-                  # VB6: ResucitadorNewbie only serves newbies (level <= 12)
-                  npc_def.npc_type == @npc_type_resucitador_newbie and entity.level > 12 ->
-                    Helpers.send_to_session(
-                      state.sessions,
-                      char_id,
-                      {:send_raw,
-                       Encoder.encode(
-                         {:console_msg, %{message: "Solo los newbies pueden ser curados aqui.", font_index: 0}}
-                       )}
-                    )
-
-                    {:noreply, state}
-
                   true ->
                     entity = %{entity | hp: entity.max_hp}
                     players = Map.put(state.players, char_id, entity)

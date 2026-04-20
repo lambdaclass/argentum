@@ -565,13 +565,11 @@ defmodule Arena.Map.SpellEffects do
         target_entity =
           cond do
             spell_def.paraliza ->
-              # VB6: duration halved for everyone, then 0.7x for Warrior/Hunter
-              base_dur = div(duration_ms, 2)
-
+              # VB6: Warrior/Hunter get 0.7x duration, others get full duration.
               effective_dur =
                 if target_entity.class in [:guerrero, :cazador],
-                  do: trunc(base_dur * 0.7),
-                  else: base_dur
+                  do: trunc(duration_ms * 0.7),
+                  else: duration_ms
 
               buff = %{type: :paralyzed, expires_at: now + effective_dur}
               buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :paralyzed))]
@@ -592,13 +590,11 @@ defmodule Arena.Map.SpellEffects do
               %{target_entity | invisible: true, buffs: buffs}
 
             spell_def.inmoviliza ->
-              # VB6: immobilize duration is halved, then 0.7x for Warrior/Hunter
-              base_dur = div(duration_ms, 2)
-
+              # VB6: Warrior/Hunter get 0.7x duration, others get full duration.
               effective_dur =
                 if target_entity.class in [:guerrero, :cazador],
-                  do: trunc(base_dur * 0.7),
-                  else: base_dur
+                  do: trunc(duration_ms * 0.7),
+                  else: duration_ms
 
               buff = %{type: :immobilized, expires_at: now + effective_dur}
               buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :immobilized))]

@@ -454,5 +454,43 @@ defmodule Arena.GamblePerdonDriftTest do
       {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player, 2500)
       assert new_state.players[:player].criminal == false
     end
+
+    test "non-newbie cannot use ResucitadorNewbie for forgiveness (VB6 EsNewbie check)" do
+      # VB6 HandleForgive (Protocol_GmCommands.bas:1692): ResucitadorNewbie
+      # only accepts newbie players (EsNewbie). Non-newbies must use Revividor.
+      newbie_priest_def = %{
+        npc_id: 99997,
+        name: "Sacerdote Newbie",
+        npc_type: 9,
+        comercia: false,
+        shop_items: [],
+        quest_numbers: [],
+        creatures: []
+      }
+
+      :ets.insert(:arena_game_data, {{:npc, 99997}, newbie_priest_def})
+
+      newbie_priest_npc = %{npc_id: 99997, x: 52, y: 50, instance_id: :newbie_priest_inst}
+
+      entity =
+        make_entity(%{
+          criminal: true,
+          gold: 50_000,
+          citizens_killed: 0,
+          level: 25,
+          last_clicked_npc_instance_id: :newbie_priest_inst,
+          last_clicked_npc_type: 9
+        })
+
+      state = make_map_state_from(
+        %{player: entity},
+        sessions: %{player: self()},
+        npcs_live: %{newbie_priest_inst: newbie_priest_npc}
+      )
+
+      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player, 2500)
+      assert new_state.players[:player].criminal == true,
+             "VB6: non-newbie (level 25) should NOT be forgiven by ResucitadorNewbie"
+    end
   end
 end

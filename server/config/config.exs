@@ -39,10 +39,10 @@ config :arena, ArenaWeb.Endpoint,
 config :ao_tcp_gateway,
   hogar_travel_delay_ms: %{
     gm: 5_000,
-    normal: 10_000,
-    adventurer: 10_000,
-    hero: 10_000,
-    legend: 10_000
+    normal: 105_000,
+    adventurer: 0,
+    hero: 0,
+    legend: 0
   }
 
 ###################################

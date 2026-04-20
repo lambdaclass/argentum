@@ -237,12 +237,44 @@ defmodule Arena.SpellEffectsParityDriftTest do
       guerrero_duration = guerrero_buff.expires_at - System.monotonic_time(:millisecond)
       mago_duration = mago_buff.expires_at - System.monotonic_time(:millisecond)
 
-      # Guerrero should get roughly 0.7x the duration of mago.
       # VB6: Warrior gets Duration * 0.7, others get Duration (full).
-      # Elixir halves for everyone: div(duration_ms, 2). For warrior, also * 0.7.
-      # So guerrero_duration / mago_duration ~ 0.7
       ratio = guerrero_duration / mago_duration
       assert ratio < 0.8, "Guerrero should get ~0.7x paralysis duration, got ratio #{ratio}"
+    end
+
+    test "non-warrior paralysis duration matches VB6 full duration (no halving)" do
+      # VB6: non-warrior/hunter gets full Duration. There is NO halving.
+      # Spell duration=10 → duration_ms=10000, min 3000 → 10000ms
+      caster = make_entity(%{char_id: :caster, x: 50, y: 50, char_index: 1})
+
+      target =
+        make_entity(%{
+          char_id: :target,
+          x: 51,
+          y: 50,
+          char_index: 2,
+          class: :mago,
+          criminal: true
+        })
+
+      spell = make_spell(%{paraliza: true, duration: 10})
+
+      now = System.monotonic_time(:millisecond)
+
+      state =
+        make_state(
+          %{caster: caster, target: target},
+          occupancy: %{{51, 50} => {:player, :target}}
+        )
+
+      state = SpellEffects.apply_spell(state, :caster, caster, spell, 51, 50)
+      target_after = state.players[:target]
+      buff = Enum.find(target_after.buffs, &(&1.type == :paralyzed))
+
+      # VB6: duration should be full 10000ms (not halved to 5000ms)
+      actual_duration = buff.expires_at - now
+      assert actual_duration > 8_000,
+             "VB6: non-warrior paralysis should be ~10000ms, got #{actual_duration}ms (halving bug)"
     end
 
     test "cazador target gets shorter paralysis than clerigo target" do

@@ -383,7 +383,7 @@ defmodule Arena.SpellEffectGoldenTest do
   # ═══════════════════════════════════════════════════════════════════════════
 
   describe "apply_spell_status -- paralysis" do
-    test "applies paralyzed flag and buff with halved duration" do
+    test "applies paralyzed flag and buff with full VB6 duration" do
       caster = make_entity(%{mana: 180})
       target = make_entity(%{char_id: :target, x: 51, y: 50, char_index: 2, buffs: []})
 
@@ -397,10 +397,8 @@ defmodule Arena.SpellEffectGoldenTest do
       assert updated_target.paralyzed == true
 
       [buff] = Enum.filter(updated_target.buffs, &(&1.type == :paralyzed))
-      # VB6: paralysis duration is halved. duration=10 -> 10000ms, halved -> 5000ms
-      # expires_at = now + 5000
+      # VB6: non-warrior/hunter gets full duration (no halving)
       assert buff.type == :paralyzed
-      # Verify the buff exists; exact expires_at depends on monotonic time
       assert is_integer(buff.expires_at)
     end
   end
@@ -492,7 +490,7 @@ defmodule Arena.SpellEffectGoldenTest do
   end
 
   describe "apply_spell_status -- immobilize" do
-    test "applies immobilized flag with halved duration" do
+    test "applies immobilized flag with full VB6 duration" do
       caster = make_entity(%{mana: 180, immobilized: false, buffs: []})
       target = make_entity(%{char_id: :target, x: 51, y: 50, char_index: 2, buffs: []})
 
@@ -1228,11 +1226,12 @@ defmodule Arena.SpellEffectGoldenTest do
   end
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # 22. Paralysis and immobilize use halved duration
+  # 22. Paralysis and immobilize use full VB6 duration (no halving)
+  # VB6: Warrior/Hunter get 0.7x, others get full duration.
   # ═══════════════════════════════════════════════════════════════════════════
 
-  describe "paralysis/immobilize halved duration" do
-    test "paralysis duration is halved compared to full duration" do
+  describe "paralysis/immobilize full duration (VB6 parity)" do
+    test "paralysis duration uses full duration (no halving)" do
       caster = make_entity(%{mana: 180, buffs: []})
       target = make_entity(%{char_id: :target, x: 51, y: 50, char_index: 2, buffs: []})
       occupancy = %{{51, 50} => {:player, :target}}
@@ -1247,14 +1246,13 @@ defmodule Arena.SpellEffectGoldenTest do
       updated_target = new_state.players[:target]
       [buff] = Enum.filter(updated_target.buffs, &(&1.type == :paralyzed))
 
-      # VB6: paralysis uses div(duration_ms, 2)
+      # VB6: non-warrior/hunter targets get full duration
       # duration_ms = max(20 * 1000, 3000) = 20000
-      # halved = 10000
-      assert buff.expires_at >= now_before + 10_000
-      assert buff.expires_at <= now_after + 10_000 + 10
+      assert buff.expires_at >= now_before + 20_000
+      assert buff.expires_at <= now_after + 20_000 + 10
     end
 
-    test "immobilize duration is halved" do
+    test "immobilize duration uses full duration (no halving)" do
       caster = make_entity(%{mana: 180, buffs: []})
       target = make_entity(%{char_id: :target, x: 51, y: 50, char_index: 2, buffs: []})
       occupancy = %{{51, 50} => {:player, :target}}
@@ -1269,8 +1267,8 @@ defmodule Arena.SpellEffectGoldenTest do
       updated_target = new_state.players[:target]
       [buff] = Enum.filter(updated_target.buffs, &(&1.type == :immobilized))
 
-      assert buff.expires_at >= now_before + 10_000
-      assert buff.expires_at <= now_after + 10_000 + 10
+      assert buff.expires_at >= now_before + 20_000
+      assert buff.expires_at <= now_after + 20_000 + 10
     end
   end
 

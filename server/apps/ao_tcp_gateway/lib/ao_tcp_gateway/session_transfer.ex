@@ -21,12 +21,14 @@ defmodule AoTcpGateway.SessionTransfer do
   # VB6 Hogar.bas:37-50 — GM gets 5s, non-GM user types have per-type timers.
   # We keep the per-tier buckets runtime-configurable under
   # :ao_tcp_gateway, :hogar_travel_delay_ms.
+  # VB6 Balance.dat: HomeTimer=105 (seconds). HomeTimerAdventurer/Hero/Legend
+  # are absent → VB6 val("") returns 0, so patrons get instant teleport.
   @hogar_travel_delay_defaults %{
     gm: 5_000,
-    normal: 10_000,
-    adventurer: 10_000,
-    hero: 10_000,
-    legend: 10_000
+    normal: 105_000,
+    adventurer: 0,
+    hero: 0,
+    legend: 0
   }
 
   # ---- Map transfer ----

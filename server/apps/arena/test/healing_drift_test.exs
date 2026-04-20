@@ -275,6 +275,50 @@ defmodule Arena.HealingDriftTest do
   end
 
   # ==================================================================
+  # Bug: handle_heal wrongly blocks non-newbies from ResucitadorNewbie
+  # VB6 HandleHeal (Protocol.bas:4408) has NO EsNewbie check — any player
+  # can be healed by ResucitadorNewbie. Only HandleResucitate restricts it.
+  # ==================================================================
+  describe "VB6 parity: ResucitadorNewbie can heal non-newbie players" do
+    test "non-newbie player (level 25) is healed by ResucitadorNewbie" do
+      newbie_priest_def = %NpcDef{
+        id: 501,
+        npc_type: 9,
+        name: "Sacerdote Newbie",
+        faccion: 0,
+        body: 1,
+        head: 0,
+        heading: 3,
+        comercia: false,
+        quest_numbers: [],
+        creatures: []
+      }
+
+      :ets.insert(:arena_game_data, {{:npc, 501}, newbie_priest_def})
+
+      newbie_priest_npc = %{npc_id: 501, x: 51, y: 50, instance_id: :newbie_rev1}
+
+      state =
+        make_state(
+          %{
+            hp: 50,
+            max_hp: 100,
+            level: 25,
+            last_clicked_npc_instance_id: :newbie_rev1,
+            last_clicked_npc_type: 9
+          },
+          npcs_live: %{newbie_rev1: newbie_priest_npc}
+        )
+
+      {:noreply, new_state} = Healing.handle_heal(state, :player)
+
+      entity = new_state.players[:player]
+      assert entity.hp == 100,
+             "VB6: ResucitadorNewbie can heal ANY player, not just newbies"
+    end
+  end
+
+  # ==================================================================
   # Drift #23: Priest resurrection wrongly zeroes mana
   # VB6: Only zeroes mana for SPELL-based revive, not NPC/priest revive
   # ==================================================================

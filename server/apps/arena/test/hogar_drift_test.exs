@@ -118,6 +118,7 @@ defmodule Arena.HogarDriftTest do
 
     test "hogar_travel_delay returns normal bucket for non-GM default tier" do
       entity = base_entity(%{gm: false, user_tier: :normal})
+      # Setup overrides config to 10_000 for this describe block
       assert SessionTransfer.hogar_travel_delay(entity) == 10_000
     end
 
@@ -134,6 +135,51 @@ defmodule Arena.HogarDriftTest do
     test "hogar_travel_delay returns legend bucket" do
       entity = base_entity(%{gm: false, user_tier: :legend})
       assert SessionTransfer.hogar_travel_delay(entity) == 7_000
+    end
+  end
+
+  # ---- VB6 default timer values from Balance.dat ----
+  # VB6 Balance.dat has HomeTimer=105 (seconds). Per-tier keys are absent,
+  # so VB6 val("") returns 0 → patrons get instant teleport.
+
+  describe "VB6 default hogar timer values (Balance.dat parity)" do
+    setup do
+      # Remove custom config to test the module defaults
+      previous = Application.get_env(:ao_tcp_gateway, :hogar_travel_delay_ms)
+      Application.delete_env(:ao_tcp_gateway, :hogar_travel_delay_ms)
+
+      on_exit(fn ->
+        if previous do
+          Application.put_env(:ao_tcp_gateway, :hogar_travel_delay_ms, previous)
+        end
+      end)
+
+      :ok
+    end
+
+    test "default normal timer is 105 seconds (VB6 HomeTimer=105)" do
+      entity = base_entity(%{gm: false, user_tier: :normal})
+      assert SessionTransfer.hogar_travel_delay(entity) == 105_000
+    end
+
+    test "default GM timer is 5 seconds" do
+      entity = base_entity(%{gm: true})
+      assert SessionTransfer.hogar_travel_delay(entity) == 5_000
+    end
+
+    test "default adventurer timer is 0 (instant, VB6 HomeTimerAdventurer missing)" do
+      entity = base_entity(%{gm: false, user_tier: :adventurer})
+      assert SessionTransfer.hogar_travel_delay(entity) == 0
+    end
+
+    test "default hero timer is 0 (instant, VB6 HomeTimerHero missing)" do
+      entity = base_entity(%{gm: false, user_tier: :hero})
+      assert SessionTransfer.hogar_travel_delay(entity) == 0
+    end
+
+    test "default legend timer is 0 (instant, VB6 HomeTimerLegend missing)" do
+      entity = base_entity(%{gm: false, user_tier: :legend})
+      assert SessionTransfer.hogar_travel_delay(entity) == 0
     end
   end
 end
