@@ -159,7 +159,7 @@ defmodule Arena.GamblePerdonDriftTest do
   @timbero_def %{
     npc_id: 99999,
     name: "Timbero",
-    npc_type: 6,
+    npc_type: 10,
     comercia: false,
     shop_items: [],
     quest_numbers: [],
@@ -222,7 +222,7 @@ defmodule Arena.GamblePerdonDriftTest do
         make_entity(%{
           gold: 5_000_000,
           last_clicked_npc_instance_id: :timbero_inst,
-          last_clicked_npc_type: 6
+          last_clicked_npc_type: 10
         })
       state = make_map_state_from(
         %{player: entity},

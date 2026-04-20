@@ -9,9 +9,11 @@ defmodule Arena.Map.NpcInteraction do
   @npc_type_entrenador 3
   @npc_type_banquero 4
   @npc_type_enlistador 5
-  @npc_type_timbero 6
+  # Shipped data: Apostador (NPC301) is NpcType=10, not VB6 enum Timbero=7
+  @npc_type_timbero 10
   @npc_type_resucitador_newbie 9
-  @npc_type_arena_guard 10
+  # VB6: ArenaGuard=24. No arena guard NPCs exist in shipped data yet.
+  @npc_type_arena_guard 24
   @npc_type_subastador 16
   @npc_type_quest 17
   @npc_type_entrega_pesca 20

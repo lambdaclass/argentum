@@ -10,23 +10,19 @@ Scope rules:
 
 ## NPC, Service, and Gameplay Flows
 
-No confirmed open backend drift is currently tracked against the inspected VB6 baseline.
+1. GM panel request path is missing.
+Current:
+- `server/apps/ao_protocol/lib/ao_protocol/server/encoder.ex` (encoder for packet 84 exists)
+VB6:
+- `old/server/Codigo/Protocol_GmCommands.bas:764` (`HandleGMPanel`)
+- `old/server/Codigo/Protocol_Writes.bas:2605` (`WriteShowGMPanelForm`)
+- Client sends packet 116 (`eGMPanel` / `/PANELGM`)
+Notes:
+- The Elixir server has the outbound encoder for `show_gm_panel_form` (packet 84) but no
+  inbound decoder for packet 116, no route, and no handler. The encoder is never called.
+- Needs: decoder for packet 116, route in SessionRouteManifest, handler that reads
+  character appearance data and sends it back via the encoder.
 
 ## Needs Verification
 
-1. Crafting NPC type collision is suspicious but not proven.
-Current:
-- `server/apps/arena/lib/arena/map/crafting.ex`
-- `server/apps/arena/lib/arena/map/npc_interaction.ex`
-Notes:
-- Do not treat this as confirmed until it is matched against real data and VB6 behavior.
-
-2. GM panel request path appears missing, but the exact client-side trigger still needs proof.
-Current:
-- `server/apps/ao_protocol/lib/ao_protocol/server/encoder.ex`
-VB6:
-- `old/server/Codigo/Protocol_GmCommands.bas:764`
-- `old/server/Codigo/Protocol_Writes.bas:2605`
-Notes:
-- The server encoder for `show_gm_panel_form` exists.
-- I have not yet found the corresponding live inbound request path in the current backend.
+No items pending verification.
