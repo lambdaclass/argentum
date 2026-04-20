@@ -8,9 +8,15 @@ defmodule Arena.Map.Faction do
   @npc_type_enlistador 5
 
   defp msg(state, char_id, message), do: Helpers.msg(state, char_id, message)
-  defp npc_faccion_to_atom(3), do: :royal_army
-  defp npc_faccion_to_atom(2), do: :chaos_legion
-  defp npc_faccion_to_atom(_), do: :none
+
+  @doc """
+  Map a NPC's `.faccion` byte to the faction atom used on player entities.
+
+  VB6: NpcList(i).Faccion — 3 = Real / Armada, 2 = Caos.
+  """
+  def npc_faccion_to_atom(3), do: :royal_army
+  def npc_faccion_to_atom(2), do: :chaos_legion
+  def npc_faccion_to_atom(_), do: :none
 
   @doc """
   Handle NPC enlistador click: enlist in a faction or rank up if already enlisted.
@@ -74,12 +80,15 @@ defmodule Arena.Map.Faction do
     end
   end
 
-  # Rank-up logic for already-enlisted players.
-  #
-  # VB6: ModFacciones.bas:111 — RecompensaArmadaReal
-  # VB6: ModFacciones.bas:237 — RecompensaCaos
-  # VB6: Protocol.bas:4604 — HandleReward (packet entry point)
-  defp handle_faction_rank_up(state, char_id, entity, faction) do
+  @doc """
+  Rank-up logic for already-enlisted players. Called by both the enlistador
+  double-click path and the /REWARD packet path.
+
+  VB6: ModFacciones.bas:111 — RecompensaArmadaReal
+  VB6: ModFacciones.bas:237 — RecompensaCaos
+  VB6: Protocol.bas:4604 — HandleReward (packet entry point)
+  """
+  def handle_faction_rank_up(state, char_id, entity, faction) do
     current_rank = current_faction_rank(entity, faction)
     ranks = GameData.faction_ranks(faction)
     next_rank_def = Enum.find(ranks, fn r -> r.rank == current_rank + 1 end)
