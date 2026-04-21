@@ -8,9 +8,33 @@ defmodule Arena.Inventory do
 
   alias Arena.Data.GameData
 
-  @max_slots 24
+  # VB6 Declares.bas:1480,1484 — MAX_INVENTORY_SLOTS = 42,
+  # MAX_USERINVENTORY_SLOTS = 24 (base). Patron tiers add more slots via
+  # `get_num_inv_slots_from_tier` (CharacterPersistence.bas:95-109).
+  @max_inventory_slots 42
   @max_stack 10_000
   @gold_item_id 12
+
+  @doc """
+  Returns the inventory slot count for the given user tier.
+
+  VB6 CharacterPersistence.bas:95-109 (`get_num_inv_slots_from_tier`):
+  base 24 + 6 for Aventurero, +12 for Heroe, +18 for Leyenda.
+  """
+  def max_slots_for_tier(:legend), do: 42
+  def max_slots_for_tier(:hero), do: 36
+  def max_slots_for_tier(:adventurer), do: 30
+  def max_slots_for_tier(_), do: 24
+
+  @doc "Returns the inventory slot count for a given entity, based on its user_tier."
+  def max_slots_for_entity(entity) do
+    entity
+    |> Map.get(:user_tier, :normal)
+    |> max_slots_for_tier()
+  end
+
+  @doc "MAX_INVENTORY_SLOTS = 42 (VB6 Declares.bas:1480)."
+  def max_inventory_slots, do: @max_inventory_slots
 
   @doc "Add an item to inventory. Stacks if stackable, otherwise uses first empty slot."
   def add_item(inventory, item_id, amount \\ 1, elemental_tags \\ 0) do
@@ -116,8 +140,8 @@ defmodule Arena.Inventory do
   end
 
   @doc "Get item at slot index."
-  def get_slot(inventory, slot) when slot >= 0 and slot < @max_slots do
-    Enum.at(inventory, slot)
+  def get_slot(inventory, slot) when is_list(inventory) and is_integer(slot) and slot >= 0 do
+    if slot < length(inventory), do: Enum.at(inventory, slot), else: nil
   end
 
   def get_slot(_inventory, _slot), do: nil

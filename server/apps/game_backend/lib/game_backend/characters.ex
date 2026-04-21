@@ -349,6 +349,11 @@ defmodule GameBackend.Characters do
       int: c.int,
       con: c.con,
       cha: c.cha,
+      # Drift #18 — VB6 Stats.UserAtributosBackUP snapshot. The live
+      # attribute is bumped by strength/agility potions; the backup is
+      # the immutable base used to cap the bumped value at backup * 2.
+      str_backup: c.str,
+      agi_backup: c.agi,
       gold: c.gold,
       inventory: slots_to_inventory(c.inventory_slots),
       equipment: row_to_equipment(c.equipment),
@@ -371,7 +376,14 @@ defmodule GameBackend.Characters do
       gm: c.gm,
       muted_until: c.muted_until || 0,
       spouse_id: c.spouse_id || 0,
-      map_id: c.map_id
+      map_id: c.map_id,
+      # VB6 parity: default chat colour from role/council (Modulo_UsUaRiOs.bas:600-625).
+      # gm_level is not yet persisted, so we approximate :admin when c.gm is true.
+      chat_color:
+        AoEntities.PlayerEntity.default_chat_color(
+          if(c.gm, do: :admin, else: nil),
+          nil
+        )
     }
   end
 

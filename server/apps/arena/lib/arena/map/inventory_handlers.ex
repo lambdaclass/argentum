@@ -462,8 +462,32 @@ defmodule Arena.Map.InventoryHandlers do
 
       # Potion (tipo_pocion: 1=HP, 2=Mana, 4=Stamina, 6=Strength, etc.)
       1 ->
-        entity = apply_potion(entity, item_def)
-        {:ok, entity, consume_and_notify(entity, slot, state, :potion)}
+        was_paralyzed = entity.paralyzed
+
+        # Drift #16: DivineBlood-flagged users reject mortal HP potions
+        # (VB6 InvUsuario.bas:1925-1928). We check before applying so the
+        # item is NOT consumed and a console message is sent.
+        if hp_potion_blocked_by_divine_blood?(entity, item_def) do
+          Helpers.send_to_session(
+            state.sessions,
+            entity.char_id,
+            {:send_raw,
+             Encoder.encode(
+               {:console_msg,
+                %{
+                  message: "Tu sangre divina no puede mezclarse con la de los mortales.",
+                  font_index: 0
+                }}
+             )}
+          )
+
+          {:ok, entity, state}
+        else
+          entity = apply_potion(entity, item_def)
+          state = consume_and_notify(entity, slot, state, :potion)
+          state = maybe_notify_paralize_cleared(state, entity, was_paralyzed)
+          {:ok, entity, state}
+        end
 
       # VB6 otBarcos (14): toggle navigation mode
       14 ->
@@ -502,13 +526,21 @@ defmodule Arena.Map.InventoryHandlers do
     amount = Enum.random(item_def.min_modificador..max(item_def.max_modificador, item_def.min_modificador))
 
     case item_def.tipo_pocion do
-      # HP potion
+      # HP potion — VB6 InvUsuario.bas:1923-1945.
+      # Drift #16: DivineBlood gate is applied by the caller (apply_item_use)
+      # before reaching this function so the item is not consumed on reject.
+      # Healing amount is multiplied by UserMod.GetSelfHealingBonus(U)
+      #   = max(1 + Modifiers.SelfHealingBonus, 0). (Modulo_UsUaRiOs.bas:3066)
       1 ->
-        %{entity | hp: min(entity.hp + amount, entity.max_hp)}
+        bonus = get_self_healing_bonus(entity)
+        healed = round(amount * bonus)
+        %{entity | hp: min(entity.hp + healed, entity.max_hp)}
 
-      # Mana potion
+      # Mana potion — VB6 InvUsuario.bas:1946-1956 uses the item's Porcentaje
+      # field as a percentage of max mana (not the min/max modificador range).
       2 ->
-        %{entity | mana: min(entity.mana + amount, entity.max_mana)}
+        mana_restore = div(entity.max_mana * Map.get(item_def, :porcentaje, 0), 100)
+        %{entity | mana: min(entity.mana + mana_restore, entity.max_mana)}
 
       # Stamina potion
       4 ->
@@ -519,13 +551,51 @@ defmodule Arena.Map.InventoryHandlers do
         buffs = Enum.reject(entity.buffs, &(&1.type == :poisoned))
         %{entity | poisoned: false, buffs: buffs}
 
-      # Strength potion
+      # Strength potion — VB6 InvUsuario.bas:1908-1922.
+      #   UserAtributos(Fuerza) = MinimoInt(Atr + rnd, AtributosBackUP * 2)
+      #   flags.DuracionEfecto = obj.DuracionEfecto
+      #   flags.TomoPocion = True
+      # In Elixir the live attribute is modelled as `str + str_buff`, with
+      # `str_backup` as the immutable base (= VB6 AtributosBackUP). So we
+      # clamp the combined value at `str_backup * 2`, then store the
+      # duration and raised flag. DuracionPociones (General.bas:1278)
+      # restores the attribute on expiry.
       6 ->
-        %{entity | str_buff: entity.str_buff + amount}
+        backup = potion_attr_backup(entity, :str)
+        delta = Map.get(entity, :str_potion_delta, 0)
+        spell_buff = entity.str_buff - delta
+        current = entity.str + entity.str_buff
+        raised = min(current + amount, backup * 2)
+        new_delta = max(raised - entity.str - spell_buff, 0)
+        new_buff = spell_buff + new_delta
+        duration = Map.get(item_def, :duracion_efecto, 0)
 
-      # Agility potion
+        %{
+          entity
+          | str_buff: new_buff,
+            str_potion_delta: new_delta,
+            tomo_pocion: true,
+            duracion_efecto: max(entity.duracion_efecto, duration)
+        }
+
+      # Agility potion — VB6 InvUsuario.bas:1893-1907 (same shape).
       7 ->
-        %{entity | agi_buff: entity.agi_buff + amount}
+        backup = potion_attr_backup(entity, :agi)
+        delta = Map.get(entity, :agi_potion_delta, 0)
+        spell_buff = entity.agi_buff - delta
+        current = entity.agi + entity.agi_buff
+        raised = min(current + amount, backup * 2)
+        new_delta = max(raised - entity.agi - spell_buff, 0)
+        new_buff = spell_buff + new_delta
+        duration = Map.get(item_def, :duracion_efecto, 0)
+
+        %{
+          entity
+          | agi_buff: new_buff,
+            agi_potion_delta: new_delta,
+            tomo_pocion: true,
+            duracion_efecto: max(entity.duracion_efecto, duration)
+        }
 
       # Paralysis cure
       8 ->
@@ -535,6 +605,61 @@ defmodule Arena.Map.InventoryHandlers do
       _ ->
         entity
     end
+  end
+
+  # Drift #18 — VB6 Stats.UserAtributosBackUP is the immutable base for
+  # strength/agility potion clamping. Characters that loaded before the
+  # backup fields were persisted have backup == 0, so fall back to the
+  # current live base attribute (which is still the un-bumped value
+  # because str_buff/agi_buff are the only potion bonus).
+  defp potion_attr_backup(entity, :str) do
+    case Map.get(entity, :str_backup, 0) do
+      n when is_integer(n) and n > 0 -> n
+      _ -> entity.str
+    end
+  end
+
+  defp potion_attr_backup(entity, :agi) do
+    case Map.get(entity, :agi_backup, 0) do
+      n when is_integer(n) and n > 0 -> n
+      _ -> entity.agi
+    end
+  end
+
+  # VB6 Modulo_UsUaRiOs.bas:3066
+  #   GetSelfHealingBonus = max(1 + User.Modifiers.SelfHealingBonus, 0)
+  # The VB6 modifier is populated purely by effects-over-time
+  # (EffectsOverTime.bas:716/745); base class/race do not contribute.
+  # Default Modifiers.SelfHealingBonus is 0 -> multiplier 1.0.
+  # TODO: once effect-over-time buffs are ported they must write this field
+  # via UpdateIncreaseModifier; today no code path mutates it, so the
+  # multiplier is always 1.0 for live players.
+  def get_self_healing_bonus(entity) do
+    bonus = Map.get(entity, :self_healing_bonus, 0.0)
+    max(1 + bonus, 0)
+  end
+
+  # VB6 InvUsuario.bas:1925 — a character with flags.DivineBlood > 0 cannot
+  # use a mortal HP potion. This gate is checked by apply_item_use before
+  # the potion is consumed, so the caller can skip consumption and send the
+  # divine-blood console message.
+  def hp_potion_blocked_by_divine_blood?(entity, item_def) do
+    item_def.tipo_pocion == 1 and Map.get(entity, :divine_blood, 0) > 0
+  end
+
+  # VB6 InvUsuario.bas:1983/2149 (paralysis-cure potion) emits WriteParalizeOK
+  # to the client when the Paralizado flag is cleared so the local character
+  # exits the frozen animation.
+  defp maybe_notify_paralize_cleared(state, entity, was_paralyzed) do
+    if was_paralyzed and not entity.paralyzed do
+      Helpers.send_to_session(
+        state.sessions,
+        entity.char_id,
+        {:send_raw, Encoder.encode({:paralize_ok, %{}})}
+      )
+    end
+
+    state
   end
 
   def consume_and_notify(entity, slot, state, effect_type) do

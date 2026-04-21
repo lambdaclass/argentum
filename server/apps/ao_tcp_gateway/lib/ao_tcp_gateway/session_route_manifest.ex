@@ -92,7 +92,9 @@ defmodule AoTcpGateway.SessionRouteManifest do
       :chaos_legion_kick,
       :sos_show_list,
       :sos_remove,
-      :clean_sos
+      :clean_sos,
+      :chat_color,
+      :gm_panel_request
     ],
     guild: [
       :guild_create,
@@ -125,6 +127,7 @@ defmodule AoTcpGateway.SessionRouteManifest do
       :clan_codex_update
     ],
     chat: [:talk, :yell, :whisper, :grupo_msg, :faction_message, :council_message],
+    duel: [:duel, :accept_duel, :cancel_duel, :quit_duel],
     commerce: [
       :commerce_start,
       :commerce_buy,
@@ -153,6 +156,7 @@ defmodule AoTcpGateway.SessionRouteManifest do
   @guild {SessionCommands.Guild, :handle_command}
   @chat {SessionCommands.Chat, :handle_command}
   @commerce {SessionCommands.Commerce, :handle_command}
+  @duel {SessionCommands.Duel, :handle_command}
 
   @routes %{
     # ── Movement ───────────────────────────────────────────────────────
@@ -221,6 +225,12 @@ defmodule AoTcpGateway.SessionRouteManifest do
     online: %{group: :gm, dispatch: @gm, vb6_ref: "Protocol_GmCommands.bas:31:HandleOnline", parity_status: :exact},
     online_royal_army: %{group: :faction, dispatch: {@session, :handle_command}, vb6_ref: "Protocol.bas:5158:HandleRoyalArmyMessage", parity_status: :exact},
     online_chaos_legion: %{group: :faction, dispatch: {@session, :handle_command}, vb6_ref: "Protocol.bas:5196:HandleChaosLegionMessage", parity_status: :exact},
+
+    # ── Duels (VB6: Protocol.bas:5931-5981 HandleDuel/HandleAcceptDuel/HandleCancelDuel/HandleQuitDuel) ──
+    duel: %{group: :duel, dispatch: @duel, vb6_ref: "Protocol.bas:5931:HandleDuel", parity_status: :exact},
+    accept_duel: %{group: :duel, dispatch: @duel, vb6_ref: "Protocol.bas:5952:HandleAcceptDuel", parity_status: :exact},
+    cancel_duel: %{group: :duel, dispatch: @duel, vb6_ref: "Protocol.bas:5964:HandleCancelDuel", parity_status: :exact},
+    quit_duel: %{group: :duel, dispatch: @duel, vb6_ref: "Protocol.bas:5975:HandleQuitDuel", parity_status: :exact},
 
     # ── Gameplay actions ───────────────────────────────────────────────
     gamble: %{group: :npc, dispatch: @map, vb6_ref: "Protocol_GmCommands.bas:181:HandleGamble", parity_status: :exact},
@@ -391,7 +401,9 @@ defmodule AoTcpGateway.SessionRouteManifest do
     chaos_legion_kick: %{group: :gm, dispatch: @gm, vb6_ref: "Protocol.bas:5438:HandleChaosLegionKick", parity_status: :exact},
     sos_show_list: %{group: :gm, dispatch: @gm, vb6_ref: "Protocol_GmCommands.bas:681:HandleSOSShowList", parity_status: :exact},
     sos_remove: %{group: :gm, dispatch: @gm, vb6_ref: "Protocol_GmCommands.bas:693:HandleSOSRemove", parity_status: :exact},
-    clean_sos: %{group: :gm, dispatch: @gm, vb6_ref: "Protocol_GmCommands.bas:3136:HandleCleanSOS", parity_status: :exact}
+    clean_sos: %{group: :gm, dispatch: @gm, vb6_ref: "Protocol_GmCommands.bas:3136:HandleCleanSOS", parity_status: :exact},
+    chat_color: %{group: :gm, dispatch: @gm, vb6_ref: "Protocol.bas:5548:HandleChatColor", parity_status: :exact},
+    gm_panel_request: %{group: :gm, dispatch: @gm, vb6_ref: "Protocol_GmCommands.bas:764:HandleGMPanel", parity_status: :exact}
   }
 
   def groups, do: @groups

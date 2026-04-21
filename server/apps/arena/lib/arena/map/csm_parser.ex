@@ -30,6 +30,10 @@ defmodule Arena.Map.CsmParser do
       :rain,
       :snow,
       :fog,
+      # VB6 FileIO.bas:1754-1760: MapInfo(Map).Salida parsed from the
+      # "map-x-y" string stored in MapDat.  `nil` or %{map: 0} means
+      # no Salida is configured for this map.
+      salida: nil,
       restrict_mode: "",
       blocked: [],
       layers: [[], [], [], []],
@@ -85,6 +89,7 @@ defmodule Arena.Map.CsmParser do
          rain: map_dat.rain,
          snow: map_dat.snow,
          fog: map_dat.fog,
+         salida: map_dat.salida,
          restrict_mode: map_dat.restrict_mode,
          blocked: sections.blocked,
          layers: sections.layers,
@@ -160,7 +165,7 @@ defmodule Arena.Map.CsmParser do
          {:ok, _letter_grh, rest} <- read_int32(rest),
          {:ok, _level, rest} <- read_int32(rest),
          {:ok, _extra2, rest} <- read_int32(rest),
-         {:ok, _salida, rest} <- read_vb6_string(rest),
+         {:ok, salida_str, rest} <- read_vb6_string(rest),
          {:ok, lluvia, rest} <- read_byte(rest),
          {:ok, nieve, rest} <- read_byte(rest),
          {:ok, niebla, rest} <- read_byte(rest) do
@@ -174,12 +179,36 @@ defmodule Arena.Map.CsmParser do
         rain: lluvia != 0,
         snow: nieve != 0,
         fog: niebla != 0,
+        salida: parse_salida(salida_str),
         restrict_mode: String.upcase(restrict_mode)
       }
 
       {:ok, map_dat, rest}
     end
   end
+
+  # VB6 FileIO.bas:1754-1760 — Salida stored as "map-x-y" string.
+  # Empty or malformed strings translate to `nil` (no Salida configured).
+  defp parse_salida(""), do: nil
+  defp parse_salida(nil), do: nil
+
+  defp parse_salida(str) when is_binary(str) do
+    case String.split(str, "-") do
+      [m, x, y | _] ->
+        with {map_id, _} <- Integer.parse(m),
+             {xi, _} <- Integer.parse(x),
+             {yi, _} <- Integer.parse(y) do
+          %{map: map_id, x: xi, y: yi}
+        else
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp parse_salida(_), do: nil
 
   # ---- Tile data sections ----
 

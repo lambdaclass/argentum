@@ -134,7 +134,8 @@ defmodule Arena.GmAdversarialTest do
       quest_npc_id: nil,
       mounted: false,
       saddle_obj_index: 0,
-      saddle_slot: 0
+      saddle_slot: 0,
+      chat_color: {255, 255, 255}
     }
 
     Map.merge(defaults, overrides)
@@ -319,8 +320,9 @@ defmodule Arena.GmAdversarialTest do
           :unban_cuenta,
           :ban_temporal,
           :remove_punishment,
-          :royal_army_message,
-          :chaos_legion_message,
+          # :royal_army_message / :chaos_legion_message are NOT session-GM-gated:
+          # VB6 Protocol.bas:5177-5209 allows council-rank players to broadcast,
+          # so the check lives at the map/chat layer (see faction_council_message_test).
           :talk_as_npc,
           # Batch 5
           :nieve_toggle,
@@ -2108,9 +2110,9 @@ defmodule Arena.GmAdversarialTest do
 
   describe "QuestServer.can_accept_quest? edge cases" do
     test "can_accept_quest? with max active quests returns false" do
-      quests = for i <- 1..20, do: %{quest_id: i, npc_kills: %{}, started_at: 0}
+      quests = for i <- 1..5, do: %{quest_id: i, npc_kills: %{}, started_at: 0}
       entity = make_entity(%{active_quests: quests})
-      quest_def = %{id: 21, required_level: 0, limit_level: 0, repetible: false}
+      quest_def = %{id: 6, required_level: 0, limit_level: 0, repetible: false}
       assert Arena.QuestServer.can_accept_quest?(entity, quest_def) == false
     end
   end

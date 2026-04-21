@@ -66,6 +66,11 @@ defmodule AoTcpGateway.SessionLogic do
   defdelegate parse_marriage_command(message), to: SessionCommands.Chat
   defdelegate parse_duel_command(message), to: SessionCommands.Chat
 
+  # ---- Route introspection (declared once up front so handle_command clauses
+  # remain grouped and don't trigger the Elixir grouped-clauses warning) ----
+
+  def route_metadata(cmd_type), do: SessionRouteManifest.route(cmd_type)
+
   # ===========================================================================
   # Command routing
   # ===========================================================================
@@ -75,6 +80,18 @@ defmodule AoTcpGateway.SessionLogic do
   @gm_commands SessionRouteManifest.group(:gm)
 
   @gm_not_authorized_msg {:console_msg, %{message: "No tienes privilegios de GM.", font_index: 0}}
+
+  # Drift #4 — VB6 Protocol.bas:5177-5209 allows faction council members
+  # to use /RMSG /CMSG even without GM status. The session doesn't track
+  # council rank; forward these packets to the map layer unconditionally
+  # and let the map-level check (see Arena.Map.GmCommands.dispatch_gm_command)
+  # reject unauthorised senders.
+  @faction_message_commands [:royal_army_message, :chaos_legion_message]
+
+  def handle_command(state, {cmd_type, _} = cmd)
+      when state.character_id != nil and cmd_type in @faction_message_commands do
+    SessionCommands.Gm.handle_command(state, cmd)
+  end
 
   # GM :online has a different handler than regular :online
   def handle_command(state, {:online, _} = cmd)
@@ -114,11 +131,18 @@ defmodule AoTcpGateway.SessionLogic do
 
   @commerce_commands SessionRouteManifest.group(:commerce)
 
-  def route_metadata(cmd_type), do: SessionRouteManifest.route(cmd_type)
-
   def handle_command(state, {cmd_type, _} = cmd)
       when state.character_id != nil and cmd_type in @commerce_commands do
     SessionCommands.Commerce.handle_command(state, cmd)
+  end
+
+  # ---- Duels (binary packets — VB6 Protocol.bas:5931-5981) ----
+
+  @duel_commands SessionRouteManifest.group(:duel)
+
+  def handle_command(state, {cmd_type, _} = cmd)
+      when state.character_id != nil and cmd_type in @duel_commands do
+    SessionCommands.Duel.handle_command(state, cmd)
   end
 
   # ===========================================================================

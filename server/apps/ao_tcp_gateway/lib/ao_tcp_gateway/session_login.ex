@@ -104,6 +104,10 @@ defmodule AoTcpGateway.SessionLogin do
         |> GameBackend.Characters.to_entity()
         |> Map.put(:user_tier, GameBackend.Account.user_tier(account))
 
+      # Drift #5 — VB6 CharacterPersistence.bas:95-109 grows the inventory
+      # slot list for patron tiers (Aventurero +6, Heroe +12, Leyenda +18).
+      entity = %{entity | inventory: resize_inventory(entity.inventory, entity.user_tier)}
+
       char_id = entity.char_id
 
       # Populate guild cache on the entity (one RPC per login is fine)
@@ -144,4 +148,15 @@ defmodule AoTcpGateway.SessionLogin do
   defp creation_error_message({:invalid_class, _}), do: "Invalid class."
   defp creation_error_message({:invalid_home_city, _}), do: "Invalid home city."
   defp creation_error_message(_), do: "Character creation failed."
+
+  defp resize_inventory(inventory, tier) do
+    target = Arena.Inventory.max_slots_for_tier(tier)
+    current = length(inventory)
+
+    cond do
+      current == target -> inventory
+      current < target -> inventory ++ List.duplicate(nil, target - current)
+      true -> inventory
+    end
+  end
 end

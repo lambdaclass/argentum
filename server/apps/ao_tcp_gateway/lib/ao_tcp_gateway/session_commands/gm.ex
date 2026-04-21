@@ -555,6 +555,22 @@ defmodule AoTcpGateway.SessionCommands.Gm do
     {state, [{:console_msg, %{message: "Guardado de personajes iniciado.", font_index: 0}}]}
   end
 
+  # VB6 Protocol.bas:5548 HandleChatColor — GM-only; stores RGB on entity.
+  # Router-level gate rejects non-GMs, so this handler only runs for GMs.
+  def handle_command(state, {:chat_color, %{r: r, g: g, b: b}}) do
+    Arena.Map.MapServer.set_chat_color(state.map_id, state.character_id, {r, g, b})
+    {state, []}
+  end
+
+  # VB6 Protocol_GmCommands.bas:764 HandleGMPanel — GM-only; the map layer
+  # replies with eShowGMPanelForm (Protocol_Writes.bas:2605) carrying the
+  # sender's appearance (head/body/casco/weapon/shield anim ids).
+  # Router-level gate rejects non-GMs, so this handler only runs for GMs.
+  def handle_command(state, {:gm_panel_request, _}) do
+    Arena.Map.MapServer.gm_panel_request(state.map_id, state.character_id)
+    {state, []}
+  end
+
   def handle_command(state, {:global_message, %{message: message}}) do
     if byte_size(message) > 0 do
       raw =

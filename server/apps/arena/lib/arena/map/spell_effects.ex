@@ -410,7 +410,16 @@ defmodule Arena.Map.SpellEffects do
 
         # Guild war: no criminal flag when attacking enemy guild members
         guild_war = Arena.GuildServer.players_at_war?(char_id, defender_id)
-        entity = if not defender.criminal and not guild_war, do: %{entity | criminal: true}, else: entity
+
+        {entity, state} =
+          if not defender.criminal and not guild_war do
+            # VB6 Modulo_UsUaRiOs.bas:2260 — VolverCriminal handles
+            # sanctuary tiles, Ciudadano→Criminal score reset, NoPKs
+            # warping, and party disband.
+            Arena.Map.CriminalStatus.volver_criminal(state, char_id, entity)
+          else
+            {entity, state}
+          end
 
         {defender, state} =
           if new_hp <= 0 do

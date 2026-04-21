@@ -16,14 +16,35 @@ defmodule Arena.Map.GmCommands do
 
   # GM command dispatch (called by Chat module when message starts with "/")
   def dispatch_gm_command(state, char_id, entity, message) do
-    case Permissions.check_permission(entity, message) do
-      :ok ->
-        handle_gm_command(state, char_id, entity, message)
+    # Drift #4 — VB6 Protocol.bas:5177-5209 allows Faccion.Status = consejo
+    # members to use /RMSG and /CMSG without GM tier. Skip the tier check
+    # when the council rank matches the targeted faction command.
+    if council_faction_bypass?(entity, message) do
+      handle_gm_command(state, char_id, entity, message)
+    else
+      case Permissions.check_permission(entity, message) do
+        :ok ->
+          handle_gm_command(state, char_id, entity, message)
 
-      {:error, reason} ->
-        Helpers.gm_console(state, char_id, reason)
-        {:noreply, state}
+        {:error, reason} ->
+          Helpers.gm_console(state, char_id, reason)
+          {:noreply, state}
+      end
     end
+  end
+
+  defp council_faction_bypass?(entity, message) do
+    command =
+      message
+      |> String.trim()
+      |> String.split(~r/\s+/, parts: 2)
+      |> List.first("")
+      |> String.upcase()
+
+    council = Map.get(entity, :council, false)
+
+    (command == "/RMSG" and council == :royal) or
+      (command == "/CMSG" and council == :chaos)
   end
 
   def handle_gm_rain_toggle(state, char_id) do

@@ -171,7 +171,8 @@ defmodule Arena.NpcAiParityTest do
 
       # Poison NPC (veneno: 5) adjacent to player, ready to attack
       npc = make_npc(npc_id: 570, x: 50, y: 50, target_id: 7)
-      player = make_player(x: 51, y: 50, hp: 300, max_hp: 300, poisoned: false, buffs: [])
+      # Large HP pool so the player survives the 40-tick loop regardless of hits landed.
+      player = make_player(x: 51, y: 50, hp: 100_000, max_hp: 100_000, poisoned: false, buffs: [])
 
       state =
         map_state(
@@ -181,9 +182,13 @@ defmodule Arena.NpcAiParityTest do
           sessions: %{7 => self()}
         )
 
-      # Run multiple ticks to ensure at least one hit lands
+      # Run multiple ticks to ensure at least one hit lands AND the 30% poison roll succeeds.
+      # 40 ticks at 30% poison chance => ~99.999% probability of at least one poisoning.
+      # Reset next_attack_at each iteration so the NPC can swing every tick (real monotonic
+      # time barely advances inside the loop, otherwise the 500ms cooldown blocks re-attacks).
       state =
-        Enum.reduce(1..10, state, fn _, s ->
+        Enum.reduce(1..40, state, fn _, s ->
+          s = update_in(s.npcs_live[1], &%{&1 | next_attack_at: -1_000_000_000_000})
           {s, _effects} = NpcAi.tick(s)
           s
         end)
@@ -229,11 +234,45 @@ defmodule Arena.NpcAiParityTest do
              "Player should NOT be poisoned by an NPC with veneno == 0"
     end
 
+    # Drift #2 — VB6 MODULO_NPCs.bas:780-794 (NpcEnvenenarUser) rolls a
+    # 1..100 chance and only poisons when n < 30. Statistical check:
+    # run many one-hit trials and assert the poisoning rate is near 30%.
+    test "NPC with veneno only poisons ~30% of the time (VB6 parity)" do
+      :rand.seed(:exsss, {4242, 424242, 42424242})
+
+      npc = make_npc(npc_id: 570, x: 50, y: 50, target_id: 7)
+
+      trials = 400
+
+      poisoned_count =
+        Enum.reduce(1..trials, 0, fn _, acc ->
+          player =
+            make_player(x: 51, y: 50, hp: 10_000, max_hp: 10_000, poisoned: false, buffs: [])
+
+          state =
+            map_state(
+              map_id: @test_map_id,
+              npcs_live: %{1 => %{npc | next_attack_at: -1_000_000_000_000}},
+              players: %{7 => player},
+              sessions: %{7 => self()}
+            )
+
+          {state, _effects} = NpcAi.tick(state)
+          if state.players[7].poisoned, do: acc + 1, else: acc
+        end)
+
+      rate = poisoned_count / trials
+
+      assert rate >= 0.15 and rate <= 0.45,
+             "Expected ~30% poison rate (VB6 roll), got #{rate} over #{trials} trials (#{poisoned_count} poisonings)"
+    end
+
     test "NPC poison sends console message to poisoned player" do
       :rand.seed(:exsss, {1, 2, 3})
 
       npc = make_npc(npc_id: 570, x: 50, y: 50, target_id: 7)
-      player = make_player(x: 51, y: 50, hp: 300, max_hp: 300, poisoned: false, buffs: [])
+      # Large HP pool so the player survives the 40-tick loop regardless of hits landed.
+      player = make_player(x: 51, y: 50, hp: 100_000, max_hp: 100_000, poisoned: false, buffs: [])
 
       state =
         map_state(
@@ -243,9 +282,12 @@ defmodule Arena.NpcAiParityTest do
           sessions: %{7 => self()}
         )
 
-      # Run ticks and collect effects
+      # Run ticks and collect effects. 40 ticks at 30% poison roll => ~99.999% chance of a poisoning.
+      # Reset next_attack_at each iteration so the NPC can swing every tick (500ms cooldown
+      # would otherwise block re-attacks while real monotonic time stands still in the loop).
       {_state, effects} =
-        Enum.reduce(1..10, {state, []}, fn _, {s, acc_effects} ->
+        Enum.reduce(1..40, {state, []}, fn _, {s, acc_effects} ->
+          s = update_in(s.npcs_live[1], &%{&1 | next_attack_at: -1_000_000_000_000})
           {s, new_effects} = NpcAi.tick(s)
           {s, acc_effects ++ new_effects}
         end)

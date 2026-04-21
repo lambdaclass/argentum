@@ -71,6 +71,14 @@ defmodule Arena.Map.Healing do
               {:send_raw, Encoder.encode({:console_msg, %{message: msg, font_index: 0}})}
             )
 
+            # VB6 Protocol.bas:1693 — WriteRestOK flips the client-side resting
+            # animation. Sent regardless of direction (start or stop).
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw, Encoder.encode({:rest_ok, %{}})}
+            )
+
             {:noreply, %{state | players: players}}
         end
 

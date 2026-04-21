@@ -147,36 +147,43 @@ defmodule Arena.CombatMathTest do
   end
 
   # ==================================================================
-  # skill_gain_probability/1
+  # roll_skill_gain/6
   # ==================================================================
-  describe "skill_gain_probability/1" do
-    test "skill 0 returns 35" do
-      assert Combat.skill_gain_probability(0) == 35
-    end
-
-    test "skill 50 returns 35" do
-      assert Combat.skill_gain_probability(50) == 35
-    end
-
-    test "skill 99 returns 35" do
-      assert Combat.skill_gain_probability(99) == 35
-    end
-
-    test "skill 100 (max) returns 0" do
-      assert Combat.skill_gain_probability(100) == 0
-    end
-
-    test "skill > 100 returns 0" do
-      assert Combat.skill_gain_probability(101) == 0
-      assert Combat.skill_gain_probability(200) == 0
-      assert Combat.skill_gain_probability(999) == 0
-    end
-
-    test "all skills from 0 to 99 return 35" do
-      for skill <- 0..99 do
-        assert Combat.skill_gain_probability(skill) == 35,
-               "skill #{skill} should return 35"
+  # Drift #11: VB6 `SubirSkill` replaces the flat 35% probability with a
+  # quadratic formula plus hunger/thirst gate, per-level cap, and XP reward.
+  describe "roll_skill_gain/6" do
+    test "skill at MAXSKILLPOINTS (100) never gains" do
+      for _ <- 1..200 do
+        assert Combat.roll_skill_gain(50, 100, false, 100, 100, 1.0) == :no_gain
       end
+    end
+
+    test "skill > 100 never gains" do
+      for _ <- 1..200 do
+        assert Combat.roll_skill_gain(50, 101, false, 100, 100, 1.0) == :no_gain
+        assert Combat.roll_skill_gain(50, 200, false, 100, 100, 1.0) == :no_gain
+      end
+    end
+
+    test "hunger 0 or thirst 0 blocks gain" do
+      for _ <- 1..200 do
+        assert Combat.roll_skill_gain(40, 10, false, 0, 100, 1.0) == :no_gain
+        assert Combat.roll_skill_gain(40, 10, false, 100, 0, 1.0) == :no_gain
+      end
+    end
+
+    test "per-level cap: level 10 blocks gain at skill 25" do
+      for _ <- 1..200 do
+        assert Combat.roll_skill_gain(10, 25, false, 100, 100, 1.0) == :no_gain
+      end
+    end
+
+    test "successful gain returns {:gain, 5 * xp_mult}" do
+      result =
+        Stream.repeatedly(fn -> Combat.roll_skill_gain(1, 0, true, 100, 100, 1.0) end)
+        |> Enum.find(&match?({:gain, _}, &1))
+
+      assert {:gain, 5} = result
     end
   end
 

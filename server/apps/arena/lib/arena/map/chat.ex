@@ -11,10 +11,15 @@ defmodule Arena.Map.Chat do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         if String.starts_with?(message, "/") do
-          if entity.gm do
-            Arena.Map.GmCommands.dispatch_gm_command(state, char_id, entity, message)
-          else
-            {:noreply, state}
+          cond do
+            entity.gm ->
+              Arena.Map.GmCommands.dispatch_gm_command(state, char_id, entity, message)
+
+            council_faction_broadcast?(entity, message) ->
+              Arena.Map.GmCommands.dispatch_gm_command(state, char_id, entity, message)
+
+            true ->
+              {:noreply, state}
           end
         else
           now = System.monotonic_time(:millisecond)
@@ -49,7 +54,9 @@ defmodule Arena.Map.Chat do
                    %{
                      message: filtered_message,
                      char_index: entity.char_index,
-                     color: 0x00FFFFFF,
+                     # VB6 Protocol.bas:1503 — entity.flags.ChatColor drives
+                     # the chat-over-head colour for live players.
+                     color: AoEntities.PlayerEntity.chat_color_to_int(Map.get(entity, :chat_color, {255, 255, 255})),
                      x: entity.x,
                      y: entity.y,
                      min_display_time: 2000,
@@ -147,4 +154,20 @@ defmodule Arena.Map.Chat do
   end
 
   defp chat_cooldown_ms, do: Arena.Settings.get(:chat_cooldown_ms)
+
+  # Drift #4 — VB6 Protocol.bas:5177-5209 allows council members to use
+  # /RMSG and /CMSG when their Faccion.Status matches the target faction.
+  defp council_faction_broadcast?(entity, message) do
+    command =
+      message
+      |> String.trim()
+      |> String.split(~r/\s+/, parts: 2)
+      |> List.first("")
+      |> String.upcase()
+
+    council = Map.get(entity, :council, false)
+
+    (command == "/RMSG" and council == :royal) or
+      (command == "/CMSG" and council == :chaos)
+  end
 end

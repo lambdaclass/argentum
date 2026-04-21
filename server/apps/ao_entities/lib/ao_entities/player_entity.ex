@@ -84,6 +84,24 @@ defmodule AoEntities.PlayerEntity do
     str_buff: 0,
     agi_buff: 0,
 
+    # VB6 Stats.UserAtributosBackUP — the character's base attribute
+    # snapshot, used by strength/agility potions to clamp the bumped
+    # value at backup * 2 and to restore on expiry.
+    # InvUsuario.bas:1893-1922, General.bas:1278-1297.
+    str_backup: 0,
+    agi_backup: 0,
+
+    # VB6 flags.DuracionEfecto / flags.TomoPocion — strength/agility
+    # potion timer (seconds remaining) and "a potion is active" flag.
+    # Ticked once per second by DuracionPociones (General.bas:1278).
+    duracion_efecto: 0,
+    tomo_pocion: false,
+    # Drift #18 — how much of str_buff / agi_buff came from the active
+    # potion, so it can be subtracted on expiry without clobbering
+    # concurrent spell buffs.
+    str_potion_delta: 0,
+    agi_potion_delta: 0,
+
     # Faction kill counters (persisted)
     faction_kills_royal: 0,
     faction_kills_chaos: 0,
@@ -205,6 +223,13 @@ defmodule AoEntities.PlayerEntity do
     magic_damage_modifier: 0.0,
     # GetMagicDamageReduction = max(1 - MagicDamageReduction, 0)
     magic_damage_reduction: 0.0,
+    # VB6 flags.DivineBlood: when > 0, mortal HP potions and non-healing spells
+    # are rejected (InvUsuario.bas:1925, modHechizos.bas:522).
+    divine_blood: 0,
+    # VB6 Modifiers.SelfHealingBonus (Single): additive bonus applied by
+    # effects-over-time. GetSelfHealingBonus = max(1 + SelfHealingBonus, 0).
+    # Default 0.0 -> multiplier 1.0. Modulo_UsUaRiOs.bas:3066.
+    self_healing_bonus: 0.0,
 
     # Punishment record (VB6: prontuario) — persisted list of GM actions
     # Each entry: %{number: int, text: String.t(), date: String.t(), gm_name: String.t()}
@@ -212,8 +237,50 @@ defmodule AoEntities.PlayerEntity do
 
     # VB6 parity: bank gold transfer cooldown (Counters.LastTransferGold)
     # Monotonic ms timestamp of last /BOVTRANSFERIR usage. 10s cooldown.
-    last_transfer_gold_at: -1_000_000_000_000
+    last_transfer_gold_at: -1_000_000_000_000,
+
+    # VB6: flags.ChatColor (Modulo_UsUaRiOs.bas:600-625) — RGB tuple used
+    # for the speaker's chat-over-head color. Defaults to vbWhite (255,255,255);
+    # role/faction-specific defaults are applied at login (see
+    # GameBackend.Characters.to_entity). GMs can overwrite via /CHATCOLOR
+    # (VB6 Protocol.bas:5548 HandleChatColor).
+    chat_color: {255, 255, 255}
   ]
+
+  @doc """
+  VB6 parity: default chat colour for a character given role/council flag.
+
+  Ported from Modulo_UsUaRiOs.bas:600-625. Role-based defaults (Admin, Dios,
+  SemiDios, Consejero) are set first; faction-based defaults (council tints
+  for e_Facciones.consejo / concilio) then override for council members.
+  Non-council factions (Ciudadano, Armada, Criminal, Caos) stay vbWhite.
+  """
+  def default_chat_color(gm_level, council) do
+    role_color =
+      case gm_level do
+        :admin -> {252, 195, 0}
+        :dios -> {26, 209, 107}
+        :semi_dios -> {60, 150, 60}
+        :consejero -> {170, 170, 170}
+        _ -> {255, 255, 255}
+      end
+
+    case council do
+      :royal -> {66, 201, 255}
+      :chaos -> {255, 102, 102}
+      _ -> role_color
+    end
+  end
+
+  @doc """
+  Pack an {r, g, b} tuple into the VB6 RGB Long format
+  (R + G*256 + B*65536) expected by chat_over_head and console packets.
+  """
+  def chat_color_to_int({r, g, b}) when is_integer(r) and is_integer(g) and is_integer(b) do
+    rem(r, 256) + rem(g, 256) * 256 + rem(b, 256) * 65_536
+  end
+
+  def chat_color_to_int(_), do: 0x00FFFFFF
 
   def normalize_user_tier(:adventurer), do: :adventurer
   def normalize_user_tier(:hero), do: :hero

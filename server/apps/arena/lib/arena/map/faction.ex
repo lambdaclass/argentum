@@ -6,6 +6,8 @@ defmodule Arena.Map.Faction do
   alias AoProtocol.Server.Encoder
 
   @npc_type_enlistador 5
+  # VB6 ModFacciones.bas:31 — Public Const MAX_FACTION_ENLISTMENTS = 0
+  @max_faction_enlistments 0
 
   defp msg(state, char_id, message), do: Helpers.msg(state, char_id, message)
 
@@ -44,6 +46,12 @@ defmodule Arena.Map.Faction do
         msg(state, char_id, "Ya perteneces a una faccion. Usa /RENUNCIAR primero.")
         {:noreply, state}
 
+      # VB6 ModFacciones.bas:63-66,191-194 reject when Reenlistadas > 0
+      # (MAX_FACTION_ENLISTMENTS = 0).
+      entity.faction_reenlistadas > @max_faction_enlistments ->
+        msg(state, char_id, "No puedes volver a enlistarte en una faccion.")
+        {:noreply, state}
+
       npc_faction == :royal_army and entity.criminal ->
         msg(state, char_id, "Los criminales no pueden enlistarse en la Armada Real.")
         {:noreply, state}
@@ -52,8 +60,14 @@ defmodule Arena.Map.Faction do
         msg(state, char_id, "Has asesinado ciudadanos inocentes. No puedes enlistarte en la Armada Real.")
         {:noreply, state}
 
-      npc_faction == :royal_army and entity.class in [:thief, :bandit, :assassin, :pirate] ->
-        msg(state, char_id, "Tu clase no puede enlistarse en la Armada Real.")
+      npc_faction == :royal_army and entity.class == :thief ->
+        msg(state, char_id, "No hay lugar para escoria en el Ejército Real.")
+        {:noreply, state}
+
+      # VB6 ModFacciones.bas:183-186 — Chaos rejects Ciudadanos; only
+      # Criminals (and prior council members) may enlist.
+      npc_faction == :chaos_legion and not entity.criminal ->
+        msg(state, char_id, "Tu no eres bienvenido aqui asqueroso Ciudadano.")
         {:noreply, state}
 
       true ->

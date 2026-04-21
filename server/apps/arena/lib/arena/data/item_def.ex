@@ -21,6 +21,9 @@ defmodule Arena.Data.ItemDef do
     min_modificador: 0,
     max_modificador: 0,
     porcentaje: 0,
+    # VB6 obj.dat DuracionEfecto (seconds) — strength/agility potion
+    # timer, decremented once per second by General.bas DuracionPociones.
+    duracion_efecto: 0,
     max_elv: 0,
     dos_manos: false,
     newbie: false,
@@ -110,6 +113,7 @@ defmodule Arena.Data.ItemDef do
       min_modificador: parse_int(section["minmodificador"]),
       max_modificador: parse_int(section["maxmodificador"]),
       porcentaje: parse_int(section["porcentaje"]),
+      duracion_efecto: parse_int(section["duracionefecto"]),
       stackable: obj_type in @stackable_types,
       equip_slot: Map.get(@equip_slots, obj_type),
       forbidden_classes: parse_forbidden_classes(section),

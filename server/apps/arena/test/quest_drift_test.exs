@@ -516,4 +516,27 @@ defmodule Arena.QuestDriftTest do
       assert_receive {:send_raw, _raw}
     end
   end
+
+  describe "Drift #6 — MAXUSERQUESTS cap = 5 (VB6 Declares.bas:1474)" do
+    test "can_accept_quest? rejects when player already has 5 active quests" do
+      quests = for i <- 1..5, do: %{quest_id: i, npc_kills: %{}, started_at: 0}
+      entity = make_entity(%{active_quests: quests})
+      quest_def = %{id: 99, required_level: 0, limit_level: 0, repetible: false}
+      assert QuestServer.can_accept_quest?(entity, quest_def) == false
+    end
+
+    test "can_accept_quest? allows when player has 4 active quests" do
+      quests = for i <- 1..4, do: %{quest_id: i, npc_kills: %{}, started_at: 0}
+
+      entity =
+        make_entity(%{
+          active_quests: quests,
+          completed_quests: MapSet.new(),
+          level: 25
+        })
+
+      quest_def = %{id: 99, required_level: 0, limit_level: 0, repetible: false}
+      assert QuestServer.can_accept_quest?(entity, quest_def) == true
+    end
+  end
 end

@@ -666,6 +666,49 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.dumb(), <<>>)
   end
 
+  # eParalizeOK (ID 97) — no payload. VB6 Protocol_Writes.bas:2450.
+  # Sent when the paralysis flag is cleared (dispel spell or paralysis-cure potion).
+  def encode({:paralize_ok, _params}) do
+    Writer.build_packet(PacketIds.Server.paralize_ok(), <<>>)
+  end
+
+  # eBlindNoMore (ID 85) — no payload. VB6 Protocol_Writes.bas:2113.
+  # Sent when the blind status is cleared.
+  def encode({:blind_no_more, _params}) do
+    Writer.build_packet(PacketIds.Server.blind_no_more(), <<>>)
+  end
+
+  # eDumbNoMore (ID 86) — no payload. VB6 Protocol_Writes.bas:2128.
+  # Sent when the dumb (silence) status is cleared.
+  def encode({:dumb_no_more, _params}) do
+    Writer.build_packet(PacketIds.Server.dumb_no_more(), <<>>)
+  end
+
+  # eRestOK (ID 72) — no payload. VB6 Protocol_Writes.bas:1748.
+  # Sent in response to /DESCANSAR to toggle the resting animation client-side.
+  def encode({:rest_ok, _params}) do
+    Writer.build_packet(PacketIds.Server.rest_ok(), <<>>)
+  end
+
+  # eWorkRequestTarget (ID 62) — Skill(Int8) + CasteaArea(Bool) + Radio(Int8).
+  # VB6 Protocol_Writes.bas:1395. Tells the client to switch the cursor into
+  # "pick a target" mode for the given work skill (fishing, mining, spell, etc.).
+  def encode({:work_request_target, params}) do
+    payload =
+      Writer.write_int8(params[:skill] || 0) <>
+        Writer.write_bool(params[:castea_area] || false) <>
+        Writer.write_int8(params[:radio] || 0)
+
+    Writer.build_packet(PacketIds.Server.work_request_target(), payload)
+  end
+
+  # eStunStart (ID 98) — Duration(Int16). VB6 Protocol_Writes.bas:2460.
+  # Sent to the victim when a melee hit procs a stun.
+  def encode({:stun_start, params}) do
+    payload = Writer.write_int16(params[:duration] || 0)
+    Writer.build_packet(PacketIds.Server.stun_start(), payload)
+  end
+
   # eMiniStats (ID 79)
   # ciudadanos_matados(Int32) + criminales_matados(Int32) + faction_status(Int8)
   # + npcs_killed(Int32) + class(Int8) + penalty(Int32) + deaths(Int32)
@@ -752,9 +795,19 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.bank_end(), <<>>)
   end
 
-  # eShowGMPanelForm (ID 84) — no payload, tells client to show the GM panel
-  def encode({:show_gm_panel_form, _params}) do
-    Writer.build_packet(PacketIds.Server.show_gm_panel_form(), <<>>)
+  # eShowGMPanelForm (ID 84) — appearance snapshot for the GM panel form.
+  # VB6: Protocol_Writes.bas:2605 WriteShowGMPanelForm writes the sender's
+  # head, body, CascoAnim (helmet), WeaponAnim (weapon) and ShieldAnim
+  # (shield) item ids as five Int16 fields.
+  def encode({:show_gm_panel_form, params}) do
+    payload =
+      Writer.write_int16(params[:head] || 0) <>
+        Writer.write_int16(params[:body] || 0) <>
+        Writer.write_int16(params[:casco_anim] || 0) <>
+        Writer.write_int16(params[:weapon_anim] || 0) <>
+        Writer.write_int16(params[:shield_anim] || 0)
+
+    Writer.build_packet(PacketIds.Server.show_gm_panel_form(), payload)
   end
 
   # ---- Crafting window packets ----

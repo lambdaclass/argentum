@@ -120,8 +120,10 @@ defmodule Arena.Map.Bank do
             amount <= 0 ->
               {:reply, {:error, :invalid_amount}, state}
 
-            # VB6 parity: validate inventory slot range (1..24)
-            slot < 1 or slot > 24 ->
+            # VB6 parity: validate inventory slot range. Patron tiers
+            # grow the slot list beyond 24 (drift #5), so the upper bound
+            # comes from the actual inventory size rather than a constant.
+            slot < 1 or slot > length(entity.inventory) ->
               {:reply, {:error, :invalid_slot}, state}
 
             # VB6 parity: validate slot_destino range against bank_max_slots

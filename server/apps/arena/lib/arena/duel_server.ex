@@ -43,8 +43,23 @@ defmodule Arena.DuelServer do
   @type char_id :: non_neg_integer()
 
   defmodule Challenge do
-    @moduledoc false
-    defstruct [:challenger_id, :target_id, :bet, :created_at]
+    @moduledoc """
+    A pending duel invitation.
+
+    `pociones_maximas` and `caen_items` mirror the VB6 fields
+    (Protocol.bas:5931 HandleDuel) — PocionesMaximas caps each duelist's
+    potion count and CaenItems toggles whether dropped items remain
+    lootable. They are preserved from the binary `eDuel` packet so the
+    duel rules match what the challenger selected.
+    """
+    defstruct [
+      :challenger_id,
+      :target_id,
+      :bet,
+      :created_at,
+      pociones_maximas: 0,
+      caen_items: false
+    ]
   end
 
   defmodule Room do
@@ -85,7 +100,9 @@ defmodule Arena.DuelServer do
       :right_pos,
       original_positions: %{},
       round: 1,
-      score: 0
+      score: 0,
+      pociones_maximas: 0,
+      caen_items: false
     ]
   end
 
@@ -103,9 +120,27 @@ defmodule Arena.DuelServer do
   @doc """
   Create a challenge (VB6: CrearReto).
   Returns :ok | {:error, reason}.
+
+  This variant omits the VB6 `PocionesMaximas` and `CaenItems` rule flags;
+  they default to 0 / false. Use `challenge/5` when routing the binary
+  eDuel packet (Protocol.bas:5931 HandleDuel) so those fields are
+  preserved.
   """
   def create_challenge(challenger_id, target_id, bet, server \\ __MODULE__) do
-    GenServer.call(server, {:create_challenge, challenger_id, target_id, bet})
+    GenServer.call(server, {:create_challenge, challenger_id, target_id, bet, %{}})
+  end
+
+  @doc """
+  Create a challenge with VB6 duel rule flags (VB6: CrearReto).
+
+  * `opts.pociones_maximas` — Int16, cap on potions each duelist may carry
+    (VB6: Protocol.bas:5935 PocionesMaximas).
+  * `opts.caen_items` — Bool, whether items dropped in the duel remain
+    lootable (VB6: Protocol.bas:5936 CaenItems).
+  """
+  def challenge(challenger_id, target_id, bet, opts, server \\ __MODULE__)
+      when is_map(opts) do
+    GenServer.call(server, {:create_challenge, challenger_id, target_id, bet, opts})
   end
 
   @doc """
@@ -210,7 +245,7 @@ defmodule Arena.DuelServer do
   end
 
   @impl true
-  def handle_call({:create_challenge, challenger_id, target_id, bet}, _from, state) do
+  def handle_call({:create_challenge, challenger_id, target_id, bet, opts}, _from, state) do
     cond do
       challenger_id == target_id ->
         {:reply, {:error, :cannot_challenge_self}, state}
@@ -232,7 +267,9 @@ defmodule Arena.DuelServer do
           challenger_id: challenger_id,
           target_id: target_id,
           bet: bet,
-          created_at: System.monotonic_time(:millisecond)
+          created_at: System.monotonic_time(:millisecond),
+          pociones_maximas: Map.get(opts, :pociones_maximas, 0),
+          caen_items: Map.get(opts, :caen_items, false)
         }
 
         state = %{
@@ -292,7 +329,9 @@ defmodule Arena.DuelServer do
                   original_positions: %{
                     challenger_id => nil,
                     acceptor_id => nil
-                  }
+                  },
+                  pociones_maximas: challenge.pociones_maximas,
+                  caen_items: challenge.caen_items
                 }
 
                 duel_key = duel_key(challenger_id, acceptor_id)

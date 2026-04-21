@@ -131,7 +131,7 @@ defmodule Arena.VB6ParityTest do
           immobilized: true,
           meditating: true,
           resting: true,
-          buffs: [%{type: :str, remaining_ms: 5000, value: 10}],
+          buffs: [%{type: :str, expires_at: System.monotonic_time(:millisecond) + 5000, value: 10}],
           commerce_npc_id: 42,
           bank_npc_id: 7,
           trade_partner_id: 99,

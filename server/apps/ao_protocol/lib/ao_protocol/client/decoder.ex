@@ -1330,6 +1330,61 @@ defmodule AoProtocol.Client.Decoder do
     end
   end
 
+  # ChatColor (ID 421) — r(Int8) + g(Int8) + b(Int8)
+  # VB6: Protocol.bas:5548-5561 HandleChatColor — GM sets their own ChatColor.
+  defp decode_packet(421, rest) do
+    with {:ok, r, rest} <- Reader.read_int8(rest),
+         {:ok, g, rest} <- Reader.read_int8(rest),
+         {:ok, b, rest} <- Reader.read_int8(rest) do
+      {:ok, {:chat_color, %{r: r, g: g, b: b}}, rest}
+    end
+  end
+
+  # GMPanel (ID 116) — no payload (VB6: eGMPanel, PacketId.bas:351,
+  # Protocol_GmCommands.bas:764 HandleGMPanel — GM-only /PANELGM request).
+  defp decode_packet(116, rest), do: {:ok, {:gm_panel_request, %{}}, rest}
+
+  # ---- Duel packets (VB6: PacketId.bas:454-457, Protocol.bas:5931-5981) ----
+
+  # eDuel (ID 218) — VB6 HandleDuel (Protocol.bas:5931) reads:
+  #   Players(String8) + Bet(Int32) + PocionesMaximas(Int16) + CaenItems(Bool).
+  defp decode_packet(218, rest) do
+    with {:ok, target_username, rest} <- Reader.read_string8(rest),
+         {:ok, bet, rest} <- Reader.read_int32(rest),
+         {:ok, pociones_maximas, rest} <- Reader.read_int16(rest),
+         {:ok, caen_items, rest} <- Reader.read_bool(rest) do
+      {:ok,
+       {:duel,
+        %{
+          target_username: target_username,
+          bet: bet,
+          pociones_maximas: pociones_maximas,
+          caen_items: caen_items
+        }}, rest}
+    end
+  end
+
+  # eAcceptDuel (ID 219) — VB6 HandleAcceptDuel (Protocol.bas:5952) reads
+  # Offerer(String8).
+  defp decode_packet(219, rest) do
+    with {:ok, target_username, rest} <- Reader.read_string8(rest) do
+      {:ok, {:accept_duel, %{target_username: target_username}}, rest}
+    end
+  end
+
+  # eCancelDuel (ID 220) — VB6 HandleCancelDuel (Protocol.bas:5964) reads a
+  # padding Int16 (reader.ReadInt16) and discards it; the handler then
+  # cancels the local challenge slot. We consume the padding to stay in
+  # sync with the wire format.
+  defp decode_packet(220, rest) do
+    with {:ok, _padding, rest} <- Reader.read_int16(rest) do
+      {:ok, {:cancel_duel, %{}}, rest}
+    end
+  end
+
+  # eQuitDuel (ID 221) — VB6 HandleQuitDuel (Protocol.bas:5975) has no payload.
+  defp decode_packet(221, rest), do: {:ok, {:quit_duel, %{}}, rest}
+
   # Unknown packet
   defp decode_packet(id, _rest), do: {:error, {:unknown_packet, id}}
 

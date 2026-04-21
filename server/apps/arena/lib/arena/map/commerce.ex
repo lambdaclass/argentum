@@ -182,10 +182,22 @@ defmodule Arena.Map.Commerce do
           not merchant_still_valid?(state, entity, entity.commerce_npc_id) ->
             {:reply, {:error, :merchant_gone}, state}
 
+          # VB6 Comercio.bas:130-133 — Consejero/SemiDios cannot sell items.
+          Map.get(entity, :gm_level) in [:consejero, :semi_dios] ->
+            Helpers.send_to_session(
+              state.sessions,
+              char_id,
+              {:send_raw,
+               Encoder.encode({:console_msg, %{message: "No podes vender items.", font_index: 0}})}
+            )
+
+            {:reply, {:error, :gm_cannot_sell}, state}
+
           amount <= 0 ->
             {:reply, {:error, :invalid_amount}, state}
 
-          slot < 1 or slot > 24 ->
+          # Drift #5 — patron tiers grow the inventory slot list.
+          slot < 1 or slot > length(entity.inventory) ->
             {:reply, {:error, :invalid_slot}, state}
 
           true ->
@@ -234,6 +246,16 @@ defmodule Arena.Map.Commerce do
 
                   {:reply, {:error, :untradeable}, state}
 
+                item_def != nil and Map.get(item_def, :destruye, false) ->
+                  Helpers.send_to_session(
+                    state.sessions,
+                    char_id,
+                    {:send_raw,
+                     Encoder.encode({:console_msg, %{message: "Lo siento, no puedo comprarte ese item.", font_index: 0}})}
+                  )
+
+                  {:reply, {:error, :destruye_item}, state}
+
                 inv_item.item_id == @gold_item_id ->
                   Helpers.send_to_session(
                     state.sessions,
@@ -257,7 +279,7 @@ defmodule Arena.Map.Commerce do
                   {:reply, {:error, :quest_item}, state}
 
                 true ->
-                  sell_price = if item_def, do: div(item_def.valor, 3) * amount, else: 0
+                  sell_price = if item_def, do: trunc(item_def.valor / sell_price_denom(entity)) * amount, else: 0
 
                   new_amount = inv_item.amount - amount
 
@@ -411,6 +433,16 @@ defmodule Arena.Map.Commerce do
       quest_def != nil and
         Enum.any?(quest_def.required_objs, fn req -> req.id == item_id end)
     end)
+  end
+
+  # VB6 Comercio.bas:294-310 (SalePrice) — base denominator is
+  # REDUCTOR_PRECIOVENTA = 3; Trabajador subtracts level * 0.025 (clamped at 2).
+  defp sell_price_denom(entity) do
+    if Map.get(entity, :class) == :trabajador do
+      max(3 - Map.get(entity, :level, 1) * 0.025, 2)
+    else
+      3
+    end
   end
 
   defp find_inventory_slot(entity, item_id, stackable) do

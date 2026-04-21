@@ -322,6 +322,250 @@ defmodule Arena.MerchantParityTest do
       assert result == :ok,
              "Expected normal item sell to succeed, got: #{inspect(result)}"
     end
+
+    # Drift #9 — VB6 Comercio.bas:130-133 rejects selling when the caller's
+    # Privilegios include Consejero or SemiDios ("MSG_NO_PODES_VENDER_ITEMS").
+    test "Consejero cannot sell items (VB6 parity)" do
+      merchant_id = find_merchant_npc_id()
+      item_id = find_sellable_item_id()
+      assert merchant_id != nil and item_id != nil
+
+      merchant = %{npc_id: merchant_id, x: 50, y: 50, instance_id: :merchant}
+
+      entity =
+        make_entity(%{
+          commerce_npc_id: merchant_id,
+          commerce_npc_instance_id: :merchant,
+          gold: 100,
+          gm: true,
+          gm_level: :consejero,
+          inventory:
+            List.replace_at(List.duplicate(nil, 24), 0, %{
+              item_id: item_id,
+              amount: 1,
+              equipped: false
+            })
+        })
+
+      state = make_map_state(entity, npcs_live: %{merchant: merchant})
+
+      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+
+      assert result == {:error, :gm_cannot_sell},
+             "Expected Consejero sell to be rejected, got: #{inspect(result)}"
+
+      assert Enum.at(new_state.players[:player].inventory, 0) != nil
+    end
+
+    test "SemiDios cannot sell items (VB6 parity)" do
+      merchant_id = find_merchant_npc_id()
+      item_id = find_sellable_item_id()
+      assert merchant_id != nil and item_id != nil
+
+      merchant = %{npc_id: merchant_id, x: 50, y: 50, instance_id: :merchant}
+
+      entity =
+        make_entity(%{
+          commerce_npc_id: merchant_id,
+          commerce_npc_instance_id: :merchant,
+          gold: 100,
+          gm: true,
+          gm_level: :semi_dios,
+          inventory:
+            List.replace_at(List.duplicate(nil, 24), 0, %{
+              item_id: item_id,
+              amount: 1,
+              equipped: false
+            })
+        })
+
+      state = make_map_state(entity, npcs_live: %{merchant: merchant})
+
+      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+
+      assert result == {:error, :gm_cannot_sell},
+             "Expected SemiDios sell to be rejected, got: #{inspect(result)}"
+
+      assert Enum.at(new_state.players[:player].inventory, 0) != nil
+    end
+
+    # Drift #8 — VB6 Comercio.bas:294-310 (SalePrice) applies a per-level
+    # sell-price discount for Trabajador characters:
+    #   denom = 3 - level * 0.025 (clamped at 2)
+    #   sell_price = Fix(valor / denom) * amount
+    test "Trabajador level 40 gets Fix(valor/2) per unit (VB6 parity)" do
+      merchant_id = find_merchant_npc_id()
+      assert merchant_id != nil
+
+      custom_item_id = 99801
+
+      item_def = %Arena.Data.ItemDef{
+        id: custom_item_id,
+        name: "Trabajador Discount Test",
+        obj_type: 1,
+        valor: 100,
+        grh_index: 1
+      }
+
+      :ets.insert(:arena_game_data, {{:item, custom_item_id}, item_def})
+
+      merchant = %{npc_id: merchant_id, x: 50, y: 50, instance_id: :merchant}
+
+      entity =
+        make_entity(%{
+          commerce_npc_id: merchant_id,
+          commerce_npc_instance_id: :merchant,
+          gold: 0,
+          class: :trabajador,
+          level: 40,
+          inventory:
+            List.replace_at(List.duplicate(nil, 24), 0, %{
+              item_id: custom_item_id,
+              amount: 1,
+              equipped: false
+            })
+        })
+
+      state = make_map_state(entity, npcs_live: %{merchant: merchant})
+
+      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+
+      :ets.delete(:arena_game_data, {:item, custom_item_id})
+
+      assert result == :ok
+      # Level 40 Trabajador: denom = 3 - 40 * 0.025 = 2, Fix(100/2) = 50
+      assert new_state.players[:player].gold == 50,
+             "Expected Trabajador lvl 40 sell_price=50 (valor/2), got #{new_state.players[:player].gold}"
+    end
+
+    test "Trabajador level 20 gets Fix(valor/2.5) per unit" do
+      merchant_id = find_merchant_npc_id()
+      custom_item_id = 99802
+
+      item_def = %Arena.Data.ItemDef{
+        id: custom_item_id,
+        name: "Trab20",
+        obj_type: 1,
+        valor: 100,
+        grh_index: 1
+      }
+
+      :ets.insert(:arena_game_data, {{:item, custom_item_id}, item_def})
+
+      merchant = %{npc_id: merchant_id, x: 50, y: 50, instance_id: :merchant}
+
+      entity =
+        make_entity(%{
+          commerce_npc_id: merchant_id,
+          commerce_npc_instance_id: :merchant,
+          gold: 0,
+          class: :trabajador,
+          level: 20,
+          inventory:
+            List.replace_at(List.duplicate(nil, 24), 0, %{
+              item_id: custom_item_id,
+              amount: 1,
+              equipped: false
+            })
+        })
+
+      state = make_map_state(entity, npcs_live: %{merchant: merchant})
+
+      {:reply, :ok, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+
+      :ets.delete(:arena_game_data, {:item, custom_item_id})
+
+      # denom = 3 - 20 * 0.025 = 2.5; Fix(100/2.5) = 40
+      assert new_state.players[:player].gold == 40
+    end
+
+    test "non-Trabajador class still sells at valor/3" do
+      merchant_id = find_merchant_npc_id()
+      custom_item_id = 99803
+
+      item_def = %Arena.Data.ItemDef{
+        id: custom_item_id,
+        name: "NonTrab",
+        obj_type: 1,
+        valor: 100,
+        grh_index: 1
+      }
+
+      :ets.insert(:arena_game_data, {{:item, custom_item_id}, item_def})
+
+      merchant = %{npc_id: merchant_id, x: 50, y: 50, instance_id: :merchant}
+
+      entity =
+        make_entity(%{
+          commerce_npc_id: merchant_id,
+          commerce_npc_instance_id: :merchant,
+          gold: 0,
+          class: :guerrero,
+          level: 40,
+          inventory:
+            List.replace_at(List.duplicate(nil, 24), 0, %{
+              item_id: custom_item_id,
+              amount: 1,
+              equipped: false
+            })
+        })
+
+      state = make_map_state(entity, npcs_live: %{merchant: merchant})
+
+      {:reply, :ok, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+
+      :ets.delete(:arena_game_data, {:item, custom_item_id})
+
+      # Guerrero: denom = 3 fixed; Fix(100/3) = 33
+      assert new_state.players[:player].gold == 33
+    end
+
+    # Drift #7 — VB6 Comercio.bas:104-107 blocks items flagged Destruye=1
+    # from being sold ("Lo siento, no puedo comprarte ese item.").
+    test "selling item flagged destruye is rejected (VB6 parity)" do
+      merchant_id = find_merchant_npc_id()
+      assert merchant_id != nil
+
+      destruye_item_id = 99900
+
+      item_def = %Arena.Data.ItemDef{
+        id: destruye_item_id,
+        name: "Bound Trinket",
+        obj_type: 1,
+        valor: 1000,
+        destruye: true,
+        grh_index: 1
+      }
+
+      :ets.insert(:arena_game_data, {{:item, destruye_item_id}, item_def})
+
+      merchant = %{npc_id: merchant_id, x: 50, y: 50, instance_id: :merchant}
+
+      entity =
+        make_entity(%{
+          commerce_npc_id: merchant_id,
+          commerce_npc_instance_id: :merchant,
+          gold: 100,
+          inventory:
+            List.replace_at(List.duplicate(nil, 24), 0, %{
+              item_id: destruye_item_id,
+              amount: 1,
+              equipped: false
+            })
+        })
+
+      state = make_map_state(entity, npcs_live: %{merchant: merchant})
+
+      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+
+      :ets.delete(:arena_game_data, {:item, destruye_item_id})
+
+      assert result == {:error, :destruye_item},
+             "Expected destruye-flagged item sell to be rejected, got: #{inspect(result)}"
+
+      assert Enum.at(new_state.players[:player].inventory, 0) != nil
+      assert new_state.players[:player].gold == 100
+    end
   end
 
   # ══════════════════════════════════════════════════════════════════════════

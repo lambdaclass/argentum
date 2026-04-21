@@ -287,7 +287,7 @@ defmodule Arena.Map.CombatHandlers do
             npc = %{npc | hp: new_hp}
 
             # VB6: weapon skill gain on hit
-            entity = maybe_gain_skill(entity, skill_name)
+            {entity, state} = maybe_gain_skill(state, char_id, entity, skill_name)
 
             # Send damage feedback to attacker
             Helpers.send_to_session(
@@ -448,7 +448,7 @@ defmodule Arena.Map.CombatHandlers do
             if :rand.uniform(100) <= hit_roll do
               # --- HIT: deal damage ---
               # VB6: weapon skill gain on hit
-              entity = maybe_gain_skill(entity, skill_name)
+              {entity, state} = maybe_gain_skill(state, char_id, entity, skill_name)
 
               # VB6: base user damage added to weapon damage
               {user_min, user_max} = Combat.base_user_damage(entity.level, class_id)
@@ -514,7 +514,16 @@ defmodule Arena.Map.CombatHandlers do
 
               # Guild war: no criminal flag when attacking enemy guild members
               guild_war = Arena.GuildServer.players_at_war?(char_id, defender_id)
-              entity = if not defender.criminal and not guild_war, do: %{entity | criminal: true}, else: entity
+
+              {entity, state} =
+                if not defender.criminal and not guild_war do
+                  # VB6 Modulo_UsUaRiOs.bas:2260 — VolverCriminal handles
+                  # sanctuary tiles, Ciudadano→Criminal score reset, NoPKs
+                  # warping, and party disband.
+                  Arena.Map.CriminalStatus.volver_criminal(state, char_id, entity)
+                else
+                  {entity, state}
+                end
 
               {defender, state} =
                 if new_hp <= 0 do
@@ -567,7 +576,7 @@ defmodule Arena.Map.CombatHandlers do
               # Drift #3: Use DEFENDER's tactics (not attacker's weapons skill)
               if shield_pct > 0 and Combat.shield_block?(shield_pct, def_skill, def_tactics) do
                 # Shield blocked the attack
-                defender = maybe_gain_skill(defender, :combat_defense)
+                {defender, state} = maybe_gain_skill(state, defender_id, defender, :combat_defense)
 
                 Helpers.send_to_session(
                   state.sessions,
@@ -804,14 +813,28 @@ defmodule Arena.Map.CombatHandlers do
     end
   end
 
-  def maybe_gain_skill(entity, skill_name) do
+  # VB6: SubirSkill (Modulo_UsUaRiOs.bas:1617-1670). Practice-based skill-up.
+  # Gates on hunger/thirst, per-level cap, quadratic probability; on success
+  # bumps the skill, awards 5 * ExpMult XP, and checks for level-up.
+  def maybe_gain_skill(state, char_id, entity, skill_name) do
     current = Map.get(entity.skills, skill_name, 0)
-    chance = Combat.skill_gain_probability(current)
+    expert? = Map.get(entity, :expert_skill_pending, false)
+    xp_mult = Arena.Settings.get(:xp_multiplier, 1.0)
 
-    if chance > 0 and :rand.uniform(100) <= chance do
-      %{entity | skills: Map.put(entity.skills, skill_name, current + 1)}
-    else
-      entity
+    case Combat.roll_skill_gain(entity.level, current, expert?, entity.hunger, entity.thirst, xp_mult) do
+      {:gain, bonus_exp} ->
+        entity = %{
+          entity
+          | skills: Map.put(entity.skills, skill_name, current + 1),
+            xp: entity.xp + bonus_exp
+        }
+
+        entity = check_level_up(entity, state.sessions, char_id)
+        send_xp_update(state, char_id, entity)
+        {entity, state}
+
+      :no_gain ->
+        {entity, state}
     end
   end
 

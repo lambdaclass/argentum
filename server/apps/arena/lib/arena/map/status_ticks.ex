@@ -19,6 +19,8 @@ defmodule Arena.Map.StatusTicks do
 
   def process_player_buffs(state, char_id, entity, now) do
     was_invisible = entity.invisible
+    was_paralyzed = entity.paralyzed
+    entity = tick_potion_duration(entity)
     {expired, active} = Enum.split_with(entity.buffs, fn b -> now >= b.expires_at end)
 
     # Clear flags for expired buffs
@@ -35,6 +37,16 @@ defmodule Arena.Map.StatusTicks do
           _ -> ent
         end
       end)
+
+    # VB6: when Paralisis counter expires (Modulo_UsUaRiOs.bas:2475) the server
+    # sends WriteParalizeOK so the client exits the frozen animation.
+    if was_paralyzed and not entity.paralyzed do
+      Helpers.send_to_session(
+        state.sessions,
+        char_id,
+        {:send_raw, Encoder.encode({:paralize_ok, %{}})}
+      )
+    end
 
     # Process poison ticks on active poison buffs
     {active, entity} =
@@ -90,6 +102,38 @@ defmodule Arena.Map.StatusTicks do
     end
 
     state
+  end
+
+  # Drift #18 — VB6 General.bas:1278-1297 (DuracionPociones). Called once
+  # per second (1 s buff_tick = VB6 PasarSegundo). Decrements
+  # flags.DuracionEfecto; on expiry restores UserAtributos from
+  # UserAtributosBackUP and clears flags.TomoPocion. In Elixir the live
+  # attribute is `*_base + *_buff`; we only subtract the potion-contributed
+  # portion (`*_potion_delta`) so concurrent spell buffs survive.
+  defp tick_potion_duration(entity) do
+    duracion = Map.get(entity, :duracion_efecto, 0)
+
+    cond do
+      duracion > 1 ->
+        %{entity | duracion_efecto: duracion - 1}
+
+      duracion == 1 ->
+        str_delta = Map.get(entity, :str_potion_delta, 0)
+        agi_delta = Map.get(entity, :agi_potion_delta, 0)
+
+        %{
+          entity
+          | duracion_efecto: 0,
+            tomo_pocion: false,
+            str_buff: entity.str_buff - str_delta,
+            agi_buff: entity.agi_buff - agi_delta,
+            str_potion_delta: 0,
+            agi_potion_delta: 0
+        }
+
+      true ->
+        entity
+    end
   end
 
   def process_regen_tick(state) do

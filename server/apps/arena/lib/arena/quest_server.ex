@@ -8,7 +8,7 @@ defmodule Arena.QuestServer do
 
   alias Arena.Data.GameData
 
-  @max_active_quests 20
+  @max_active_quests 5
 
   @doc "Return quest IDs available from an NPC (from its quest_numbers list) that the player hasn't completed/accepted."
   def available_quests_for_npc(entity, npc_def) do

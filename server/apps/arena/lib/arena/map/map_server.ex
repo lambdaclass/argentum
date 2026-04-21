@@ -253,6 +253,21 @@ defmodule Arena.Map.MapServer do
   def set_duel_state(map_id, char_id, in_duel, opponent_id),
     do: GenServer.cast(via(map_id), {:set_duel_state, char_id, in_duel, opponent_id})
 
+  @doc """
+  Set the entity's chat colour (VB6: HandleChatColor, Protocol.bas:5548).
+  `rgb` is an `{r, g, b}` tuple of Int8 values.
+  """
+  def set_chat_color(map_id, char_id, {_r, _g, _b} = rgb),
+    do: GenServer.cast(via(map_id), {:set_chat_color, char_id, rgb})
+
+  @doc """
+  Reply to /PANELGM with the appearance snapshot the GM panel expects.
+  VB6: Protocol_GmCommands.bas:764 HandleGMPanel +
+  Protocol_Writes.bas:2605 WriteShowGMPanelForm.
+  """
+  def gm_panel_request(map_id, char_id),
+    do: GenServer.cast(via(map_id), {:gm_panel_request, char_id})
+
   @doc "Check if a map process is loaded and ready to accept commands."
   def ready?(map_id) do
     GenServer.call(via(map_id), :ready?)
@@ -333,6 +348,12 @@ defmodule Arena.Map.MapServer do
             terrain: map_data.terrain,
             safe_zone: map_data.safe_zone,
             restrict_mode: restrict_mode_str,
+            # VB6 FileIO.bas:1728 — bit 4 (0x04) = NoPKs (criminals are
+            # not allowed on the map and get warped to Salida).
+            no_pks: band(restrict_mode_int, 4) != 0,
+            # VB6 FileIO.bas:1754-1760 — Salida map+coords for this map,
+            # `nil` when not configured.
+            salida: Map.get(map_data, :salida),
             # VB6 26h: bit 16 (0x10) = SinInviOcul -- strip invisible+oculto on entry
             sin_invi_ocul: band(restrict_mode_int, 16) != 0,
             music_hi: map_data.music_hi,
@@ -806,6 +827,50 @@ defmodule Arena.Map.MapServer do
     end
   end
 
+  # VB6: HandleChatColor (Protocol.bas:5548) — stores the RGB tuple on the
+  # entity so subsequent chat broadcasts pick it up.
+  def handle_cast({:set_chat_color, char_id, {_r, _g, _b} = rgb}, state) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        entity = %{entity | chat_color: rgb}
+        {:noreply, %{state | players: Map.put(state.players, char_id, entity)}}
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  # VB6: HandleGMPanel (Protocol_GmCommands.bas:764) replies with
+  # WriteShowGMPanelForm (Protocol_Writes.bas:2605) carrying the GM's
+  # head, body, helmet-anim, weapon-anim and shield-anim item ids.
+  # The session-layer router enforces the GM-only gate, so this cast is
+  # only invoked for GM callers; we silently drop it for unknown char_ids
+  # to match the VB6 noop behaviour when the user is not resolvable.
+  def handle_cast({:gm_panel_request, char_id}, state) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, entity} ->
+        equipment = entity.equipment || %{}
+
+        raw =
+          AoProtocol.Server.Encoder.encode(
+            {:show_gm_panel_form,
+             %{
+               head: entity.head_id || 0,
+               body: entity.body_id || 0,
+               casco_anim: Map.get(equipment, :helmet) || 0,
+               weapon_anim: Map.get(equipment, :weapon) || 0,
+               shield_anim: Map.get(equipment, :shield) || 0
+             }}
+          )
+
+        Helpers.send_to_session(state.sessions, char_id, {:send_raw, raw})
+        {:noreply, state}
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
   # ---- Timers ----
 
   @impl true
@@ -842,7 +907,10 @@ defmodule Arena.Map.MapServer do
 
     state =
       Enum.reduce(state.players, state, fn {char_id, entity}, state ->
-        if entity.buffs == [] do
+        # Drift #18: strength/agility potions track expiry via duracion_efecto
+        # on the entity itself, so process_player_buffs must run even when the
+        # buffs list is empty to tick the potion timer.
+        if entity.buffs == [] and Map.get(entity, :duracion_efecto, 0) == 0 do
           state
         else
           StatusTicks.process_player_buffs(state, char_id, entity, now)

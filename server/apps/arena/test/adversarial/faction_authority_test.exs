@@ -458,6 +458,89 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
 
       assert new_state.players[:player].faction == :none
     end
+
+    # Drift #12 — VB6 ModFacciones.bas:50-53 rejects only Thief from the Royal
+    # Army. Elixir previously rejected thief/bandit/assassin/pirate — too strict.
+    test "bandit class can enlist in royal army (VB6 parity)" do
+      entity = make_entity(%{char_id: :player, faction: :none, class: :bandit})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Faction.handle_enlistador_click(state, :player, entity, royal_enlistador_npc_def())
+
+      assert new_state.players[:player].faction == :royal_army
+    end
+
+    test "assassin class can enlist in royal army (VB6 parity)" do
+      entity = make_entity(%{char_id: :player, faction: :none, class: :assassin})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Faction.handle_enlistador_click(state, :player, entity, royal_enlistador_npc_def())
+
+      assert new_state.players[:player].faction == :royal_army
+    end
+
+    test "pirate class can enlist in royal army (VB6 parity)" do
+      entity = make_entity(%{char_id: :player, faction: :none, class: :pirate})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Faction.handle_enlistador_click(state, :player, entity, royal_enlistador_npc_def())
+
+      assert new_state.players[:player].faction == :royal_army
+    end
+
+    # Drift #14 — VB6 ModFacciones.bas:63-66 (Armada) and :191-194 (Caos)
+    # reject the re-enlistment when `.Faccion.Reenlistadas > MAX_FACTION_ENLISTMENTS`.
+    # MAX_FACTION_ENLISTMENTS = 0 (ModFacciones.bas:31), so any prior re-enlistment blocks.
+    test "player who has re-enlisted once cannot enlist again in royal army" do
+      entity = make_entity(%{char_id: :player, faction: :none, faction_reenlistadas: 1})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} = Faction.handle_enlistador_click(state, :player, entity, royal_enlistador_npc_def())
+
+      assert new_state.players[:player].faction == :none
+    end
+
+    test "player who has re-enlisted once cannot enlist again in chaos legion" do
+      entity =
+        make_entity(%{char_id: :player, faction: :none, criminal: true, faction_reenlistadas: 1})
+
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} =
+        Faction.handle_enlistador_click(state, :player, entity, chaos_enlistador_npc_def())
+
+      assert new_state.players[:player].faction == :none
+    end
+
+    # Drift #13 — VB6 ModFacciones.bas:183-186 rejects Chaos enlistment from
+    # Armada/Ciudadano/consejo. A non-criminal Ciudadano (faction :none,
+    # criminal false) falls into the Ciudadano branch and must be rejected.
+    test "non-criminal Ciudadano cannot enlist in chaos legion (VB6 parity)" do
+      entity = make_entity(%{char_id: :player, faction: :none, criminal: false})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} =
+        Faction.handle_enlistador_click(state, :player, entity, chaos_enlistador_npc_def())
+
+      assert new_state.players[:player].faction == :none
+    end
+
+    test "criminal player can enlist in chaos legion" do
+      entity = make_entity(%{char_id: :player, faction: :none, criminal: true})
+      sessions = %{player: self()}
+      state = make_map_state(%{player: entity}, sessions: sessions)
+
+      {:noreply, new_state} =
+        Faction.handle_enlistador_click(state, :player, entity, chaos_enlistador_npc_def())
+
+      assert new_state.players[:player].faction == :chaos_legion
+    end
   end
 
   # ═══════════════════════════════════════════════════════════════════════════

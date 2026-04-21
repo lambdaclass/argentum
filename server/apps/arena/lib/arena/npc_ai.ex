@@ -723,7 +723,7 @@ defmodule Arena.NpcAi do
               # VB6: NPC melee poison — if npc_def.veneno > 0 and player is not already
               # poisoned, apply a poison debuff. Duration = veneno * 1000 ms.
               {player, effects} =
-                if npc_def.veneno > 0 and not Map.get(player, :poisoned, false) and new_hp > 0 do
+                if npc_def.veneno > 0 and not Map.get(player, :poisoned, false) and new_hp > 0 and :rand.uniform(100) < 30 do
                   poison_now = System.monotonic_time(:millisecond)
                   duration_ms = npc_def.veneno * 1000
                   buff = %{type: :poisoned, expires_at: poison_now + duration_ms, next_tick: poison_now + @poison_tick_interval}

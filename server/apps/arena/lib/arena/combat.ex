@@ -402,18 +402,65 @@ defmodule Arena.Combat do
   # Skill gain
   # ==================================================================
 
-  @skill_gain_chance 35
+  # Drift #11: VB6 SubirSkill (Modulo_UsUaRiOs.bas:1617-1670).
+  # MAXSKILLPOINTS from Declares.bas:1355.
   @max_skill 100
+  # Balance.dat:328 — EXTRA/DificultadSubirSkill.
+  @skill_difficulty 2
+  # Declares.bas:1083-1084.
+  @expert_skill_cutoff 17
+  @nonexpert_skill_cutoff 10
 
   @doc """
-  Return the probability (0..100) that a skill at the given level gains a point.
-  Returns 0 when the skill is already at max.
+  VB6 SubirSkill (Modulo_UsUaRiOs.bas:1617-1670).
 
-  This is the pure half of the VB6 skill-gain check; the caller rolls
-  `:rand.uniform(100)` and compares against this value.
+  Rolls a practice-based skill-up attempt. Returns `{:gain, bonus_exp}`
+  on success or `:no_gain`. The caller bumps the skill value and adds
+  the bonus XP.
+
+    * `level` — actor's character level (Stats.ELV).
+    * `current_skill` — current skill value (Stats.UserSkills(Skill)).
+    * `expert?` — `flags.PendienteDelExperto = 1` (uses 17 cutoff; else 10).
+    * `hunger`, `thirst` — Stats.MinHam / Stats.MinAGU; both must be > 0.
+    * `xp_mult` — SvrConfig "ExpMult" (Arena.Settings :xp_multiplier).
+
+  VB6 pipeline:
+    1. Return if current_skill >= MAXSKILLPOINTS.
+    2. Compute maxPermitido per level; return if current_skill >= maxPermitido.
+    3. Return if hunger <= 0 or thirst <= 0.
+    4. Prob = Int(0.1 * Lvl^2 + 15); Aumenta = rand(1, Prob * DificultadSubirSkill).
+    5. Gain iff Aumenta < cutoff (17 expert / 10 non-expert).
+    6. On gain, BonusExp = 5 * ExpMult.
   """
-  def skill_gain_probability(current_skill) do
-    if current_skill < @max_skill, do: @skill_gain_chance, else: 0
+  def roll_skill_gain(level, current_skill, expert?, hunger, thirst, xp_mult) do
+    cond do
+      current_skill >= @max_skill -> :no_gain
+      current_skill >= max_skill_for_level(level) -> :no_gain
+      hunger <= 0 or thirst <= 0 -> :no_gain
+      true -> do_roll_skill_gain(level, expert?, xp_mult)
+    end
+  end
+
+  # VB6: maxPermitido = (Lvl \\ 2) * 5 on even levels; on odd levels
+  # add (3 or 2) depending on whether the previous even-level cap ended in 0 or 5.
+  defp max_skill_for_level(level) do
+    if rem(level, 2) == 0 do
+      div(level, 2) * 5
+    else
+      div(level, 2) * 5 + 3 - div(rem(div(level - 1, 2) * 5, 10), 5)
+    end
+  end
+
+  defp do_roll_skill_gain(level, expert?, xp_mult) do
+    prob = trunc(0.1 * level * level + 15)
+    aumenta = :rand.uniform(prob * @skill_difficulty)
+    cutoff = if expert?, do: @expert_skill_cutoff, else: @nonexpert_skill_cutoff
+
+    if aumenta < cutoff do
+      {:gain, trunc(5 * xp_mult)}
+    else
+      :no_gain
+    end
   end
 
   @doc """

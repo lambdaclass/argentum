@@ -100,6 +100,19 @@ defmodule AoProtocol.PacketIds do
     def quest_details_request, do: 261
     def quest_abandon, do: 262
 
+    # GM chat color (VB6: eChatColor = 421, PacketId.bas:438, /CHATCOLOR)
+    def chat_color, do: 421
+
+    # GM panel request (VB6: eGMPanel = 116, PacketId.bas:351, /PANELGM)
+    def gm_panel_request, do: 116
+
+    # Duel (VB6: PacketId.bas:454-457 — eDuel=218, eAcceptDuel=219,
+    # eCancelDuel=220, eQuitDuel=221). Handlers: Protocol.bas:5931-5981.
+    def duel, do: 218
+    def accept_duel, do: 219
+    def cancel_duel, do: 220
+    def quit_duel, do: 221
+
     # Other
     def quit, do: 39
     def rest, do: 47
@@ -205,6 +218,14 @@ defmodule AoProtocol.PacketIds do
     def snow_toggle, do: 76
     def party_safe_mode_on, do: 22
     def party_safe_mode_off, do: 23
+
+    # Status-effect clears and combat flags (VB6 PacketId.bas:83,93,106-107,118-119)
+    def work_request_target, do: 62
+    def rest_ok, do: 72
+    def blind_no_more, do: 85
+    def dumb_no_more, do: 86
+    def paralize_ok, do: 97
+    def stun_start, do: 98
 
     # Party snapshot (VB6: eDatosGrupo = 143)
     def datos_grupo, do: 143

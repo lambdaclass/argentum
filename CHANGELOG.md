@@ -4,6 +4,64 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **VB6 parity drift closures (2026-04-21):**
+  - **Drift #1** — GM panel request flow. Added client packet 116
+    (`gm_panel_request`) decoder, `:gm`-group route, and handler that responds
+    via the existing `:show_gm_panel_form` encoder.
+  - **Drift #2** — NPC melee poison 30% roll. Gated `npc_ai.ex` poison
+    application on `:rand.uniform(100) < 30` per `MODULO_NPCs.bas:780-794`.
+  - **Drift #3** — Binary duel packets. Added `:duel` / `:accept_duel` /
+    `:cancel_duel` / `:quit_duel` decoders, routes, and a new
+    `SessionCommands.Duel` module. Extended `Arena.DuelServer` to carry
+    `pociones_maximas` and `caen_items` end-to-end (missing from the text
+    `/RETO` path).
+  - **Drift #4** — Council-rank faction messages. `/RMSG` and `/CMSG` now
+    bypass the GM gate for Royal/Chaos council members; non-council non-GM
+    senders still rejected. Rewired `session_logic.ex`, `chat.ex`, and
+    `gm_commands.ex`.
+  - **Drift #5** — Inventory slots by patron tier.
+    `Inventory.max_slots_for_tier/1` (24/30/36/42 for
+    normal/adventurer/hero/legend), inventory resized at login, bank and
+    commerce slot bounds now dynamic.
+  - **Drift #6** — `@max_active_quests` 20 → 5 per `Declares.bas:1474`.
+  - **Drift #7** — Commerce sell rejects items flagged `destruye`.
+  - **Drift #8** — Trabajador sell-price discount: denom subtracts
+    `level * 0.025` from `REDUCTOR_PRECIOVENTA` (clamped at 2).
+  - **Drift #9** — Commerce sell blocks `:consejero` / `:semi_dios` tiers.
+  - **Drift #10** — `/CHATCOLOR` + per-entity `chat_color`. Added packet 421
+    decoder, GM-gated handler, role/council defaults
+    (`PlayerEntity.default_chat_color/2`), and threading into chat-over-head
+    broadcasts.
+  - **Drift #11** — Skill-up formula rewrite. Replaced flat 35% with VB6
+    quadratic `Prob = Int(0.1 * Lvl^2 + 15)`, added hunger gate, per-level
+    cap, and `5 * xp_mult` XP bonus side effect.
+  - **Drift #12** — Royal Army class gate narrowed from 4 classes to `:thief`
+    only per `ModFacciones.bas:50-53`.
+  - **Drift #13** — Chaos Legion now rejects non-criminal Ciudadanos per
+    `ModFacciones.bas:183-186`.
+  - **Drift #14** — `MAX_FACTION_ENLISTMENTS = 0` guard on both enlist paths.
+  - **Drift #15** — Full `VolverCriminal` port. New
+    `Arena.Map.CriminalStatus` honours trigger-6 safe tiles, resets
+    `faction_score` on Ciudadano→Criminal, warps criminals out of NoPKs maps
+    to `MapInfo.Salida`, and disbands parties.
+  - **Drift #16** — HP potion DivineBlood gate + SelfHealingBonus multiplier.
+    Added `divine_blood` and `self_healing_bonus` fields on `PlayerEntity`;
+    `apply_potion` for `tipo_pocion == 1` rejects under DivineBlood and
+    multiplies the roll by `max(1 + bonus, 0)`.
+  - **Drift #17** — Mana potion now restores
+    `div(max_mana * item_def.porcentaje, 100)` per `InvUsuario.bas:1946-1956`.
+  - **Drift #18** — Str/Agi potion duration + cap. Added `str_backup` /
+    `agi_backup` / `duracion_efecto` / `tomo_pocion` fields and
+    `str_potion_delta` / `agi_potion_delta` trackers. Clamps at
+    `backup * 2`; `StatusTicks.tick_potion_duration/1` runs at the existing
+    1 s `:buff_tick` cadence and restores the attribute on expiry.
+  - **Drift #19** (partial) — Six missing outbound encoders added:
+    `:paralize_ok`, `:blind_no_more`, `:dumb_no_more`, `:rest_ok`,
+    `:work_request_target`, `:stun_start`. Wired `:paralize_ok` (inventory
+    cure + buff-expiry in `StatusTicks`) and `:rest_ok` (/DESCANSAR). The
+    other four await their flag subsystems — ticket remains open in
+    `drift.md` scoped to the missing wiring.
+
 - **Final backend parity sweep + tooling cleanup (2026-04-19):**
   - Closed the late-stage parity sweep that landed after the Phase 2/3 roadmap
     closures: core combat/spell/leveling formulas, trade/drop/bank item-rule
