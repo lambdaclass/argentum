@@ -47,6 +47,23 @@ defmodule Arena.Map.GmCommands do
       (command == "/CMSG" and council == :chaos)
   end
 
+  # Strips the leading slash command from `message` case-insensitively and
+  # returns the remainder. VB6 `/RMSG` / `/CMSG` / `/TALKASNPC` arrive as
+  # binary packets (Protocol.bas:5177-5209), so VB6 never sees the command
+  # token at all. In Elixir the dispatcher uppercases for matching but the
+  # original message preserves user case; extract the body by splitting on
+  # whitespace so any case of the prefix is stripped.
+  defp extract_command_body(message) do
+    message
+    |> String.trim()
+    |> String.split(~r/\s+/, parts: 2)
+    |> case do
+      [_cmd, rest] -> rest
+      [_cmd] -> ""
+      [] -> ""
+    end
+  end
+
   def handle_gm_rain_toggle(state, char_id) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} when entity.gm ->
@@ -376,15 +393,15 @@ defmodule Arena.Map.GmCommands do
         Events.gm_mass_kill_npcs(state, char_id, entity)
 
       ["/RMSG" | _rest] ->
-        msg_text = String.trim_leading(String.trim(message), "/RMSG ")
+        msg_text = extract_command_body(message)
         Events.gm_faction_message(state, char_id, :royal_army, msg_text)
 
       ["/CMSG" | _rest] ->
-        msg_text = String.trim_leading(String.trim(message), "/CMSG ")
+        msg_text = extract_command_body(message)
         Events.gm_faction_message(state, char_id, :chaos_legion, msg_text)
 
       ["/TALKASNPC" | _rest] ->
-        msg_text = String.trim_leading(String.trim(message), "/TALKASNPC ")
+        msg_text = extract_command_body(message)
         Events.gm_talk_as_npc(state, char_id, entity, msg_text)
 
       ["/INVASION", map_str, npc_str, count_str] ->

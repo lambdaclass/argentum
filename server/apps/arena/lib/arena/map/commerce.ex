@@ -72,6 +72,13 @@ defmodule Arena.Map.Commerce do
       {:ok, entity} when entity.dead ->
         {:reply, {:error, :dead}, state}
 
+      # VB6 Comercio.bas / Protocol.bas — Comerciando is a shared mutex
+      # between NPC commerce and user-to-user trade. While a player has an
+      # active trade_partner_id, NPC commerce must be blocked (defense-in-depth
+      # in case commerce_npc_id lingers from a prior session).
+      {:ok, entity} when entity.trade_partner_id != nil ->
+        {:reply, {:error, :already_trading}, state}
+
       {:ok, entity} ->
         if amount <= 0 do
           {:reply, {:error, :invalid_amount}, state}
@@ -173,6 +180,13 @@ defmodule Arena.Map.Commerce do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} when entity.dead ->
         {:reply, {:error, :dead}, state}
+
+      # VB6 Comercio.bas / Protocol.bas — Comerciando is a shared mutex
+      # between NPC commerce and user-to-user trade. While a player has an
+      # active trade_partner_id, NPC commerce must be blocked (defense-in-depth
+      # in case commerce_npc_id lingers from a prior session).
+      {:ok, entity} when entity.trade_partner_id != nil ->
+        {:reply, {:error, :already_trading}, state}
 
       {:ok, entity} ->
         cond do

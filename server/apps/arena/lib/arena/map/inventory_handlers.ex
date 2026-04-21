@@ -410,9 +410,6 @@ defmodule Arena.Map.InventoryHandlers do
         entity.dead ->
           {:reply, {:error, :dead}, state}
 
-        entity.paralyzed ->
-          {:reply, {:error, :paralyzed}, state}
-
         now < entity.next_item_use_at ->
           {:reply, {:error, :cooldown}, state}
 
@@ -424,19 +421,29 @@ defmodule Arena.Map.InventoryHandlers do
             item ->
               item_def = GameData.get_item(item.item_id)
 
-              if item_def == nil do
-                {:reply, {:error, :unknown_item}, state}
-              else
-                case apply_item_use(entity, item_def, slot, state, target_x, target_y) do
-                  {:ok, entity, state} ->
-                    entity = %{entity | next_item_use_at: now + item_use_cooldown_ms()}
-                    players = Map.put(state.players, char_id, entity)
-                    state = %{state | players: players}
-                    {:reply, :ok, state}
+              cond do
+                item_def == nil ->
+                  {:reply, {:error, :unknown_item}, state}
 
-                  {:error, reason} ->
-                    {:reply, {:error, reason}, state}
-                end
+                # VB6 parity (InvUsuario.bas:1877-1887): the otPotions branch
+                # only gates on Muerto + IntervaloPermiteGolpeUsar. Paralizado
+                # is NOT a gate for potions, so a paralyzed character can still
+                # drink a cure/speed/strength potion. Every other item type
+                # retains the paralyzed rejection.
+                entity.paralyzed and item_def.obj_type != 1 ->
+                  {:reply, {:error, :paralyzed}, state}
+
+                true ->
+                  case apply_item_use(entity, item_def, slot, state, target_x, target_y) do
+                    {:ok, entity, state} ->
+                      entity = %{entity | next_item_use_at: now + item_use_cooldown_ms()}
+                      players = Map.put(state.players, char_id, entity)
+                      state = %{state | players: players}
+                      {:reply, :ok, state}
+
+                    {:error, reason} ->
+                      {:reply, {:error, reason}, state}
+                  end
               end
           end
       end

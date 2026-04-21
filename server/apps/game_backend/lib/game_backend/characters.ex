@@ -85,6 +85,17 @@ defmodule GameBackend.Characters do
     # Marriage: VB6 SpouseId (0 = not married)
     field(:spouse_id, :integer, default: 0)
 
+    # Potion state — VB6 CharacterPersistence.bas writes DuracionEfecto and
+    # UserAtributosBackUP so a mid-buff logoff preserves the remaining timer
+    # and the base-stat backup used to cap the buffed attribute at
+    # backup * 2.  See VB6 `AtrBKUP` / `Pocion` writes.
+    field(:duracion_efecto, :integer, default: 0)
+    field(:tomo_pocion, :boolean, default: false)
+    field(:str_potion_delta, :integer, default: 0)
+    field(:agi_potion_delta, :integer, default: 0)
+    field(:str_backup, :integer, default: 0)
+    field(:agi_backup, :integer, default: 0)
+
     field(:session_token, :string)
 
     has_many(:inventory_slots, InventorySlot, foreign_key: :character_id)
@@ -144,6 +155,12 @@ defmodule GameBackend.Characters do
     :gm,
     :muted_until,
     :spouse_id,
+    :duracion_efecto,
+    :tomo_pocion,
+    :str_potion_delta,
+    :agi_potion_delta,
+    :str_backup,
+    :agi_backup,
     :session_token
   ]
 
@@ -352,8 +369,14 @@ defmodule GameBackend.Characters do
       # Drift #18 — VB6 Stats.UserAtributosBackUP snapshot. The live
       # attribute is bumped by strength/agility potions; the backup is
       # the immutable base used to cap the bumped value at backup * 2.
-      str_backup: c.str,
-      agi_backup: c.agi,
+      # Legacy rows (pre-migration) store 0; fall back to the live stat
+      # so existing characters don't break their cap on first load.
+      str_backup: if((c.str_backup || 0) == 0, do: c.str, else: c.str_backup),
+      agi_backup: if((c.agi_backup || 0) == 0, do: c.agi, else: c.agi_backup),
+      str_potion_delta: c.str_potion_delta || 0,
+      agi_potion_delta: c.agi_potion_delta || 0,
+      duracion_efecto: c.duracion_efecto || 0,
+      tomo_pocion: c.tomo_pocion || false,
       gold: c.gold,
       inventory: slots_to_inventory(c.inventory_slots),
       equipment: row_to_equipment(c.equipment),
@@ -435,7 +458,17 @@ defmodule GameBackend.Characters do
       criminal: e.criminal,
       muted_until: e.muted_until,
       spouse_id: e.spouse_id,
-      map_id: e.map_id
+      map_id: e.map_id,
+      # Potion state — VB6 parity: DuracionEfecto and UserAtributosBackUP
+      # must survive log-off so mid-buff reconnects preserve the timer and
+      # the base-stat backup.  See CharacterPersistence.bas `AtrBKUP` /
+      # `Pocion` writes.
+      duracion_efecto: e.duracion_efecto,
+      tomo_pocion: e.tomo_pocion,
+      str_potion_delta: e.str_potion_delta,
+      agi_potion_delta: e.agi_potion_delta,
+      str_backup: e.str_backup,
+      agi_backup: e.agi_backup
     }
   end
 
