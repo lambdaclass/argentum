@@ -253,6 +253,7 @@ defmodule Arena.CraftingBankTrainDriftTest do
 
       # Train creature at index 1 (1-based, VB6 style)
       # This should be handled by NpcInteraction.handle_train_creature/3
+      Code.ensure_loaded?(NpcInteraction)
       assert function_exported?(NpcInteraction, :handle_train_creature, 3),
              "NpcInteraction.handle_train_creature/3 must exist"
 
@@ -340,6 +341,7 @@ defmodule Arena.CraftingBankTrainDriftTest do
           npcs_live: %{}
         )
 
+      Code.ensure_loaded?(NpcInteraction)
       assert function_exported?(NpcInteraction, :handle_bank_gold_transfer, 4),
              "NpcInteraction.handle_bank_gold_transfer/4 must exist"
 

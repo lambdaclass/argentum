@@ -173,6 +173,11 @@ defmodule AoTcpGateway.ParityStubHandlersTest do
   # ===================================================================
 
   describe "sos_show_list (GM)" do
+    setup do
+      AoSession.SosQueue.clear()
+      :ok
+    end
+
     test "returns a list (even if empty) instead of hardcoded '(vacia)'" do
       state = gm_state()
 
