@@ -9,7 +9,7 @@ defmodule Arena.StubHandlersTest do
   alias Arena.Map.MapServer
   alias AoEntities.PlayerEntity
 
-  @test_map_id 1
+  @test_map_id 10_007
 
   setup_all do
     Application.ensure_all_started(:phoenix_pubsub)

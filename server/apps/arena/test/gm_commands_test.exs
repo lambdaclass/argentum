@@ -7,7 +7,7 @@ defmodule Arena.GmCommandsTest do
   alias Arena.Map.MapServer
   alias AoEntities.PlayerEntity
 
-  @test_map_id 1
+  @test_map_id 10_002
 
   setup_all do
     Application.ensure_all_started(:phoenix_pubsub)

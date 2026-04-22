@@ -12,7 +12,7 @@ defmodule Arena.CombatLifecycleTest do
   alias Arena.Map.MapServer
   alias AoEntities.PlayerEntity
 
-  @test_map_id 1
+  @test_map_id 10_001
 
   setup_all do
     Application.ensure_all_started(:phoenix_pubsub)

@@ -16,7 +16,7 @@ defmodule Arena.TreasureNpcDriftTest do
   alias Arena.Data.GameData
 
   # Use map 1 which is always available in test data
-  @test_map_id 1
+  @test_map_id 10_009
 
   setup_all do
     # Start only the processes we need (same pattern as map_server_bugs_test)
@@ -56,9 +56,9 @@ defmodule Arena.TreasureNpcDriftTest do
     npc_id = List.first(original_config.npc_ids) || 591
 
     :ets.insert(:arena_game_data, {:treasure_config, %{
-      treasure_maps: [1],
+      treasure_maps: [@test_map_id],
       treasure_items: [{100, 1}],
-      gift_maps: [1],
+      gift_maps: [@test_map_id],
       gift_items: [{200, 1}],
       npc_ids: [npc_id],
       npc_maps: [@test_map_id]

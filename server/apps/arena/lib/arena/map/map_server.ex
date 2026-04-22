@@ -279,6 +279,12 @@ defmodule Arena.Map.MapServer do
 
   @benchmark_map_id 999
   @crowd_arena_map_id 998
+  # Map IDs >= @test_map_id_min are synthetic empty maps used by test
+  # suites so each test module gets an isolated MapServer with no real
+  # NPCs, no regen/buff ticks, and no cross-test packet leakage.
+  @test_map_id_min 10_000
+
+  defguardp test_map?(map_id) when is_integer(map_id) and map_id >= @test_map_id_min
 
   @impl true
   def init(map_id) do
@@ -290,14 +296,17 @@ defmodule Arena.Map.MapServer do
     Logger.info("Loading map #{map_id}...")
 
     map_data_result =
-      case map_id do
-        @benchmark_map_id ->
+      cond do
+        map_id == @benchmark_map_id ->
           {:ok, benchmark_map_data()}
 
-        @crowd_arena_map_id ->
+        map_id == @crowd_arena_map_id ->
           {:ok, crowd_arena_map_data()}
 
-        _ ->
+        test_map?(map_id) ->
+          {:ok, test_map_data(map_id)}
+
+        true ->
           csm_path = Path.join(maps_dir(), "mapa#{map_id}.csm")
           CsmParser.parse_file(csm_path)
       end
@@ -318,7 +327,9 @@ defmodule Arena.Map.MapServer do
               "#{length(map_data.objects)} objects, #{length(map_data.tile_exits)} exits)"
           )
 
-          Process.send_after(self(), :autosave, @autosave_interval_ms)
+          unless test_map?(map_id) do
+            Process.send_after(self(), :autosave, @autosave_interval_ms)
+          end
 
           visibility_mode = Application.get_env(:arena, :visibility_mode, :aoi_grid)
 
@@ -387,12 +398,14 @@ defmodule Arena.Map.MapServer do
             npc_char_indices: npc_char_indices
           }
 
-          if map_size(npcs_live) > 0 do
+          if runtime_timers_enabled?(map_id) and map_size(npcs_live) > 0 do
             Process.send_after(self(), :npc_ai_tick, @npc_ai_tick_ms)
           end
 
-          Process.send_after(self(), :buff_tick, 1000)
-          Process.send_after(self(), :regen_tick, regen_tick_ms())
+          unless test_map?(map_id) do
+            Process.send_after(self(), :buff_tick, 1000)
+            Process.send_after(self(), :regen_tick, regen_tick_ms())
+          end
 
           {:noreply, state}
         end
@@ -874,6 +887,9 @@ defmodule Arena.Map.MapServer do
   # ---- Timers ----
 
   @impl true
+  def handle_info(:autosave, state) when test_map?(state.map_id), do: {:noreply, state}
+
+  @impl true
   def handle_info(:autosave, state) do
     for {char_id, entity} <- state.players do
       Helpers.send_to_session(state.sessions, char_id, {:autosave, entity})
@@ -882,6 +898,9 @@ defmodule Arena.Map.MapServer do
     Process.send_after(self(), :autosave, @autosave_interval_ms)
     {:noreply, state}
   end
+
+  @impl true
+  def handle_info(:npc_ai_tick, state) when test_map?(state.map_id), do: {:noreply, state}
 
   @impl true
   def handle_info(:npc_ai_tick, state) do
@@ -899,6 +918,9 @@ defmodule Arena.Map.MapServer do
     Process.send_after(self(), :npc_ai_tick, @npc_ai_tick_ms)
     {:noreply, state}
   end
+
+  @impl true
+  def handle_info(:buff_tick, state) when test_map?(state.map_id), do: {:noreply, state}
 
   @impl true
   def handle_info(:buff_tick, state) do
@@ -926,6 +948,9 @@ defmodule Arena.Map.MapServer do
     Process.send_after(self(), :buff_tick, 1000)
     {:noreply, state}
   end
+
+  @impl true
+  def handle_info(:regen_tick, state) when test_map?(state.map_id), do: {:noreply, state}
 
   @impl true
   def handle_info(:regen_tick, state) do
@@ -1212,6 +1237,44 @@ defmodule Arena.Map.MapServer do
       tiles: tiles
     }
   end
+
+  # Synthetic empty map for test-only use. Each test module picks a distinct
+  # ID (>= @test_map_id_min) so MapServers don't cross-contaminate: no NPCs,
+  # no regen/buff/autosave ticks scheduled, no shared spatial visibility
+  # state with other tests.
+  defp test_map_data(map_id) do
+    alias Arena.Map.CsmParser.MapData
+
+    paired_map_id =
+      if rem(map_id, 2) == 0 do
+        map_id + 1
+      else
+        max(map_id - 1, @test_map_id_min)
+      end
+
+    %MapData{
+      map_name: "Synthetic Test Map #{map_id}",
+      zone: "CAMPO",
+      terrain: "BOSQUE",
+      safe_zone: false,
+      music_hi: 0,
+      music_low: 0,
+      rain: false,
+      snow: false,
+      fog: false,
+      blocked: [],
+      layers: [[], [], [], []],
+      triggers: [],
+      npcs: [],
+      objects: [],
+      tile_exits: [
+        %{x: 50, y: 50, dest_map: paired_map_id, dest_x: 51, dest_y: 50}
+      ],
+      tiles: List.duplicate(0, Helpers.map_width() * Helpers.map_height())
+    }
+  end
+
+  defp runtime_timers_enabled?(map_id), do: not test_map?(map_id)
 
   defp maps_dir do
     Application.get_env(:arena, :maps_dir, Path.join(:code.priv_dir(:arena), "maps"))

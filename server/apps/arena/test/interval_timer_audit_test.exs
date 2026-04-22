@@ -27,7 +27,7 @@ defmodule Arena.IntervalTimerAuditTest do
   alias AoProtocol.Server.Encoder
   import Arena.Test.MapStateFactory
 
-  @test_map_id 1
+  @test_map_id 10_003
 
   # ============================================================
   # Setup — start minimal infrastructure (matches existing tests)

@@ -10,7 +10,7 @@ defmodule Arena.SmokeBotTest do
   alias Arena.Map.MapServer
   alias AoEntities.PlayerEntity
 
-  @test_map_id 1
+  @test_map_id 10_006
 
   # Packet IDs (from AoProtocol.PacketIds.Server)
   @pkt_chat_over_head 35

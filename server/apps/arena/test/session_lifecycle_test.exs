@@ -17,8 +17,8 @@ defmodule Arena.SessionLifecycleTest do
   alias Arena.Map.MapServer
   alias AoEntities.PlayerEntity
 
-  @test_map_id 1
-  @alt_map_id 2
+  @test_map_id 10_005
+  @alt_map_id 10_105
 
   setup_all do
     Application.ensure_all_started(:phoenix_pubsub)

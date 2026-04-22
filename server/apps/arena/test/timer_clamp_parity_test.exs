@@ -41,7 +41,7 @@ defmodule Arena.TimerClampParityTest do
 
   import Arena.Test.MapStateFactory
 
-  @test_map_id 1
+  @test_map_id 10_008
 
   # ── Setup (minimal infrastructure, same pattern as other arena tests) ──
 

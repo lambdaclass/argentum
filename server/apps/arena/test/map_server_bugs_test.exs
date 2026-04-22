@@ -8,7 +8,7 @@ defmodule Arena.Map.MapServerBugsTest do
   alias Arena.Map.MapServer
   alias AoEntities.PlayerEntity
 
-  @test_map_id 1
+  @test_map_id 10_020
 
   setup_all do
     # Start only the processes we need (no Phoenix, no Postgres)
@@ -332,7 +332,7 @@ defmodule Arena.Map.MapServerBugsTest do
       {:ok, _idx, _, _weather} = MapServer.enter(@test_map_id, entity, position: {start_x, start_y})
       flush_mailbox()
 
-      # Forward: map 1 → dest (two-step: enter dest, then leave source)
+      # Forward: test_map → dest (two-step: enter dest, then leave source)
       assert {:ok, _} = MapServer.move_character(@test_map_id, 6701, direction)
       {dest_map, dest_x, dest_y, transferred} = receive_transfer(6701)
       assert dest_map == dest_map_id
@@ -341,7 +341,7 @@ defmodule Arena.Map.MapServerBugsTest do
       MapServer.leave(@test_map_id, 6701)
       flush_mailbox()
 
-      # Find an exit on dest map that goes back to map 1
+      # Find an exit on dest map that goes back to the test map
       return_exit = find_reachable_exit_to(dest_map, @test_map_id)
 
       if return_exit do
