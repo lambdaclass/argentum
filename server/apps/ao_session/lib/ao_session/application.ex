@@ -7,6 +7,7 @@ defmodule AoSession.Application do
   def start(_type, _args) do
     children = [
       {Registry, keys: :unique, name: AoSession.SessionRegistry},
+      AoSession.PressureRegistry,
       AoSession.OnlineDirectory,
       AoSession.SosQueue,
       AoSession.SessionMonitor

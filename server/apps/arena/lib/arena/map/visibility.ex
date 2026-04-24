@@ -10,6 +10,7 @@ defmodule Arena.Map.Visibility do
   alias Arena.Map.Helpers
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
+  alias AoSession.{Egress, Outbound}
 
   # cell_size is compile-time; runtime AoI checks use Helpers.aoi_range_x/y()
   @cell_size max(
@@ -97,19 +98,19 @@ defmodule Arena.Map.Visibility do
 
   @doc "Send character_remove to nearby non-GM players (entity going invisible)."
   def hide_from_non_gm(state, entity) do
-    remove_raw = Encoder.encode({:character_remove, %{char_index: entity.char_index}})
+    envelope = Outbound.critical(Encoder.encode({:character_remove, %{char_index: entity.char_index}}))
 
     broadcast_visible_non_gm(state, entity.x, entity.y, entity.char_id, fn pid ->
-      send(pid, {:send_raw, remove_raw})
+      Egress.enqueue(pid, envelope)
     end)
   end
 
   @doc "Send character_create to nearby non-GM players (entity becoming visible)."
   def reveal_to_non_gm(state, entity) do
-    create_raw = Encoder.encode(Helpers.character_create_packet(entity))
+    envelope = Outbound.critical(Encoder.encode(Helpers.character_create_packet(entity)))
 
     broadcast_visible_non_gm(state, entity.x, entity.y, entity.char_id, fn pid ->
-      send(pid, {:send_raw, create_raw})
+      Egress.enqueue(pid, envelope)
     end)
   end
 
@@ -323,15 +324,15 @@ defmodule Arena.Map.Visibility do
   def enter_visibility(state, entity, sessions) do
     if state.visible_sets == nil do
       # :global mode -- broadcast to everyone, no visible set tracking
-      create_raw = Encoder.encode(Helpers.character_create_packet(entity))
+      create_env = Outbound.critical(Encoder.encode(Helpers.character_create_packet(entity)))
 
       for {cid, pid} <- sessions, cid != entity.char_id do
         if entity.invisible do
           # Only send to GMs
           viewer = Map.get(state.players, cid)
-          if viewer != nil and viewer.gm, do: send(pid, {:send_raw, create_raw})
+          if viewer != nil and viewer.gm, do: Egress.enqueue(pid, create_env)
         else
-          send(pid, {:send_raw, create_raw})
+          Egress.enqueue(pid, create_env)
         end
       end
 
@@ -348,7 +349,7 @@ defmodule Arena.Map.Visibility do
       visible_ids = compute_visible_ids(state, entity.x, entity.y, entity.char_id)
       visible_sets = Map.put(state.visible_sets, entity.char_id, visible_ids)
 
-      create_raw = Encoder.encode(Helpers.character_create_packet(entity))
+      create_env = Outbound.critical(Encoder.encode(Helpers.character_create_packet(entity)))
 
       visible_sets =
         Enum.reduce(visible_ids, visible_sets, fn other_id, vs ->
@@ -356,10 +357,10 @@ defmodule Arena.Map.Visibility do
             # Only send our create to GMs
             other = Map.get(state.players, other_id)
             if other != nil and other.gm do
-              Helpers.send_to_session(sessions, other_id, {:send_raw, create_raw})
+              Helpers.send_outbound(sessions, other_id, create_env)
             end
           else
-            Helpers.send_to_session(sessions, other_id, {:send_raw, create_raw})
+            Helpers.send_outbound(sessions, other_id, create_env)
           end
 
           Map.update(vs, other_id, MapSet.new([entity.char_id]), &MapSet.put(&1, entity.char_id))
@@ -396,18 +397,18 @@ defmodule Arena.Map.Visibility do
 
   # Handle leave/transfer: send removal to observers, clean up visible sets
   def remove_from_visibility(state, char_id, entity) do
+    remove_env = Outbound.critical(Encoder.encode({:character_remove, %{char_index: entity.char_index}}))
+
     if state.visible_sets == nil do
       # :global mode
-      remove_raw = Encoder.encode({:character_remove, %{char_index: entity.char_index}})
-      for {cid, pid} <- state.sessions, cid != char_id, do: send(pid, {:send_raw, remove_raw})
+      for {cid, pid} <- state.sessions, cid != char_id, do: Egress.enqueue(pid, remove_env)
       nil
     else
-      remove_raw = Encoder.encode({:character_remove, %{char_index: entity.char_index}})
       old_visible = Map.get(state.visible_sets, char_id, MapSet.new())
 
       visible_sets =
         Enum.reduce(old_visible, state.visible_sets, fn other_id, vs ->
-          Helpers.send_to_session(state.sessions, other_id, {:send_raw, remove_raw})
+          Helpers.send_outbound(state.sessions, other_id, remove_env)
           Map.update(vs, other_id, MapSet.new(), &MapSet.delete(&1, char_id))
         end)
 
@@ -429,7 +430,7 @@ defmodule Arena.Map.Visibility do
 
       # Players that just entered mover's AoI: send create both ways
       # Invisible filtering: don't reveal invisible entities to non-GMs
-      create_mover_raw = Encoder.encode(Helpers.character_create_packet(entity))
+      create_mover_env = Outbound.critical(Encoder.encode(Helpers.character_create_packet(entity)))
       mover_is_gm = entity.gm
 
       visible_sets =
@@ -439,17 +440,17 @@ defmodule Arena.Map.Visibility do
           # Send other's create to mover (unless other is invisible and mover is not GM)
           if other do
             unless other.invisible and not mover_is_gm do
-              Helpers.send_to_session(
+              Helpers.send_outbound(
                 state.sessions,
                 char_id,
-                {:send_raw, Encoder.encode(Helpers.character_create_packet(other))}
+                Outbound.critical(Encoder.encode(Helpers.character_create_packet(other)))
               )
             end
           end
 
           # Send mover's create to other (unless mover is invisible and other is not GM)
           unless entity.invisible and (other == nil or not other.gm) do
-            Helpers.send_to_session(state.sessions, other_id, {:send_raw, create_mover_raw})
+            Helpers.send_outbound(state.sessions, other_id, create_mover_env)
           end
 
           Map.update(vs, other_id, MapSet.new([char_id]), &MapSet.put(&1, char_id))
@@ -457,7 +458,7 @@ defmodule Arena.Map.Visibility do
 
       # Players that just left mover's AoI: send remove both ways
       # Only send remove if the entity was actually visible to the recipient
-      remove_mover_raw = Encoder.encode({:character_remove, %{char_index: entity.char_index}})
+      remove_mover_env = Outbound.critical(Encoder.encode({:character_remove, %{char_index: entity.char_index}}))
 
       visible_sets =
         Enum.reduce(left, visible_sets, fn other_id, vs ->
@@ -466,17 +467,17 @@ defmodule Arena.Map.Visibility do
           # Send other's remove to mover (unless other was invisible to mover)
           if other do
             unless other.invisible and not mover_is_gm do
-              Helpers.send_to_session(
+              Helpers.send_outbound(
                 state.sessions,
                 char_id,
-                {:send_raw, Encoder.encode({:character_remove, %{char_index: other.char_index}})}
+                Outbound.critical(Encoder.encode({:character_remove, %{char_index: other.char_index}}))
               )
             end
           end
 
           # Send mover's remove to other (unless mover was invisible to other)
           unless entity.invisible and (other == nil or not other.gm) do
-            Helpers.send_to_session(state.sessions, other_id, {:send_raw, remove_mover_raw})
+            Helpers.send_outbound(state.sessions, other_id, remove_mover_env)
           end
 
           Map.update(vs, other_id, MapSet.new(), &MapSet.delete(&1, char_id))

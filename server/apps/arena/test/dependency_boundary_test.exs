@@ -109,6 +109,8 @@ defmodule Arena.DependencyBoundaryTest do
             GameBackend.Guilds
             AoTcpGateway.BrowserApi
             AoSession.OnlineDirectory
+            AoSession.Egress
+            AoSession.Outbound
           ]
 
           modules =

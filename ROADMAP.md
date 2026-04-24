@@ -72,7 +72,11 @@
 
 ## Phase 5. Observability And Ops - make the runtime visible and operable
 
-59. Finish telemetry wiring.
+59. Finish telemetry wiring. _Partial: session backpressure foundation
+    (`AoSession.Outbound`, `AoSession.Egress`, `AoSession.PressureRegistry`,
+    `AoProtocol.Classify`) emits `[:arena, :session, :backpressure]`.
+    Remaining: PromEx/Prometheus reporter, bank/guild events, producer
+    migration beyond `Arena.Map.Visibility`._
 60. Add metrics and dashboards.
 61. Add alerts.
 62. Add runtime admin tools for map and process inspection and control.

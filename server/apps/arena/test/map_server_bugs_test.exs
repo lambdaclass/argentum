@@ -111,6 +111,7 @@ defmodule Arena.Map.MapServerBugsTest do
       received_heading_update =
         receive do
           {:send_raw, <<_::binary>>} -> true
+          {:egress, %{payload: <<_::binary>>}} -> true
         after
           100 -> false
         end
@@ -157,6 +158,7 @@ defmodule Arena.Map.MapServerBugsTest do
       received_create =
         receive do
           {:send_raw, <<_::binary>>} -> true
+          {:egress, %{payload: <<_::binary>>}} -> true
         after
           200 -> false
         end
@@ -184,6 +186,7 @@ defmodule Arena.Map.MapServerBugsTest do
       received_remove =
         receive do
           {:send_raw, <<_::binary>>} -> true
+          {:egress, %{payload: <<_::binary>>}} -> true
         after
           200 -> false
         end
@@ -215,6 +218,7 @@ defmodule Arena.Map.MapServerBugsTest do
       received_move =
         receive do
           {:send_raw, <<_::binary>>} -> true
+          {:egress, %{payload: <<_::binary>>}} -> true
         after
           200 -> false
         end
@@ -392,6 +396,9 @@ defmodule Arena.Map.MapServerBugsTest do
         {dest_map, dest_x, dest_y, entity}
 
       {:send_raw, _} ->
+        receive_transfer_loop(char_id, timeout)
+
+      {:egress, _} ->
         receive_transfer_loop(char_id, timeout)
     after
       timeout -> raise "Did not receive :transfer message for char_id #{char_id} within #{timeout}ms"

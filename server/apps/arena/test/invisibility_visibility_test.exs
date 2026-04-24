@@ -71,7 +71,7 @@ defmodule Arena.InvisibilityVisibilityTest do
 
       Visibility.enter_visibility(state, invisible, Map.put(state.sessions, 1, self()))
 
-      refute_receive {:receiver, :observer, {:send_raw, _}}, 100
+      refute_receive {:receiver, :observer, {:egress, %{payload: _}}}, 100
     end
 
     test "invisible nearby players are not included in reply_players for normal client (AoI)" do
@@ -122,7 +122,7 @@ defmodule Arena.InvisibilityVisibilityTest do
 
       Visibility.enter_visibility(state, invisible, Map.put(state.sessions, 1, self()))
 
-      assert_receive {:receiver, :gm, {:send_raw, _}}, 200
+      assert_receive {:receiver, :gm, {:egress, %{payload: _}}}, 200
     end
   end
 
@@ -178,8 +178,8 @@ defmodule Arena.InvisibilityVisibilityTest do
 
       Visibility.hide_from_non_gm(state, entity)
 
-      assert_receive {:receiver, :normal, {:send_raw, _}}, 200
-      refute_receive {:receiver, :gm, {:send_raw, _}}, 100
+      assert_receive {:receiver, :normal, {:egress, %{payload: _}}}, 200
+      refute_receive {:receiver, :gm, {:egress, %{payload: _}}}, 100
     end
 
     test "reveal_to_non_gm sends character_create to normal clients only" do
@@ -198,8 +198,8 @@ defmodule Arena.InvisibilityVisibilityTest do
 
       Visibility.reveal_to_non_gm(state, entity)
 
-      assert_receive {:receiver, :normal, {:send_raw, _}}, 200
-      refute_receive {:receiver, :gm, {:send_raw, _}}, 100
+      assert_receive {:receiver, :normal, {:egress, %{payload: _}}}, 200
+      refute_receive {:receiver, :gm, {:egress, %{payload: _}}}, 100
     end
   end
 end

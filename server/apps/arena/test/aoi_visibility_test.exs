@@ -83,6 +83,7 @@ defmodule Arena.Map.AoiVisibilityTest do
   defp collect_raw_messages_acc(acc, timeout) do
     receive do
       {:send_raw, data} -> collect_raw_messages_acc([data | acc], timeout)
+      {:egress, %{payload: data}} -> collect_raw_messages_acc([data | acc], timeout)
     after
       timeout -> Enum.reverse(acc)
     end

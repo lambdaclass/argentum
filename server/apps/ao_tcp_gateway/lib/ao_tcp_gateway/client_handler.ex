@@ -10,11 +10,13 @@ defmodule AoTcpGateway.ClientHandler do
 
   require Logger
 
-  alias AoProtocol.Server.Encoder
+  alias AoProtocol.{Classify, Server.Encoder}
+  alias AoSession.{Egress, Outbound, PressureRegistry}
   alias AoTcpGateway.{FloodGuard, PacketCounter, SessionLogic}
 
   @backpressure_warn Application.compile_env(:ao_tcp_gateway, :backpressure_warn, 500)
   @backpressure_disconnect Application.compile_env(:ao_tcp_gateway, :backpressure_disconnect, 1000)
+  @flush_batch 128
 
   @impl :ranch_protocol
   def start_link(ref, socket, transport, _opts) do
@@ -47,7 +49,9 @@ defmodule AoTcpGateway.ClientHandler do
       hogar_timer_ref: nil,
       viewing_forum_id: nil,
       flood_guard: FloodGuard.new(),
-      packet_counters: PacketCounter.new()
+      packet_counters: PacketCounter.new(),
+      egress: Egress.new(self()),
+      pressure: :ok
     })
   end
 
@@ -67,6 +71,7 @@ defmodule AoTcpGateway.ClientHandler do
 
       {:tcp_closed, _socket} ->
         Logger.info("Client disconnected")
+        PressureRegistry.clear(self())
         SessionLogic.cleanup(state)
 
       {:tcp_error, _socket, reason} ->
@@ -80,15 +85,17 @@ defmodule AoTcpGateway.ClientHandler do
           )
         end
 
+        PressureRegistry.clear(self())
         SessionLogic.cleanup(state)
 
+      {:egress, %Outbound{} = out} ->
+        handle_outbound(state, out)
+
       {:send_packet, command} ->
-        send_to_client(state, command)
-        loop(state)
+        handle_outbound(state, wrap_command(command))
 
       {:send_raw, binary} ->
-        state.transport.send(state.socket, binary)
-        loop(state)
+        handle_outbound(state, wrap_raw(binary))
 
       {:set_viewing_forum, forum_id} ->
         loop(%{state | viewing_forum_id: forum_id})
@@ -109,6 +116,7 @@ defmodule AoTcpGateway.ClientHandler do
 
       :shutdown_drain ->
         Logger.info("Shutdown drain: closing session for char #{inspect(state.character_id)}")
+        PressureRegistry.clear(self())
         SessionLogic.cleanup(state)
         state.transport.close(state.socket)
 
@@ -135,6 +143,89 @@ defmodule AoTcpGateway.ClientHandler do
     end
   end
 
+  # ---- Egress integration ----
+
+  defp handle_outbound(state, %Outbound{} = out) do
+    case Egress.push(state.egress, out) do
+      {:ok, eg} ->
+        {bins, eg} = Egress.flush(eg, @flush_batch)
+        write_bins(state, bins)
+        state = update_pressure(state, eg)
+        loop(state)
+
+      {:disconnect, :critical_overflow, _eg} ->
+        Logger.warning(
+          "Egress critical overflow, disconnecting char=#{inspect(state.character_id)}"
+        )
+
+        :telemetry.execute(
+          [:arena, :session, :backpressure],
+          %{critical_depth: state.egress.critical_depth},
+          %{
+            character_id: state.character_id,
+            action: :disconnect,
+            transport: :tcp,
+            cause: :critical_overflow
+          }
+        )
+
+        PressureRegistry.clear(self())
+        SessionLogic.cleanup(state)
+        state.transport.close(state.socket)
+    end
+  end
+
+  defp write_bins(_state, []), do: :ok
+
+  defp write_bins(state, bins) do
+    state.transport.send(state.socket, Enum.reduce(bins, <<>>, &(&2 <> &1)))
+  end
+
+  defp update_pressure(state, eg) do
+    new_level = Egress.pressure_level(eg)
+
+    state =
+      if new_level != state.pressure do
+        PressureRegistry.publish(self(), new_level)
+
+        :telemetry.execute(
+          [:arena, :session, :backpressure],
+          %{
+            queued_bytes: eg.queued_bytes,
+            critical_depth: eg.critical_depth,
+            lossy_depth: eg.lossy_depth,
+            coalesce_size: map_size(eg.coalesce_map),
+            dropped_lossy: eg.dropped_lossy,
+            dropped_coalesce_replaced: eg.dropped_coalesce_replaced
+          },
+          %{
+            character_id: state.character_id,
+            transport: :tcp,
+            level: new_level,
+            prev_level: state.pressure,
+            action: :pressure_change
+          }
+        )
+
+        %{state | pressure: new_level}
+      else
+        state
+      end
+
+    %{state | egress: eg}
+  end
+
+  defp wrap_command(command) do
+    bin = Encoder.encode(command)
+    wrap_raw(bin)
+  end
+
+  defp wrap_raw(<<packet_id::little-signed-integer-16, _::binary>> = bin) do
+    Outbound.from_class(Classify.class_for(packet_id), bin)
+  end
+
+  defp wrap_raw(bin), do: Outbound.critical(bin)
+
   defp check_backpressure(state) do
     {:message_queue_len, len} = Process.info(self(), :message_queue_len)
 
@@ -148,6 +239,7 @@ defmodule AoTcpGateway.ClientHandler do
           %{character_id: state.character_id, action: :disconnect, transport: :tcp, cause: :mailbox_overflow}
         )
 
+        PressureRegistry.clear(self())
         SessionLogic.cleanup(state)
         state.transport.close(state.socket)
         :disconnect

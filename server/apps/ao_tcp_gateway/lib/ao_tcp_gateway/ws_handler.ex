@@ -8,8 +8,9 @@ defmodule AoTcpGateway.WsHandler do
 
   require Logger
 
-  alias AoProtocol.Server.Encoder
+  alias AoProtocol.{Classify, Server.Encoder}
   alias AoProtocol.Client.Decoder
+  alias AoSession.{Egress, Outbound, PressureRegistry}
   alias AoTcpGateway.{FloodGuard, PacketCounter, SessionLogic}
 
   # Idle timeout: disconnect if no data (including pong) for 90s.
@@ -19,6 +20,7 @@ defmodule AoTcpGateway.WsHandler do
 
   @backpressure_warn Application.compile_env(:ao_tcp_gateway, :backpressure_warn, 500)
   @backpressure_disconnect Application.compile_env(:ao_tcp_gateway, :backpressure_disconnect, 1000)
+  @flush_batch 128
 
   # ---- Cowboy callbacks ----
 
@@ -48,7 +50,9 @@ defmodule AoTcpGateway.WsHandler do
        hogar_timer_ref: nil,
        viewing_forum_id: nil,
        flood_guard: FloodGuard.new(),
-       packet_counters: PacketCounter.new()
+       packet_counters: PacketCounter.new(),
+       egress: Egress.new(self()),
+       pressure: :ok
      }}
   end
 
@@ -66,20 +70,21 @@ defmodule AoTcpGateway.WsHandler do
 
   def websocket_handle(_frame, state), do: {:ok, state}
 
-  # Direct sends from MapServer
-  def websocket_info({:send_packet, command}, state) do
-    case check_backpressure(state) do
-      :disconnect -> {:reply, {:close, 1008, "backpressure"}, state}
-      :ok -> {:reply, {:binary, Encoder.encode(command)}, state}
-    end
+  # Egress envelope from producers (primary path)
+  def websocket_info({:egress, %Outbound{} = out}, state) do
+    handle_outbound(state, out)
   end
 
-  # Pre-encoded raw bytes from MapServer
+  # Legacy: direct send with a command tuple. Shim during migration —
+  # wraps + classifies by packet ID and routes through egress.
+  def websocket_info({:send_packet, command}, state) do
+    handle_outbound(state, wrap_command(command))
+  end
+
+  # Legacy: pre-encoded raw bytes. Shim during migration — classifies by
+  # packet ID from the first 2 bytes and routes through egress.
   def websocket_info({:send_raw, binary}, state) do
-    case check_backpressure(state) do
-      :disconnect -> {:reply, {:close, 1008, "backpressure"}, state}
-      :ok -> {:reply, {:binary, binary}, state}
-    end
+    handle_outbound(state, wrap_raw(binary))
   end
 
   def websocket_info(:trade_started, state) do
@@ -138,11 +143,103 @@ defmodule AoTcpGateway.WsHandler do
 
   def terminate(_reason, _req, state) do
     Logger.info("WebSocket client disconnected")
+    PressureRegistry.clear(self())
     SessionLogic.cleanup(state)
     :ok
   end
 
-  # ---- Backpressure ----
+  # ---- Egress integration ----
+
+  defp handle_outbound(state, %Outbound{} = out) do
+    case check_backpressure(state) do
+      :disconnect ->
+        PressureRegistry.clear(self())
+        {:reply, {:close, 1008, "mailbox overflow"}, state}
+
+      :ok ->
+        do_handle_outbound(state, out)
+    end
+  end
+
+  defp do_handle_outbound(state, %Outbound{} = out) do
+    case Egress.push(state.egress, out) do
+      {:ok, eg} ->
+        {bins, eg} = Egress.flush(eg, @flush_batch)
+        state = update_pressure(state, eg)
+
+        case bins do
+          [] -> {:ok, state}
+          _ -> {:reply, {:binary, Enum.reduce(bins, <<>>, &(&2 <> &1))}, state}
+        end
+
+      {:disconnect, :critical_overflow, _eg} ->
+        Logger.warning(
+          "WS egress critical overflow, disconnecting char=#{inspect(state.character_id)}"
+        )
+
+        :telemetry.execute(
+          [:arena, :session, :backpressure],
+          %{critical_depth: state.egress.critical_depth},
+          %{
+            character_id: state.character_id,
+            action: :disconnect,
+            transport: :websocket,
+            cause: :critical_overflow
+          }
+        )
+
+        PressureRegistry.clear(self())
+        SessionLogic.cleanup(state)
+        {:reply, {:close, 1008, "egress overflow"}, state}
+    end
+  end
+
+  defp update_pressure(state, eg) do
+    new_level = Egress.pressure_level(eg)
+
+    state =
+      if new_level != state.pressure do
+        PressureRegistry.publish(self(), new_level)
+
+        :telemetry.execute(
+          [:arena, :session, :backpressure],
+          %{
+            queued_bytes: eg.queued_bytes,
+            critical_depth: eg.critical_depth,
+            lossy_depth: eg.lossy_depth,
+            coalesce_size: map_size(eg.coalesce_map),
+            dropped_lossy: eg.dropped_lossy,
+            dropped_coalesce_replaced: eg.dropped_coalesce_replaced
+          },
+          %{
+            character_id: state.character_id,
+            transport: :websocket,
+            level: new_level,
+            prev_level: state.pressure,
+            action: :pressure_change
+          }
+        )
+
+        %{state | pressure: new_level}
+      else
+        state
+      end
+
+    %{state | egress: eg}
+  end
+
+  defp wrap_command(command) do
+    bin = Encoder.encode(command)
+    wrap_raw(bin)
+  end
+
+  defp wrap_raw(<<packet_id::little-signed-integer-16, _::binary>> = bin) do
+    Outbound.from_class(Classify.class_for(packet_id), bin)
+  end
+
+  defp wrap_raw(bin), do: Outbound.critical(bin)
+
+  # ---- Mailbox backpressure (legacy fuse) ----
 
   defp check_backpressure(state) do
     {:message_queue_len, len} = Process.info(self(), :message_queue_len)

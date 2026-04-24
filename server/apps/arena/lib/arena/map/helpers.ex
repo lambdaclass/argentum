@@ -61,6 +61,22 @@ defmodule Arena.Map.Helpers do
     end
   end
 
+  # Egress-layer send: wraps producer path through the backpressure queue.
+  # Prefer this over send_to_session for any server→client packet. Producers
+  # should construct the envelope via AoSession.Outbound.{critical,lossy,coalesce}/_
+  # so classification stays explicit at the call site.
+  #
+  # The envelope is a map (not matched as a struct) because ao_session is a
+  # runtime-only dependency of arena (not in deps), so the struct alias is
+  # not available at compile time. The receiving session guards on the
+  # struct shape.
+  def send_outbound(sessions, char_id, outbound) do
+    case Map.get(sessions, char_id) do
+      nil -> :ok
+      pid -> AoSession.Egress.enqueue(pid, outbound)
+    end
+  end
+
   # Heading conversions
   def heading_to_int(:north), do: 1
   def heading_to_int(:east), do: 2

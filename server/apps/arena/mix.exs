@@ -32,7 +32,9 @@ defmodule Arena.MixProject do
           GameBackend.Characters,
           GameBackend.Guilds,
           AoTcpGateway.BrowserApi,
-          AoSession.OnlineDirectory
+          AoSession.OnlineDirectory,
+          AoSession.Egress,
+          AoSession.Outbound
         ]
       ]
     ]

@@ -4,6 +4,45 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **Outbound backpressure foundation (2026-04-22):**
+  - New `AoSession.Outbound` envelope (`:critical | :lossy | :coalesce`) with
+    constructors `critical/1`, `lossy/1`, `coalesce/2`, `from_class/3`. Single
+    producer API `AoSession.Egress.enqueue/2` posts `{:egress, %Outbound{}}`
+    to the session pid.
+  - New `AoSession.Egress` holds per-session bounded state (critical queue,
+    coalesce map with oldest-update-first order, lossy ring). Flush order is
+    critical → coalesce → lossy. Byte + depth budgets emit
+    `{:disconnect, :critical_overflow, state}` on sustained overflow. Lossy
+    and coalesce shed-counters are tracked for telemetry.
+  - New `AoSession.PressureRegistry` (ETS-backed, O(1) reads, missing ⇒ `:ok`)
+    exposes current per-session pressure level (`:ok | :warn | :critical`)
+    for cheap producer-side checks. Registered under the ao_session
+    supervisor.
+  - New `AoProtocol.Classify.class_for/1` maps server packet IDs to
+    `:critical | :lossy | :coalesce`. Lives in ao_protocol (zero deps) so
+    both ao_session and arena can consume it without a cycle.
+  - TCP (`AoTcpGateway.ClientHandler`) and WS (`AoTcpGateway.WsHandler`)
+    session loops integrated: new `{:egress, %Outbound{}}` receive clause
+    flushes in batches of 128 through a single `transport.send`; legacy
+    `{:send_raw, _}` and `{:send_packet, _}` are kept as migration shims
+    that wrap and classify via the packet-ID peek. One disconnect path
+    now covers `:mailbox_overflow | :send_timeout | :critical_overflow`
+    and always calls `PressureRegistry.clear/1`.
+  - Canary producer migration: `Arena.Map.Visibility` (`hide_from_non_gm`,
+    `reveal_to_non_gm`, `enter_visibility`, `remove_from_visibility`,
+    `update_visible_set_on_move`) now emits through
+    `Helpers.send_outbound/3` / `Egress.enqueue/2`. Arena xref excludes
+    extended for `AoSession.Egress` and `AoSession.Outbound`
+    (arena still must not compile-depend on ao_session).
+  - Telemetry: `[:arena, :session, :backpressure]` fires on pressure level
+    transitions and disconnects. Measurements include `queued_bytes`,
+    `critical_depth`, `lossy_depth`, `coalesce_size`, `dropped_lossy`,
+    `dropped_coalesce_replaced`. Metadata includes
+    `character_id`, `transport`, `action`, `cause`, `level`, `prev_level`.
+  - Tests: 4 `Outbound`, 16 `Egress`, 4 `PressureRegistry`, 20 `Classify`.
+    Visibility-slice suites updated to accept both `{:send_raw, _}` and
+    `{:egress, %{payload: _}}` shapes during the migration.
+
 - **VB6 parity drift closures (2026-04-21):**
   - **Drift #1** — GM panel request flow. Added client packet 116
     (`gm_panel_request`) decoder, `:gm`-group route, and handler that responds
