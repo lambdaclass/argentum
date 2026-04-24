@@ -239,8 +239,11 @@ defmodule Arena.NpcTextParityTest do
 
       timbero = %{npc_id: timbero_id, x: 51, y: 50, instance_id: :timbero}
 
-      # Run gamble many times to get both win and loss.
-      # Since we can't control :rand, run enough trials.
+      # Seed :rand deterministically so we always sample both win and loss
+      # outcomes over the trial window. handle_gamble/4 runs synchronously in
+      # the test process, so the per-process seed applies.
+      :rand.seed(:exsss, {100, 200, 300})
+
       win_msgs = []
       loss_msgs = []
 

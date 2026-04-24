@@ -25,12 +25,21 @@ defmodule Arena.TreasureEventTest do
   end
 
   setup do
-    # Start a fresh TreasureEvent process for each test
+    # Start a fresh TreasureEvent process for each test.
+    # Use start (not start_link) so the GenServer isn't killed by the
+    # test process's shutdown before on_exit can run — otherwise the
+    # Process.alive?/GenServer.stop pair races the link teardown.
     name = :"treasure_event_#{System.unique_integer([:positive])}"
-    {:ok, pid} = GenServer.start_link(TreasureEvent, [], name: name)
+    {:ok, pid} = GenServer.start(TreasureEvent, [], name: name)
 
     on_exit(fn ->
-      if Process.alive?(pid), do: GenServer.stop(pid)
+      if Process.alive?(pid) do
+        try do
+          GenServer.stop(pid)
+        catch
+          :exit, _ -> :ok
+        end
+      end
     end)
 
     %{pid: pid}

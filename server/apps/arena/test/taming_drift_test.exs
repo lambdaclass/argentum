@@ -133,6 +133,9 @@ defmodule Arena.TamingDriftTest do
       # A warrior with cha=18, taming=80 should get 18*80 = 1440
       # Then divided by 118 (non-druid) = 12
       # This must be compared against npc_def.domable, NOT a simple random <= skill check.
+      # function_exported?/3 returns false on unloaded modules, so force-load.
+      Code.ensure_loaded!(Crafting)
+
       assert function_exported?(Crafting, :taming_score, 2),
              "Crafting.taming_score/2 should be a public function for testing the VB6 formula"
 
