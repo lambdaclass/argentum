@@ -67,71 +67,40 @@ defmodule Arena.Map.Healing do
       {:ok, entity} ->
         cond do
           entity.dead ->
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: "Estas muerto.", font_index: 0}})}
-            )
-
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("Estas muerto."))]}
 
           # VB6: If .flags.Montado = 1 Then → "No podes meditar estando montado"
           entity.mounted ->
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw,
-               Encoder.encode(
-                 {:console_msg, %{message: "No podes meditar estando montado.", font_index: 0}}
-               )}
-            )
-
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("No podes meditar estando montado."))]}
 
           entity.class not in @magical_classes ->
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw,
-               Encoder.encode({:console_msg, %{message: "Solo las clases magicas pueden meditar.", font_index: 0}})}
-            )
-
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("Solo las clases magicas pueden meditar."))]}
 
           entity.mana >= entity.max_mana ->
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: "Tienes el mana completo.", font_index: 0}})}
-            )
-
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("Tienes el mana completo."))]}
 
           true ->
             new_meditating = not entity.meditating
             entity = %{entity | meditating: new_meditating, resting: false}
             players = Map.put(state.players, char_id, entity)
-
             msg = if new_meditating, do: "Has comenzado a meditar.", else: "Has dejado de meditar."
 
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: msg, font_index: 0}})}
-            )
+            effects = [Effects.send(char_id, console(msg))]
 
             # VB6: show meditate FX (varies by level/faction; simplified to fx_id 4 here)
-            if new_meditating do
-              Visibility.broadcast_visible_all(state, entity.x, entity.y, fn pid ->
-                send(pid, {:send_raw, Encoder.encode({:create_fx, %{char_index: entity.char_index, fx: 4, loops: 0}})})
-              end)
-            end
+            effects =
+              if new_meditating do
+                fx = Encoder.encode({:create_fx, %{char_index: entity.char_index, fx: 4, loops: 0}})
+                effects ++ [Effects.broadcast_visible_all(entity.x, entity.y, fx)]
+              else
+                effects
+              end
 
-            {:noreply, %{state | players: players}}
+            {:ok, %{state | players: players}, effects}
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 

@@ -187,7 +187,7 @@ defmodule Arena.HealingDriftTest do
     test "mounted player cannot meditate" do
       state = make_state(%{mounted: true, class: :mage, mana: 50, max_mana: 200})
 
-      {:noreply, new_state} = Healing.handle_meditate(state, :player)
+      {:ok, new_state, _effects} = Healing.handle_meditate(state, :player)
 
       entity = new_state.players[:player]
       # VB6: mounted player should NOT start meditating
@@ -197,7 +197,7 @@ defmodule Arena.HealingDriftTest do
     test "unmounted player can meditate normally" do
       state = make_state(%{mounted: false, class: :mage, mana: 50, max_mana: 200})
 
-      {:noreply, new_state} = Healing.handle_meditate(state, :player)
+      {:ok, new_state, _effects} = Healing.handle_meditate(state, :player)
 
       entity = new_state.players[:player]
       assert entity.meditating, "unmounted mage should be able to meditate"

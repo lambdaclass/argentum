@@ -705,7 +705,11 @@ defmodule Arena.Map.MapServer do
     {:noreply, state}
   end
   @impl true
-  def handle_cast({:meditate, char_id}, state), do: Healing.handle_meditate(state, char_id)
+  def handle_cast({:meditate, char_id}, state) do
+    {:ok, state, effects} = Healing.handle_meditate(state, char_id)
+    Effects.run(state, effects)
+    {:noreply, state}
+  end
   @impl true
   def handle_cast({:heal, char_id}, state), do: Healing.handle_heal(state, char_id)
   @impl true
