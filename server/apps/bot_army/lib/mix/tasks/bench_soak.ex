@@ -9,14 +9,16 @@ defmodule Mix.Tasks.Bench.Soak do
 
       mix bench.soak --bots 100 --duration 300 --profile walk_only
       mix bench.soak --bots 500 --duration 600 --map 999
+      mix bench.soak --bots 200 --duration 120 --profile slow_client --recv-delay-ms 1500
 
   ## Options
 
-      --bots      Number of bots to spawn (default: 100)
-      --duration  Test duration in seconds (default: 300 = 5 minutes)
-      --profile   Bot action profile: walk_only, walk_chat, idle, default (default: walk_only)
-      --interval  Action interval in ms (default: 300)
-      --map       Benchmark map ID; nil = real maps (default: nil)
+      --bots           Number of bots to spawn (default: 100)
+      --duration       Test duration in seconds (default: 300 = 5 minutes)
+      --profile        Bot action profile: walk_only, walk_chat, slow_client, idle, default (default: walk_only)
+      --interval       Action interval in ms (default: 300)
+      --map            Benchmark map ID; nil = real maps (default: nil)
+      --recv-delay-ms  Slow-client read delay in ms; only used with --profile slow_client (default: 1000)
 
   ## Pass/Fail Criteria
 
@@ -47,7 +49,8 @@ defmodule Mix.Tasks.Bench.Soak do
           duration: :integer,
           profile: :string,
           interval: :integer,
-          map: :integer
+          map: :integer,
+          recv_delay_ms: :integer
         ]
       )
 
@@ -57,6 +60,7 @@ defmodule Mix.Tasks.Bench.Soak do
     interval = Keyword.get(opts, :interval, 300)
     max_interval = interval + 200
     bench_map = Keyword.get(opts, :map, nil)
+    recv_delay_ms = Keyword.get(opts, :recv_delay_ms, 1_000)
 
     # Enable scheduler wall time tracking
     :erlang.system_flag(:scheduler_wall_time, true)
@@ -93,7 +97,8 @@ defmodule Mix.Tasks.Bench.Soak do
       BotArmy.spawn(count,
         profile: profile,
         min_action_interval: interval,
-        max_action_interval: max_interval
+        max_action_interval: max_interval,
+        recv_delay_ms: recv_delay_ms
       )
 
     Mix.shell().info("Spawned #{spawned}/#{count} bots")

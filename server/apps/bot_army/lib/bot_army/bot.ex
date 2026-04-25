@@ -12,6 +12,7 @@ defmodule BotArmy.Bot do
   @default_min_action_interval 500
   @default_max_action_interval 2_000
   @reconnect_delay 5_000
+  @default_slow_client_recv_delay_ms 1_000
 
   # --- Public API ---
 
@@ -38,10 +39,19 @@ defmodule BotArmy.Bot do
   @impl true
   def init(opts) do
     char_id = Keyword.fetch!(opts, :char_id)
-    # :walk_only — only walks (no chat/attack). :walk_chat — walks + chat. :default — original mix.
+    # Profiles:
+    #   :walk_only    — only walks (no chat/attack)
+    #   :walk_chat    — walks + chat
+    #   :slow_client  — walks + chat, but throttles socket reads via active: :once
+    #                   gated by recv_delay_ms, to saturate the server send buffer
+    #                   and exercise the backpressure path
+    #   :default      — original mix
     profile = Keyword.get(opts, :profile, :default)
     min_interval = Keyword.get(opts, :min_action_interval, @default_min_action_interval)
     max_interval = Keyword.get(opts, :max_action_interval, @default_max_action_interval)
+
+    recv_delay_ms =
+      Keyword.get(opts, :recv_delay_ms, @default_slow_client_recv_delay_ms)
 
     state = %{
       char_id: char_id,
@@ -54,6 +64,7 @@ defmodule BotArmy.Bot do
       profile: profile,
       min_action_interval: min_interval,
       max_action_interval: max_interval,
+      recv_delay_ms: recv_delay_ms,
       # Per-command packet counters (anti-cheat requires strictly increasing)
       packet_counters: %{walk: 0, talk: 0, attack: 0},
       # Benchmark metrics
@@ -95,6 +106,13 @@ defmodule BotArmy.Bot do
     case BotArmy.WsClient.connect() do
       {:ok, socket} ->
         Logger.debug("Bot #{state.char_id} connected")
+        # For slow_client, flip from the WsClient default (active: true) to
+        # active: :once so we can gate reads behind a delay and saturate the
+        # server send buffer.
+        if state.profile == :slow_client do
+          :inet.setopts(socket, active: :once)
+        end
+
         send(self(), :login)
         {:noreply, %{state | socket: socket, connected: true, buffer: <<>>, packet_counters: %{walk: 0, talk: 0, attack: 0}}}
 
@@ -168,6 +186,16 @@ defmodule BotArmy.Bot do
         handle_server_packet(frame, acc)
       end)
 
+    state = maybe_schedule_rearm(state)
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info(:rearm_recv, %{socket: nil} = state), do: {:noreply, state}
+
+  @impl true
+  def handle_info(:rearm_recv, %{socket: socket} = state) do
+    :inet.setopts(socket, active: :once)
     {:noreply, state}
   end
 
@@ -320,6 +348,20 @@ defmodule BotArmy.Bot do
   end
 
   # --- Helpers ---
+
+  defp maybe_schedule_rearm(%{profile: :slow_client, recv_delay_ms: delay} = state)
+       when is_integer(delay) and delay > 0 do
+    Process.send_after(self(), :rearm_recv, delay)
+    state
+  end
+
+  defp maybe_schedule_rearm(%{profile: :slow_client, socket: socket} = state)
+       when not is_nil(socket) do
+    :inet.setopts(socket, active: :once)
+    state
+  end
+
+  defp maybe_schedule_rearm(state), do: state
 
   defp schedule_action(state) do
     range = max(1, state.max_action_interval - state.min_action_interval)
