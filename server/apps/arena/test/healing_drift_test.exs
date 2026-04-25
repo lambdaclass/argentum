@@ -220,7 +220,7 @@ defmodule Arena.HealingDriftTest do
           map_id: 1
         )
 
-      {:noreply, new_state} = Healing.handle_heal(state, :player)
+      {:ok, new_state, _effects} = Healing.handle_heal(state, :player)
 
       assert new_state.players[:player].hp == 50,
              "heal should reject when priest is nearby but not selected"
@@ -243,7 +243,7 @@ defmodule Arena.HealingDriftTest do
           map_id: @jail_map_id
         )
 
-      {:noreply, new_state} = Healing.handle_heal(state, :player)
+      {:ok, new_state, _effects} = Healing.handle_heal(state, :player)
 
       entity = new_state.players[:player]
       # VB6: heal should NOT work in jail
@@ -266,7 +266,7 @@ defmodule Arena.HealingDriftTest do
           map_id: 1
         )
 
-      {:noreply, new_state} = Healing.handle_heal(state, :player)
+      {:ok, new_state, _effects} = Healing.handle_heal(state, :player)
 
       entity = new_state.players[:player]
       # Normal map: heal should work
@@ -310,7 +310,7 @@ defmodule Arena.HealingDriftTest do
           npcs_live: %{newbie_rev1: newbie_priest_npc}
         )
 
-      {:noreply, new_state} = Healing.handle_heal(state, :player)
+      {:ok, new_state, _effects} = Healing.handle_heal(state, :player)
 
       entity = new_state.players[:player]
       assert entity.hp == 100,

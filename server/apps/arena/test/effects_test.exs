@@ -122,4 +122,57 @@ defmodule Arena.Map.EffectsTest do
       assert_receive {:peer_received, %{class: :lossy, payload: ^payload}}
     end
   end
+
+  describe "run/2 :broadcast_character_change" do
+    # End-to-end check: the character_change effect lands on every nearby
+    # session as a critical Egress envelope carrying the encoded
+    # character_change packet. This guards the path that handle_resucitate
+    # (and other producers) rely on after slice 4.
+    test "fans a critical character_change envelope to every visible session" do
+      origin = self()
+
+      peer_pid =
+        spawn_link(fn ->
+          receive do
+            {:egress, env} -> Kernel.send(origin, {:peer_received, env})
+          end
+        end)
+
+      ox = 50
+      oy = 50
+
+      entity = %{
+        char_index: 7,
+        x: ox,
+        y: oy,
+        heading: :south,
+        body_id: 1,
+        head_id: 2,
+        dead: false,
+        equipment: %{weapon: 0, shield: 0, helmet: 0},
+        gm: false
+      }
+
+      players = %{
+        actor: entity,
+        peer: %{x: ox + 1, y: oy, gm: false}
+      }
+
+      state =
+        map_state(
+          players: players,
+          sessions: %{actor: origin, peer: peer_pid},
+          visibility_mode: :global
+        )
+
+      expected_payload =
+        AoProtocol.Server.Encoder.encode(Arena.Map.Helpers.character_change_packet(entity))
+
+      assert :ok =
+               Effects.run(state, [Effects.broadcast_character_change(entity)])
+
+      assert_receive {:egress, %{class: :critical, payload: ^expected_payload}}
+      assert_receive {:peer_received, %{class: :critical, payload: ^expected_payload}}
+    end
+  end
 end

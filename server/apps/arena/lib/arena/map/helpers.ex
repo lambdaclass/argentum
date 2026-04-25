@@ -158,12 +158,19 @@ defmodule Arena.Map.Helpers do
   @doc """
   Broadcast a character_change packet to all players that can see (x, y).
   Used after death, revive, and equipment changes.
+
+  `character_change` is a critical visual-lifecycle packet (must deliver), so
+  this routes envelopes through `AoSession.Egress.enqueue/2` rather than the
+  legacy `{:send_raw, _}` shim. Producers that already produce structured
+  effects should prefer `Arena.Map.Effects.broadcast_character_change/1` so
+  the runner makes the side effect explicit at the dispatch layer.
   """
   def broadcast_character_change(state, entity) do
     raw = Encoder.encode(character_change_packet(entity))
+    envelope = AoSession.Outbound.critical(raw)
 
     Arena.Map.Visibility.broadcast_visible_all(state, entity.x, entity.y, fn pid ->
-      send(pid, {:send_raw, raw})
+      AoSession.Egress.enqueue(pid, envelope)
     end)
   end
 

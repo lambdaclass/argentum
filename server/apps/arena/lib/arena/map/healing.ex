@@ -109,22 +109,10 @@ defmodule Arena.Map.Healing do
       {:ok, entity} ->
         cond do
           entity.dead ->
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: "Estas muerto.", font_index: 0}})}
-            )
-
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("Estas muerto."))]}
 
           entity.hp >= entity.max_hp ->
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: "Estas sano.", font_index: 0}})}
-            )
-
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("Estas sano."))]}
 
           true ->
             # VB6: heal is NPC interaction -- full heal from Revividor NPC.
@@ -134,50 +122,31 @@ defmodule Arena.Map.Healing do
                 cond do
                   # VB6: If .pos.Map = MAP_HOME_IN_JAIL And NpcList(...).npcType = Revividor Then Exit Sub
                   state.map_id == @jail_map_id and npc_def.npc_type == @npc_type_revividor ->
-                    Helpers.send_to_session(
-                      state.sessions,
-                      char_id,
-                      {:send_raw,
-                       Encoder.encode(
-                         {:console_msg,
-                          %{message: "No puedes curarte en la carcel.", font_index: 0}}
-                       )}
-                    )
-
-                    {:noreply, state}
+                    {:ok, state,
+                     [Effects.send(char_id, console("No puedes curarte en la carcel."))]}
 
                   true ->
                     entity = %{entity | hp: entity.max_hp}
                     players = Map.put(state.players, char_id, entity)
 
-                    Helpers.send_to_session(
-                      state.sessions,
-                      char_id,
-                      {:send_raw, Encoder.encode({:console_msg, %{message: "Has sido curado.", font_index: 0}})}
-                    )
+                    effects = [
+                      Effects.send(char_id, console("Has sido curado.")),
+                      Effects.send(
+                        char_id,
+                        Encoder.encode({:update_hp, %{min_hp: entity.max_hp, shield: 0}})
+                      )
+                    ]
 
-                    Helpers.send_to_session(
-                      state.sessions,
-                      char_id,
-                      {:send_raw, Encoder.encode({:update_hp, %{min_hp: entity.max_hp, shield: 0}})}
-                    )
-
-                    {:noreply, %{state | players: players}}
+                    {:ok, %{state | players: players}, effects}
                 end
 
               :not_found ->
-                Helpers.send_to_session(
-                  state.sessions,
-                  char_id,
-                  {:send_raw, Encoder.encode({:console_msg, %{message: "No hay un sacerdote cerca.", font_index: 0}})}
-                )
-
-                {:noreply, state}
+                {:ok, state, [Effects.send(char_id, console("No hay un sacerdote cerca."))]}
             end
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
