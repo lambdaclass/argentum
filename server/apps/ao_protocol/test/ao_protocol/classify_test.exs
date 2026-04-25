@@ -41,4 +41,36 @@ defmodule AoProtocol.ClassifyTest do
       assert Classify.class_for(9999) == :critical
     end
   end
+
+  describe "coalesce_key_for" do
+    test "coalesce-class packets return their packet_id as the key" do
+      for fun <- [:update_hp, :update_mana, :update_sta, :update_gold, :update_exp,
+                  :update_hunger_and_thirst, :update_user_stats, :mini_stats, :pos_update] do
+        id = apply(S, fun, [])
+        assert Classify.coalesce_key_for(id) == id,
+               "#{fun}/0 should use its packet_id as the coalesce key"
+      end
+    end
+
+    test "lossy and critical packets return nil (no coalesce key)" do
+      assert Classify.coalesce_key_for(S.character_move()) == nil
+      assert Classify.coalesce_key_for(S.console_msg()) == nil
+      assert Classify.coalesce_key_for(S.character_create()) == nil
+      assert Classify.coalesce_key_for(9999) == nil
+    end
+
+    test "different coalesce streams have distinct keys" do
+      # Each stat stream gets its own slot — HP updates do not collapse mana
+      # updates, etc.
+      keys =
+        for fun <- [:update_hp, :update_mana, :update_sta, :update_gold,
+                    :update_exp, :update_hunger_and_thirst, :update_user_stats,
+                    :mini_stats, :pos_update] do
+          Classify.coalesce_key_for(apply(S, fun, []))
+        end
+
+      assert length(Enum.uniq(keys)) == length(keys),
+             "every coalesce-class packet must have a distinct key"
+    end
+  end
 end

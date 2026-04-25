@@ -234,7 +234,8 @@ defmodule AoTcpGateway.WsHandler do
   end
 
   defp wrap_raw(<<packet_id::little-signed-integer-16, _::binary>> = bin) do
-    Outbound.from_class(Classify.class_for(packet_id), bin)
+    class = Classify.class_for(packet_id)
+    Outbound.from_class(class, bin, Classify.coalesce_key_for(packet_id))
   end
 
   defp wrap_raw(bin), do: Outbound.critical(bin)

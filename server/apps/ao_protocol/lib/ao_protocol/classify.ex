@@ -38,6 +38,21 @@ defmodule AoProtocol.Classify do
     end
   end
 
+  @doc """
+  Default coalesce key for a server packet ID, or `nil` if the packet is not
+  in the coalesce class. Used by the session-loop shim so producers that emit
+  raw binaries (`{:send_raw, _}`) still get latest-wins coalescing for stat
+  streams without supplying an explicit key.
+
+  Self-targeted streams (HP, mana, stats, mini-stats, hunger/thirst, position)
+  use the packet ID itself as the key — there is exactly one logical stream
+  per session, so the ID is a stable per-stream identifier.
+  """
+  @spec coalesce_key_for(integer()) :: integer() | nil
+  def coalesce_key_for(packet_id) when is_integer(packet_id) do
+    if coalesce?(packet_id), do: packet_id, else: nil
+  end
+
   defp lossy?(id) do
     id == S.character_move() or
       id == S.create_fx() or
