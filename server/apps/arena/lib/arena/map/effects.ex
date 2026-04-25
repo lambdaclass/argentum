@@ -1,17 +1,81 @@
 defmodule Arena.Map.Effects do
   @moduledoc """
-  Runner for `Arena.Map.Effect.t()` lists produced by map-layer handlers.
+  Constructors and runner for `Arena.Map.Effect.t()` lists produced by
+  map-layer handlers.
 
-  Outbound packets reach the client through `Helpers.send_to_session/3` and
-  the visibility broadcast helpers, the same paths the inline call sites
-  used before the refactor. Behaviour is unchanged at the wire — only the
-  call site moves.
+  Handlers stay char_id-keyed and never see a session pid. The constructors
+  wrap an encoded packet binary into a backpressure envelope (via
+  `AoSession.Outbound.from_class/3`) using `AoProtocol.Classify` for the
+  default class. Use the `class:` and `coalesce_key:` keyword overrides
+  when the call site knows better than the classifier.
 
-  Unknown effects raise: silent drops would let typos pass tests by
+  The runner resolves char_id → session pid against `state.sessions` and
+  routes envelopes through `AoSession.Egress.enqueue/2` so producer packets
+  always traverse the backpressure layer, never the legacy
+  `{:send_raw, _}` shim.
+
+  Unknown effects raise — silent drops would let typos pass tests by
   accident.
+
+  Note: `AoSession.Outbound` and `AoSession.Egress` are runtime-only
+  references (declared in `arena/mix.exs` xref excludes), so we call them
+  as remote functions and never construct the struct via `%Outbound{}`
+  literal.
   """
 
   alias Arena.Map.{Helpers, Visibility}
+
+  ## Constructors ────────────────────────────────────────────────────────
+
+  @doc """
+  Unicast `packet` to the player's session.
+
+  `packet` is an encoded server packet (binary). The default egress class
+  is derived from `AoProtocol.Classify.class_for/1` keyed by the packet ID
+  (the first two bytes, little-endian). Pass `class:` to override and
+  `coalesce_key:` to override the coalesce key for `:coalesce` packets.
+  """
+  @spec send(term(), binary(), keyword()) :: Arena.Map.Effect.t()
+  def send(char_id, packet, opts \\ []) when is_binary(packet) do
+    {:send, char_id, build_envelope(packet, opts)}
+  end
+
+  @doc "Broadcast `packet` to every player whose AoI covers (x, y), excluding origin."
+  @spec broadcast_visible(pos_integer(), pos_integer(), binary(), keyword()) ::
+          Arena.Map.Effect.t()
+  def broadcast_visible(x, y, packet, opts \\ []) when is_binary(packet) do
+    {:broadcast_visible, x, y, build_envelope(packet, opts)}
+  end
+
+  @doc "Broadcast `packet` to every player whose AoI covers (x, y), including origin."
+  @spec broadcast_visible_all(pos_integer(), pos_integer(), binary(), keyword()) ::
+          Arena.Map.Effect.t()
+  def broadcast_visible_all(x, y, packet, opts \\ []) when is_binary(packet) do
+    {:broadcast_visible_all, x, y, build_envelope(packet, opts)}
+  end
+
+  @doc "Broadcast a character_change packet for `entity` to its visibility region."
+  @spec broadcast_character_change(map()) :: Arena.Map.Effect.t()
+  def broadcast_character_change(entity) do
+    {:broadcast_character_change, entity}
+  end
+
+  defp build_envelope(packet, opts) when is_binary(packet) do
+    {default_class, default_key} =
+      case packet do
+        <<id::little-signed-integer-16, _::binary>> ->
+          {AoProtocol.Classify.class_for(id), AoProtocol.Classify.coalesce_key_for(id)}
+
+        _ ->
+          {:critical, nil}
+      end
+
+    class = Keyword.get(opts, :class, default_class)
+    key = Keyword.get(opts, :coalesce_key, default_key)
+    AoSession.Outbound.from_class(class, packet, key)
+  end
+
+  ## Runner ──────────────────────────────────────────────────────────────
 
   @spec run(map(), [Arena.Map.Effect.t()]) :: :ok
   def run(_state, []), do: :ok
@@ -20,19 +84,19 @@ defmodule Arena.Map.Effects do
     Enum.each(effects, &dispatch(state, &1))
   end
 
-  defp dispatch(state, {:send, char_id, packet}) do
-    Helpers.send_to_session(state.sessions, char_id, {:send_raw, packet})
+  defp dispatch(state, {:send, char_id, outbound}) do
+    Helpers.send_outbound(state.sessions, char_id, outbound)
   end
 
-  defp dispatch(state, {:broadcast_visible, x, y, packet}) do
+  defp dispatch(state, {:broadcast_visible, x, y, outbound}) do
     Visibility.broadcast_visible(state, x, y, nil, fn pid ->
-      Kernel.send(pid, {:send_raw, packet})
+      AoSession.Egress.enqueue(pid, outbound)
     end)
   end
 
-  defp dispatch(state, {:broadcast_visible_all, x, y, packet}) do
+  defp dispatch(state, {:broadcast_visible_all, x, y, outbound}) do
     Visibility.broadcast_visible_all(state, x, y, fn pid ->
-      Kernel.send(pid, {:send_raw, packet})
+      AoSession.Egress.enqueue(pid, outbound)
     end)
   end
 

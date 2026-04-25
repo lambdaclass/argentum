@@ -1,7 +1,7 @@
 defmodule Arena.Map.Healing do
   @moduledoc "Rest, meditate, heal, and resurrect handlers."
 
-  alias Arena.Map.{Helpers, Visibility}
+  alias Arena.Map.{Effects, Helpers, Visibility}
   alias AoProtocol.Server.Encoder
 
   @magical_classes [:mage, :cleric, :druid, :bard, :paladin]
@@ -28,14 +28,14 @@ defmodule Arena.Map.Healing do
       {:ok, entity} ->
         cond do
           entity.dead ->
-            {:ok, state, [{:send, char_id, console("Estas muerto.")}]}
+            {:ok, state, [Effects.send(char_id, console("Estas muerto."))]}
 
           entity.hp >= entity.max_hp ->
-            {:ok, state, [{:send, char_id, console("Estas sano.")}]}
+            {:ok, state, [Effects.send(char_id, console("Estas sano."))]}
 
           # VB6: If HayOBJarea(.pos, FOGATA) Then — resting requires nearby campfire
           not has_nearby_fogata?(state, entity) ->
-            {:ok, state, [{:send, char_id, console("No hay fogata cerca.")}]}
+            {:ok, state, [Effects.send(char_id, console("No hay fogata cerca."))]}
 
           true ->
             new_resting = not entity.resting
@@ -44,10 +44,10 @@ defmodule Arena.Map.Healing do
             msg = if new_resting, do: "Has comenzado a descansar.", else: "Has dejado de descansar."
 
             effects = [
-              {:send, char_id, console(msg)},
+              Effects.send(char_id, console(msg)),
               # VB6 Protocol.bas:1693 — WriteRestOK flips the client-side resting
               # animation. Sent regardless of direction (start or stop).
-              {:send, char_id, Encoder.encode({:rest_ok, %{}})}
+              Effects.send(char_id, Encoder.encode({:rest_ok, %{}}))
             ]
 
             {:ok, %{state | players: players}, effects}
