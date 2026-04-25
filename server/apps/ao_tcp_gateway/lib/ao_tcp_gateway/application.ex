@@ -14,6 +14,7 @@ defmodule AoTcpGateway.Application do
     ws_dispatch = :cowboy_router.compile([
       {:_, [
         {"/ao", AoTcpGateway.WsHandler, []},
+        {"/metrics", AoTcpGateway.MetricsHandler, []},
         {"/", AoTcpGateway.RootHandler, []},
         {:_, Plug.Cowboy.Handler, {AoTcpGateway.WsRouter, []}}
       ]}

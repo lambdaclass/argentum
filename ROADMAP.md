@@ -75,10 +75,14 @@
 59. Finish telemetry wiring. _Partial: session backpressure foundation
     (`AoSession.Outbound`, `AoSession.Egress`, `AoSession.PressureRegistry`,
     `AoProtocol.Classify`) emits `[:arena, :session, :backpressure]`.
-    Remaining: PromEx/Prometheus reporter, bank/guild events, producer
-    migration beyond `Arena.Map.Visibility`._
-60. Add metrics and dashboards.
-61. Add alerts.
+    Remaining: producer migration beyond `Arena.Map.Visibility`, PromEx or
+    Prometheus reporter wiring, autosave-task failure metrics, and bank or
+    guild event coverage._
+60. Add metrics and dashboards, starting with backpressure queue depth,
+    disconnect reasons, `send_pend`, autosave task failures, and egress shed
+    counters.
+61. Add alerts, including sustained shedding and forced backpressure
+    disconnects.
 62. Add runtime admin tools for map and process inspection and control.
 63. Add admin lookup for accounts, characters, and online players.
 64. Add admin moderation actions.
@@ -89,9 +93,16 @@
 
 67. Replace NPC aggro full scans with spatial-grid queries.
 68. Replace pet target full scans with bounded or indexed lookup.
-69. Define a shared map-effect return contract and effect shapes.
+69. Define a shared map-effect return contract and effect shapes. _Do this only
+    after backpressure observability and load validation are in place._
 70. Add effect helper constructors and explicit persistence-boundary wrappers.
-71. Introduce handler effects only where they remove real coupling.
+    _Partial: autosave now runs under `AoTcpGateway.AutosaveTaskSupervisor`;
+    guild writes stay synchronous until a separate UX and semantics design is
+    approved._
+71. Introduce handler effects only where they remove real coupling. _Start with
+    `Arena.Map.Healing`, then `Arena.Map.NpcInteraction`, then
+    `Arena.Map.Social` or `Arena.Map.InventoryHandlers`; leave
+    `Arena.Map.CombatHandlers` for last._
 72. Split `guild_server.ex` into focused modules.
 73. Pre-resolve `.dat` references at load time where hot-path lookups still repeat.
 74. Unify interest management for players, NPCs, and ground items.
