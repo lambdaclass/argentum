@@ -340,7 +340,7 @@ defmodule Arena.HealingDriftTest do
           npcs_live: %{rev1: revividor_npc}
         )
 
-      {:noreply, new_state} = Healing.handle_resucitate(state, :player)
+      {:ok, new_state, _effects} = Healing.handle_resucitate(state, :player)
 
       entity = new_state.players[:player]
       refute entity.dead, "player should be resurrected"
