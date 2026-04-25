@@ -398,5 +398,182 @@ defmodule Arena.HealingDriftTest do
       entity = new_state.players[:player]
       refute entity.resting, "rest should fail if campfire is too far away"
     end
+
+    test "rest at fogata radius edge: 8 tiles succeeds, 9 tiles fails" do
+      # Player at (50,50). @fogata_radius = 8 (VB6 HayOBJarea radius).
+      # 8 tiles in a single axis is the inclusive boundary.
+      fogata_item = %{item_id: @fogata_obj_index, amount: 1, elemental_tags: 0}
+
+      state_edge =
+        make_state(
+          %{hp: 50, max_hp: 100, resting: false},
+          ground_items: %{{58, 50} => fogata_item}
+        )
+
+      {:ok, new_state_edge, _effects} = Healing.handle_rest(state_edge, :player)
+
+      assert new_state_edge.players[:player].resting,
+             "fogata at exactly 8 tiles (radius boundary) must allow resting"
+
+      # One tile further must fail.
+      state_just_out =
+        make_state(
+          %{hp: 50, max_hp: 100, resting: false},
+          ground_items: %{{59, 50} => fogata_item}
+        )
+
+      {:ok, new_state_out, _effects} = Healing.handle_rest(state_just_out, :player)
+
+      refute new_state_out.players[:player].resting,
+             "fogata at 9 tiles (1 past radius) must NOT allow resting"
+    end
+  end
+
+  # ==================================================================
+  # Effects-pipeline shape — pin behaviour of the migrated handlers.
+  # These tests exist to catch silent regressions in the effect list:
+  # missing FX, wrong class on stat-stream packets, wrong order, etc.
+  # ==================================================================
+  describe "Effects pipeline: handle_meditate produces no FX broadcast when stopping" do
+    test "stopping meditate emits a :send console only (no :broadcast_visible_all)" do
+      # Handler currently emits FX only on START (new_meditating == true).
+      # When toggling OFF, the effects list must NOT contain a broadcast.
+      state = make_state(%{meditating: true, class: :mage, mana: 50, max_mana: 200})
+
+      {:ok, new_state, effects} = Healing.handle_meditate(state, :player)
+
+      refute new_state.players[:player].meditating
+
+      refute Enum.any?(effects, fn
+               {:broadcast_visible_all, _, _, _} -> true
+               _ -> false
+             end),
+             "stopping meditate must NOT emit a broadcast_visible_all FX"
+
+      assert Enum.any?(effects, fn
+               {:send, :player, _} -> true
+               _ -> false
+             end),
+             "stopping meditate should still emit at least one console :send"
+    end
+
+    test "starting meditate DOES emit a :broadcast_visible_all FX (control case)" do
+      state = make_state(%{meditating: false, class: :mage, mana: 50, max_mana: 200})
+
+      {:ok, _new_state, effects} = Healing.handle_meditate(state, :player)
+
+      assert Enum.any?(effects, fn
+               {:broadcast_visible_all, _, _, _} -> true
+               _ -> false
+             end),
+             "starting meditate must emit a broadcast_visible_all FX"
+    end
+  end
+
+  describe "Effects pipeline: handle_heal envelope classification" do
+    test "update_hp envelope is :coalesce with packet-ID coalesce_key" do
+      # Stat-stream packets must travel through the coalesce class so the
+      # session-loop replaces stale samples in place under pressure. If the
+      # default classifier is bypassed (e.g. wrong opts plumbed through),
+      # the egress layer would buffer every sample as critical and starve.
+      revividor_npc = %{npc_id: 500, x: 51, y: 50, instance_id: :rev1}
+
+      state =
+        make_state(
+          %{
+            hp: 50,
+            max_hp: 100,
+            map_id: 1,
+            last_clicked_npc_instance_id: :rev1,
+            last_clicked_npc_type: @npc_type_revividor
+          },
+          npcs_live: %{rev1: revividor_npc},
+          map_id: 1
+        )
+
+      {:ok, _new_state, effects} = Healing.handle_heal(state, :player)
+
+      hp_id = AoProtocol.PacketIds.Server.update_hp()
+
+      update_hp_envelope =
+        Enum.find_value(effects, fn
+          {:send, :player, env} ->
+            case env.payload do
+              <<^hp_id::little-signed-integer-16, _::binary>> -> env
+              _ -> nil
+            end
+
+          _ ->
+            nil
+        end)
+
+      assert update_hp_envelope != nil,
+             "handle_heal must produce a :send carrying an update_hp packet"
+
+      assert update_hp_envelope.class == :coalesce,
+             "update_hp envelope must be :coalesce (default classifier)"
+
+      assert update_hp_envelope.coalesce_key == hp_id,
+             "update_hp coalesce_key must default to the packet ID itself"
+    end
+  end
+
+  describe "Effects pipeline: handle_resucitate effect shape" do
+    test "produces exactly the expected ordered effect list on success" do
+      # Handler returns:
+      #   1. :send  update_hp        (stat stream, :coalesce)
+      #   2. :send  update_mana      (stat stream, :coalesce)
+      #   3. :send  console "Has sido resucitado."
+      #   4. :broadcast_character_change for the entity
+      #   5. :broadcast_visible_all FX (create_fx, :lossy)
+      revividor_npc = %{npc_id: 500, x: 51, y: 50, instance_id: :rev1}
+
+      state =
+        make_state(
+          %{
+            dead: true,
+            hp: 0,
+            max_hp: 100,
+            mana: 150,
+            max_mana: 200,
+            x: 50,
+            y: 50,
+            last_clicked_npc_instance_id: :rev1,
+            last_clicked_npc_type: @npc_type_revividor
+          },
+          npcs_live: %{rev1: revividor_npc}
+        )
+
+      {:ok, _new_state, effects} = Healing.handle_resucitate(state, :player)
+
+      hp_id = AoProtocol.PacketIds.Server.update_hp()
+      mana_id = AoProtocol.PacketIds.Server.update_mana()
+      console_id = AoProtocol.PacketIds.Server.console_msg()
+      fx_id = AoProtocol.PacketIds.Server.create_fx()
+
+      assert length(effects) == 5,
+             "handle_resucitate should produce exactly 5 effects, got #{length(effects)}"
+
+      [e1, e2, e3, e4, e5] = effects
+
+      # 1. update_hp :send (coalesce)
+      assert {:send, :player, %{class: :coalesce, payload: <<^hp_id::little-signed-integer-16, _::binary>>}} =
+               e1
+
+      # 2. update_mana :send (coalesce)
+      assert {:send, :player, %{class: :coalesce, payload: <<^mana_id::little-signed-integer-16, _::binary>>}} =
+               e2
+
+      # 3. console msg :send (critical)
+      assert {:send, :player, %{class: :critical, payload: <<^console_id::little-signed-integer-16, _::binary>>}} =
+               e3
+
+      # 4. character_change broadcast
+      assert {:broadcast_character_change, %{dead: false}} = e4
+
+      # 5. create_fx broadcast_visible_all (lossy)
+      assert {:broadcast_visible_all, 50, 50, %{class: :lossy, payload: <<^fx_id::little-signed-integer-16, _::binary>>}} =
+               e5
+    end
   end
 end
