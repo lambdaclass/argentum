@@ -1,0 +1,40 @@
+defmodule Arena.Map.Effect do
+  @moduledoc """
+  Canonical map-layer side effects.
+
+  Map handlers stay pure: they take state, return `{:ok, state, [Effect.t()]}`,
+  and never call sockets, broadcasts, or persistence directly. The
+  `Arena.Map.Effects` runner interprets the list after the handler returns.
+
+  ## Effect kinds
+
+    * `{:send, char_id, packet}` — unicast a server packet (iodata) to one
+      player session. Goes through `Helpers.send_to_session/3`.
+    * `{:broadcast_visible, x, y, packet}` — send the packet to every player
+      whose AoI covers `(x, y)`, excluding origin if the call site does so.
+    * `{:broadcast_visible_all, x, y, packet}` — same, including origin.
+    * `{:broadcast_character_change, entity}` — broadcasts a character_change
+      packet for `entity` via the existing helper.
+
+  Future kinds (`:persist_character`, `:transfer`, `:telemetry`, `:log`) are
+  declared in the typespec when their first migration target lands; the
+  runner should fail loudly if it sees an unknown effect rather than
+  silently dropping.
+
+  ## Why tagged tuples and not structs
+
+  The existing `Arena.NpcAi.dispatch_effects/2` already uses tagged tuples;
+  matching that shape keeps cognitive overhead low and lets a future commit
+  fold both runners together without a data migration.
+  """
+
+  @type packet :: iodata()
+  @type char_id :: term()
+  @type coord :: pos_integer()
+
+  @type t ::
+          {:send, char_id(), packet()}
+          | {:broadcast_visible, coord(), coord(), packet()}
+          | {:broadcast_visible_all, coord(), coord(), packet()}
+          | {:broadcast_character_change, entity :: map()}
+end

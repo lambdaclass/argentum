@@ -28,63 +28,38 @@ defmodule Arena.Map.Healing do
       {:ok, entity} ->
         cond do
           entity.dead ->
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: "Estas muerto.", font_index: 0}})}
-            )
-
-            {:noreply, state}
+            {:ok, state, [{:send, char_id, console("Estas muerto.")}]}
 
           entity.hp >= entity.max_hp ->
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: "Estas sano.", font_index: 0}})}
-            )
-
-            {:noreply, state}
+            {:ok, state, [{:send, char_id, console("Estas sano.")}]}
 
           # VB6: If HayOBJarea(.pos, FOGATA) Then — resting requires nearby campfire
           not has_nearby_fogata?(state, entity) ->
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw,
-               Encoder.encode(
-                 {:console_msg, %{message: "No hay fogata cerca.", font_index: 0}}
-               )}
-            )
-
-            {:noreply, state}
+            {:ok, state, [{:send, char_id, console("No hay fogata cerca.")}]}
 
           true ->
             new_resting = not entity.resting
             entity = %{entity | resting: new_resting, meditating: false}
             players = Map.put(state.players, char_id, entity)
-
             msg = if new_resting, do: "Has comenzado a descansar.", else: "Has dejado de descansar."
 
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: msg, font_index: 0}})}
-            )
+            effects = [
+              {:send, char_id, console(msg)},
+              # VB6 Protocol.bas:1693 — WriteRestOK flips the client-side resting
+              # animation. Sent regardless of direction (start or stop).
+              {:send, char_id, Encoder.encode({:rest_ok, %{}})}
+            ]
 
-            # VB6 Protocol.bas:1693 — WriteRestOK flips the client-side resting
-            # animation. Sent regardless of direction (start or stop).
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw, Encoder.encode({:rest_ok, %{}})}
-            )
-
-            {:noreply, %{state | players: players}}
+            {:ok, %{state | players: players}, effects}
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
+  end
+
+  defp console(message) do
+    Encoder.encode({:console_msg, %{message: message, font_index: 0}})
   end
 
   def handle_meditate(state, char_id) do

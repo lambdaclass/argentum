@@ -360,7 +360,7 @@ defmodule Arena.HealingDriftTest do
       # Player at (50,50), no campfire on the ground
       state = make_state(%{hp: 50, max_hp: 100, resting: false})
 
-      {:noreply, new_state} = Healing.handle_rest(state, :player)
+      {:ok, new_state, _effects} = Healing.handle_rest(state, :player)
 
       entity = new_state.players[:player]
       # VB6: resting requires a campfire nearby; without one, player cannot rest
@@ -377,7 +377,7 @@ defmodule Arena.HealingDriftTest do
           ground_items: %{{50, 51} => fogata_item}
         )
 
-      {:noreply, new_state} = Healing.handle_rest(state, :player)
+      {:ok, new_state, _effects} = Healing.handle_rest(state, :player)
 
       entity = new_state.players[:player]
       assert entity.resting, "rest should succeed when campfire is nearby"
@@ -393,7 +393,7 @@ defmodule Arena.HealingDriftTest do
           ground_items: %{{60, 60} => fogata_item}
         )
 
-      {:noreply, new_state} = Healing.handle_rest(state, :player)
+      {:ok, new_state, _effects} = Healing.handle_rest(state, :player)
 
       entity = new_state.players[:player]
       refute entity.resting, "rest should fail if campfire is too far away"

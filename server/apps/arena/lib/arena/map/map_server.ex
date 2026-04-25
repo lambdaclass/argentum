@@ -43,6 +43,7 @@ defmodule Arena.Map.MapServer do
   alias Arena.Entity.NpcEntity
   alias Arena.Map.{Helpers, Visibility, Movement, CombatHandlers, InventoryHandlers, Commerce, Bank, Trade, Social}
   alias Arena.Map.{Chat, Healing, Pets, QuestHandlers, Faction, NpcInteraction, Training, Banking, GmCommands, StatusTicks}
+  alias Arena.Map.Effects
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
@@ -698,7 +699,11 @@ defmodule Arena.Map.MapServer do
   @impl true
   def handle_cast({:yell, char_id, message}, state), do: Chat.handle_yell(state, char_id, message)
   @impl true
-  def handle_cast({:rest, char_id}, state), do: Healing.handle_rest(state, char_id)
+  def handle_cast({:rest, char_id}, state) do
+    {:ok, state, effects} = Healing.handle_rest(state, char_id)
+    Effects.run(state, effects)
+    {:noreply, state}
+  end
   @impl true
   def handle_cast({:meditate, char_id}, state), do: Healing.handle_meditate(state, char_id)
   @impl true
