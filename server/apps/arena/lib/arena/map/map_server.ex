@@ -699,29 +699,20 @@ defmodule Arena.Map.MapServer do
   @impl true
   def handle_cast({:yell, char_id, message}, state), do: Chat.handle_yell(state, char_id, message)
   @impl true
-  def handle_cast({:rest, char_id}, state) do
-    {:ok, state, effects} = Healing.handle_rest(state, char_id)
-    Effects.run(state, effects)
-    {:noreply, state}
-  end
+  def handle_cast({:rest, char_id}, state),
+    do: Effects.run_handler(state, fn s -> Healing.handle_rest(s, char_id) end)
+
   @impl true
-  def handle_cast({:meditate, char_id}, state) do
-    {:ok, state, effects} = Healing.handle_meditate(state, char_id)
-    Effects.run(state, effects)
-    {:noreply, state}
-  end
+  def handle_cast({:meditate, char_id}, state),
+    do: Effects.run_handler(state, fn s -> Healing.handle_meditate(s, char_id) end)
+
   @impl true
-  def handle_cast({:heal, char_id}, state) do
-    {:ok, state, effects} = Healing.handle_heal(state, char_id)
-    Effects.run(state, effects)
-    {:noreply, state}
-  end
+  def handle_cast({:heal, char_id}, state),
+    do: Effects.run_handler(state, fn s -> Healing.handle_heal(s, char_id) end)
+
   @impl true
-  def handle_cast({:resucitate, char_id}, state) do
-    {:ok, state, effects} = Healing.handle_resucitate(state, char_id)
-    Effects.run(state, effects)
-    {:noreply, state}
-  end
+  def handle_cast({:resucitate, char_id}, state),
+    do: Effects.run_handler(state, fn s -> Healing.handle_resucitate(s, char_id) end)
   @impl true
   def handle_cast({:request_atributes, char_id}, state), do: Social.handle_request_atributes(state, char_id)
   @impl true

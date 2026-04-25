@@ -21,6 +21,21 @@ defmodule Arena.Map.Effects do
   references (declared in `arena/mix.exs` xref excludes), so we call them
   as remote functions and never construct the struct via `%Outbound{}`
   literal.
+
+  ## MapServer dispatch convention
+
+  Handlers migrated to this contract return `{:ok, state, effects}`. The
+  MapServer adapter is uniform: call `run_handler/2` with the state and a
+  closure that produces `{:ok, state', effects}`. The runner executes the
+  effects against the post-handler state and returns `{:noreply, state'}`
+  for the GenServer cast.
+
+      def handle_cast({:rest, char_id}, state),
+        do: Effects.run_handler(state, fn s -> Healing.handle_rest(s, char_id) end)
+
+  Future migrations (NpcInteraction, Faction, etc.) should follow the same
+  shape so the cast bodies stay one-liners and side effects stay confined
+  to the runner.
   """
 
   alias Arena.Map.{Helpers, Visibility}
@@ -82,6 +97,24 @@ defmodule Arena.Map.Effects do
 
   def run(state, effects) when is_list(effects) do
     Enum.each(effects, &dispatch(state, &1))
+  end
+
+  @doc """
+  Adapter used by MapServer casts that delegate to a handler returning
+  `{:ok, state, effects}`. Runs the produced effects against the new state
+  and returns `{:noreply, state}` so the cast body stays one line.
+
+  Example:
+
+      def handle_cast({:rest, char_id}, state),
+        do: Effects.run_handler(state, fn s -> Healing.handle_rest(s, char_id) end)
+  """
+  @spec run_handler(map(), (map() -> {:ok, map(), [Arena.Map.Effect.t()]})) ::
+          {:noreply, map()}
+  def run_handler(state, fun) when is_function(fun, 1) do
+    {:ok, state, effects} = fun.(state)
+    run(state, effects)
+    {:noreply, state}
   end
 
   defp dispatch(state, {:send, char_id, outbound}) do
