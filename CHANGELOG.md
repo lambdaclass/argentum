@@ -4,6 +4,24 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **Autosave under Task.Supervisor (2026-04-25):**
+  - `AoTcpGateway.AutosaveTaskSupervisor` added to the gateway supervision
+    tree. `AutosaveWriter.start_write/3` now spawns DB writes via
+    `Task.Supervisor.async_nolink/2` instead of a bare `spawn_monitor/1`.
+  - Workers are unlinked from `AutosaveWriter` (a crash still surfaces as
+    `{:DOWN, ...}` and clears `in_flight`) but linked to the task supervisor,
+    so application shutdown gives in-flight writes the supervisor's grace
+    window instead of being orphaned.
+  - Result protocol switched from `send(parent, {:write_done, ...})` to the
+    task's native return value (`{ref, {char_id, result, duration}}`),
+    matching standard `async_nolink` semantics. Demonitor with `:flush` on
+    completion suppresses the trailing `:DOWN` per OTP convention.
+  - `terminate/2`'s `wait_in_flight` loop updated to the same shape; the
+    10s shutdown drain is unchanged. Existing fault-injection tests
+    (synthetic `{:DOWN, ...}`, in-flight retry of pending snapshot,
+    cleanup_save_failed telemetry) continue to pass — 15/15 autosave tests
+    green, no public API change.
+
 - **Outbound backpressure foundation (2026-04-22):**
   - New `AoSession.Outbound` envelope (`:critical | :lossy | :coalesce`) with
     constructors `critical/1`, `lossy/1`, `coalesce/2`, `from_class/3`. Single

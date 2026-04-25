@@ -76,7 +76,10 @@ defmodule AoTcpGateway.AutosaveWriter do
   end
 
   @impl true
-  def handle_info({:write_done, char_id, result, duration}, state) do
+  def handle_info({ref, {char_id, result, duration}}, state) when is_reference(ref) do
+    # Task.Supervisor.async_nolink monitors the task; flush the trailing :DOWN.
+    Process.demonitor(ref, [:flush])
+
     event = if result == :ok, do: :ok, else: :error
 
     :telemetry.execute([:arena, :persistence, :autosave],
@@ -87,10 +90,10 @@ defmodule AoTcpGateway.AutosaveWriter do
       Logger.error("Autosave failed for #{char_id}: #{inspect(result)}")
     end
 
-    # Demonitor and clean up the task_monitors entry for this char_id
-    state = demonitor_for_char(state, char_id)
-
-    state = %{state | in_flight: Map.delete(state.in_flight, char_id)}
+    state = %{state |
+      task_monitors: Map.delete(state.task_monitors, ref),
+      in_flight: Map.delete(state.in_flight, char_id)
+    }
 
     # Check if there's a pending (coalesced) snapshot to write next
     case Map.pop(state.pending, char_id) do
@@ -163,9 +166,10 @@ defmodule AoTcpGateway.AutosaveWriter do
         # Start any pending writes that have no in-flight counterpart
         state = start_pending_writes(state)
 
-        # Process any incoming :write_done or :DOWN messages
+        # Process any incoming task results or :DOWN messages
         receive do
-          {:write_done, char_id, result, duration} ->
+          {ref, {char_id, result, duration}} when is_reference(ref) ->
+            Process.demonitor(ref, [:flush])
             event = if result == :ok, do: :ok, else: :error
 
             :telemetry.execute([:arena, :persistence, :autosave],
@@ -176,8 +180,10 @@ defmodule AoTcpGateway.AutosaveWriter do
               Logger.error("Autosave failed during shutdown for #{char_id}: #{inspect(result)}")
             end
 
-            state = demonitor_for_char(state, char_id)
-            state = %{state | in_flight: Map.delete(state.in_flight, char_id)}
+            state = %{state |
+              task_monitors: Map.delete(state.task_monitors, ref),
+              in_flight: Map.delete(state.in_flight, char_id)
+            }
             wait_in_flight(state, deadline)
 
           {:DOWN, ref, :process, _pid, reason} ->
@@ -212,15 +218,14 @@ defmodule AoTcpGateway.AutosaveWriter do
   # ---- Internal ----
 
   defp start_write(state, char_id, snapshot) do
-    parent = self()
-
     :telemetry.execute([:arena, :persistence, :autosave], %{count: 1},
       %{char_id: char_id, event: :started})
 
-    # spawn_monitor: unlinked + monitored in one call.
-    # Worker crash cannot take down AutosaveWriter; {:DOWN, ...} clears in_flight.
-    {_pid, monitor_ref} =
-      spawn_monitor(fn ->
+    # Supervised, monitored, not linked: a worker crash cannot take down
+    # AutosaveWriter; {:DOWN, ...} clears in_flight. The Task.Supervisor
+    # ensures workers are terminated cleanly during application shutdown.
+    task =
+      Task.Supervisor.async_nolink(AoTcpGateway.AutosaveTaskSupervisor, fn ->
         start = System.monotonic_time()
 
         result =
@@ -239,25 +244,14 @@ defmodule AoTcpGateway.AutosaveWriter do
           end
 
         duration = System.monotonic_time() - start
-        send(parent, {:write_done, char_id, result, duration})
+        {char_id, result, duration}
       end)
 
     state = %{state |
       in_flight: Map.put(state.in_flight, char_id, true),
-      task_monitors: Map.put(state.task_monitors, monitor_ref, char_id)
+      task_monitors: Map.put(state.task_monitors, task.ref, char_id)
     }
     {:noreply, state}
-  end
-
-  defp demonitor_for_char(state, char_id) do
-    case Enum.find(state.task_monitors, fn {_ref, cid} -> cid == char_id end) do
-      {ref, _} ->
-        Process.demonitor(ref, [:flush])
-        %{state | task_monitors: Map.delete(state.task_monitors, ref)}
-
-      nil ->
-        state
-    end
   end
 
   defp notify_and_clear_waiters(state, char_id) do

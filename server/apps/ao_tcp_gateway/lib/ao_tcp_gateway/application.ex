@@ -20,6 +20,7 @@ defmodule AoTcpGateway.Application do
     ])
 
     children = [
+      {Task.Supervisor, name: AoTcpGateway.AutosaveTaskSupervisor},
       AoTcpGateway.AutosaveWriter,
       {AoTcpGateway.Listener, port: tcp_port},
       %{
