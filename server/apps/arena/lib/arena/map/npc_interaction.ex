@@ -399,39 +399,41 @@ defmodule Arena.Map.NpcInteraction do
 
         cond do
           guard == nil ->
-            msg(state, char_id, "No hay un guardia de arena cerca.")
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("No hay un guardia de arena cerca."))]}
 
           entity.dead ->
-            msg(state, char_id, "Estas muerto!")
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("Estas muerto!"))]}
 
           entity.gold < guard.map_entry_price ->
-            msg(state, char_id, "Necesitas #{guard.map_entry_price} monedas de oro para entrar.")
-            {:noreply, state}
+            {:ok, state,
+             [
+               Effects.send(
+                 char_id,
+                 console("Necesitas #{guard.map_entry_price} monedas de oro para entrar.")
+               )
+             ]}
 
           true ->
             entity = %{entity | gold: entity.gold - guard.map_entry_price}
             players = Map.put(state.players, char_id, entity)
-            state = %{state | players: players}
+            new_state = %{state | players: players}
 
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
-            )
+            effects = [
+              Effects.send(char_id, Encoder.encode({:update_gold, %{gold: entity.gold}})),
+              Effects.transfer(
+                char_id,
+                guard.map_target_entry,
+                guard.map_target_entry_x,
+                guard.map_target_entry_y,
+                entity
+              )
+            ]
 
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:transfer, guard.map_target_entry, guard.map_target_entry_x, guard.map_target_entry_y, entity}
-            )
-
-            {:noreply, state}
+            {:ok, new_state, effects}
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 

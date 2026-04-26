@@ -367,6 +367,21 @@ defmodule Arena.Map.EffectsTest do
       entity = %{char_index: 1}
       assert {:transfer, :p, 5, 6, 7, ^entity} = Effects.transfer(:p, 5, 6, 7, entity)
     end
+
+    test "tolerates a dead session pid (no crash, returns :ok)" do
+      # Mirrors the dead-pid coverage for `:send` effects: Kernel.send/2 to a
+      # dead pid is a BEAM-level no-op, so dispatching `:transfer` to a stale
+      # session entry must not raise.
+      dead_pid = spawn(fn -> :ok end)
+      ref = Process.monitor(dead_pid)
+      assert_receive {:DOWN, ^ref, :process, ^dead_pid, _}, 200
+      refute Process.alive?(dead_pid)
+
+      state = %{sessions: %{:p => dead_pid}}
+      entity = %{char_index: 9}
+
+      assert :ok = Effects.run(state, [Effects.transfer(:p, 100, 50, 50, entity)])
+    end
   end
 
   describe "run/2 :broadcast_character_change" do

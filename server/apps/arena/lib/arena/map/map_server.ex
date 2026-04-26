@@ -829,7 +829,8 @@ defmodule Arena.Map.MapServer do
 
   def handle_cast({:forgive, char_id, gold_amount}, state),
     do: Effects.run_handler(state, fn s -> NpcInteraction.handle_forgive(s, char_id, gold_amount) end)
-  def handle_cast({:arena_entry, char_id}, state), do: NpcInteraction.handle_arena_entry(state, char_id)
+  def handle_cast({:arena_entry, char_id}, state),
+    do: Effects.run_handler(state, fn s -> NpcInteraction.handle_arena_entry(s, char_id) end)
   def handle_cast({:request_account_state, char_id}, state), do: Social.handle_request_account_state(state, char_id)
   def handle_cast({:request_reward, char_id}, state), do: Social.handle_request_reward(state, char_id)
   def handle_cast({:quest, char_id}, state), do: QuestHandlers.handle_quest(state, char_id)
