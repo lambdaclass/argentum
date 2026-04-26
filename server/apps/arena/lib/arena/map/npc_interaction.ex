@@ -1,7 +1,7 @@
 defmodule Arena.Map.NpcInteraction do
   @moduledoc "NPC interaction handlers (double-click, gambling, forgive, arena entry)."
 
-  alias Arena.Map.{Helpers, Faction, Commerce}
+  alias Arena.Map.{Helpers, Faction, Commerce, Effects}
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
@@ -29,8 +29,7 @@ defmodule Arena.Map.NpcInteraction do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         if entity.dead do
-          msg(state, char_id, "Estas muerto!")
-          {:noreply, state}
+          {:ok, state, [Effects.send(char_id, console("Estas muerto!"))]}
         else
           case Helpers.resolve_nearby_npc(state, entity, [@npc_type_enlistador], 4) do
             {:ok, _npc, npc_def} ->
@@ -38,25 +37,38 @@ defmodule Arena.Map.NpcInteraction do
 
               cond do
                 npc_faction == :royal_army and entity.faction == :royal_army ->
-                  msg(state, char_id, "Tu deber es luchar contra criminales, cada 100 criminales derrotados recibes recompensa")
-                  {:noreply, state}
+                  {:ok, state,
+                   [
+                     Effects.send(
+                       char_id,
+                       console(
+                         "Tu deber es luchar contra criminales, cada 100 criminales derrotados recibes recompensa"
+                       )
+                     )
+                   ]}
 
                 npc_faction == :chaos_legion and entity.faction == :chaos_legion ->
-                  msg(state, char_id, "Tu deber es sembrar caos y desesperacion, cada 100 ciudadanos derrotados recibes recompensa")
-                  {:noreply, state}
+                  {:ok, state,
+                   [
+                     Effects.send(
+                       char_id,
+                       console(
+                         "Tu deber es sembrar caos y desesperacion, cada 100 ciudadanos derrotados recibes recompensa"
+                       )
+                     )
+                   ]}
 
                 true ->
-                  msg(state, char_id, "No perteneces a esta faccion!")
-                  {:noreply, state}
+                  {:ok, state, [Effects.send(char_id, console("No perteneces a esta faccion!"))]}
               end
 
             :not_found ->
-              {:noreply, state}
+              {:ok, state, []}
           end
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
@@ -601,5 +613,9 @@ defmodule Arena.Map.NpcInteraction do
       char_id,
       {:send_raw, Encoder.encode({:console_msg, %{message: text, font_index: 0}})}
     )
+  end
+
+  defp console(message) do
+    Encoder.encode({:console_msg, %{message: message, font_index: 0}})
   end
 end

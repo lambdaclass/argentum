@@ -279,12 +279,10 @@ defmodule Arena.InformationQuestDriftTest do
         npcs_live: %{enl_inst: @enlistador_royal_npc}
       )
 
-      {:noreply, _new_state} = NpcInteraction.handle_information(state, :player)
+      {:ok, _new_state, effects} = NpcInteraction.handle_information(state, :player)
 
       # VB6: royal army enlistador shows duty message about criminals
-      assert_receive {:send_raw, raw}
-      msg = IO.iodata_to_binary(raw)
-      assert msg =~ "criminales"
+      assert effect_payload_contains?(effects, "criminales")
     end
 
     test "handle_information near chaos enlistador shows chaos faction message" do
@@ -296,12 +294,10 @@ defmodule Arena.InformationQuestDriftTest do
         npcs_live: %{enl_inst: @enlistador_chaos_npc}
       )
 
-      {:noreply, _new_state} = NpcInteraction.handle_information(state, :player)
+      {:ok, _new_state, effects} = NpcInteraction.handle_information(state, :player)
 
       # VB6: chaos enlistador shows duty message about citizens
-      assert_receive {:send_raw, raw}
-      msg = IO.iodata_to_binary(raw)
-      assert msg =~ "ciudadanos"
+      assert effect_payload_contains?(effects, "ciudadanos")
     end
 
     test "handle_information rejects dead player" do
@@ -313,12 +309,10 @@ defmodule Arena.InformationQuestDriftTest do
         npcs_live: %{enl_inst: @enlistador_royal_npc}
       )
 
-      {:noreply, _state} = NpcInteraction.handle_information(state, :player)
+      {:ok, _state, effects} = NpcInteraction.handle_information(state, :player)
 
       # Dead player should get an error, not faction info
-      assert_receive {:send_raw, raw}
-      msg = IO.iodata_to_binary(raw)
-      assert msg =~ "muerto"
+      assert effect_payload_contains?(effects, "muerto")
     end
 
     test "handle_information rejects when no enlistador nearby" do
@@ -330,10 +324,10 @@ defmodule Arena.InformationQuestDriftTest do
         npcs_live: %{}
       )
 
-      {:noreply, _state} = NpcInteraction.handle_information(state, :player)
+      {:ok, _state, effects} = NpcInteraction.handle_information(state, :player)
 
       # No enlistador → no faction message
-      refute_receive {:send_raw, _}, 50
+      assert effects == []
     end
 
     test "handle_information rejects when enlistador is too far (distance > 4)" do
@@ -345,10 +339,10 @@ defmodule Arena.InformationQuestDriftTest do
         npcs_live: %{enl_inst: @enlistador_far_npc}
       )
 
-      {:noreply, _state} = NpcInteraction.handle_information(state, :player)
+      {:ok, _state, effects} = NpcInteraction.handle_information(state, :player)
 
       # Enlistador at distance 5 should be too far (VB6 range <= 4)
-      refute_receive {:send_raw, _}, 50
+      assert effects == []
     end
 
     test "handle_information when player not in matching faction shows rejection" do
@@ -361,12 +355,23 @@ defmodule Arena.InformationQuestDriftTest do
         npcs_live: %{enl_inst: @enlistador_royal_npc}
       )
 
-      {:noreply, _state} = NpcInteraction.handle_information(state, :player)
+      {:ok, _state, effects} = NpcInteraction.handle_information(state, :player)
 
-      assert_receive {:send_raw, raw}
-      msg = IO.iodata_to_binary(raw)
-      assert msg =~ "No perteneces"
+      assert effect_payload_contains?(effects, "No perteneces")
     end
+  end
+
+  # Helper that searches an effect list for a `{:send, _, %{payload: bin}}` entry
+  # whose payload binary contains `needle`. The effects-tuple shape is the
+  # `Arena.Map.Effects.send/2` constructor output post-migration.
+  defp effect_payload_contains?(effects, needle) do
+    Enum.any?(effects, fn
+      {:send, _char_id, %{payload: payload}} when is_binary(payload) ->
+        :binary.match(payload, needle) != :nomatch
+
+      _ ->
+        false
+    end)
   end
 
   # ═══════════════════════════════════════════════════════════════════════════

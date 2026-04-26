@@ -736,7 +736,8 @@ defmodule Arena.Map.MapServer do
   @impl true
   def handle_cast({:request_mini_stats, char_id}, state), do: Social.handle_request_mini_stats(state, char_id)
   @impl true
-  def handle_cast({:information, char_id}, state), do: NpcInteraction.handle_information(state, char_id)
+  def handle_cast({:information, char_id}, state),
+    do: Effects.run_handler(state, fn s -> NpcInteraction.handle_information(s, char_id) end)
   @impl true
   def handle_cast({:double_click, char_id, x, y}, state), do: NpcInteraction.handle_double_click(state, char_id, x, y)
   @impl true
