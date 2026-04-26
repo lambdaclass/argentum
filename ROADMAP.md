@@ -42,6 +42,13 @@
    - Do not mix unrelated cleanup into the same commits
    - Follow the `Healing` reference: handlers return `{:ok, state, effects}`,
      casts use `Effects.run_handler/2`, no session pid in handlers
+   - Finish it in this order:
+     - pure text and info paths
+     - gamble and forgive
+     - arena entry via `:transfer`
+     - fish delivery, quest NPC click, and subastador click
+   - Defer the main `handle_npc_double_click` dispatcher flip until the
+     sibling modules it delegates to are also on the effects contract
 
 4. Build a deterministic scenario harness.
    - Synthetic maps
@@ -72,10 +79,14 @@
 9. Migrate `Arena.Map.Social` or `Arena.Map.InventoryHandlers` to the effects contract.
    - Pick the module with the cleaner blast radius first
 
-10. Leave `Arena.Map.CombatHandlers` for last.
+10. Flip `NpcInteraction` dispatcher paths onto the effects contract once its sibling modules are ready.
+   - Do not force mixed `{:noreply, state}` and `{:ok, state, effects}`
+     returns through the same dispatcher during the transition
+
+11. Leave `Arena.Map.CombatHandlers` for last.
    - Only start after the pattern is proven on simpler modules
 
-11. Close the last partial parity item.
+12. Close the last partial parity item.
    - Wire `blind_no_more`
    - Wire `dumb_no_more`
    - Wire `work_request_target`
@@ -84,73 +95,73 @@
 
 ### Proof And Repeatability
 
-12. Add a high-load bot benchmark.
+13. Add a high-load bot benchmark.
 
-13. Add a load and soak gate.
+14. Add a load and soak gate.
 
-14. Define the exact parity-gate required suites.
+15. Define the exact parity-gate required suites.
 
-15. Build and version a real VB6 packet-capture corpus.
+16. Build and version a real VB6 packet-capture corpus.
     - `BLOCKED` on Windows/VB6 environment
 
-16. Add packet replay coverage for login, character creation, and bootstrap.
+17. Add packet replay coverage for login, character creation, and bootstrap.
     - `BLOCKED` on the VB6 packet-capture corpus task above
 
-17. Add packet replay coverage for movement, transfer, chat, and service requests.
+18. Add packet replay coverage for movement, transfer, chat, and service requests.
     - `BLOCKED` on the VB6 packet-capture corpus task above
 
-18. Add packet replay coverage for inventory, equip/use, combat, spells, and death.
+19. Add packet replay coverage for inventory, equip/use, combat, spells, and death.
     - `BLOCKED` on the VB6 packet-capture corpus task above
 
-19. Add packet replay coverage for bank, trade, party, guild, faction, reconnect, and logout.
+20. Add packet replay coverage for bank, trade, party, guild, faction, reconnect, and logout.
     - `BLOCKED` on the VB6 packet-capture corpus task above
 
 ### Observability And Operations
 
-20. Finish telemetry wiring where coverage still matters.
+21. Finish telemetry wiring where coverage still matters.
     - Remaining producer migration beyond `Arena.Map.Visibility`
     - Any missing bank or guild event coverage
     - Any missing autosave-task failure or disconnect coverage
 
-21. Finish metrics and dashboards.
+22. Finish metrics and dashboards.
     - Backpressure queue depth
     - Disconnect reasons
     - `send_pend`
     - Autosave task failures
     - Egress shed and coalesce counters
 
-22. Add alerts.
+23. Add alerts.
     - Sustained shedding
     - Forced backpressure disconnects
 
-23. Add runtime admin tools for map and process inspection and control.
+24. Add runtime admin tools for map and process inspection and control.
 
-24. Add admin lookup for accounts, characters, and online players.
+25. Add admin lookup for accounts, characters, and online players.
 
-25. Add admin moderation, world, log, and health actions.
+26. Add admin moderation, world, log, and health actions.
 
 ### Security And Hardening
 
-26. Keep the exploit and parity audit executable.
+27. Keep the exploit and parity audit executable.
 
-27. Add anti-cheat hardening.
+28. Add anti-cheat hardening.
 
 ### Performance And Backend Architecture
 
-28. Replace NPC aggro full scans with spatial-grid queries.
+29. Replace NPC aggro full scans with spatial-grid queries.
     - This is the next major runtime win after the effects pattern is proven
 
-29. Replace pet target full scans with bounded or indexed lookup.
+30. Replace pet target full scans with bounded or indexed lookup.
 
-30. Split `guild_server.ex` into focused modules.
+31. Split `guild_server.ex` into focused modules.
 
-31. Pre-resolve `.dat` references at load time where hot-path lookups still repeat.
+32. Pre-resolve `.dat` references at load time where hot-path lookups still repeat.
 
-32. Unify interest management for players, NPCs, and ground items.
+33. Unify interest management for players, NPCs, and ground items.
 
-33. Add runtime-tunable settings for intervals, rates, and formula constants.
+34. Add runtime-tunable settings for intervals, rates, and formula constants.
 
-34. Finish the long-term persistence boundary cleanup.
+35. Finish the long-term persistence boundary cleanup.
     - One explicit character write path
     - One explicit guild write path
     - Clear ordering, retry, and failure semantics
@@ -158,24 +169,24 @@
 
 ### Release And Deployment
 
-35. Add release artifacts, deployment pipeline, and backup/restore runbook.
+36. Add release artifacts, deployment pipeline, and backup/restore runbook.
 
-36. Add TLS for HTTPS and WSS.
+37. Add TLS for HTTPS and WSS.
 
-37. Add asset CDN and static-delivery strategy.
+38. Add asset CDN and static-delivery strategy.
 
-38. Add automated backups and database connection-pool tuning.
+39. Add automated backups and database connection-pool tuning.
 
-39. Define the live database migration strategy.
+40. Define the live database migration strategy.
 
-40. Add pre-public scripted load and soak runs.
+41. Add pre-public scripted load and soak runs.
 
 ## Completed Or Mostly Closed Work
 
-1. Maintenance discipline remains ongoing.
-2. Backend parity work is done except for the last partial parity item.
-3. Proof foundations before the current gate are done.
-4. Backpressure foundation, Prometheus `/metrics`, slow-client soak profile,
+- Maintenance discipline remains ongoing.
+- Backend parity work is done except for the last partial parity item.
+- Proof foundations before the current gate are done.
+- Backpressure foundation, Prometheus `/metrics`, slow-client soak profile,
    monitoring runbook, and autosave supervision are landed.
 
 ## Future Product Work
@@ -184,13 +195,13 @@ These are real roadmap items, but they are not the next backend priorities.
 
 ### Optional Legacy Systems
 
-41. If clan relations are re-enabled, implement live guild alliance and peace proposal flows.
+42. If clan relations are re-enabled, implement live guild alliance and peace proposal flows.
 
-42. If guild elections are re-enabled, implement the live election and democratic succession system.
+43. If guild elections are re-enabled, implement the live election and democratic succession system.
 
 ### Browser Proof
 
-43. Prove browser protocol and reducer correctness.
+44. Prove browser protocol and reducer correctness.
     - Clean `typecheck` and `build`
     - Shared packet fixtures and fuzzing
     - Reducer/state tests
@@ -199,7 +210,7 @@ These are real roadmap items, but they are not the next backend priorities.
 
 ### Frontend Product And UX
 
-44. Make the browser UI reflect authoritative server state.
+45. Make the browser UI reflect authoritative server state.
     - Authoritative party and clan panels
     - Distinct faction, guild, and party chat streams
     - Responsive layout passes
@@ -207,14 +218,14 @@ These are real roadmap items, but they are not the next backend priorities.
 
 ### Browser Account And Lobby
 
-45. Complete the browser account surface.
+46. Complete the browser account surface.
     - Google auth endpoint and flows
     - Google-only and linked-account support
     - Browser stat choices during character creation
 
 ### Localization
 
-46. Make supported languages first-class.
+47. Make supported languages first-class.
     - Locale definitions
     - Translation extraction
     - Locale preference and persistence
@@ -222,7 +233,7 @@ These are real roadmap items, but they are not the next backend priorities.
 
 ### Multi-Realm
 
-47. Add explicit regional realm support.
+48. Add explicit regional realm support.
     - Realm architecture
     - Backend and browser realm selection
     - Realm-aware monitoring
@@ -230,7 +241,7 @@ These are real roadmap items, but they are not the next backend priorities.
 
 ### Browser Hardening And Release
 
-48. Make the browser client releasable.
+49. Make the browser client releasable.
     - Supported browser matrix
     - Shared protocol contract tests
     - Deterministic browser harness
