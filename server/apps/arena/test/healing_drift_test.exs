@@ -67,6 +67,7 @@ defmodule Arena.HealingDriftTest do
       no_detectable: false,
       paralyzed: false,
       blind: false,
+      dumb: false,
       immobilized: false,
       meditating: false,
       resting: false,

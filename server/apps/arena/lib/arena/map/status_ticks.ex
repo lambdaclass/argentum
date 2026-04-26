@@ -21,6 +21,7 @@ defmodule Arena.Map.StatusTicks do
     was_invisible = entity.invisible
     was_paralyzed = entity.paralyzed
     was_blind = entity.blind
+    was_dumb = entity.dumb
     entity = tick_potion_duration(entity)
     {expired, active} = Enum.split_with(entity.buffs, fn b -> now >= b.expires_at end)
 
@@ -30,6 +31,7 @@ defmodule Arena.Map.StatusTicks do
         case buff.type do
           :paralyzed -> %{ent | paralyzed: false}
           :blind -> %{ent | blind: false}
+          :dumb -> %{ent | dumb: false}
           :poisoned -> %{ent | poisoned: false}
           :invisible -> %{ent | invisible: false}
           :oculto -> %{ent | oculto: false}
@@ -57,6 +59,16 @@ defmodule Arena.Map.StatusTicks do
         state.sessions,
         char_id,
         {:send_raw, Encoder.encode({:blind_no_more, %{}})}
+      )
+    end
+
+    # VB6: when Estupidez counter expires the server sends WriteDumbNoMore so
+    # the client clears the silenced overlay (modUsuarios EfectoEstupidez path).
+    if was_dumb and not entity.dumb do
+      Helpers.send_to_session(
+        state.sessions,
+        char_id,
+        {:send_raw, Encoder.encode({:dumb_no_more, %{}})}
       )
     end
 

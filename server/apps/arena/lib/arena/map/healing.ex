@@ -170,6 +170,7 @@ defmodule Arena.Map.Healing do
                     buffs: [],
                     paralyzed: false,
                     blind: false,
+                    dumb: false,
                     poisoned: false,
                     invisible: false
                 }

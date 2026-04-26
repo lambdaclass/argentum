@@ -608,6 +608,21 @@ defmodule Arena.Map.SpellEffects do
               buffs = Enum.reject(target_entity.buffs, &(&1.type == :blind))
               %{target_entity | blind: false, buffs: buffs}
 
+            spell_def.estupidez ->
+              # VB6: Warrior/Hunter get 0.7x duration, others get full duration.
+              effective_dur =
+                if target_entity.class in [:guerrero, :cazador],
+                  do: trunc(duration_ms * 0.7),
+                  else: duration_ms
+
+              buff = %{type: :dumb, expires_at: now + effective_dur}
+              buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :dumb))]
+              %{target_entity | dumb: true, buffs: buffs}
+
+            spell_def.cura_estupidez ->
+              buffs = Enum.reject(target_entity.buffs, &(&1.type == :dumb))
+              %{target_entity | dumb: false, buffs: buffs}
+
             spell_def.invisibilidad ->
               buff = %{type: :invisible, expires_at: now + duration_ms}
               buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :invisible))]
@@ -650,6 +665,19 @@ defmodule Arena.Map.SpellEffects do
           )
         end
 
+        # VB6 modHechizos.bas (cura_estupidez handler) only writes DumbNoMore
+        # when the target was previously dumb. Mirror the `If .flags.Estupidez > 0`
+        # guard.
+        was_dumb = Map.get(target_entity_before, :dumb, false)
+
+        if was_dumb and not target_entity.dumb do
+          Helpers.send_to_session(
+            state.sessions,
+            target_id,
+            {:send_raw, Encoder.encode({:dumb_no_more, %{}})}
+          )
+        end
+
         players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, target_entity)
         state = %{state | players: players}
 
@@ -689,6 +717,7 @@ defmodule Arena.Map.SpellEffects do
           buffs: [],
           paralyzed: false,
           blind: false,
+          dumb: false,
           poisoned: false,
           invisible: false,
           oculto: false

@@ -1,19 +1,25 @@
-defmodule Arena.BlindNoMoreDriftTest do
+defmodule Arena.DumbNoMoreDriftTest do
   @moduledoc """
-  Drift #19a: VB6 ceguera (blind) buff system.
+  Drift #19b: VB6 estupidez (dumb / silenced) buff system.
 
-  Mirrors the existing paralyzed buff wiring 1:1. The encoder for
-  `:blind_no_more` (eBlindNoMore = 85, no payload) is already in place;
-  this exercises the buff mechanic + emission at clear sites:
+  Mirrors the just-shipped blind slice (commit ac82ed4) 1:1. The encoder
+  for `:dumb_no_more` (eDumbNoMore = 86, no payload) is already in place;
+  this exercises the buff mechanic + emission at the two clear sites:
 
-    * On tick-expiry (`StatusTicks.process_player_buffs/4`) — VB6
-      Modulo_UsUaRiOs.bas:2475 analogue (the WriteParalizeOK path, but
-      for ceguera).
-    * On `cura_ceguera`-spell clear — VB6 modHechizos.bas:1601 / 3465 /
-      4083, guarded by `If .flags.Ceguera > 0`.
+    * On tick-expiry (`StatusTicks.process_player_buffs/4`) — analogue
+      to the WriteParalizeOK / WriteBlindNoMore tick paths but for
+      VB6 .flags.Estupidez.
+    * On `cura_estupidez`-spell clear — VB6 modHechizos.bas guarded by
+      `If .flags.Estupidez > 0` (don't notify a target that wasn't dumb).
 
-  No-op assertions cover the adversarial paths: clear-while-not-blind
-  must NOT emit a `:blind_no_more` packet (matching the VB6 guard).
+  Adversarial paths confirm the VB6 guard: clear-while-not-dumb must NOT
+  emit a `:dumb_no_more` packet. There is no potion clear in VB6, so
+  pick_up_potion is intentionally untested (no emission site).
+
+  In addition we assert real shipped data parity: spell HECHIZO263
+  ("Bendición") in resources/raw/Dat/Hechizos.dat carries
+  `RemoverEstupidez=1`, so the parser must turn that into
+  `cura_estupidez: true` on the live SpellDef.
   """
   use ExUnit.Case, async: false
 
@@ -160,13 +166,13 @@ defmodule Arena.BlindNoMoreDriftTest do
     :ok
   end
 
-  # The encoded eBlindNoMore packet — packet id 85, no payload.
-  @blind_no_more_packet Encoder.encode({:blind_no_more, %{}})
+  # The encoded eDumbNoMore packet — packet id 86, no payload.
+  @dumb_no_more_packet Encoder.encode({:dumb_no_more, %{}})
 
   # ── Tick-expiry path ─────────────────────────────────────────────────────
 
-  describe "tick-expiry emits :blind_no_more" do
-    test "expired :blind buff clears flag and emits packet" do
+  describe "tick-expiry emits :dumb_no_more" do
+    test "expired :dumb buff clears flag and emits packet" do
       caster = make_entity(%{char_id: :caster, mana: 200, x: 49, y: 50, char_index: 1})
 
       target =
@@ -176,27 +182,23 @@ defmodule Arena.BlindNoMoreDriftTest do
           y: 50,
           char_index: 2,
           buffs: [],
-          blind: false
+          dumb: false
         })
 
       occupancy = %{{50, 50} => {:player, :target}}
       state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
 
-      # Use a synthetic spell with very short duration. apply_spell_status
-      # floors duration to 3000ms internally, but we'll fast-forward past
-      # that with a future `now` value.
-      spell = make_spell(%{ciega: true, duration: 1, mana_required: 20})
+      # Synthetic spell with very short duration; floor of 3000ms — fast-forward past it.
+      spell = make_spell(%{estupidez: true, duration: 1, mana_required: 20})
 
       state =
         SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
 
-      assert state.players[:target].blind == true,
-             "synthetic ciega spell must set blind: true"
+      assert state.players[:target].dumb == true,
+             "synthetic estupidez spell must set dumb: true"
 
-      # Drain the update_mana side-effect from the cast
       drain_mailbox()
 
-      # Fast-forward past the duration floor (3000ms)
       future = System.monotonic_time(:millisecond) + 5_000
 
       target_after_cast = state.players[:target]
@@ -204,14 +206,14 @@ defmodule Arena.BlindNoMoreDriftTest do
       _new_state =
         StatusTicks.process_player_buffs(state, :target, target_after_cast, future)
 
-      assert_receive {:send_raw, @blind_no_more_packet}, 200
+      assert_receive {:send_raw, @dumb_no_more_packet}, 200
     end
   end
 
-  # ── cura_ceguera spell-clear path ────────────────────────────────────────
+  # ── cura_estupidez spell-clear path ──────────────────────────────────────
 
-  describe "cura_ceguera spell clears blind and emits packet" do
-    test "blind target receives :blind_no_more when cura_ceguera lands" do
+  describe "cura_estupidez spell clears dumb and emits packet" do
+    test "dumb target receives :dumb_no_more when cura_estupidez lands" do
       caster = make_entity(%{char_id: :caster, mana: 200, x: 49, y: 50, char_index: 1})
 
       target =
@@ -220,35 +222,35 @@ defmodule Arena.BlindNoMoreDriftTest do
           x: 50,
           y: 50,
           char_index: 2,
-          blind: true,
+          dumb: true,
           buffs: [
-            %{type: :blind, expires_at: System.monotonic_time(:millisecond) + 60_000}
+            %{type: :dumb, expires_at: System.monotonic_time(:millisecond) + 60_000}
           ]
         })
 
       occupancy = %{{50, 50} => {:player, :target}}
       state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
 
-      spell = make_spell(%{cura_ceguera: true, mana_required: 20, duration: 0})
+      spell = make_spell(%{cura_estupidez: true, mana_required: 20, duration: 0})
 
       drain_mailbox()
 
       new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
 
       cleared = new_state.players[:target]
-      assert cleared.blind == false, "cura_ceguera must clear the blind flag"
+      assert cleared.dumb == false, "cura_estupidez must clear the dumb flag"
 
-      refute Enum.any?(cleared.buffs, &(&1.type == :blind)),
-             "cura_ceguera must drop the :blind buff entry"
+      refute Enum.any?(cleared.buffs, &(&1.type == :dumb)),
+             "cura_estupidez must drop the :dumb buff entry"
 
-      assert_receive {:send_raw, @blind_no_more_packet}, 200
+      assert_receive {:send_raw, @dumb_no_more_packet}, 200
     end
   end
 
-  # ── Adversarial: cura_ceguera on a non-blind target ──────────────────────
+  # ── Adversarial: cura_estupidez on a non-dumb target ─────────────────────
 
-  describe "cura_ceguera on non-blind target is a no-op (VB6 guard)" do
-    test "no :blind_no_more emitted when target was not blind" do
+  describe "cura_estupidez on non-dumb target is a no-op (VB6 guard)" do
+    test "no :dumb_no_more emitted when target was not dumb" do
       caster = make_entity(%{char_id: :caster, mana: 200, x: 49, y: 50, char_index: 1})
 
       target =
@@ -257,34 +259,34 @@ defmodule Arena.BlindNoMoreDriftTest do
           x: 50,
           y: 50,
           char_index: 2,
-          blind: false,
+          dumb: false,
           buffs: []
         })
 
       occupancy = %{{50, 50} => {:player, :target}}
       state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
 
-      spell = make_spell(%{cura_ceguera: true, mana_required: 20, duration: 0})
+      spell = make_spell(%{cura_estupidez: true, mana_required: 20, duration: 0})
 
       drain_mailbox()
 
       _new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
 
-      refute_receive {:send_raw, @blind_no_more_packet}, 100
+      refute_receive {:send_raw, @dumb_no_more_packet}, 100
     end
   end
 
-  # ── Adversarial: tick on a non-blind target ──────────────────────────────
+  # ── Adversarial: tick on a non-dumb target ───────────────────────────────
 
-  describe "tick with no :blind buff emits no packet" do
-    test "no :blind_no_more emitted when there's no :blind buff" do
+  describe "tick with no :dumb buff emits no packet" do
+    test "no :dumb_no_more emitted when there's no :dumb buff" do
       target =
         make_entity(%{
           char_id: :target,
           x: 50,
           y: 50,
           char_index: 1,
-          blind: false,
+          dumb: false,
           buffs: []
         })
 
@@ -295,14 +297,14 @@ defmodule Arena.BlindNoMoreDriftTest do
 
       _new_state = StatusTicks.process_player_buffs(state, :target, target, now)
 
-      refute_receive {:send_raw, @blind_no_more_packet}, 100
+      refute_receive {:send_raw, @dumb_no_more_packet}, 100
     end
   end
 
   # ── Warrior 0.7x duration parity ────────────────────────────────────────
 
-  describe "warrior gets 0.7x blind duration (VB6 parity)" do
-    test "warrior class blind buff has 0.7x duration offset" do
+  describe "warrior gets 0.7x dumb duration (VB6 parity)" do
+    test "warrior class dumb buff has 0.7x duration offset" do
       caster = make_entity(%{char_id: :caster, mana: 200, x: 49, y: 50, char_index: 1})
 
       target =
@@ -312,7 +314,7 @@ defmodule Arena.BlindNoMoreDriftTest do
           x: 50,
           y: 50,
           char_index: 2,
-          blind: false,
+          dumb: false,
           buffs: []
         })
 
@@ -320,14 +322,14 @@ defmodule Arena.BlindNoMoreDriftTest do
       state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
 
       # duration 10 → 10000ms; warrior gets 0.7x → 7000ms
-      spell = make_spell(%{ciega: true, duration: 10, mana_required: 20})
+      spell = make_spell(%{estupidez: true, duration: 10, mana_required: 20})
 
       now_before = System.monotonic_time(:millisecond)
       new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
       now_after = System.monotonic_time(:millisecond)
 
       updated = new_state.players[:target]
-      [buff] = Enum.filter(updated.buffs, &(&1.type == :blind))
+      [buff] = Enum.filter(updated.buffs, &(&1.type == :dumb))
 
       # 10000ms * 0.7 = 7000ms
       assert buff.expires_at >= now_before + 7000
@@ -344,36 +346,36 @@ defmodule Arena.BlindNoMoreDriftTest do
           x: 50,
           y: 50,
           char_index: 2,
-          blind: false,
+          dumb: false,
           buffs: []
         })
 
       occupancy = %{{50, 50} => {:player, :target}}
       state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
 
-      spell = make_spell(%{ciega: true, duration: 10, mana_required: 20})
+      spell = make_spell(%{estupidez: true, duration: 10, mana_required: 20})
 
       now_before = System.monotonic_time(:millisecond)
       new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
       now_after = System.monotonic_time(:millisecond)
 
       updated = new_state.players[:target]
-      [buff] = Enum.filter(updated.buffs, &(&1.type == :blind))
+      [buff] = Enum.filter(updated.buffs, &(&1.type == :dumb))
 
       assert buff.expires_at >= now_before + 10_000
       assert buff.expires_at <= now_after + 10_000 + 50
     end
   end
 
-  # ── Resurrect / death / resucitate clear the blind flag ──────────────────
+  # ── Resurrect / death / resucitate clear the dumb flag ───────────────────
 
-  describe "death/resurrect/resucitate clear blind flag" do
-    test "PlayerDeath.handle_player_death clears blind: true" do
+  describe "death/resurrect/resucitate clear dumb flag" do
+    test "PlayerDeath.handle_player_death clears dumb: true" do
       target =
         make_entity(%{
           char_id: :target,
-          blind: true,
-          buffs: [%{type: :blind, expires_at: System.monotonic_time(:millisecond) + 60_000}]
+          dumb: true,
+          buffs: [%{type: :dumb, expires_at: System.monotonic_time(:millisecond) + 60_000}]
         })
 
       state = make_state(%{target: target})
@@ -381,10 +383,10 @@ defmodule Arena.BlindNoMoreDriftTest do
       {dead_entity, _new_state} =
         Arena.Map.PlayerDeath.handle_player_death(state, :target, target)
 
-      assert dead_entity.blind == false, "death must clear blind flag"
+      assert dead_entity.dumb == false, "death must clear dumb flag"
     end
 
-    test "spell_effects resurrect clears blind: true" do
+    test "spell_effects resurrect clears dumb: true" do
       caster =
         make_entity(%{
           char_id: :caster,
@@ -404,8 +406,8 @@ defmodule Arena.BlindNoMoreDriftTest do
           x: 50,
           y: 50,
           char_index: 2,
-          blind: true,
-          buffs: [%{type: :blind, expires_at: System.monotonic_time(:millisecond) + 60_000}]
+          dumb: true,
+          buffs: [%{type: :dumb, expires_at: System.monotonic_time(:millisecond) + 60_000}]
         })
 
       occupancy = %{{50, 50} => {:player, :target}}
@@ -417,11 +419,10 @@ defmodule Arena.BlindNoMoreDriftTest do
 
       revived = new_state.players[:target]
       assert revived.dead == false
-      assert revived.blind == false, "spell-revive must clear blind flag"
+      assert revived.dumb == false, "spell-revive must clear dumb flag"
     end
 
-    test "Healing.handle_resucitate clears blind: true" do
-      # Set up a Revividor NPC and a dead, blind player.
+    test "Healing.handle_resucitate clears dumb: true" do
       npc_def = %Arena.Data.NpcDef{
         id: 600,
         npc_type: 1,
@@ -449,8 +450,8 @@ defmodule Arena.BlindNoMoreDriftTest do
           max_hp: 100,
           mana: 50,
           max_mana: 200,
-          blind: true,
-          buffs: [%{type: :blind, expires_at: System.monotonic_time(:millisecond) + 60_000}],
+          dumb: true,
+          buffs: [%{type: :dumb, expires_at: System.monotonic_time(:millisecond) + 60_000}],
           last_clicked_npc_instance_id: :rev1,
           last_clicked_npc_type: 1
         })
@@ -464,7 +465,40 @@ defmodule Arena.BlindNoMoreDriftTest do
 
       revived = new_state.players[:player]
       assert revived.dead == false
-      assert revived.blind == false, "NPC resucitate must clear blind flag"
+      assert revived.dumb == false, "NPC resucitate must clear dumb flag"
+    end
+  end
+
+  # ── Bendición data parity (HECHIZO263) ───────────────────────────────────
+
+  describe "shipped Hechizos.dat parity" do
+    test "Bendición (HECHIZO263) parses as cura_estupidez: true" do
+      # VB6 Hechizos.dat ships HECHIZO263 (Bendición) with RemoverEstupidez=1.
+      # The parser must read the downcased key `removerestupidez`.
+      section = %{
+        "nombre" => "Bendición",
+        "tipo" => "2",
+        "manarequerido" => "250",
+        "starequerido" => "5000",
+        "target" => "3",
+        "cooldown" => "20",
+        "removedebuff" => "1",
+        "curaveneno" => "1",
+        "removerestupidez" => "1",
+        "removermaldicion" => "1",
+        "removerparalisis" => "1"
+      }
+
+      spell = SpellDef.from_section(263, section)
+
+      assert spell.id == 263
+      assert spell.name == "Bendición"
+      assert spell.cura_estupidez == true,
+             "Bendición ships RemoverEstupidez=1; parser must surface cura_estupidez: true"
+
+      # Sanity: cura_veneno should also be set on the same entry so the test
+      # confirms our new field is being populated alongside the existing one.
+      assert spell.cura_veneno == true
     end
   end
 end
