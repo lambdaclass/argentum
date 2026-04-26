@@ -251,6 +251,33 @@ defmodule Arena.RewardNpcParityTest do
     end
   end
 
+  # Pull console_msg packets (id 37) out of an effect list.
+  defp console_payloads(effects) do
+    Enum.flat_map(effects, fn
+      {:send, _char_id, %{payload: <<37::little-signed-16, _::binary>> = raw}} -> [raw]
+      _ -> []
+    end)
+  end
+
+  defp first_console_payload(effects) do
+    case console_payloads(effects) do
+      [first | _] -> first
+      [] -> nil
+    end
+  end
+
+  # Combine console_msg payloads from effects (post-Social-migration) and
+  # from the test pid's mailbox (Faction.handle_faction_rank_up still uses
+  # the legacy `Helpers.msg/3` shim that sends `{:send_raw, _}`). The
+  # rank-up message-text assertions below need both shapes until Faction
+  # migrates.
+  defp all_console_payloads(effects) do
+    legacy =
+      collect_console_messages()
+
+    console_payloads(effects) ++ legacy
+  end
+
   # ═══════════════════════════════════════════════════════════════════════════
   # 1. Player qualifies for rank 1 -- reward items are granted
   # ═══════════════════════════════════════════════════════════════════════════
@@ -270,7 +297,7 @@ defmodule Arena.RewardNpcParityTest do
       enlistador = %{npc_id: @test_enlistador_npc_id, x: 51, y: 50, instance_id: :enlistador}
       state = make_map_state(entity, %{enlistador: enlistador})
 
-      {:noreply, new_state} = Social.handle_request_reward(state, :player)
+      {:ok, new_state, _effects} = Social.handle_request_reward(state, :player)
       drain_messages()
 
       updated = new_state.players[:player]
@@ -302,7 +329,7 @@ defmodule Arena.RewardNpcParityTest do
       enlistador = %{npc_id: @test_enlistador_npc_id, x: 51, y: 50, instance_id: :enlistador}
       state = make_map_state(entity, %{enlistador: enlistador})
 
-      {:noreply, new_state} = Social.handle_request_reward(state, :player)
+      {:ok, new_state, _effects} = Social.handle_request_reward(state, :player)
       drain_messages()
 
       updated = new_state.players[:player]
@@ -340,11 +367,14 @@ defmodule Arena.RewardNpcParityTest do
       enlistador = %{npc_id: @test_enlistador_npc_id, x: 51, y: 50, instance_id: :enlistador}
       state = make_map_state(entity, %{enlistador: enlistador})
 
-      {:noreply, new_state} = Social.handle_request_reward(state, :player)
+      {:ok, new_state, effects} = Social.handle_request_reward(state, :player)
 
-      # Should receive a message about max rank
-      assert_receive {:send_raw, raw}
-      msg = decode_console_msg(raw)
+      # Should receive a message about max rank (currently emitted via
+      # Faction.handle_faction_rank_up's legacy `msg/3` shim — collect
+      # both effects and `{:send_raw, _}` mailbox messages).
+      payloads = all_console_payloads(effects)
+      assert payloads != [], "expected console message"
+      msg = Enum.map(payloads, &decode_console_msg/1) |> Enum.join(" ")
       assert msg =~ "maximo" or msg =~ "recompensa"
 
       # Rank should remain unchanged
@@ -371,11 +401,13 @@ defmodule Arena.RewardNpcParityTest do
       enlistador = %{npc_id: @test_enlistador_npc_id, x: 51, y: 50, instance_id: :enlistador}
       state = make_map_state(entity, %{enlistador: enlistador})
 
-      {:noreply, new_state} = Social.handle_request_reward(state, :player)
+      {:ok, new_state, effects} = Social.handle_request_reward(state, :player)
 
-      # Should receive message about missing points
-      assert_receive {:send_raw, raw}
-      msg = decode_console_msg(raw)
+      # Should receive message about missing points (Faction-emitted via
+      # legacy `msg/3` shim).
+      payloads = all_console_payloads(effects)
+      assert payloads != [], "expected console message"
+      msg = Enum.map(payloads, &decode_console_msg/1) |> Enum.join(" ")
       assert msg =~ "300" or msg =~ "puntos"
 
       # Rank should NOT change
@@ -402,11 +434,13 @@ defmodule Arena.RewardNpcParityTest do
       enlistador = %{npc_id: @test_enlistador_npc_id, x: 51, y: 50, instance_id: :enlistador}
       state = make_map_state(entity, %{enlistador: enlistador})
 
-      {:noreply, new_state} = Social.handle_request_reward(state, :player)
+      {:ok, new_state, effects} = Social.handle_request_reward(state, :player)
 
-      # Should receive message about missing levels
-      assert_receive {:send_raw, raw}
-      msg = decode_console_msg(raw)
+      # Should receive message about missing levels (Faction-emitted via
+      # legacy `msg/3` shim).
+      payloads = all_console_payloads(effects)
+      assert payloads != [], "expected console message"
+      msg = Enum.map(payloads, &decode_console_msg/1) |> Enum.join(" ")
       assert msg =~ "nivel" or msg =~ "2"
 
       # Rank should NOT change
@@ -433,11 +467,13 @@ defmodule Arena.RewardNpcParityTest do
       enlistador = %{npc_id: @test_enlistador_npc_id, x: 51, y: 50, instance_id: :enlistador}
       state = make_map_state(entity, %{enlistador: enlistador})
 
-      {:noreply, new_state} = Social.handle_request_reward(state, :player)
+      {:ok, new_state, effects} = Social.handle_request_reward(state, :player)
 
-      assert_receive {:send_raw, raw}
+      raw = first_console_payload(effects)
+      assert raw, "expected console message effect"
       msg = decode_console_msg(raw)
       assert msg =~ "muerto"
+      refute_receive {:send_raw, _}, 50
 
       # No rank change
       assert new_state.players[:player].faction_rank_armada == 0
@@ -454,11 +490,13 @@ defmodule Arena.RewardNpcParityTest do
       enlistador = %{npc_id: @test_enlistador_npc_id, x: 51, y: 50, instance_id: :enlistador}
       state = make_map_state(entity, %{enlistador: enlistador})
 
-      {:noreply, _state} = Social.handle_request_reward(state, :player)
+      {:ok, _state, effects} = Social.handle_request_reward(state, :player)
 
-      assert_receive {:send_raw, raw}
+      raw = first_console_payload(effects)
+      assert raw, "expected console message effect"
       msg = decode_console_msg(raw)
       assert msg =~ "faccion"
+      refute_receive {:send_raw, _}, 50
     end
 
     test "player too far from enlistador is rejected" do
@@ -474,11 +512,13 @@ defmodule Arena.RewardNpcParityTest do
       enlistador = %{npc_id: @test_enlistador_npc_id, x: 60, y: 60, instance_id: :enlistador}
       state = make_map_state(entity, %{enlistador: enlistador})
 
-      {:noreply, new_state} = Social.handle_request_reward(state, :player)
+      {:ok, new_state, effects} = Social.handle_request_reward(state, :player)
 
-      assert_receive {:send_raw, raw}
+      raw = first_console_payload(effects)
+      assert raw, "expected console message effect"
       msg = decode_console_msg(raw)
       assert msg =~ "lejos"
+      refute_receive {:send_raw, _}, 50
 
       assert new_state.players[:player].faction_rank_armada == 0
     end
@@ -493,11 +533,13 @@ defmodule Arena.RewardNpcParityTest do
 
       state = make_map_state(entity, %{})
 
-      {:noreply, _state} = Social.handle_request_reward(state, :player)
+      {:ok, _state, effects} = Social.handle_request_reward(state, :player)
 
-      assert_receive {:send_raw, raw}
+      raw = first_console_payload(effects)
+      assert raw, "expected console message effect"
       msg = decode_console_msg(raw)
       assert msg =~ "seleccionar"
+      refute_receive {:send_raw, _}, 50
     end
 
     test "non-enlistador NPC is rejected" do
@@ -523,11 +565,13 @@ defmodule Arena.RewardNpcParityTest do
       banker = %{npc_id: 9951, x: 51, y: 50, instance_id: :banker}
       state = make_map_state(entity, %{banker: banker})
 
-      {:noreply, _state} = Social.handle_request_reward(state, :player)
+      {:ok, _state, effects} = Social.handle_request_reward(state, :player)
 
-      assert_receive {:send_raw, raw}
+      raw = first_console_payload(effects)
+      assert raw, "expected console message effect"
       msg = decode_console_msg(raw)
       assert msg =~ "seleccionar"
+      refute_receive {:send_raw, _}, 50
 
       :ets.delete(:arena_game_data, {:npc, 9951})
     end
@@ -562,15 +606,17 @@ defmodule Arena.RewardNpcParityTest do
       enlistador = %{npc_id: 9952, x: 51, y: 50, instance_id: :chaos_enlistador}
       state = make_map_state(entity, %{chaos_enlistador: enlistador})
 
-      {:noreply, new_state} = Social.handle_request_reward(state, :player)
+      {:ok, new_state, effects} = Social.handle_request_reward(state, :player)
 
       # Should NOT promote -- wrong faction side
       assert new_state.players[:player].faction_rank_armada == 0
 
       # Should receive rejection message
-      assert_receive {:send_raw, raw}
+      raw = first_console_payload(effects)
+      assert raw, "expected console message effect"
       msg = decode_console_msg(raw)
       assert msg =~ "faccion" or msg =~ "enlistador"
+      refute_receive {:send_raw, _}, 50
 
       :ets.delete(:arena_game_data, {:npc, 9952})
     end
@@ -590,15 +636,17 @@ defmodule Arena.RewardNpcParityTest do
       enlistador = %{npc_id: @test_enlistador_npc_id, x: 51, y: 50, instance_id: :enlistador}
       state = make_map_state(entity, %{enlistador: enlistador})
 
-      {:noreply, new_state} = Social.handle_request_reward(state, :player)
+      {:ok, new_state, effects} = Social.handle_request_reward(state, :player)
 
       # Should NOT promote -- wrong faction side
       assert new_state.players[:player].faction_rank_chaos == 0
 
       # Should receive rejection message
-      assert_receive {:send_raw, raw}
+      raw = first_console_payload(effects)
+      assert raw, "expected console message effect"
       msg = decode_console_msg(raw)
       assert msg =~ "faccion" or msg =~ "enlistador"
+      refute_receive {:send_raw, _}, 50
     end
   end
 
@@ -621,10 +669,12 @@ defmodule Arena.RewardNpcParityTest do
       enlistador = %{npc_id: @test_enlistador_npc_id, x: 51, y: 50, instance_id: :enlistador}
       state = make_map_state(entity, %{enlistador: enlistador})
 
-      {:noreply, _new_state} = Social.handle_request_reward(state, :player)
+      {:ok, _new_state, effects} = Social.handle_request_reward(state, :player)
 
-      messages = collect_console_messages()
-      texts = Enum.map(messages, &decode_console_msg/1)
+      # The rank-up text comes from Faction.handle_faction_rank_up via the
+      # legacy `msg/3` shim, so we must collect both effects and
+      # `{:send_raw, _}` mailbox messages here.
+      texts = effects |> all_console_payloads() |> Enum.map(&decode_console_msg/1)
 
       # Should have a message mentioning the rank or title
       has_rank_msg =
@@ -669,10 +719,11 @@ defmodule Arena.RewardNpcParityTest do
       enlistador = %{npc_id: @test_enlistador_npc_id, x: 51, y: 50, instance_id: :enlistador}
       state = make_map_state(entity, %{enlistador: enlistador})
 
-      {:noreply, new_state} = Social.handle_request_reward(state, :player)
+      {:ok, new_state, effects} = Social.handle_request_reward(state, :player)
 
-      messages = collect_console_messages()
-      texts = Enum.map(messages, &decode_console_msg/1)
+      # The no-space message comes from Faction.give_faction_rewards via
+      # the legacy `msg/3` shim — collect both effects and mailbox.
+      texts = effects |> all_console_payloads() |> Enum.map(&decode_console_msg/1)
 
       # Should be ranked up even if inventory is full
       assert new_state.players[:player].faction_rank_armada == 1

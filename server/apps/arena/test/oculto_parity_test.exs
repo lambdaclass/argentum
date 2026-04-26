@@ -345,7 +345,7 @@ defmodule Arena.OcultoParityTest do
           visibility_mode: :global
         )
 
-      {:noreply, state} = Social.handle_ocultarse(state, 1, 0)
+      {:ok, state, _effects} = Social.handle_ocultarse(state, 1, 0)
       assert state.players[1].oculto == false
     end
 
@@ -368,7 +368,7 @@ defmodule Arena.OcultoParityTest do
               visibility_mode: :global
             )
 
-          {:noreply, new_state} = Social.handle_ocultarse(state, 1, 1)
+          {:ok, new_state, _effects} = Social.handle_ocultarse(state, 1, 1)
           new_state.players[1].oculto
         end
 
@@ -395,7 +395,7 @@ defmodule Arena.OcultoParityTest do
               visibility_mode: :global
             )
 
-          {:noreply, new_state} = Social.handle_ocultarse(state, 1, 100)
+          {:ok, new_state, _effects} = Social.handle_ocultarse(state, 1, 100)
           new_state.players[1].oculto
         end
 

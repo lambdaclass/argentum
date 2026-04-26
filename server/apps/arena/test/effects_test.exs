@@ -384,6 +384,176 @@ defmodule Arena.Map.EffectsTest do
     end
   end
 
+  describe "run/2 :broadcast_map" do
+    # End-to-end: a :broadcast_map effect fans the envelope to EVERY session
+    # on the map regardless of AoI — this is the wire that backs marriage
+    # announcements, weather toggles, and other map-wide chat.
+    test "fans the envelope to every session on the map, ignoring AoI" do
+      origin = self()
+
+      far_pid =
+        spawn_link(fn ->
+          receive do
+            {:egress, env} -> Kernel.send(origin, {:far_received, env})
+          end
+        end)
+
+      # Place `far` outside any reasonable AoI window — :broadcast_map must
+      # still reach it, unlike :broadcast_visible_all which would skip it.
+      players = %{
+        actor: %{x: 50, y: 50, gm: false},
+        far: %{x: 500, y: 500, gm: false}
+      }
+
+      state =
+        map_state(
+          players: players,
+          sessions: %{actor: origin, far: far_pid},
+          visibility_mode: :global
+        )
+
+      console_id = AoProtocol.PacketIds.Server.console_msg()
+      payload = <<console_id::little-signed-integer-16, "marriage"::binary>>
+
+      assert :ok = Effects.run(state, [Effects.broadcast_map(payload)])
+
+      assert_receive {:egress, %{class: :critical, payload: ^payload}}
+      assert_receive {:far_received, %{class: :critical, payload: ^payload}}
+    end
+
+    test "constructor honours class: override" do
+      console_id = AoProtocol.PacketIds.Server.console_msg()
+      packet = <<console_id::little-signed-integer-16, "x"::binary>>
+
+      {:broadcast_map, env} = Effects.broadcast_map(packet, class: :lossy)
+      assert env.class == :lossy
+    end
+  end
+
+  describe "run/2 :hide_from_non_gm" do
+    # End-to-end: a :hide_from_non_gm effect emits a character_remove
+    # envelope to every nearby non-GM session. GMs and the entity's own
+    # session are excluded.
+    test "fans a character_remove envelope to nearby non-GM sessions" do
+      origin = self()
+
+      peer_pid =
+        spawn_link(fn ->
+          receive do
+            {:egress, env} -> Kernel.send(origin, {:peer_received, env})
+          end
+        end)
+
+      gm_pid =
+        spawn_link(fn ->
+          receive do
+            {:egress, env} -> Kernel.send(origin, {:gm_received, env})
+          end
+        end)
+
+      ox = 50
+      oy = 50
+
+      entity = %{
+        char_id: :hider,
+        char_index: 7,
+        x: ox,
+        y: oy,
+        gm: false
+      }
+
+      players = %{
+        hider: entity,
+        peer: %{x: ox + 1, y: oy, gm: false, char_index: 8},
+        watcher_gm: %{x: ox + 1, y: oy, gm: true, char_index: 9}
+      }
+
+      state =
+        map_state(
+          players: players,
+          sessions: %{hider: origin, peer: peer_pid, watcher_gm: gm_pid},
+          visibility_mode: :global
+        )
+
+      remove_id = AoProtocol.PacketIds.Server.character_remove()
+
+      assert :ok = Effects.run(state, [Effects.hide_from_non_gm(entity)])
+
+      assert_receive {:peer_received,
+                      %{class: :critical,
+                        payload: <<^remove_id::little-signed-integer-16, _::binary>>}}
+
+      # GM peer must NOT receive the remove envelope — they keep seeing the
+      # hider per VB6 invisibility semantics.
+      refute_receive {:gm_received, _}, 50
+
+      # The hider's own session must NOT receive its own removal.
+      refute_receive {:egress, _}, 50
+    end
+  end
+
+  describe "run_handler_call/2 adapter" do
+    test "returns {:reply, :ok, post-handler state} and runs effects against post-state" do
+      origin = self()
+      pre = %{sessions: %{}}
+
+      handler = fn s ->
+        new_state = %{s | sessions: Map.put(s.sessions, :p, origin)}
+        {:ok, new_state, [Effects.send(:p, "hello-from-call")]}
+      end
+
+      assert {:reply, :ok, post} = Effects.run_handler_call(pre, handler)
+      assert post.sessions[:p] == origin
+      assert_receive {:egress, %{payload: "hello-from-call"}}
+    end
+
+    test "always returns :ok reply (rejection signalled via effects, not reply term)" do
+      pre = %{sessions: %{}}
+      handler = fn s -> {:ok, s, []} end
+      assert {:reply, :ok, _} = Effects.run_handler_call(pre, handler)
+    end
+  end
+
+  describe "run_handler_call_reply/2 adapter" do
+    test "threads the handler's reply value through to the caller" do
+      pre = %{sessions: %{}}
+
+      handler = fn s ->
+        {:ok, s, {:ok, 42}, []}
+      end
+
+      assert {:reply, {:ok, 42}, _} = Effects.run_handler_call_reply(pre, handler)
+    end
+
+    test "runs the produced effects against the post-handler state" do
+      origin = self()
+      pre = %{sessions: %{}}
+
+      handler = fn s ->
+        new_state = %{s | sessions: Map.put(s.sessions, :p, origin)}
+        {:ok, new_state, {:ok, 100}, [Effects.send(:p, "with-reply")]}
+      end
+
+      assert {:reply, {:ok, 100}, post} = Effects.run_handler_call_reply(pre, handler)
+      assert post.sessions[:p] == origin
+      assert_receive {:egress, %{payload: "with-reply"}}
+    end
+
+    test "an :error reply is surfaced as-is alongside its effects" do
+      origin = self()
+      pre = %{sessions: %{:p => origin}}
+
+      handler = fn s ->
+        {:ok, s, {:error, :not_enough_gold}, [Effects.send(:p, "rejected")]}
+      end
+
+      assert {:reply, {:error, :not_enough_gold}, _} =
+               Effects.run_handler_call_reply(pre, handler)
+
+      assert_receive {:egress, %{payload: "rejected"}}
+    end
+  end
+
   describe "run/2 :broadcast_character_change" do
     # End-to-end check: the character_change effect lands on every nearby
     # session as a critical Egress envelope carrying the encoded

@@ -1,7 +1,16 @@
 defmodule Arena.Map.Social do
-  @moduledoc "Chat, social commands, stat requests, and NPC interaction."
+  @moduledoc """
+  Chat, social commands, stat requests, NPC-gated stat panels.
 
-  alias Arena.Map.{Helpers, Visibility, Faction}
+  Every public top-level handler now follows the effects contract: it
+  returns `{:ok, state, effects}` (or `{:ok, state, reply, effects}` for
+  `handle_deduct_gold/3` whose downstream caller branches on the reply).
+  The MapServer entries dispatch via `Arena.Map.Effects.run_handler/2` for
+  casts, `run_handler_call/2` for `:ok`-replying calls, and
+  `run_handler_call_reply/2` for calls whose reply is meaningful.
+  """
+
+  alias Arena.Map.{Helpers, Faction, Effects}
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
@@ -23,12 +32,11 @@ defmodule Arena.Map.Social do
         state = %{state | players: players}
 
         packet = if new_safe, do: {:safe_mode_on, %{}}, else: {:safe_mode_off, %{}}
-        Helpers.send_to_session(state.sessions, char_id, {:send_raw, Encoder.encode(packet)})
 
-        {:reply, :ok, state}
+        {:ok, state, [Effects.send(char_id, Encoder.encode(packet))]}
 
       :error ->
-        {:reply, {:error, :not_on_map}, state}
+        {:ok, state, []}
     end
   end
 
@@ -39,142 +47,117 @@ defmodule Arena.Map.Social do
   def handle_request_atributes(state, char_id) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw,
-           Encoder.encode(
-             {:update_user_stats,
-              %{
-                max_hp: entity.max_hp,
-                min_hp: entity.hp,
-                shield: 0,
-                max_mana: entity.max_mana,
-                min_mana: entity.mana,
-                max_sta: entity.max_stamina,
-                min_sta: entity.stamina,
-                gold: entity.gold,
-                gold_cap: 1_000_000,
-                level: entity.level,
-                exp_next_level: GameData.exp_for_level(entity.level + 1) || 0,
-                exp: entity.xp,
-                class: Helpers.class_to_int(entity.class)
-              }}
-           )}
-        )
+        effects = [
+          Effects.send(
+            char_id,
+            Encoder.encode(
+              {:update_user_stats,
+               %{
+                 max_hp: entity.max_hp,
+                 min_hp: entity.hp,
+                 shield: 0,
+                 max_mana: entity.max_mana,
+                 min_mana: entity.mana,
+                 max_sta: entity.max_stamina,
+                 min_sta: entity.stamina,
+                 gold: entity.gold,
+                 gold_cap: 1_000_000,
+                 level: entity.level,
+                 exp_next_level: GameData.exp_for_level(entity.level + 1) || 0,
+                 exp: entity.xp,
+                 class: Helpers.class_to_int(entity.class)
+               }}
+            )
+          ),
+          Effects.send(
+            char_id,
+            Encoder.encode(
+              {:send_atributes,
+               %{
+                 str: entity.str,
+                 agi: entity.agi,
+                 int: entity.int,
+                 con: entity.con,
+                 cha: entity.cha
+               }}
+            )
+          )
+        ]
 
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw,
-           Encoder.encode(
-             {:send_atributes,
-              %{
-                str: entity.str,
-                agi: entity.agi,
-                int: entity.int,
-                con: entity.con,
-                cha: entity.cha
-              }}
-           )}
-        )
-
-        {:noreply, state}
+        {:ok, state, effects}
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
   def handle_request_skills(state, char_id) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw, Encoder.encode({:send_skills, %{skills: entity.skills}})}
-        )
-
-        {:noreply, state}
+        {:ok, state,
+         [Effects.send(char_id, Encoder.encode({:send_skills, %{skills: entity.skills}}))]}
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
-
 
   def handle_request_mini_stats(state, char_id) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw,
-           Encoder.encode(
-             {:update_user_stats,
-              %{
-                max_hp: entity.max_hp,
-                min_hp: entity.hp,
-                shield: 0,
-                max_mana: entity.max_mana,
-                min_mana: entity.mana,
-                max_sta: entity.max_stamina,
-                min_sta: entity.stamina,
-                gold: entity.gold,
-                gold_cap: 1_000_000,
-                level: entity.level,
-                exp_next_level: GameData.exp_for_level(entity.level + 1) || 0,
-                exp: entity.xp,
-                class: Helpers.class_to_int(entity.class)
-              }}
-           )}
-        )
+        effects = [
+          Effects.send(
+            char_id,
+            Encoder.encode(
+              {:update_user_stats,
+               %{
+                 max_hp: entity.max_hp,
+                 min_hp: entity.hp,
+                 shield: 0,
+                 max_mana: entity.max_mana,
+                 min_mana: entity.mana,
+                 max_sta: entity.max_stamina,
+                 min_sta: entity.stamina,
+                 gold: entity.gold,
+                 gold_cap: 1_000_000,
+                 level: entity.level,
+                 exp_next_level: GameData.exp_for_level(entity.level + 1) || 0,
+                 exp: entity.xp,
+                 class: Helpers.class_to_int(entity.class)
+               }}
+            )
+          ),
+          Effects.send(
+            char_id,
+            Encoder.encode(
+              {:mini_stats,
+               %{
+                 ciudadanos_matados: entity.citizens_killed,
+                 criminales_matados: entity.criminals_killed,
+                 faction_status:
+                   case Map.get(entity, :faction, :none) do
+                     :royal_army -> 1
+                     :chaos_legion -> 2
+                     :none -> if entity.criminal, do: 3, else: 0
+                   end,
+                 npcs_killed: entity.npcs_killed,
+                 class: Helpers.class_to_int(entity.class),
+                 penalty: entity.penalty,
+                 deaths: entity.deaths,
+                 gender: if(entity.gender == :male, do: 1, else: 2),
+                 fishing_points: entity.fishing_points,
+                 race: Helpers.race_to_int(entity.race)
+               }}
+            )
+          )
+        ]
 
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw,
-           Encoder.encode(
-             {:mini_stats,
-              %{
-                ciudadanos_matados: entity.citizens_killed,
-                criminales_matados: entity.criminals_killed,
-                faction_status:
-                  case Map.get(entity, :faction, :none) do
-                    :royal_army -> 1
-                    :chaos_legion -> 2
-                    :none -> if entity.criminal, do: 3, else: 0
-                  end,
-                npcs_killed: entity.npcs_killed,
-                class: Helpers.class_to_int(entity.class),
-                penalty: entity.penalty,
-                deaths: entity.deaths,
-                gender: if(entity.gender == :male, do: 1, else: 2),
-                fishing_points: entity.fishing_points,
-                race: Helpers.race_to_int(entity.race)
-              }}
-           )}
-        )
-
-        {:noreply, state}
+        {:ok, state, effects}
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
-
-  # ==================================================================
-  # Double-click / NPC interaction
-  # ==================================================================
-
-  # Double-click and NPC interaction delegated to Arena.Map.NpcInteraction
-  # Faction system delegated to Arena.Map.Faction
-
-  # Faction functions removed — see Arena.Map.Faction
-
-  defp msg(state, char_id, message), do: Helpers.msg(state, char_id, message)
-
-  # Pet commands delegated to Arena.Map.Pets
 
   # ==================================================================
   # Move spell (VB6: reorder spell slots)
@@ -197,23 +180,27 @@ defmodule Arena.Map.Social do
           players = Map.put(state.players, char_id, entity)
           state = %{state | players: players}
 
-          # Send updated spell slots to client
-          send_spell_slot(state.sessions, char_id, spells, idx)
-          send_spell_slot(state.sessions, char_id, spells, swap_idx)
-          {:noreply, state}
+          effects = [
+            spell_slot_effect(char_id, spells, idx),
+            spell_slot_effect(char_id, spells, swap_idx)
+          ]
+
+          {:ok, state, effects}
         else
-          {:noreply, state}
+          {:ok, state, []}
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
-  defp send_spell_slot(sessions, char_id, spells, idx) do
+  defp spell_slot_effect(char_id, spells, idx) do
     spell_id = Enum.at(spells, idx) || 0
-    packet = Encoder.encode({:change_spell_slot, %{slot: idx + 1, spell_id: spell_id}})
-    Helpers.send_to_session(sessions, char_id, {:send_raw, packet})
+    Effects.send(
+      char_id,
+      Encoder.encode({:change_spell_slot, %{slot: idx + 1, spell_id: spell_id}})
+    )
   end
 
   defp swap_spell_cooldowns(cooldowns, slot_a, slot_b) do
@@ -262,21 +249,21 @@ defmodule Arena.Map.Social do
   def handle_modify_skills(state, char_id, points_list) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
-        if entity.dead do
-          msg(state, char_id, "Estas muerto!")
-          {:noreply, state}
-        else
+        cond do
+          entity.dead ->
+            {:ok, state, [Effects.send(char_id, console("Estas muerto!"))]}
+
           # Reject any negative values in the list
-          if Enum.any?(points_list, &(&1 < 0)) do
-            msg(state, char_id, "Valores invalidos.")
-            {:noreply, state}
-          else
+          Enum.any?(points_list, &(&1 < 0)) ->
+            {:ok, state, [Effects.send(char_id, console("Valores invalidos."))]}
+
+          true ->
             # Sum requested points — must not exceed available skill_points
             total_requested = Enum.sum(points_list)
 
             if total_requested <= 0 or total_requested > entity.skill_points do
-              msg(state, char_id, "No tienes suficientes puntos de habilidad.")
-              {:noreply, state}
+              {:ok, state,
+               [Effects.send(char_id, console("No tienes suficientes puntos de habilidad."))]}
             else
               # Apply points to skills, capping each at 100
               {new_skills, points_used} =
@@ -297,24 +284,27 @@ defmodule Arena.Map.Social do
                   end
                 end)
 
-              entity = %{entity | skills: new_skills, skill_points: entity.skill_points - points_used}
+              entity = %{
+                entity
+                | skills: new_skills,
+                  skill_points: entity.skill_points - points_used
+              }
+
               players = Map.put(state.players, char_id, entity)
               state = %{state | players: players}
 
-              # Send updated skills back
-              Helpers.send_to_session(
-                state.sessions,
-                char_id,
-                {:send_raw, Encoder.encode({:send_skills, %{skills: entity.skills}})}
-              )
-
-              {:noreply, state}
+              {:ok, state,
+               [
+                 Effects.send(
+                   char_id,
+                   Encoder.encode({:send_skills, %{skills: entity.skills}})
+                 )
+               ]}
             end
-          end
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
@@ -327,19 +317,17 @@ defmodule Arena.Map.Social do
   def handle_change_description(state, char_id, desc) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} when entity.dead ->
-        msg(state, char_id, "Estas muerto.")
-        {:noreply, state}
+        {:ok, state, [Effects.send(char_id, console("Estas muerto."))]}
 
       {:ok, entity} ->
         desc = String.slice(desc, 0, @max_description_length)
         entity = %{entity | description: desc}
         players = Map.put(state.players, char_id, entity)
         state = %{state | players: players}
-        msg(state, char_id, "Descripcion cambiada.")
-        {:noreply, state}
+        {:ok, state, [Effects.send(char_id, console("Descripcion cambiada."))]}
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
@@ -353,29 +341,29 @@ defmodule Arena.Map.Social do
         idx = slot - 1
         spell_id = Enum.at(entity.spells || [], idx)
 
-        if spell_id && spell_id > 0 do
-          case GameData.get_spell(spell_id) do
-            nil ->
-              msg(state, char_id, "Hechizo no encontrado.")
+        message =
+          if spell_id && spell_id > 0 do
+            case GameData.get_spell(spell_id) do
+              nil ->
+                "Hechizo no encontrado."
 
-            spell_def ->
-              info = "#{spell_def.name} - Mana: #{spell_def.mana_required}"
+              spell_def ->
+                info = "#{spell_def.name} - Mana: #{spell_def.mana_required}"
 
-              info =
-                if spell_def.min_hp && spell_def.min_hp > 0,
-                  do: info <> " - Daño: #{spell_def.min_hp}-#{spell_def.max_hp}",
-                  else: info
-
-              msg(state, char_id, info)
+                if spell_def.min_hp && spell_def.min_hp > 0 do
+                  info <> " - Daño: #{spell_def.min_hp}-#{spell_def.max_hp}"
+                else
+                  info
+                end
+            end
+          else
+            "No hay hechizo en ese slot."
           end
-        else
-          msg(state, char_id, "No hay hechizo en ese slot.")
-        end
 
-        {:noreply, state}
+        {:ok, state, [Effects.send(char_id, console(message))]}
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
@@ -398,16 +386,18 @@ defmodule Arena.Map.Social do
           players = Map.put(state.players, char_id, entity)
           state = %{state | players: players}
 
-          # Send updated slots
-          Helpers.send_inventory_slot(state.sessions, char_id, inv, from_idx)
-          Helpers.send_inventory_slot(state.sessions, char_id, inv, to_idx)
-          {:noreply, state}
+          effects = [
+            inventory_slot_effect(char_id, inv, from_idx),
+            inventory_slot_effect(char_id, inv, to_idx)
+          ]
+
+          {:ok, state, effects}
         else
-          {:noreply, state}
+          {:ok, state, []}
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
@@ -418,49 +408,58 @@ defmodule Arena.Map.Social do
   def handle_modify_gold(state, char_id, amount) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} when entity.dead ->
-        {:noreply, state}
+        {:ok, state, []}
 
       {:ok, entity} ->
         new_gold = max(entity.gold + amount, 0)
         entity = %{entity | gold: new_gold}
         players = Map.put(state.players, char_id, entity)
         state = %{state | players: players}
-        Helpers.send_to_session(state.sessions, char_id, {:send_raw, Encoder.encode({:update_gold, %{gold: new_gold}})})
-        {:noreply, state}
+
+        {:ok, state,
+         [Effects.send(char_id, Encoder.encode({:update_gold, %{gold: new_gold}}))]}
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
   @doc """
-  Atomically deduct gold from a player, returning {:reply, {:ok, new_gold}, state}
-  or {:reply, {:error, reason}, state}. Used by transfer_gold/donate_gold to avoid
-  TOCTOU races where snapshot_entity reads gold then async modify fires later.
+  Atomically deduct gold from a player.
+
+  Returns `{:ok, state, reply, effects}` where `reply` is `{:ok, new_gold}`
+  or `{:error, reason}`. The MapServer dispatches this via
+  `Effects.run_handler_call_reply/2`, which surfaces `reply` to the caller
+  unchanged. Used by transfer_gold / donate_gold to avoid TOCTOU races
+  where snapshot_entity reads gold then async modify fires later.
   """
   def handle_deduct_gold(state, char_id, amount) when amount > 0 do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} when entity.dead ->
-        {:reply, {:error, :dead}, state}
+        {:ok, state, {:error, :dead}, []}
 
       {:ok, entity} when entity.gold >= amount ->
         new_gold = entity.gold - amount
         entity = %{entity | gold: new_gold}
         players = Map.put(state.players, char_id, entity)
         state = %{state | players: players}
-        Helpers.send_to_session(state.sessions, char_id, {:send_raw, Encoder.encode({:update_gold, %{gold: new_gold}})})
-        {:reply, {:ok, new_gold}, state}
+
+        effects = [
+          Effects.send(char_id, Encoder.encode({:update_gold, %{gold: new_gold}}))
+        ]
+
+        {:ok, state, {:ok, new_gold}, effects}
 
       {:ok, _entity} ->
-        {:reply, {:error, :not_enough_gold}, state}
+        {:ok, state, {:error, :not_enough_gold}, []}
 
       :error ->
-        {:reply, {:error, :not_on_map}, state}
+        {:ok, state, {:error, :not_on_map}, []}
     end
   end
 
   def handle_deduct_gold(state, _char_id, _amount) do
-    {:reply, {:error, :invalid_amount}, state}
+    {:ok, state, {:error, :invalid_amount}, []}
   end
 
   # ==================================================================
@@ -488,12 +487,12 @@ defmodule Arena.Map.Social do
             do_propose_marriage(state, char_id, entity, target_char_id, target_entity)
 
           :error ->
-            msg(state, char_id, "El jugador no se encuentra en este mapa.")
-            {:noreply, state}
+            {:ok, state,
+             [Effects.send(char_id, console("El jugador no se encuentra en este mapa."))]}
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
@@ -503,34 +502,44 @@ defmodule Arena.Map.Social do
     cond do
       # Must be near a priest
       priest_result == :not_found ->
-        msg(state, char_id, "Primero haz click sobre un sacerdote.")
-        {:noreply, state}
-
-      # Priest too far (resolve_selected_npc checks VB6 Distancia <= 10)
-      # If we got here, priest is nearby. Check other conditions.
+        {:ok, state, [Effects.send(char_id, console("Primero haz click sobre un sacerdote."))]}
 
       # Cannot marry yourself
       char_id == target_char_id ->
-        msg(state, char_id, "No puedes casarte contigo mismo.")
-        {:noreply, state}
+        {:ok, state, [Effects.send(char_id, console("No puedes casarte contigo mismo."))]}
 
       # Proposer already married
       entity.spouse_id != 0 and entity.spouse_id != nil ->
-        msg(state, char_id, "Ya estas casado! Debes divorciarte de tu actual pareja para casarte nuevamente.")
-        {:noreply, state}
+        {:ok, state,
+         [
+           Effects.send(
+             char_id,
+             console(
+               "Ya estas casado! Debes divorciarte de tu actual pareja para casarte nuevamente."
+             )
+           )
+         ]}
 
       # Target already married
       target_entity.spouse_id != 0 and target_entity.spouse_id != nil ->
-        msg(state, char_id, "Tu pareja debe divorciarse antes de tomar tu mano en matrimonio.")
-        {:noreply, state}
+        {:ok, state,
+         [
+           Effects.send(
+             char_id,
+             console("Tu pareja debe divorciarse antes de tomar tu mano en matrimonio.")
+           )
+         ]}
 
       # Mutual proposal: target already proposed to us -> marry!
       target_entity.marriage_proposal_target == char_id ->
-        {:ok, _npc, _npc_def} = priest_result
-
         # Set both as married
         entity = %{entity | spouse_id: target_entity.char_id, marriage_proposal_target: nil}
-        target_entity = %{target_entity | spouse_id: entity.char_id, marriage_proposal_target: nil}
+
+        target_entity = %{
+          target_entity
+          | spouse_id: entity.char_id,
+            marriage_proposal_target: nil
+        }
 
         players =
           state.players
@@ -540,18 +549,19 @@ defmodule Arena.Map.Social do
         state = %{state | players: players}
 
         # Broadcast marriage announcement (VB6: SendData ToAll)
-        announce = "El sacerdote celebra el casamiento entre #{entity.name} y #{target_entity.name}."
-
-        Visibility.broadcast_to_map(state, fn pid ->
-          send(pid, {:send_packet, {:console_msg, %{message: announce, font_index: 0}}})
-        end)
+        announce =
+          "El sacerdote celebra el casamiento entre #{entity.name} y #{target_entity.name}."
 
         # Congratulations to both (VB6: Msg1414/1415)
         congrats = "Los declaro unidos en legal matrimonio. Felicidades!"
-        msg(state, char_id, congrats)
-        msg(state, target_char_id, congrats)
 
-        {:noreply, state}
+        effects = [
+          Effects.broadcast_map(console(announce)),
+          Effects.send(char_id, console(congrats)),
+          Effects.send(target_char_id, console(congrats))
+        ]
+
+        {:ok, state, effects}
 
       # First proposal: set candidato, notify target
       true ->
@@ -559,16 +569,21 @@ defmodule Arena.Map.Social do
         players = Map.put(state.players, char_id, entity)
         state = %{state | players: players}
 
-        msg(state, char_id, "La solicitud de casamiento ha sido enviada a #{target_entity.name}.")
+        effects = [
+          Effects.send(
+            char_id,
+            console("La solicitud de casamiento ha sido enviada a #{target_entity.name}.")
+          ),
+          # VB6: Msg1956
+          Effects.send(
+            target_char_id,
+            console(
+              "#{entity.name} desea casarse contigo, para permitirlo haz click en el sacerdote y escribe /PROPONER #{entity.name}."
+            )
+          )
+        ]
 
-        # VB6: Msg1956
-        msg(
-          state,
-          target_char_id,
-          "#{entity.name} desea casarse contigo, para permitirlo haz click en el sacerdote y escribe /PROPONER #{entity.name}."
-        )
-
-        {:noreply, state}
+        {:ok, state, effects}
     end
   end
 
@@ -658,26 +673,24 @@ defmodule Arena.Map.Social do
       {:ok, entity} ->
         cond do
           entity.dead ->
-            msg(state, char_id, "Estas muerto!")
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("Estas muerto!"))]}
 
           entity.oculto ->
-            msg(state, char_id, "Ya estas oculto.")
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("Ya estas oculto."))]}
 
           skill_level < 1 ->
-            msg(state, char_id, "No tienes habilidad suficiente para ocultarte.")
-            {:noreply, state}
+            {:ok, state,
+             [Effects.send(char_id, console("No tienes habilidad suficiente para ocultarte."))]}
 
           # VB6: non-pirate cannot hide while navigating
           entity.navigating and entity.class != :pirate ->
-            msg(state, char_id, "No puedes ocultarte mientras navegas.")
-            {:noreply, state}
+            {:ok, state,
+             [Effects.send(char_id, console("No puedes ocultarte mientras navegas."))]}
 
           # VB6: recent-hit cooldown — block hiding if attacked too recently
           now - entity.last_attacked_at < @hide_after_hit_cooldown_ms ->
-            msg(state, char_id, "No puedes ocultarte tan pronto despues de atacar.")
-            {:noreply, state}
+            {:ok, state,
+             [Effects.send(char_id, console("No puedes ocultarte tan pronto despues de atacar."))]}
 
           true ->
             # VB6: nonlinear cubic polynomial success roll
@@ -702,23 +715,26 @@ defmodule Arena.Map.Social do
               players = Map.put(state.players, char_id, entity)
               state = %{state | players: players}
 
-              Arena.Map.Visibility.hide_from_non_gm(state, entity)
+              message =
+                if entity.navigating and entity.class == :pirate do
+                  "Te has camuflado como barco fantasma!"
+                else
+                  "Te has ocultado entre las sombras."
+                end
 
-              if entity.navigating and entity.class == :pirate do
-                msg(state, char_id, "Te has camuflado como barco fantasma!")
-              else
-                msg(state, char_id, "Te has ocultado entre las sombras.")
-              end
+              effects = [
+                Effects.hide_from_non_gm(entity),
+                Effects.send(char_id, console(message))
+              ]
 
-              {:noreply, state}
+              {:ok, state, effects}
             else
-              msg(state, char_id, "No has logrado ocultarte.")
-              {:noreply, state}
+              {:ok, state, [Effects.send(char_id, console("No has logrado ocultarte."))]}
             end
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
@@ -740,15 +756,17 @@ defmodule Arena.Map.Social do
              }}
           )
 
-        Helpers.send_to_session(state.sessions, char_id, {:send_raw, raw})
-
-        # Tell the session handler which forum is open
+        # The {:set_viewing_forum, forum_id} message is a session-state
+        # update (not an outbound packet) — keep it as a direct send to
+        # the session pid via the legacy shim. Migrating it would require
+        # a new effect kind for an in-band session-state message that no
+        # other handler emits.
         Helpers.send_to_session(state.sessions, char_id, {:set_viewing_forum, forum_id})
 
-        {:noreply, state}
+        {:ok, state, [Effects.send(char_id, raw)]}
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
@@ -762,8 +780,7 @@ defmodule Arena.Map.Social do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         if entity.spouse_id == 0 or entity.spouse_id == nil do
-          msg(state, char_id, "No estas casado.")
-          {:noreply, state}
+          {:ok, state, [Effects.send(char_id, console("No estas casado."))]}
         else
           spouse_id = entity.spouse_id
 
@@ -778,20 +795,21 @@ defmodule Arena.Map.Social do
               players = Map.put(state.players, spouse_id, spouse_entity)
               state = %{state | players: players}
 
-              msg(state, char_id, "Te has divorciado.")
-              msg(state, spouse_id, "#{entity.name} se ha divorciado de ti.")
+              effects = [
+                Effects.send(char_id, console("Te has divorciado.")),
+                Effects.send(spouse_id, console("#{entity.name} se ha divorciado de ti."))
+              ]
 
-              {:noreply, state}
+              {:ok, state, effects}
 
             :error ->
               # Spouse offline or on another map -- only clear our side
-              msg(state, char_id, "Te has divorciado.")
-              {:noreply, state}
+              {:ok, state, [Effects.send(char_id, console("Te has divorciado."))]}
           end
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
@@ -803,8 +821,7 @@ defmodule Arena.Map.Social do
   def handle_request_account_state(state, char_id) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} when entity.dead ->
-        msg(state, char_id, "No puedes hacer eso estando muerto.")
-        {:noreply, state}
+        {:ok, state, [Effects.send(char_id, console("No puedes hacer eso estando muerto."))]}
 
       {:ok, entity} ->
         case Helpers.selected_npc(state, entity) do
@@ -813,8 +830,14 @@ defmodule Arena.Map.Social do
               npc_def.npc_type == @npc_type_banquero and
                   Helpers.within_vb6_distance?(entity, npc, 3) ->
                 bank_gold = Map.get(entity, :bank_gold, 0)
-                msg(state, char_id, "Tenes #{bank_gold} monedas de oro en tu cuenta.")
-                {:noreply, state}
+
+                {:ok, state,
+                 [
+                   Effects.send(
+                     char_id,
+                     console("Tenes #{bank_gold} monedas de oro en tu cuenta.")
+                   )
+                 ]}
 
               npc_def.npc_type == @npc_type_timbero and
                   Helpers.within_vb6_distance?(entity, npc, 3) ->
@@ -822,31 +845,44 @@ defmodule Arena.Map.Social do
                 wins = Map.get(entity, :gamble_wins, 0)
                 losses = Map.get(entity, :gamble_losses, 0)
                 plays = Map.get(entity, :gamble_plays, 0)
-                msg(state, char_id, "Apuestas ganadas: #{wins}")
-                msg(state, char_id, "Apuestas perdidas: #{losses}")
-                msg(state, char_id, "Veces jugadas: #{plays}")
-                {:noreply, state}
+
+                effects = [
+                  Effects.send(char_id, console("Apuestas ganadas: #{wins}")),
+                  Effects.send(char_id, console("Apuestas perdidas: #{losses}")),
+                  Effects.send(char_id, console("Veces jugadas: #{plays}"))
+                ]
+
+                {:ok, state, effects}
 
               npc_def.npc_type in [@npc_type_banquero, @npc_type_timbero] ->
-                msg(state, char_id, "Estas demasiado lejos.")
-                {:noreply, state}
+                {:ok, state, [Effects.send(char_id, console("Estas demasiado lejos."))]}
 
               true ->
-                msg(state, char_id, "Primero debes seleccionar un personaje, haz click izquierdo sobre el.")
-                {:noreply, state}
+                {:ok, state,
+                 [
+                   Effects.send(
+                     char_id,
+                     console(
+                       "Primero debes seleccionar un personaje, haz click izquierdo sobre el."
+                     )
+                   )
+                 ]}
             end
 
-          {:error, :stale_selection} ->
-            msg(state, char_id, "Primero debes seleccionar un personaje, haz click izquierdo sobre el.")
-            {:noreply, state}
-
-          {:error, :no_selection} ->
-            msg(state, char_id, "Primero debes seleccionar un personaje, haz click izquierdo sobre el.")
-            {:noreply, state}
+          {:error, _reason} ->
+            {:ok, state,
+             [
+               Effects.send(
+                 char_id,
+                 console(
+                   "Primero debes seleccionar un personaje, haz click izquierdo sobre el."
+                 )
+               )
+             ]}
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
@@ -857,50 +893,100 @@ defmodule Arena.Map.Social do
   def handle_request_reward(state, char_id) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} when entity.dead ->
-        msg(state, char_id, "No puedes hacer eso estando muerto.")
-        {:noreply, state}
+        {:ok, state, [Effects.send(char_id, console("No puedes hacer eso estando muerto."))]}
 
       {:ok, entity} ->
         case Helpers.selected_npc(state, entity) do
           {:ok, npc, npc_def} ->
             cond do
               npc_def.npc_type != @npc_type_enlistador ->
-                msg(state, char_id, "Primero debes seleccionar un personaje, haz click izquierdo sobre el.")
-                {:noreply, state}
+                {:ok, state,
+                 [
+                   Effects.send(
+                     char_id,
+                     console(
+                       "Primero debes seleccionar un personaje, haz click izquierdo sobre el."
+                     )
+                   )
+                 ]}
 
               not Helpers.within_vb6_distance?(entity, npc, 4) ->
-                msg(state, char_id, "Estas demasiado lejos.")
-                {:noreply, state}
+                {:ok, state, [Effects.send(char_id, console("Estas demasiado lejos."))]}
 
               entity.faction == :none ->
-                msg(state, char_id, "No perteneces a ninguna faccion.")
-                {:noreply, state}
+                {:ok, state, [Effects.send(char_id, console("No perteneces a ninguna faccion."))]}
 
               Faction.npc_faccion_to_atom(npc_def.faccion) != entity.faction ->
-                msg(state, char_id, "Este enlistador no pertenece a tu faccion.")
-                {:noreply, state}
+                {:ok, state,
+                 [Effects.send(char_id, console("Este enlistador no pertenece a tu faccion."))]}
 
               true ->
                 # VB6: HandleReward — check faction_score & level vs rank
                 # requirements, then award rank-up + items for any newly-
                 # qualified rank.
-                Faction.handle_faction_rank_up(state, char_id, entity, entity.faction)
+                #
+                # Faction.handle_faction_rank_up still uses the legacy
+                # `{:noreply, state}` contract. Until it migrates we adapt
+                # here: run it for its state mutation + side effects, then
+                # surface the post-state with no further effects (the
+                # rank-up packets and console messages already fired
+                # through the legacy shim from inside handle_faction_rank_up).
+                {:noreply, new_state} =
+                  Faction.handle_faction_rank_up(state, char_id, entity, entity.faction)
+
+                {:ok, new_state, []}
             end
 
-          {:error, :stale_selection} ->
-            msg(state, char_id, "Primero debes seleccionar un personaje, haz click izquierdo sobre el.")
-            {:noreply, state}
-
-          {:error, :no_selection} ->
-            msg(state, char_id, "Primero debes seleccionar un personaje, haz click izquierdo sobre el.")
-            {:noreply, state}
+          {:error, _reason} ->
+            {:ok, state,
+             [
+               Effects.send(
+                 char_id,
+                 console(
+                   "Primero debes seleccionar un personaje, haz click izquierdo sobre el."
+                 )
+               )
+             ]}
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
+  defp console(message) do
+    Encoder.encode({:console_msg, %{message: message, font_index: 0}})
+  end
 
-  # Quest handlers delegated to Arena.Map.QuestHandlers
+  defp inventory_slot_effect(char_id, inv, idx) do
+    raw = inventory_slot_packet(inv, idx)
+    Effects.send(char_id, raw)
+  end
+
+  # Mirror of `Helpers.send_inventory_slot/4` packet construction (without
+  # the send_to_session shim). Inlined here to keep effect production in
+  # the handler module.
+  defp inventory_slot_packet(inventory, idx) do
+    case Enum.at(inventory, idx) do
+      nil ->
+        Encoder.encode({:change_inventory_slot, %{slot: idx + 1, obj_index: 0, amount: 0}})
+
+      item ->
+        item_def = GameData.get_item(item.item_id)
+        valor = if item_def, do: item_def.valor, else: 0
+        instance_tags = Map.get(item, :elemental_tags, 0)
+
+        Encoder.encode(
+          {:change_inventory_slot,
+           %{
+             slot: idx + 1,
+             obj_index: item.item_id,
+             amount: item.amount,
+             equipped: item.equipped,
+             valor: valor / 1,
+             elemental_tags: instance_tags
+           }}
+        )
+    end
+  end
 end

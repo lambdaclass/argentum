@@ -76,6 +76,27 @@ defmodule Arena.Map.Effects do
   end
 
   @doc """
+  Broadcast `packet` to every session on the map, ignoring AoI.
+
+  Used for global announcements (marriage, world weather/audio). The
+  envelope is built via the classifier (same as `send/3` /
+  `broadcast_visible/3`); pass `class:` / `coalesce_key:` to override.
+  """
+  @spec broadcast_map(binary(), keyword()) :: Arena.Map.Effect.t()
+  def broadcast_map(packet, opts \\ []) when is_binary(packet) do
+    {:broadcast_map, build_envelope(packet, opts)}
+  end
+
+  @doc """
+  Fan a `character_remove` packet to every nearby non-GM session for
+  `entity`. Used when the entity becomes invisible / oculto.
+  """
+  @spec hide_from_non_gm(map()) :: Arena.Map.Effect.t()
+  def hide_from_non_gm(entity) do
+    {:hide_from_non_gm, entity}
+  end
+
+  @doc """
   Transfer the player to `(dest_map, dest_x, dest_y)`.
 
   The runner resolves `char_id` against `state.sessions` and sends the bare
@@ -146,6 +167,25 @@ defmodule Arena.Map.Effects do
     {:reply, :ok, state}
   end
 
+  @doc """
+  Like `run_handler_call/2` but the handler returns its own reply term:
+  `{:ok, state, reply, effects}`.
+
+  Used by handlers whose downstream callers depend on a richer reply than
+  `:ok` (e.g. `Social.handle_deduct_gold/3` returns `{:ok, new_gold}` /
+  `{:error, reason}` because the gateway's faction-donation flow branches
+  on the reply). Rejection is the reply value itself; effects still run.
+  """
+  @spec run_handler_call_reply(
+          map(),
+          (map() -> {:ok, map(), term(), [Arena.Map.Effect.t()]})
+        ) :: {:reply, term(), map()}
+  def run_handler_call_reply(state, fun) when is_function(fun, 1) do
+    {:ok, state, reply, effects} = fun.(state)
+    run(state, effects)
+    {:reply, reply, state}
+  end
+
   defp dispatch(state, {:send, char_id, outbound}) do
     Helpers.send_outbound(state.sessions, char_id, outbound)
   end
@@ -162,8 +202,18 @@ defmodule Arena.Map.Effects do
     end)
   end
 
+  defp dispatch(state, {:broadcast_map, outbound}) do
+    Visibility.broadcast_to_map(state, fn pid ->
+      AoSession.Egress.enqueue(pid, outbound)
+    end)
+  end
+
   defp dispatch(state, {:broadcast_character_change, entity}) do
     Helpers.broadcast_character_change(state, entity)
+  end
+
+  defp dispatch(state, {:hide_from_non_gm, entity}) do
+    Visibility.hide_from_non_gm(state, entity)
   end
 
   defp dispatch(state, {:transfer, char_id, dest_map, dest_x, dest_y, entity}) do

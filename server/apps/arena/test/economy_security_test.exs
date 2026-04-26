@@ -1429,7 +1429,7 @@ defmodule Arena.EconomySecurityTest do
 
       # Try to add 10 points when only 5 available
       points = [10 | List.duplicate(0, 23)]
-      {:noreply, new_state} = Social.handle_modify_skills(state, :player, points)
+      {:ok, new_state, _effects} = Social.handle_modify_skills(state, :player, points)
       # Should be rejected — skill_points unchanged
       assert new_state.players[:player].skill_points == 5
     end
@@ -1440,7 +1440,7 @@ defmodule Arena.EconomySecurityTest do
       state = make_map_state(%{player: entity}, sessions: sessions)
 
       points = List.duplicate(0, 24)
-      {:noreply, new_state} = Social.handle_modify_skills(state, :player, points)
+      {:ok, new_state, _effects} = Social.handle_modify_skills(state, :player, points)
       assert new_state.players[:player].skill_points == 10
     end
 
@@ -1451,7 +1451,7 @@ defmodule Arena.EconomySecurityTest do
 
       # First value (magic) = -10, sum = -10 which is <= 0 → rejected by total check
       points = [-10 | List.duplicate(0, 23)]
-      {:noreply, new_state} = Social.handle_modify_skills(state, :player, points)
+      {:ok, new_state, _effects} = Social.handle_modify_skills(state, :player, points)
       # The total_requested = -10 <= 0, so it's rejected
       assert new_state.players[:player].skills.magic == 50
     end
@@ -1468,7 +1468,7 @@ defmodule Arena.EconomySecurityTest do
       # magic=-20, stealing=+25 → sum=5 matches available points
       # But this would steal 20 from magic and add 25 to stealing
       points = [-20, 25 | List.duplicate(0, 22)]
-      {:noreply, new_state} = Social.handle_modify_skills(state, :player, points)
+      {:ok, new_state, _effects} = Social.handle_modify_skills(state, :player, points)
 
       # Negative values are ignored (pts > 0 guard), so only stealing gets +5 (capped by available)
       # magic should remain unchanged
@@ -1486,7 +1486,7 @@ defmodule Arena.EconomySecurityTest do
 
       # Request 20 for magic, but only 5 will be applied (cap at 100)
       points = [20 | List.duplicate(0, 23)]
-      {:noreply, new_state} = Social.handle_modify_skills(state, :player, points)
+      {:ok, new_state, _effects} = Social.handle_modify_skills(state, :player, points)
 
       p = new_state.players[:player]
       assert p.skills.magic == 100
@@ -1500,13 +1500,13 @@ defmodule Arena.EconomySecurityTest do
       state = make_map_state(%{player: entity}, sessions: sessions)
 
       points = [5 | List.duplicate(0, 23)]
-      {:noreply, new_state} = Social.handle_modify_skills(state, :player, points)
+      {:ok, new_state, _effects} = Social.handle_modify_skills(state, :player, points)
       assert new_state.players[:player].skill_points == 10
     end
 
     test "unknown player is a no-op" do
       state = make_map_state(%{})
-      {:noreply, new_state} = Social.handle_modify_skills(state, :ghost, [5 | List.duplicate(0, 23)])
+      {:ok, new_state, _effects} = Social.handle_modify_skills(state, :ghost, [5 | List.duplicate(0, 23)])
       assert new_state == state
     end
 
@@ -1517,7 +1517,7 @@ defmodule Arena.EconomySecurityTest do
 
       # 30 values instead of 24 — Enum.zip truncates to shorter list
       points = [5 | List.duplicate(0, 29)]
-      {:noreply, new_state} = Social.handle_modify_skills(state, :player, points)
+      {:ok, new_state, _effects} = Social.handle_modify_skills(state, :player, points)
       assert new_state.players[:player].skills.magic == 55
       assert new_state.players[:player].skill_points == 5
     end
@@ -1529,7 +1529,7 @@ defmodule Arena.EconomySecurityTest do
 
       # Only 3 values — Enum.zip truncates to shorter list, remaining skills untouched
       points = [5, 3, 0]
-      {:noreply, new_state} = Social.handle_modify_skills(state, :player, points)
+      {:ok, new_state, _effects} = Social.handle_modify_skills(state, :player, points)
       p = new_state.players[:player]
       assert p.skills.magic == 55
       assert p.skills[:stealing] == 3

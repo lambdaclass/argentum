@@ -145,7 +145,7 @@ defmodule Arena.Adversarial.SpellAuthorityTest do
 
       state = make_state(%{caster: entity})
 
-      {:noreply, moved_state} = Social.handle_move_spell(state, :caster, false, 1)
+      {:ok, moved_state, _effects} = Social.handle_move_spell(state, :caster, false, 1)
 
       moved = moved_state.players.caster
       assert moved.spells == [98_762, 98_761]

@@ -92,7 +92,9 @@ defmodule Arena.Map.NpcInteraction do
                     item_def = GameData.get_item(item_id)
 
                     if item_def != nil and item_def.forum_id > 0 do
-                      Arena.Map.Social.handle_forum_open(state, char_id, item_def.forum_id)
+                      Effects.run_handler(state, fn s ->
+                        Arena.Map.Social.handle_forum_open(s, char_id, item_def.forum_id)
+                      end)
                     else
                       {:noreply, state}
                     end

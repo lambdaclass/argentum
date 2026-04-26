@@ -686,7 +686,7 @@ defmodule Arena.BugRegressionTest do
 
       # Attack: [100, -99, 0, 0, ...] sums to 1 (passes guard), but +100 applied to first skill
       attack = [100, -99] ++ List.duplicate(0, 20)
-      {:noreply, new_state} = Social.handle_modify_skills(state, :player, attack)
+      {:ok, new_state, _effects} = Social.handle_modify_skills(state, :player, attack)
       p = new_state.players[:player]
 
       # Magic should gain at most 1 point (the sum), not 100
@@ -700,7 +700,7 @@ defmodule Arena.BugRegressionTest do
       state = make_map_state(%{player: entity}, sessions: sessions)
 
       attack = [-5] ++ List.duplicate(0, 21)
-      {:noreply, new_state} = Social.handle_modify_skills(state, :player, attack)
+      {:ok, new_state, _effects} = Social.handle_modify_skills(state, :player, attack)
       # Skills must not change
       assert Map.get(new_state.players[:player].skills, :magic, 0) == 50
     end
@@ -928,7 +928,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Social.handle_change_description(state, :player, "new desc")
+      {:ok, new_state, _effects} = Social.handle_change_description(state, :player, "new desc")
 
       player = Map.get(new_state.players, :player)
       assert player.description == "old", "Dead player should not change description"
@@ -948,7 +948,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Social.handle_modify_gold(state, :player, -500)
+      {:ok, new_state, _effects} = Social.handle_modify_gold(state, :player, -500)
 
       player = Map.get(new_state.players, :player)
       assert player.gold == 0, "Gold should clamp to 0, not go negative"
@@ -959,7 +959,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Social.handle_modify_gold(state, :player, -100)
+      {:ok, new_state, _effects} = Social.handle_modify_gold(state, :player, -100)
 
       player = Map.get(new_state.players, :player)
       assert player.gold == 0
@@ -978,7 +978,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, {:ok, new_gold}, new_state} = Social.handle_deduct_gold(state, :player, 200)
+      {:ok, new_state, {:ok, new_gold}, _effects} = Social.handle_deduct_gold(state, :player, 200)
 
       assert new_gold == 300
       assert Map.get(new_state.players, :player).gold == 300
@@ -989,7 +989,8 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, {:error, :not_enough_gold}, new_state} = Social.handle_deduct_gold(state, :player, 200)
+      {:ok, new_state, {:error, :not_enough_gold}, _effects} =
+        Social.handle_deduct_gold(state, :player, 200)
 
       # Gold unchanged
       assert Map.get(new_state.players, :player).gold == 100
@@ -1000,7 +1001,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, {:error, :dead}, _state} = Social.handle_deduct_gold(state, :player, 100)
+      {:ok, _state, {:error, :dead}, _effects} = Social.handle_deduct_gold(state, :player, 100)
     end
 
     test "deduct_gold rejects amount <= 0" do
@@ -1008,8 +1009,11 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, {:error, :invalid_amount}, _state} = Social.handle_deduct_gold(state, :player, 0)
-      {:reply, {:error, :invalid_amount}, _state} = Social.handle_deduct_gold(state, :player, -100)
+      {:ok, _state, {:error, :invalid_amount}, _effects} =
+        Social.handle_deduct_gold(state, :player, 0)
+
+      {:ok, _state, {:error, :invalid_amount}, _effects} =
+        Social.handle_deduct_gold(state, :player, -100)
     end
   end
 
@@ -1027,7 +1031,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Social.handle_modify_gold(state, :player, 500)
+      {:ok, new_state, _effects} = Social.handle_modify_gold(state, :player, 500)
 
       player = Map.get(new_state.players, :player)
       assert player.gold == 100, "Dead player gold should not change"

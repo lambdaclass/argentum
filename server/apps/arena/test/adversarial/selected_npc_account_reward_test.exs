@@ -93,6 +93,17 @@ defmodule Arena.Adversarial.SelectedNpcAccountRewardTest do
     end
   end
 
+  # Find first console_msg payload (packet id 37) sent in the effect list.
+  defp first_console_message(effects) do
+    Enum.find_value(effects, fn
+      {:send, _char_id, %{payload: <<37::little-signed-16, _::binary>> = payload}} ->
+        decode_console_msg(payload)
+
+      _ ->
+        nil
+    end)
+  end
+
   describe "request_account_state requires selected NPC semantics" do
     test "clicking a non-special NPC updates remembered selection and rejects account-state" do
       npc_id = find_npc_id_not_in_types([1, 3, 4, 5, 6, 9, 10, 16, 17, 20])
@@ -108,11 +119,12 @@ defmodule Arena.Adversarial.SelectedNpcAccountRewardTest do
 
       drain_messages()
 
-      assert {:noreply, _state} = Social.handle_request_account_state(clicked_state, :player)
+      assert {:ok, _state, effects} = Social.handle_request_account_state(clicked_state, :player)
 
-      assert_receive {:send_raw, raw}
-      msg = decode_console_msg(raw)
+      msg = first_console_message(effects)
+      assert msg, "expected a console message effect"
       assert msg.message =~ "seleccionar"
+      refute_receive {:send_raw, _}, 50
     end
 
     test "selected banker on the same tile exposes the bank balance" do
@@ -123,11 +135,12 @@ defmodule Arena.Adversarial.SelectedNpcAccountRewardTest do
       entity = make_entity(%{bank_gold: 777, last_clicked_npc_instance_id: :banker, last_clicked_npc_type: @npc_type_banquero})
       state = make_map_state(entity, %{banker: banker})
 
-      assert {:noreply, _state} = Social.handle_request_account_state(state, :player)
+      assert {:ok, _state, effects} = Social.handle_request_account_state(state, :player)
 
-      assert_receive {:send_raw, raw}
-      msg = decode_console_msg(raw)
+      msg = first_console_message(effects)
+      assert msg, "expected a console message effect"
       assert msg.message =~ "777"
+      refute_receive {:send_raw, _}, 50
     end
 
     test "nearby banker alone should not expose bank balance" do
@@ -137,12 +150,13 @@ defmodule Arena.Adversarial.SelectedNpcAccountRewardTest do
       banker = %{npc_id: banker_id, x: 51, y: 50, instance_id: :banker}
       state = make_map_state(make_entity(%{bank_gold: 777}), %{banker: banker})
 
-      assert {:noreply, _state} = Social.handle_request_account_state(state, :player)
+      assert {:ok, _state, effects} = Social.handle_request_account_state(state, :player)
 
-      assert_receive {:send_raw, raw}
-      msg = decode_console_msg(raw)
+      msg = first_console_message(effects)
+      assert msg, "expected a console message effect"
       assert msg.message =~ "seleccionar"
       refute msg.message =~ "777"
+      refute_receive {:send_raw, _}, 50
     end
 
     test "stale banker selection is rejected after the NPC disappears" do
@@ -157,11 +171,12 @@ defmodule Arena.Adversarial.SelectedNpcAccountRewardTest do
         )
         |> Map.put(:npcs_live, %{})
 
-      assert {:noreply, _state} = Social.handle_request_account_state(stale_state, :player)
+      assert {:ok, _state, effects} = Social.handle_request_account_state(stale_state, :player)
 
-      assert_receive {:send_raw, raw}
-      msg = decode_console_msg(raw)
+      msg = first_console_message(effects)
+      assert msg, "expected a console message effect"
       assert msg.message =~ "seleccionar"
+      refute_receive {:send_raw, _}, 50
     end
 
     test "nearby timbero alone should not expose gambling stats" do
@@ -171,12 +186,13 @@ defmodule Arena.Adversarial.SelectedNpcAccountRewardTest do
       timbero = %{npc_id: timbero_id, x: 51, y: 50, instance_id: :timbero}
       state = make_map_state(make_entity(%{gamble_wins: 20, gamble_losses: 3}), %{timbero: timbero})
 
-      assert {:noreply, _state} = Social.handle_request_account_state(state, :player)
+      assert {:ok, _state, effects} = Social.handle_request_account_state(state, :player)
 
-      assert_receive {:send_raw, raw}
-      msg = decode_console_msg(raw)
+      msg = first_console_message(effects)
+      assert msg, "expected a console message effect"
       assert msg.message =~ "seleccionar"
       refute msg.message =~ "Ganancias"
+      refute_receive {:send_raw, _}, 50
     end
 
     test "selected timbero must still be in range to expose gambling stats" do
@@ -193,11 +209,12 @@ defmodule Arena.Adversarial.SelectedNpcAccountRewardTest do
       far_timbero = %{timbero | x: 60, y: 50}
       far_state = %{clicked_state | npcs_live: %{timbero: far_timbero}}
 
-      assert {:noreply, _state} = Social.handle_request_account_state(far_state, :player)
+      assert {:ok, _state, effects} = Social.handle_request_account_state(far_state, :player)
 
-      assert_receive {:send_raw, raw}
-      msg = decode_console_msg(raw)
+      msg = first_console_message(effects)
+      assert msg, "expected a console message effect"
       assert msg.message =~ "demasiado lejos"
+      refute_receive {:send_raw, _}, 50
     end
   end
 
@@ -218,11 +235,12 @@ defmodule Arena.Adversarial.SelectedNpcAccountRewardTest do
           occupancy: %{{51, 50} => {:npc, :merchant_like}}
         )
 
-      assert {:noreply, _state} = Social.handle_request_reward(state, :player)
+      assert {:ok, _state, effects} = Social.handle_request_reward(state, :player)
 
-      assert_receive {:send_raw, raw}
-      msg = decode_console_msg(raw)
+      msg = first_console_message(effects)
+      assert msg, "expected a console message effect"
       assert msg.message =~ "seleccionar"
+      refute_receive {:send_raw, _}, 50
     end
 
     test "nearby enlistador alone should not satisfy the reward flow" do
@@ -232,12 +250,13 @@ defmodule Arena.Adversarial.SelectedNpcAccountRewardTest do
       enlistador = %{npc_id: enlistador_id, x: 51, y: 50, instance_id: :enlistador}
       state = make_map_state(make_entity(%{faction: :royal_army}), %{enlistador: enlistador})
 
-      assert {:noreply, _state} = Social.handle_request_reward(state, :player)
+      assert {:ok, _state, effects} = Social.handle_request_reward(state, :player)
 
-      assert_receive {:send_raw, raw}
-      msg = decode_console_msg(raw)
+      msg = first_console_message(effects)
+      assert msg, "expected a console message effect"
       assert msg.message =~ "seleccionar"
       refute msg.message =~ "recompensas"
+      refute_receive {:send_raw, _}, 50
     end
 
     test "selected enlistador must still be in range to receive reward" do
@@ -259,11 +278,12 @@ defmodule Arena.Adversarial.SelectedNpcAccountRewardTest do
       far_enlistador = %{enlistador | x: 60, y: 50}
       far_state = %{state | npcs_live: %{enlistador: far_enlistador}}
 
-      assert {:noreply, _state} = Social.handle_request_reward(far_state, :player)
+      assert {:ok, _state, effects} = Social.handle_request_reward(far_state, :player)
 
-      assert_receive {:send_raw, raw}
-      msg = decode_console_msg(raw)
+      msg = first_console_message(effects)
+      assert msg, "expected a console message effect"
       assert msg.message =~ "demasiado lejos"
+      refute_receive {:send_raw, _}, 50
     end
   end
 end

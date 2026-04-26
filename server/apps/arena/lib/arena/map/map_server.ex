@@ -577,7 +577,8 @@ defmodule Arena.Map.MapServer do
   # ---- Commerce / Bank / Trade (delegated) ----
 
   @impl true
-  def handle_call({:safe_toggle, char_id}, _from, state), do: Social.handle_safe_toggle(state, char_id)
+  def handle_call({:safe_toggle, char_id}, _from, state),
+    do: Effects.run_handler_call(state, fn s -> Social.handle_safe_toggle(s, char_id) end)
   @impl true
   def handle_call({:open_commerce, char_id, tx, ty}, _from, state),
     do: Commerce.handle_open_commerce(state, char_id, tx, ty)
@@ -690,7 +691,10 @@ defmodule Arena.Map.MapServer do
 
   @impl true
   def handle_call({:deduct_gold, char_id, amount}, _from, state),
-    do: Social.handle_deduct_gold(state, char_id, amount)
+    do:
+      Effects.run_handler_call_reply(state, fn s ->
+        Social.handle_deduct_gold(s, char_id, amount)
+      end)
 
   # ---- Movement (delegated) ----
 
@@ -725,7 +729,8 @@ defmodule Arena.Map.MapServer do
   def handle_cast({:resucitate, char_id}, state),
     do: Effects.run_handler(state, fn s -> Healing.handle_resucitate(s, char_id) end)
   @impl true
-  def handle_cast({:request_atributes, char_id}, state), do: Social.handle_request_atributes(state, char_id)
+  def handle_cast({:request_atributes, char_id}, state),
+    do: Effects.run_handler(state, fn s -> Social.handle_request_atributes(s, char_id) end)
   @impl true
   def handle_cast({:train_skill, char_id, skill_index}, state),
     do: Training.handle_train_skill(state, char_id, skill_index)
@@ -743,9 +748,12 @@ defmodule Arena.Map.MapServer do
     )
 
   @impl true
-  def handle_cast({:request_skills, char_id}, state), do: Social.handle_request_skills(state, char_id)
+  def handle_cast({:request_skills, char_id}, state),
+    do: Effects.run_handler(state, fn s -> Social.handle_request_skills(s, char_id) end)
+
   @impl true
-  def handle_cast({:request_mini_stats, char_id}, state), do: Social.handle_request_mini_stats(state, char_id)
+  def handle_cast({:request_mini_stats, char_id}, state),
+    do: Effects.run_handler(state, fn s -> Social.handle_request_mini_stats(s, char_id) end)
   @impl true
   def handle_cast({:information, char_id}, state),
     do: Effects.run_handler(state, fn s -> NpcInteraction.handle_information(s, char_id) end)
@@ -769,22 +777,28 @@ defmodule Arena.Map.MapServer do
   def handle_cast({:pet_follow_all, char_id}, state), do: Pets.handle_pet_follow_all(state, char_id)
   @impl true
   def handle_cast({:move_spell, char_id, upwards, slot}, state),
-    do: Social.handle_move_spell(state, char_id, upwards, slot)
+    do: Effects.run_handler(state, fn s -> Social.handle_move_spell(s, char_id, upwards, slot) end)
 
   @impl true
-  def handle_cast({:modify_skills, char_id, points}, state), do: Social.handle_modify_skills(state, char_id, points)
+  def handle_cast({:modify_skills, char_id, points}, state),
+    do: Effects.run_handler(state, fn s -> Social.handle_modify_skills(s, char_id, points) end)
+
   @impl true
   def handle_cast({:change_description, char_id, desc}, state),
-    do: Social.handle_change_description(state, char_id, desc)
+    do: Effects.run_handler(state, fn s -> Social.handle_change_description(s, char_id, desc) end)
 
   @impl true
-  def handle_cast({:spell_info, char_id, slot}, state), do: Social.handle_spell_info(state, char_id, slot)
+  def handle_cast({:spell_info, char_id, slot}, state),
+    do: Effects.run_handler(state, fn s -> Social.handle_spell_info(s, char_id, slot) end)
+
   @impl true
   def handle_cast({:move_item, char_id, from_slot, to_slot}, state),
-    do: Social.handle_move_item(state, char_id, from_slot, to_slot)
+    do:
+      Effects.run_handler(state, fn s -> Social.handle_move_item(s, char_id, from_slot, to_slot) end)
 
   @impl true
-  def handle_cast({:modify_gold, char_id, amount}, state), do: Social.handle_modify_gold(state, char_id, amount)
+  def handle_cast({:modify_gold, char_id, amount}, state),
+    do: Effects.run_handler(state, fn s -> Social.handle_modify_gold(s, char_id, amount) end)
 
   @impl true
   def handle_cast({:modify_bank_gold, char_id, amount}, state) do
@@ -822,10 +836,14 @@ defmodule Arena.Map.MapServer do
 
   @impl true
   def handle_cast({:propose_marriage, char_id, target_char_id}, state),
-    do: Social.handle_propose_marriage(state, char_id, target_char_id)
+    do:
+      Effects.run_handler(state, fn s ->
+        Social.handle_propose_marriage(s, char_id, target_char_id)
+      end)
 
   @impl true
-  def handle_cast({:divorce, char_id}, state), do: Social.handle_divorce(state, char_id)
+  def handle_cast({:divorce, char_id}, state),
+    do: Effects.run_handler(state, fn s -> Social.handle_divorce(s, char_id) end)
 
   def handle_cast({:train_list, char_id}, state), do: Training.handle_train_list(state, char_id)
 
@@ -842,8 +860,11 @@ defmodule Arena.Map.MapServer do
     do: Effects.run_handler(state, fn s -> NpcInteraction.handle_forgive(s, char_id, gold_amount) end)
   def handle_cast({:arena_entry, char_id}, state),
     do: Effects.run_handler(state, fn s -> NpcInteraction.handle_arena_entry(s, char_id) end)
-  def handle_cast({:request_account_state, char_id}, state), do: Social.handle_request_account_state(state, char_id)
-  def handle_cast({:request_reward, char_id}, state), do: Social.handle_request_reward(state, char_id)
+  def handle_cast({:request_account_state, char_id}, state),
+    do: Effects.run_handler(state, fn s -> Social.handle_request_account_state(s, char_id) end)
+
+  def handle_cast({:request_reward, char_id}, state),
+    do: Effects.run_handler(state, fn s -> Social.handle_request_reward(s, char_id) end)
   def handle_cast({:quest, char_id}, state), do: QuestHandlers.handle_quest(state, char_id)
   def handle_cast({:quest_list_request, char_id}, state), do: QuestHandlers.handle_quest_list_request(state, char_id)
   def handle_cast({:quest_details_request, char_id, slot}, state), do: QuestHandlers.handle_quest_details_request(state, char_id, slot)

@@ -13,8 +13,14 @@ defmodule Arena.Map.Effect do
     * `{:broadcast_visible, x, y, packet}` — send the packet to every player
       whose AoI covers `(x, y)`, excluding origin if the call site does so.
     * `{:broadcast_visible_all, x, y, packet}` — same, including origin.
+    * `{:broadcast_map, packet}` — broadcasts the packet to every session on
+      the map, ignoring AoI. Used for global announcements (marriage,
+      world-state). Envelope is built via the same classifier used for
+      `:send` / `:broadcast_visible*`.
     * `{:broadcast_character_change, entity}` — broadcasts a character_change
       packet for `entity` via the existing helper.
+    * `{:hide_from_non_gm, entity}` — fans `character_remove` to every nearby
+      non-GM session (used when an entity becomes invisible / oculto).
     * `{:transfer, char_id, dest_map, dest_x, dest_y, entity}` — instructs the
       player's session to transfer to `(dest_map, dest_x, dest_y)`. The runner
       resolves `char_id` against `state.sessions` and sends the bare
@@ -41,7 +47,9 @@ defmodule Arena.Map.Effect do
           {:send, char_id(), packet()}
           | {:broadcast_visible, coord(), coord(), packet()}
           | {:broadcast_visible_all, coord(), coord(), packet()}
+          | {:broadcast_map, packet()}
           | {:broadcast_character_change, entity :: map()}
+          | {:hide_from_non_gm, entity :: map()}
           | {:transfer, char_id(), dest_map :: pos_integer(), coord(), coord(),
              entity :: map()}
 end

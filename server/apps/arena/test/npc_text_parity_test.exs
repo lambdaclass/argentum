@@ -213,9 +213,13 @@ defmodule Arena.NpcTextParityTest do
       })
       state = make_map_state(entity, %{timbero: timbero})
 
-      assert {:noreply, _state} = Social.handle_request_account_state(state, :player)
+      assert {:ok, _state, effects} = Social.handle_request_account_state(state, :player)
 
-      messages = collect_console_messages()
+      messages =
+        for {:send, _char_id, %{payload: <<37::little-signed-16, _::binary>> = raw}} <- effects do
+          decode_console_msg(raw)
+        end
+
       all_text = Enum.join(messages, " ")
 
       # VB6: must report individual counters, not a computed "earnings" number
@@ -224,6 +228,7 @@ defmodule Arena.NpcTextParityTest do
       assert all_text =~ "10", "should contain plays count (10)"
       # Must NOT show the old wrong "Ganancias" computation (7 - 3 = 4)
       refute all_text =~ "Ganancias"
+      refute_receive {:send_raw, _}, 50
     end
   end
 
