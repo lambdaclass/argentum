@@ -824,11 +824,11 @@ defmodule Arena.Map.MapServer do
   def handle_cast({:bank_gold_transfer, char_id, target_name, amount}, state),
     do: Banking.handle_bank_gold_transfer(state, char_id, target_name, amount)
 
-  def handle_cast({:gamble, char_id, amount}, state) do
-    NpcInteraction.handle_gamble(state, char_id, amount, nil)
-  end
+  def handle_cast({:gamble, char_id, amount}, state),
+    do: Effects.run_handler(state, fn s -> NpcInteraction.handle_gamble(s, char_id, amount, nil) end)
 
-  def handle_cast({:forgive, char_id, gold_amount}, state), do: NpcInteraction.handle_forgive(state, char_id, gold_amount)
+  def handle_cast({:forgive, char_id, gold_amount}, state),
+    do: Effects.run_handler(state, fn s -> NpcInteraction.handle_forgive(s, char_id, gold_amount) end)
   def handle_cast({:arena_entry, char_id}, state), do: NpcInteraction.handle_arena_entry(state, char_id)
   def handle_cast({:request_account_state, char_id}, state), do: Social.handle_request_account_state(state, char_id)
   def handle_cast({:request_reward, char_id}, state), do: Social.handle_request_reward(state, char_id)

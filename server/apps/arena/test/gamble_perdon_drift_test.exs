@@ -10,6 +10,12 @@ defmodule Arena.GamblePerdonDriftTest do
     Current: Clears criminal for free near any priest, no gold required.
     VB6:     Requires gold donation, range <= 3, faction checks,
              donation threshold based on ciudadanosMatados, gold deduction.
+
+  Slice 2 of the NpcInteraction effects migration: `handle_gamble/4` and
+  `handle_forgive/3` now return `{:ok, state, effects}` instead of
+  `{:noreply, state}`. Assertions on side-effecting messages go through
+  the `effect_payload_contains?/2` helper that searches the returned
+  effects list (mirrors the slice-1 helper in `information_quest_drift_test.exs`).
   """
   use ExUnit.Case, async: false
 
@@ -29,7 +35,7 @@ defmodule Arena.GamblePerdonDriftTest do
 
   # ── Helpers ──────────────────────────────────────────────────────────────
 
-  defp make_entity(overrides \\ %{}) do
+  defp make_entity(overrides) do
     Map.merge(
       %{
         char_id: :player,
@@ -144,7 +150,7 @@ defmodule Arena.GamblePerdonDriftTest do
     )
   end
 
-  defp make_map_state_from(players, opts \\ []) do
+  defp make_map_state_from(players, opts) do
     map_state(
       players: players,
       sessions: Keyword.get(opts, :sessions, %{}),
@@ -211,10 +217,11 @@ defmodule Arena.GamblePerdonDriftTest do
           npcs_live: %{timbero_inst: @timbero_npc}
         )
 
-      {:noreply, new_state} = NpcInteraction.handle_gamble(state, :player, 100, nil)
+      {:ok, new_state, effects} = NpcInteraction.handle_gamble(state, :player, 100, nil)
 
       assert new_state.players[:player].gold == 5_000
       assert new_state.players[:player].gamble_plays == 0
+      assert effect_payload_contains?(effects, "No hay un timbero cerca.")
     end
 
     test "over 1000 gambles, win rate is approximately 10% (not 50%)" do
@@ -236,7 +243,7 @@ defmodule Arena.GamblePerdonDriftTest do
       {wins, _} =
         Enum.reduce(1..1000, {0, state}, fn _i, {win_count, s} ->
           flush_mailbox()
-          {:noreply, new_state} = NpcInteraction.handle_gamble(s, :player, 100, nil)
+          {:ok, new_state, _effects} = NpcInteraction.handle_gamble(s, :player, 100, nil)
           new_gold = new_state.players[:player].gold
           old_gold = s.players[:player].gold
 
@@ -283,9 +290,10 @@ defmodule Arena.GamblePerdonDriftTest do
       # The 3-arity call should work; old 2-arity should no longer exist
       # or should reject with a message since no gold is provided.
       # VB6 CostoPerdonPorCiudadano = 5000, no citizens killed → donation = 5000/2 = 2500
-      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player, 2500)
+      {:ok, new_state, effects} = NpcInteraction.handle_forgive(state, :player, 2500)
       assert new_state.players[:player].criminal == false,
              "Criminal should be cleared when sufficient gold is donated"
+      assert effect_payload_contains?(effects, "Has sido perdonado.")
     end
 
     test "forgive deducts gold from player" do
@@ -303,7 +311,7 @@ defmodule Arena.GamblePerdonDriftTest do
         npcs_live: %{priest_inst: @priest_npc}
       )
 
-      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player, 3000)
+      {:ok, new_state, _effects} = NpcInteraction.handle_forgive(state, :player, 3000)
       # VB6: gold is deducted by the donated amount
       assert new_state.players[:player].gold == 50_000 - 3000
     end
@@ -326,11 +334,12 @@ defmodule Arena.GamblePerdonDriftTest do
       )
 
       # Donate less than threshold
-      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player, 1000)
+      {:ok, new_state, effects} = NpcInteraction.handle_forgive(state, :player, 1000)
       assert new_state.players[:player].criminal == true,
              "Criminal should NOT be cleared when donation is below threshold"
       # Gold should not be deducted either
       assert new_state.players[:player].gold == 50_000
+      assert effect_payload_contains?(effects, "avara")
     end
 
     test "forgive rejected when donated gold is below threshold (citizens_killed == 0)" do
@@ -349,7 +358,7 @@ defmodule Arena.GamblePerdonDriftTest do
         npcs_live: %{priest_inst: @priest_npc}
       )
 
-      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player, 100)
+      {:ok, new_state, _effects} = NpcInteraction.handle_forgive(state, :player, 100)
       assert new_state.players[:player].criminal == true,
              "Criminal should NOT be cleared when donation is below 2500 threshold"
       assert new_state.players[:player].gold == 50_000
@@ -370,9 +379,10 @@ defmodule Arena.GamblePerdonDriftTest do
         npcs_live: %{priest_inst: @priest_npc}
       )
 
-      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player, 2500)
+      {:ok, new_state, effects} = NpcInteraction.handle_forgive(state, :player, 2500)
       assert new_state.players[:player].criminal == true
       assert new_state.players[:player].gold == 100
+      assert effect_payload_contains?(effects, "No tienes suficiente dinero.")
     end
 
     test "forgive blocked for :royal_army faction" do
@@ -390,9 +400,10 @@ defmodule Arena.GamblePerdonDriftTest do
         npcs_live: %{priest_inst: @priest_npc}
       )
 
-      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player, 5000)
+      {:ok, new_state, effects} = NpcInteraction.handle_forgive(state, :player, 5000)
       assert new_state.players[:player].criminal == true,
              "Royal army members cannot be forgiven via /PERDON"
+      assert effect_payload_contains?(effects, "No puedo aceptar tu donacion en este momento.")
     end
 
     test "forgive blocked for :chaos_legion faction" do
@@ -410,9 +421,10 @@ defmodule Arena.GamblePerdonDriftTest do
         npcs_live: %{priest_inst: @priest_npc}
       )
 
-      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player, 5000)
+      {:ok, new_state, effects} = NpcInteraction.handle_forgive(state, :player, 5000)
       assert new_state.players[:player].criminal == true,
              "Chaos legion members cannot be forgiven via /PERDON"
+      assert effect_payload_contains?(effects, "No puedo aceptar tu donacion en este momento.")
     end
 
     test "forgive blocked when priest is too far (range > 3)" do
@@ -430,9 +442,10 @@ defmodule Arena.GamblePerdonDriftTest do
         npcs_live: %{priest_far_inst: @priest_npc_far}
       )
 
-      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player, 5000)
+      {:ok, new_state, effects} = NpcInteraction.handle_forgive(state, :player, 5000)
       assert new_state.players[:player].criminal == true,
              "Priest at distance 4 should be too far for /PERDON (VB6 range <= 3)"
+      assert effect_payload_contains?(effects, "Necesitas estar cerca de un sacerdote.")
     end
 
     test "forgive works when priest is within range 3" do
@@ -451,7 +464,7 @@ defmodule Arena.GamblePerdonDriftTest do
         npcs_live: %{priest_inst: @priest_npc}
       )
 
-      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player, 2500)
+      {:ok, new_state, _effects} = NpcInteraction.handle_forgive(state, :player, 2500)
       assert new_state.players[:player].criminal == false
     end
 
@@ -488,9 +501,23 @@ defmodule Arena.GamblePerdonDriftTest do
         npcs_live: %{newbie_priest_inst: newbie_priest_npc}
       )
 
-      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player, 2500)
+      {:ok, new_state, effects} = NpcInteraction.handle_forgive(state, :player, 2500)
       assert new_state.players[:player].criminal == true,
              "VB6: non-newbie (level 25) should NOT be forgiven by ResucitadorNewbie"
+      assert effect_payload_contains?(effects, "Solo los newbies pueden ser atendidos aqui.")
     end
+  end
+
+  # Helper that searches an effect list for a `{:send, _, %{payload: bin}}` entry
+  # whose payload binary contains `needle`. The effects-tuple shape is the
+  # `Arena.Map.Effects.send/2` constructor output post-migration.
+  defp effect_payload_contains?(effects, needle) do
+    Enum.any?(effects, fn
+      {:send, _char_id, %{payload: payload}} when is_binary(payload) ->
+        :binary.match(payload, needle) != :nomatch
+
+      _ ->
+        false
+    end)
   end
 end

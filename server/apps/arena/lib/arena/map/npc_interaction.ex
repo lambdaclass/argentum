@@ -243,26 +243,21 @@ defmodule Arena.Map.NpcInteraction do
       {:ok, entity} ->
         cond do
           entity.dead ->
-            msg(state, char_id, "Estas muerto!")
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("Estas muerto!"))]}
 
           amount <= 0 ->
-            msg(state, char_id, "La apuesta debe ser mayor a 0.")
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("La apuesta debe ser mayor a 0."))]}
 
           amount > 5000 ->
-            msg(state, char_id, "La apuesta maxima es 5000.")
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("La apuesta maxima es 5000."))]}
 
           entity.gold < amount ->
-            msg(state, char_id, "No tienes suficiente oro.")
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("No tienes suficiente oro."))]}
 
           true ->
             case Helpers.resolve_selected_npc(state, entity, [@npc_type_timbero], 10) do
               :not_found ->
-                msg(state, char_id, "No hay un timbero cerca.")
-                {:noreply, state}
+                {:ok, state, [Effects.send(char_id, console("No hay un timbero cerca."))]}
 
               {:ok, _npc, npc_def} ->
                 # VB6 parity: RandomNumber(1, 100) <= 10 → 10% win rate
@@ -282,26 +277,26 @@ defmodule Arena.Map.NpcInteraction do
                   end
 
                 players = Map.put(state.players, char_id, entity)
-                state = %{state | players: players}
+                new_state = %{state | players: players}
 
-                Helpers.send_to_session(
-                  state.sessions,
-                  char_id,
-                  {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
-                )
+                outcome_msg =
+                  if won do
+                    "#{npc_def.name} te dice: Has ganado #{amount} monedas de oro!"
+                  else
+                    "#{npc_def.name} te dice: Has perdido #{amount} monedas de oro."
+                  end
 
-                if won do
-                  msg(state, char_id, "#{npc_def.name} te dice: Has ganado #{amount} monedas de oro!")
-                else
-                  msg(state, char_id, "#{npc_def.name} te dice: Has perdido #{amount} monedas de oro.")
-                end
+                effects = [
+                  Effects.send(char_id, Encoder.encode({:update_gold, %{gold: entity.gold}})),
+                  Effects.send(char_id, console(outcome_msg))
+                ]
 
-                {:noreply, state}
+                {:ok, new_state, effects}
             end
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
@@ -317,28 +312,26 @@ defmodule Arena.Map.NpcInteraction do
       {:ok, entity} ->
         cond do
           entity.dead ->
-            msg(state, char_id, "Estas muerto!")
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("Estas muerto!"))]}
 
           not entity.criminal ->
-            msg(state, char_id, "No eres un criminal.")
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("No eres un criminal."))]}
 
           # VB6: faction members (armada/caos) cannot use /PERDON
           entity.faction == :royal_army or entity.faction == :chaos_legion ->
-            msg(state, char_id, "No puedo aceptar tu donacion en este momento.")
-            {:noreply, state}
+            {:ok, state,
+             [Effects.send(char_id, console("No puedo aceptar tu donacion en este momento."))]}
 
           true ->
             case find_selected_priest(state, entity) do
               :not_found ->
-                msg(state, char_id, "Necesitas estar cerca de un sacerdote.")
-                {:noreply, state}
+                {:ok, state,
+                 [Effects.send(char_id, console("Necesitas estar cerca de un sacerdote."))]}
 
               {:ok, _npc, %{npc_type: @npc_type_resucitador_newbie}} when entity.level > 12 ->
                 # VB6: ResucitadorNewbie only serves newbies (EsNewbie check)
-                msg(state, char_id, "Solo los newbies pueden ser atendidos aqui.")
-                {:noreply, state}
+                {:ok, state,
+                 [Effects.send(char_id, console("Solo los newbies pueden ser atendidos aqui."))]}
 
               {:ok, _npc, _npc_def} ->
                 # VB6: donation threshold based on ciudadanosMatados
@@ -351,32 +344,37 @@ defmodule Arena.Map.NpcInteraction do
 
                 cond do
                   entity.gold < gold_amount ->
-                    msg(state, char_id, "No tienes suficiente dinero.")
-                    {:noreply, state}
+                    {:ok, state, [Effects.send(char_id, console("No tienes suficiente dinero."))]}
 
                   gold_amount < required_donation ->
-                    msg(state, char_id, "Dios no puede perdonarte si eres una persona avara.")
-                    {:noreply, state}
+                    {:ok, state,
+                     [
+                       Effects.send(
+                         char_id,
+                         console("Dios no puede perdonarte si eres una persona avara.")
+                       )
+                     ]}
 
                   true ->
                     entity = %{entity | criminal: false, gold: entity.gold - gold_amount}
                     players = Map.put(state.players, char_id, entity)
-                    state = %{state | players: players}
+                    new_state = %{state | players: players}
 
-                    Helpers.send_to_session(
-                      state.sessions,
-                      char_id,
-                      {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
-                    )
+                    effects = [
+                      Effects.send(
+                        char_id,
+                        Encoder.encode({:update_gold, %{gold: entity.gold}})
+                      ),
+                      Effects.send(char_id, console("Has sido perdonado."))
+                    ]
 
-                    msg(state, char_id, "Has sido perdonado.")
-                    {:noreply, state}
+                    {:ok, new_state, effects}
                 end
             end
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
