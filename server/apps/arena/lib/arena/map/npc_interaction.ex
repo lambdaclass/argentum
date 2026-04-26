@@ -18,7 +18,6 @@ defmodule Arena.Map.NpcInteraction do
   @npc_type_quest 17
   @npc_type_entrega_pesca 20
 
-  defp msg(state, char_id, message), do: Helpers.msg(state, char_id, message)
   @doc """
   Handle the eInformation packet (VB6: HandleInformation).
 
@@ -103,13 +102,9 @@ defmodule Arena.Map.NpcInteraction do
                 end
             end
           else
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: "Estas demasiado lejos.", font_index: 0}})}
-            )
-
-            {:noreply, state}
+            Effects.run_handler(state, fn s ->
+              {:ok, s, [Effects.send(char_id, console("Estas demasiado lejos."))]}
+            end)
           end
         end
 
@@ -140,32 +135,20 @@ defmodule Arena.Map.NpcInteraction do
               end
 
             npc_def.npc_type in [@npc_type_revividor, @npc_type_resucitador_newbie] ->
-              if entity.dead do
-                Helpers.send_to_session(
-                  state.sessions,
-                  char_id,
-                  {:send_raw,
-                   Encoder.encode(
-                     {:console_msg,
-                      %{message: "#{npc_def.name} dice: Puedo resucitarte. Usa el comando /resucitar.", font_index: 0}}
-                   )}
-                )
-              else
-                Helpers.send_to_session(
-                  state.sessions,
-                  char_id,
-                  {:send_raw,
-                   Encoder.encode(
-                     {:console_msg,
-                      %{message: "#{npc_def.name} dice: Puedo curarte. Usa el comando /curar.", font_index: 0}}
-                   )}
-                )
-              end
+              priest_msg =
+                if entity.dead do
+                  "#{npc_def.name} dice: Puedo resucitarte. Usa el comando /resucitar."
+                else
+                  "#{npc_def.name} dice: Puedo curarte. Usa el comando /curar."
+                end
 
-              # VB6: clicking a priest also shows the player's prontuario
-              show_prontuario(state, char_id, entity)
+              Effects.run_handler(state, fn s ->
+                effects =
+                  [Effects.send(char_id, console(priest_msg))] ++
+                    prontuario_effects(char_id, entity)
 
-              {:noreply, state}
+                {:ok, s, effects}
+              end)
 
             npc_def.npc_type == @npc_type_enlistador ->
               Faction.handle_enlistador_click(state, char_id, entity, npc_def)
@@ -177,17 +160,15 @@ defmodule Arena.Map.NpcInteraction do
               end
 
             npc_def.npc_type == @npc_type_entrenador ->
-              Helpers.send_to_session(
-                state.sessions,
-                char_id,
-                {:send_raw,
-                 Encoder.encode(
-                   {:console_msg,
-                    %{message: "#{npc_def.name} dice: Puedo entrenarte. Usa el boton Entrenar.", font_index: 0}}
-                 )}
-              )
-
-              {:noreply, state}
+              Effects.run_handler(state, fn s ->
+                {:ok, s,
+                 [
+                   Effects.send(
+                     char_id,
+                     console("#{npc_def.name} dice: Puedo entrenarte. Usa el boton Entrenar.")
+                   )
+                 ]}
+              end)
 
             npc_def.npc_type == @npc_type_entrega_pesca ->
               Effects.run_handler(state, fn s ->
@@ -195,19 +176,31 @@ defmodule Arena.Map.NpcInteraction do
               end)
 
             npc_def.npc_type == @npc_type_timbero ->
-              msg(state, char_id, "#{npc_def.name} dice: Haz tu apuesta con /APOSTAR cantidad (1-5000 monedas).")
-              {:noreply, state}
+              Effects.run_handler(state, fn s ->
+                {:ok, s,
+                 [
+                   Effects.send(
+                     char_id,
+                     console(
+                       "#{npc_def.name} dice: Haz tu apuesta con /APOSTAR cantidad (1-5000 monedas)."
+                     )
+                   )
+                 ]}
+              end)
 
             npc_def.npc_type == @npc_type_arena_guard ->
               fee = Map.get(npc_def, :arena_price, 0)
 
-              if fee > 0 do
-                msg(state, char_id, "#{npc_def.name} dice: La entrada a la arena cuesta #{fee} monedas de oro.")
-              else
-                msg(state, char_id, "#{npc_def.name} dice: Bienvenido a la arena.")
-              end
+              guard_msg =
+                if fee > 0 do
+                  "#{npc_def.name} dice: La entrada a la arena cuesta #{fee} monedas de oro."
+                else
+                  "#{npc_def.name} dice: Bienvenido a la arena."
+                end
 
-              {:noreply, state}
+              Effects.run_handler(state, fn s ->
+                {:ok, s, [Effects.send(char_id, console(guard_msg))]}
+              end)
 
             npc_def.npc_type == @npc_type_subastador ->
               Effects.run_handler(state, fn s ->
@@ -220,13 +213,9 @@ defmodule Arena.Map.NpcInteraction do
               end)
 
             true ->
-              Helpers.send_to_session(
-                state.sessions,
-                char_id,
-                {:send_raw, Encoder.encode({:console_msg, %{message: "Ves a #{npc_def.name}.", font_index: 0}})}
-              )
-
-              {:noreply, state}
+              Effects.run_handler(state, fn s ->
+                {:ok, s, [Effects.send(char_id, console("Ves a #{npc_def.name}."))]}
+              end)
           end
         end
     end
@@ -720,16 +709,13 @@ defmodule Arena.Map.NpcInteraction do
     end
   end
 
-  # VB6: clicking a priest NPC shows the player's prontuario (punishment record)
-  defp show_prontuario(state, char_id, entity) do
+  # VB6: clicking a priest NPC shows the player's prontuario (punishment record).
+  # Returns a single-element effects list so the priest branch can splice it
+  # into its own effects.
+  defp prontuario_effects(char_id, entity) do
     punishments = Map.get(entity, :punishments, [])
     text = Arena.Map.Gm.Moderation.format_punishments(punishments)
-
-    Helpers.send_to_session(
-      state.sessions,
-      char_id,
-      {:send_raw, Encoder.encode({:console_msg, %{message: text, font_index: 0}})}
-    )
+    [Effects.send(char_id, console(text))]
   end
 
   defp console(message) do
