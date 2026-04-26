@@ -190,7 +190,9 @@ defmodule Arena.Map.NpcInteraction do
               {:noreply, state}
 
             npc_def.npc_type == @npc_type_entrega_pesca ->
-              handle_fish_delivery(state, char_id, entity, npc_def)
+              Effects.run_handler(state, fn s ->
+                handle_fish_delivery(s, char_id, entity, npc_def)
+              end)
 
             npc_def.npc_type == @npc_type_timbero ->
               msg(state, char_id, "#{npc_def.name} dice: Haz tu apuesta con /APOSTAR cantidad (1-5000 monedas).")
@@ -208,10 +210,14 @@ defmodule Arena.Map.NpcInteraction do
               {:noreply, state}
 
             npc_def.npc_type == @npc_type_subastador ->
-              handle_subastador_click(state, char_id, entity, npc_def)
+              Effects.run_handler(state, fn s ->
+                handle_subastador_click(s, char_id, entity, npc_def)
+              end)
 
             npc_def.npc_type == @npc_type_quest ->
-              handle_quest_npc_click(state, char_id, entity, instance_id, npc_def)
+              Effects.run_handler(state, fn s ->
+                handle_quest_npc_click(s, char_id, entity, instance_id, npc_def)
+              end)
 
             true ->
               Helpers.send_to_session(
@@ -437,169 +443,280 @@ defmodule Arena.Map.NpcInteraction do
     end
   end
 
-  defp handle_fish_delivery(state, char_id, entity, npc_def) do
-    if entity.class != :trabajador do
-      msg(state, char_id, "#{npc_def.name} dice: Solo los trabajadores pueden entregar peces.")
-      {:noreply, state}
-    else
-      {total_points, total_gold, slots_to_clear} =
-        entity.inventory
-        |> Enum.with_index()
-        |> Enum.reduce({0, 0, []}, fn {item, idx}, {pts, gold, slots} ->
-          case item do
-            %{item_id: item_id, amount: amount} when amount > 0 ->
-              item_def = GameData.get_item(item_id)
+  def handle_fish_delivery(state, char_id, entity, npc_def) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, _entity} ->
+        if entity.class != :trabajador do
+          {:ok, state,
+           [
+             Effects.send(
+               char_id,
+               console("#{npc_def.name} dice: Solo los trabajadores pueden entregar peces.")
+             )
+           ]}
+        else
+          {total_points, total_gold, slots_to_clear} =
+            entity.inventory
+            |> Enum.with_index()
+            |> Enum.reduce({0, 0, []}, fn {item, idx}, {pts, gold, slots} ->
+              case item do
+                %{item_id: item_id, amount: amount} when amount > 0 ->
+                  item_def = GameData.get_item(item_id)
 
-              if item_def != nil and item_def.puntos_pesca > 0 do
-                {pts + item_def.puntos_pesca * amount, gold + item_def.valor * amount, [idx | slots]}
-              else
-                {pts, gold, slots}
+                  if item_def != nil and item_def.puntos_pesca > 0 do
+                    {pts + item_def.puntos_pesca * amount, gold + item_def.valor * amount,
+                     [idx | slots]}
+                  else
+                    {pts, gold, slots}
+                  end
+
+                _ ->
+                  {pts, gold, slots}
               end
+            end)
 
-            _ ->
-              {pts, gold, slots}
+          if total_points == 0 do
+            {:ok, state,
+             [
+               Effects.send(
+                 char_id,
+                 console("#{npc_def.name} dice: No tienes peces especiales para entregar.")
+               )
+             ]}
+          else
+            new_inv =
+              Enum.reduce(slots_to_clear, entity.inventory, fn idx, inv ->
+                List.replace_at(inv, idx, nil)
+              end)
+
+            entity = %{
+              entity
+              | inventory: new_inv,
+                fishing_points: entity.fishing_points + total_points,
+                gold: entity.gold + total_gold
+            }
+
+            players = Map.put(state.players, char_id, entity)
+            new_state = %{state | players: players}
+
+            # Per-slot inventory packets first (one per cleared slot).
+            # `slots_to_clear` was built via `[idx | slots]` so the head is
+            # the highest slot index — we preserve that traversal order to
+            # match the prior `Enum.each` behaviour.
+            slot_effects =
+              Enum.map(slots_to_clear, fn slot ->
+                # Inline encode: cleared slots are nil, so the packet is
+                # always the empty-slot variant. Keeping this inline avoids
+                # a new effect kind for a one-line encode.
+                Effects.send(
+                  char_id,
+                  Encoder.encode(
+                    {:change_inventory_slot,
+                     %{slot: slot + 1, obj_index: 0, amount: 0}}
+                  )
+                )
+              end)
+
+            effects =
+              slot_effects ++
+                [
+                  Effects.send(
+                    char_id,
+                    Encoder.encode({:update_gold, %{gold: entity.gold}})
+                  ),
+                  Effects.send(
+                    char_id,
+                    console(
+                      "Has entregado peces. Puntos: +#{total_points}, Oro: +#{total_gold}."
+                    )
+                  )
+                ]
+
+            {:ok, new_state, effects}
           end
-        end)
+        end
 
-      if total_points == 0 do
-        msg(state, char_id, "#{npc_def.name} dice: No tienes peces especiales para entregar.")
-        {:noreply, state}
-      else
-        new_inv =
-          Enum.reduce(slots_to_clear, entity.inventory, fn idx, inv ->
-            List.replace_at(inv, idx, nil)
+      :error ->
+        {:ok, state, []}
+    end
+  end
+
+  def handle_subastador_click(state, char_id, entity, npc_def) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, _entity} ->
+        tile_key = {entity.x, entity.y}
+        item_on_ground = Map.get(state.ground_items || %{}, tile_key)
+
+        case Arena.Auction.initiate(char_id, item_on_ground) do
+          :ok ->
+            new_ground = Map.delete(state.ground_items || %{}, tile_key)
+            new_state = %{state | ground_items: new_ground}
+
+            # Effect ordering: state mutation already applied (item removed
+            # from ground_items); broadcast_visible_all then fans the
+            # delete_object packet to every visible session. The runner
+            # uses post-handler state for visibility lookups, so the
+            # broadcast sees the post-removal world.
+            #
+            # Decision: reuse `Effects.broadcast_visible_all/3` with an
+            # inline-encoded `object_delete` packet rather than adding a
+            # `:broadcast_object_delete` effect kind. The encode is a
+            # one-liner and the existing effect kind already does exactly
+            # what `Helpers.broadcast_object_delete/3` was doing
+            # internally.
+            delete_packet =
+              Encoder.encode({:object_delete, %{x: entity.x, y: entity.y}})
+
+            effects = [
+              Effects.broadcast_visible_all(entity.x, entity.y, delete_packet),
+              Effects.send(
+                char_id,
+                console(
+                  "#{npc_def.name} dice: Escribe /OFERTAINICIAL (cantidad) para comenzar la subasta. Tienes 15 segundos!"
+                )
+              )
+            ]
+
+            {:ok, new_state, effects}
+
+          {:error, :auction_in_progress} ->
+            {:ok, state,
+             [
+               Effects.send(
+                 char_id,
+                 console(
+                   "#{npc_def.name} dice: Oye amigo, espera tu turno, estoy subastando en este momento."
+                 )
+               )
+             ]}
+
+          {:error, :already_initiating} ->
+            {:ok, state,
+             [
+               Effects.send(
+                 char_id,
+                 console(
+                   "#{npc_def.name} dice: Ya estas preparando una subasta. Escribe /OFERTAINICIAL (cantidad)."
+                 )
+               )
+             ]}
+
+          {:error, :no_item} ->
+            {:ok, state,
+             [
+               Effects.send(
+                 char_id,
+                 console(
+                   "#{npc_def.name} dice: Pues acaso el aire esta en venta ahora? Bribon!"
+                 )
+               )
+             ]}
+        end
+
+      :error ->
+        {:ok, state, []}
+    end
+  end
+
+  def handle_quest_npc_click(state, char_id, entity, _instance_id, npc_def) do
+    case Map.fetch(state.players, char_id) do
+      {:ok, _entity} ->
+        quest_ids_set = MapSet.new(npc_def.quest_numbers)
+
+        completable =
+          entity.active_quests
+          |> Enum.with_index()
+          |> Enum.filter(fn {aq, idx} ->
+            MapSet.member?(quest_ids_set, aq.quest_id) and
+              Arena.QuestServer.quest_complete?(entity, idx)
           end)
 
-        entity = %{
-          entity
-          | inventory: new_inv,
-            fishing_points: entity.fishing_points + total_points,
-            gold: entity.gold + total_gold
-        }
+        if completable != [] do
+          {aq, slot} = hd(completable)
+          quest_def = Arena.Data.GameData.get_quest(aq.quest_id)
+          updated_entity = Arena.QuestServer.complete_quest(entity, slot)
 
-        players = Map.put(state.players, char_id, entity)
-        state = %{state | players: players}
+          if updated_entity != entity and quest_def != nil do
+            new_state = put_in(state.players[char_id], updated_entity)
 
-        Enum.each(slots_to_clear, fn slot ->
-          Helpers.send_inventory_slot(state.sessions, char_id, entity.inventory, slot)
-        end)
+            desc_final_effects =
+              if quest_def.desc_final != "" do
+                [
+                  Effects.send(
+                    char_id,
+                    console(npc_def.name <> " dice: " <> quest_def.desc_final)
+                  )
+                ]
+              else
+                []
+              end
 
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
-        )
+            gold_effects =
+              if quest_def.reward_gld > 0 do
+                [
+                  Effects.send(
+                    char_id,
+                    console("Recibiste #{quest_def.reward_gld} monedas de oro.")
+                  ),
+                  Effects.send(
+                    char_id,
+                    Encoder.encode({:update_gold, %{gold: updated_entity.gold}})
+                  )
+                ]
+              else
+                []
+              end
 
-        msg(state, char_id, "Has entregado peces. Puntos: +#{total_points}, Oro: +#{total_gold}.")
-        {:noreply, state}
-      end
-    end
-  end
+            exp_effects =
+              if quest_def.reward_exp > 0 do
+                [
+                  Effects.send(
+                    char_id,
+                    console(
+                      "Recibiste #{quest_def.reward_exp} puntos de experiencia."
+                    )
+                  )
+                ]
+              else
+                []
+              end
 
-  defp handle_subastador_click(state, char_id, entity, npc_def) do
-    tile_key = {entity.x, entity.y}
-    item_on_ground = Map.get(state.ground_items || %{}, tile_key)
+            effects = desc_final_effects ++ gold_effects ++ exp_effects
+            {:ok, new_state, effects}
+          else
+            {:ok, state,
+             [Effects.send(char_id, console("No se pudo completar la mision."))]}
+          end
+        else
+          available = Arena.QuestServer.available_quests_for_npc(entity, npc_def)
 
-    case Arena.Auction.initiate(char_id, item_on_ground) do
-      :ok ->
-        new_ground = Map.delete(state.ground_items || %{}, tile_key)
-        state = %{state | ground_items: new_ground}
+          if available == [] do
+            {:ok, state,
+             [
+               Effects.send(
+                 char_id,
+                 console(npc_def.name <> " dice: No tengo misiones disponibles para ti.")
+               )
+             ]}
+          else
+            npc_quest_params = Arena.QuestServer.build_npc_quest_list(available)
 
-        Helpers.broadcast_object_delete(state, entity.x, entity.y)
+            entity = %{entity | quest_npc_id: npc_def.id}
+            new_state = put_in(state.players[char_id], entity)
 
-        msg(
-          state,
-          char_id,
-          "#{npc_def.name} dice: Escribe /OFERTAINICIAL (cantidad) para comenzar la subasta. Tienes 15 segundos!"
-        )
+            effects = [
+              Effects.send(
+                char_id,
+                Encoder.encode({:npc_quest_list_send, %{quests: npc_quest_params}})
+              )
+            ]
 
-        {:noreply, state}
-
-      {:error, :auction_in_progress} ->
-        msg(
-          state,
-          char_id,
-          "#{npc_def.name} dice: Oye amigo, espera tu turno, estoy subastando en este momento."
-        )
-
-        {:noreply, state}
-
-      {:error, :already_initiating} ->
-        msg(
-          state,
-          char_id,
-          "#{npc_def.name} dice: Ya estas preparando una subasta. Escribe /OFERTAINICIAL (cantidad)."
-        )
-
-        {:noreply, state}
-
-      {:error, :no_item} ->
-        msg(
-          state,
-          char_id,
-          "#{npc_def.name} dice: Pues acaso el aire esta en venta ahora? Bribon!"
-        )
-
-        {:noreply, state}
-    end
-  end
-
-  defp handle_quest_npc_click(state, char_id, entity, _instance_id, npc_def) do
-    quest_ids_set = MapSet.new(npc_def.quest_numbers)
-
-    completable =
-      entity.active_quests
-      |> Enum.with_index()
-      |> Enum.filter(fn {aq, idx} ->
-        MapSet.member?(quest_ids_set, aq.quest_id) and
-          Arena.QuestServer.quest_complete?(entity, idx)
-      end)
-
-    if completable != [] do
-      {aq, slot} = hd(completable)
-      quest_def = Arena.Data.GameData.get_quest(aq.quest_id)
-      updated_entity = Arena.QuestServer.complete_quest(entity, slot)
-
-      if updated_entity != entity and quest_def != nil do
-        if quest_def.desc_final != "" do
-          msg(state, char_id, npc_def.name <> " dice: " <> quest_def.desc_final)
+            {:ok, new_state, effects}
+          end
         end
 
-        if quest_def.reward_gld > 0 do
-          msg(state, char_id, "Recibiste #{quest_def.reward_gld} monedas de oro.")
-          Helpers.send_to_session(state.sessions, char_id,
-            {:send_raw, Encoder.encode({:update_gold, %{gold: updated_entity.gold}})})
-        end
-
-        if quest_def.reward_exp > 0 do
-          msg(state, char_id, "Recibiste #{quest_def.reward_exp} puntos de experiencia.")
-        end
-
-        state = put_in(state.players[char_id], updated_entity)
-        {:noreply, state}
-      else
-        msg(state, char_id, "No se pudo completar la mision.")
-        {:noreply, state}
-      end
-    else
-      available = Arena.QuestServer.available_quests_for_npc(entity, npc_def)
-
-      if available == [] do
-        msg(state, char_id, npc_def.name <> " dice: No tengo misiones disponibles para ti.")
-        {:noreply, state}
-      else
-        npc_quest_params = Arena.QuestServer.build_npc_quest_list(available)
-
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw, Encoder.encode({:npc_quest_list_send, %{quests: npc_quest_params}})}
-        )
-
-        entity = %{entity | quest_npc_id: npc_def.id}
-        state = put_in(state.players[char_id], entity)
-        {:noreply, state}
-      end
+      :error ->
+        {:ok, state, []}
     end
   end
 
