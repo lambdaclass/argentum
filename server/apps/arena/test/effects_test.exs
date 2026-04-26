@@ -340,6 +340,35 @@ defmodule Arena.Map.EffectsTest do
     end
   end
 
+  describe "run/2 :transfer" do
+    test "sends the bare {:transfer, dest_map, dest_x, dest_y, entity} tuple to the session pid" do
+      entity = %{char_index: 7, x: 10, y: 20}
+      state = %{sessions: %{:p => self()}}
+
+      assert :ok =
+               Effects.run(state, [Effects.transfer(:p, 42, 50, 60, entity)])
+
+      # The runner must strip the char_id and send the shape the session
+      # handlers (WsHandler/ClientHandler) actually pattern-match.
+      assert_receive {:transfer, 42, 50, 60, ^entity}
+    end
+
+    test "is silently dropped when the char_id has no session" do
+      state = %{sessions: %{}}
+      entity = %{char_index: 7}
+
+      assert :ok =
+               Effects.run(state, [Effects.transfer(:missing, 1, 2, 3, entity)])
+
+      refute_receive {:transfer, _, _, _, _}, 50
+    end
+
+    test "constructor returns the tagged tuple unchanged" do
+      entity = %{char_index: 1}
+      assert {:transfer, :p, 5, 6, 7, ^entity} = Effects.transfer(:p, 5, 6, 7, entity)
+    end
+  end
+
   describe "run/2 :broadcast_character_change" do
     # End-to-end check: the character_change effect lands on every nearby
     # session as a critical Egress envelope carrying the encoded

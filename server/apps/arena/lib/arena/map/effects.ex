@@ -75,6 +75,20 @@ defmodule Arena.Map.Effects do
     {:broadcast_character_change, entity}
   end
 
+  @doc """
+  Transfer the player to `(dest_map, dest_x, dest_y)`.
+
+  The runner resolves `char_id` against `state.sessions` and sends the bare
+  `{:transfer, dest_map, dest_x, dest_y, entity}` tuple expected by
+  `AoTcpGateway.WsHandler` / `AoTcpGateway.ClientHandler`. Not envelope-wrapped:
+  transfers are out-of-band of the egress queue.
+  """
+  @spec transfer(term(), pos_integer(), pos_integer(), pos_integer(), map()) ::
+          Arena.Map.Effect.t()
+  def transfer(char_id, dest_map, dest_x, dest_y, entity) do
+    {:transfer, char_id, dest_map, dest_x, dest_y, entity}
+  end
+
   defp build_envelope(packet, opts) when is_binary(packet) do
     {default_class, default_key} =
       case packet do
@@ -135,6 +149,13 @@ defmodule Arena.Map.Effects do
 
   defp dispatch(state, {:broadcast_character_change, entity}) do
     Helpers.broadcast_character_change(state, entity)
+  end
+
+  defp dispatch(state, {:transfer, char_id, dest_map, dest_x, dest_y, entity}) do
+    case Map.get(state.sessions, char_id) do
+      nil -> :ok
+      pid -> Kernel.send(pid, {:transfer, dest_map, dest_x, dest_y, entity})
+    end
   end
 
   defp dispatch(_state, other) do
