@@ -19,6 +19,7 @@ defmodule Arena.Map.PlayerDeath do
         hunger: 0,
         thirst: 0,
         paralyzed: false,
+        blind: false,
         invisible: false,
         oculto: false,
         oculto_timer: 0,

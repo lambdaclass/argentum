@@ -79,6 +79,7 @@ defmodule Arena.SpellEffectGoldenTest do
       mounted: false,
       no_detectable: false,
       paralyzed: false,
+      blind: false,
       immobilized: false,
       meditating: false,
       resting: false,

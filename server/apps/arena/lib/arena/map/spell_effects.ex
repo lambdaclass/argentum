@@ -593,6 +593,21 @@ defmodule Arena.Map.SpellEffects do
               buffs = Enum.reject(target_entity.buffs, &(&1.type == :poisoned))
               %{target_entity | poisoned: false, buffs: buffs}
 
+            spell_def.ciega ->
+              # VB6: Warrior/Hunter get 0.7x duration, others get full duration.
+              effective_dur =
+                if target_entity.class in [:guerrero, :cazador],
+                  do: trunc(duration_ms * 0.7),
+                  else: duration_ms
+
+              buff = %{type: :blind, expires_at: now + effective_dur}
+              buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :blind))]
+              %{target_entity | blind: true, buffs: buffs}
+
+            spell_def.cura_ceguera ->
+              buffs = Enum.reject(target_entity.buffs, &(&1.type == :blind))
+              %{target_entity | blind: false, buffs: buffs}
+
             spell_def.invisibilidad ->
               buff = %{type: :invisible, expires_at: now + duration_ms}
               buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :invisible))]
@@ -621,6 +636,19 @@ defmodule Arena.Map.SpellEffects do
 
         was_visible = not (Map.get(target_entity_before, :invisible, false))
         now_invisible = target_entity.invisible
+
+        # VB6 modHechizos.bas (cura_ceguera handler) only writes BlindNoMore
+        # when the target was previously blind. Mirror the `If .flags.Ceguera > 0`
+        # guard.
+        was_blind = Map.get(target_entity_before, :blind, false)
+
+        if was_blind and not target_entity.blind do
+          Helpers.send_to_session(
+            state.sessions,
+            target_id,
+            {:send_raw, Encoder.encode({:blind_no_more, %{}})}
+          )
+        end
 
         players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, target_entity)
         state = %{state | players: players}
@@ -660,6 +688,7 @@ defmodule Arena.Map.SpellEffects do
           thirst: 0,
           buffs: [],
           paralyzed: false,
+          blind: false,
           poisoned: false,
           invisible: false,
           oculto: false

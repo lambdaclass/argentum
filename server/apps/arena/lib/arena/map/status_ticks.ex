@@ -20,6 +20,7 @@ defmodule Arena.Map.StatusTicks do
   def process_player_buffs(state, char_id, entity, now) do
     was_invisible = entity.invisible
     was_paralyzed = entity.paralyzed
+    was_blind = entity.blind
     entity = tick_potion_duration(entity)
     {expired, active} = Enum.split_with(entity.buffs, fn b -> now >= b.expires_at end)
 
@@ -28,6 +29,7 @@ defmodule Arena.Map.StatusTicks do
       Enum.reduce(expired, entity, fn buff, ent ->
         case buff.type do
           :paralyzed -> %{ent | paralyzed: false}
+          :blind -> %{ent | blind: false}
           :poisoned -> %{ent | poisoned: false}
           :invisible -> %{ent | invisible: false}
           :oculto -> %{ent | oculto: false}
@@ -45,6 +47,16 @@ defmodule Arena.Map.StatusTicks do
         state.sessions,
         char_id,
         {:send_raw, Encoder.encode({:paralize_ok, %{}})}
+      )
+    end
+
+    # VB6: when Ceguera counter expires the server sends WriteBlindNoMore so
+    # the client clears the blindness overlay (modUsuarios EfectoCeguera path).
+    if was_blind and not entity.blind do
+      Helpers.send_to_session(
+        state.sessions,
+        char_id,
+        {:send_raw, Encoder.encode({:blind_no_more, %{}})}
       )
     end
 

@@ -84,6 +84,7 @@ defmodule Arena.Map.EffectsE2ETest do
       oculto_timer: 0,
       no_detectable: false,
       paralyzed: false,
+      blind: false,
       immobilized: false,
       meditating: false,
       resting: false,

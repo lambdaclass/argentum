@@ -169,6 +169,7 @@ defmodule Arena.Map.Healing do
                     hp: entity.max_hp,
                     buffs: [],
                     paralyzed: false,
+                    blind: false,
                     poisoned: false,
                     invisible: false
                 }
