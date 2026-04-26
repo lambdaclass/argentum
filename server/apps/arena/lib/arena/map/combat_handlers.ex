@@ -694,6 +694,27 @@ defmodule Arena.Map.CombatHandlers do
                   spell_def == nil ->
                     {:reply, {:error, :unknown_spell}, state}
 
+                  # VB6 modHechizos.bas:4150-4156 (UseSpellSlot): when the player
+                  # clicks a non-AutoLanzar spell with no target picked, the
+                  # server prompts the client for a target via WriteWorkRequestTarget.
+                  # In the modern Elixir client this almost never fires — clients
+                  # send :left_click to set target_x/y first, then :cast_spell —
+                  # but parity demands the prompt for VB6-style clients.
+                  target_x == nil and target_y == nil and not spell_def.auto_lanzar ->
+                    payload = %{
+                      skill: 1,
+                      castea_area: spell_def.area_afecta > 0,
+                      radio: spell_def.area_radio
+                    }
+
+                    Helpers.send_to_session(
+                      state.sessions,
+                      char_id,
+                      {:send_raw, Encoder.encode({:work_request_target, payload})}
+                    )
+
+                    {:reply, :ok, state}
+
                   not spell_in_range ->
                     {:reply, {:error, :out_of_range}, state}
 

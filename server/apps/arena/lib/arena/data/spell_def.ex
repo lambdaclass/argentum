@@ -58,7 +58,10 @@ defmodule Arena.Data.SpellDef do
     remove_invisibility: false,
     is_elemental_tags_only: false,
     # VB6: AntiRm — when 1, spell ignores magic resistance
-    anti_rm: 0
+    anti_rm: 0,
+    # VB6 modHechizos.bas:4150 — UseSpellSlot self-casts when AutoLanzar=1
+    # (no server-prompted target picker is shown).
+    auto_lanzar: false
   ]
 
   @doc "Build a SpellDef from a parsed INI section (downcased keys)."
@@ -115,7 +118,8 @@ defmodule Arena.Data.SpellDef do
       target_effect_type: parse_int(section["targeteffecttype"]),
       remove_invisibility: band(parse_int(section["effects"]), 32768) != 0,
       is_elemental_tags_only: parse_int(section["iselementaltagsonly"]) > 0,
-      anti_rm: parse_int(section["antirm"])
+      anti_rm: parse_int(section["antirm"]),
+      auto_lanzar: parse_bool(section["autolanzar"])
     }
   end
 

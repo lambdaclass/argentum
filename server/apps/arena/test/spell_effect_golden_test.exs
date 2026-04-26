@@ -782,9 +782,13 @@ defmodule Arena.SpellEffectGoldenTest do
       :ets.insert(:arena_game_data, {{:spell, spell_id}, %{spell_def | id: spell_id}})
 
       caster = make_entity(%{mana: 30, spells: [spell_id], spell_cooldowns: %{}})
-      state = make_state(%{caster: caster})
+      occupancy = %{{50, 50} => {:player, :caster}}
+      state = make_state(%{caster: caster}, occupancy: occupancy)
 
-      {:reply, result, _state} = CombatHandlers.handle_cast_spell(state, :caster, 1, nil, nil)
+      # Self-target via (50,50). nil targets now trigger the WriteWorkRequestTarget
+      # prompt (drift 19c, VB6 modHechizos.bas:4150-4156), so we must supply
+      # an explicit target to exercise the mana-validation branch.
+      {:reply, result, _state} = CombatHandlers.handle_cast_spell(state, :caster, 1, 50, 50)
       assert result == {:error, :not_enough_mana}
 
       :ets.delete(:arena_game_data, {:spell, spell_id})
@@ -796,9 +800,11 @@ defmodule Arena.SpellEffectGoldenTest do
       :ets.insert(:arena_game_data, {{:spell, spell_id}, spell_def})
 
       caster = make_entity(%{mana: 100, hp: 50, max_hp: 100, spells: [spell_id], spell_cooldowns: %{}})
+      # Target an empty tile so the heal falls through to the self-heal
+      # branch (which writes the mana-deducted caster entity back to state).
       state = make_state(%{caster: caster})
 
-      {:reply, :ok, new_state} = CombatHandlers.handle_cast_spell(state, :caster, 1, nil, nil)
+      {:reply, :ok, new_state} = CombatHandlers.handle_cast_spell(state, :caster, 1, 51, 50)
 
       updated = new_state.players[:caster]
       # 100 - 20 = 80 mana remaining
@@ -819,9 +825,10 @@ defmodule Arena.SpellEffectGoldenTest do
       :ets.insert(:arena_game_data, {{:spell, spell_id}, spell_def})
 
       caster = make_entity(%{mana: 200, skills: %{magic: 50}, spells: [spell_id], spell_cooldowns: %{}})
-      state = make_state(%{caster: caster})
+      occupancy = %{{50, 50} => {:player, :caster}}
+      state = make_state(%{caster: caster}, occupancy: occupancy)
 
-      {:reply, result, _state} = CombatHandlers.handle_cast_spell(state, :caster, 1, nil, nil)
+      {:reply, result, _state} = CombatHandlers.handle_cast_spell(state, :caster, 1, 50, 50)
       assert result == {:error, :skill_too_low}
 
       :ets.delete(:arena_game_data, {:spell, spell_id})
@@ -833,9 +840,10 @@ defmodule Arena.SpellEffectGoldenTest do
       :ets.insert(:arena_game_data, {{:spell, spell_id}, spell_def})
 
       caster = make_entity(%{mana: 200, hp: 50, max_hp: 100, skills: %{magic: 50}, spells: [spell_id], spell_cooldowns: %{}})
-      state = make_state(%{caster: caster})
+      occupancy = %{{50, 50} => {:player, :caster}}
+      state = make_state(%{caster: caster}, occupancy: occupancy)
 
-      {:reply, result, _state} = CombatHandlers.handle_cast_spell(state, :caster, 1, nil, nil)
+      {:reply, result, _state} = CombatHandlers.handle_cast_spell(state, :caster, 1, 50, 50)
       assert result == :ok
 
       :ets.delete(:arena_game_data, {:spell, spell_id})
@@ -931,9 +939,10 @@ defmodule Arena.SpellEffectGoldenTest do
       :ets.insert(:arena_game_data, {{:spell, spell_id}, spell_def})
 
       caster = make_entity(%{mana: 200, level: 20, spells: [spell_id], spell_cooldowns: %{}})
-      state = make_state(%{caster: caster})
+      occupancy = %{{50, 50} => {:player, :caster}}
+      state = make_state(%{caster: caster}, occupancy: occupancy)
 
-      {:reply, result, _state} = CombatHandlers.handle_cast_spell(state, :caster, 1, nil, nil)
+      {:reply, result, _state} = CombatHandlers.handle_cast_spell(state, :caster, 1, 50, 50)
       assert result == {:error, :level_too_high}
 
       :ets.delete(:arena_game_data, {:spell, spell_id})
@@ -945,9 +954,10 @@ defmodule Arena.SpellEffectGoldenTest do
       :ets.insert(:arena_game_data, {{:spell, spell_id}, spell_def})
 
       caster = make_entity(%{mana: 200, level: 25, hp: 50, max_hp: 100, spells: [spell_id], spell_cooldowns: %{}})
-      state = make_state(%{caster: caster})
+      occupancy = %{{50, 50} => {:player, :caster}}
+      state = make_state(%{caster: caster}, occupancy: occupancy)
 
-      {:reply, result, _state} = CombatHandlers.handle_cast_spell(state, :caster, 1, nil, nil)
+      {:reply, result, _state} = CombatHandlers.handle_cast_spell(state, :caster, 1, 50, 50)
       assert result == :ok
 
       :ets.delete(:arena_game_data, {:spell, spell_id})
@@ -959,9 +969,10 @@ defmodule Arena.SpellEffectGoldenTest do
       :ets.insert(:arena_game_data, {{:spell, spell_id}, spell_def})
 
       caster = make_entity(%{mana: 200, level: 99, hp: 50, max_hp: 100, spells: [spell_id], spell_cooldowns: %{}})
-      state = make_state(%{caster: caster})
+      occupancy = %{{50, 50} => {:player, :caster}}
+      state = make_state(%{caster: caster}, occupancy: occupancy)
 
-      {:reply, result, _state} = CombatHandlers.handle_cast_spell(state, :caster, 1, nil, nil)
+      {:reply, result, _state} = CombatHandlers.handle_cast_spell(state, :caster, 1, 50, 50)
       assert result == :ok
 
       :ets.delete(:arena_game_data, {:spell, spell_id})
@@ -979,9 +990,10 @@ defmodule Arena.SpellEffectGoldenTest do
       :ets.insert(:arena_game_data, {{:spell, spell_id}, spell_def})
 
       caster = make_entity(%{mana: 200, stamina: 30, spells: [spell_id], spell_cooldowns: %{}})
-      state = make_state(%{caster: caster})
+      occupancy = %{{50, 50} => {:player, :caster}}
+      state = make_state(%{caster: caster}, occupancy: occupancy)
 
-      {:reply, result, _state} = CombatHandlers.handle_cast_spell(state, :caster, 1, nil, nil)
+      {:reply, result, _state} = CombatHandlers.handle_cast_spell(state, :caster, 1, 50, 50)
       assert result == {:error, :not_enough_stamina}
 
       :ets.delete(:arena_game_data, {:spell, spell_id})
@@ -1287,9 +1299,10 @@ defmodule Arena.SpellEffectGoldenTest do
       now_before = System.monotonic_time(:millisecond)
 
       caster = make_entity(%{mana: 100, stamina: 50, hp: 50, max_hp: 100, spells: [spell_id], spell_cooldowns: %{}})
+      # Target empty tile so heal falls through to self-heal branch.
       state = make_state(%{caster: caster})
 
-      {:reply, :ok, new_state} = CombatHandlers.handle_cast_spell(state, :caster, 1, nil, nil)
+      {:reply, :ok, new_state} = CombatHandlers.handle_cast_spell(state, :caster, 1, 51, 50)
 
       now_after = System.monotonic_time(:millisecond)
       updated = new_state.players[:caster]

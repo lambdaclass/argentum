@@ -282,9 +282,20 @@ defmodule Arena.SpellSelectionParityTest do
       assert new_state.players.caster.mana == 190
     end
 
-    test "user-only spell (target=1) with no target casts on self" do
+    test "user-only spell (target=1) with auto_lanzar self-casts (VB6 modHechizos.bas:4150)" do
       spell_id = 80_005
-      insert_spell(spell_id, %{target: 1, sube_hp: 1, min_hp: 20, max_hp: 20})
+      # VB6: AutoLanzar=1 spells short-circuit UseSpellSlot to LanzarHechizo on
+      # the caster directly, skipping the WriteWorkRequestTarget prompt.
+      # Sending nil targets here matches what the VB6 path passes — the
+      # auto_lanzar branch in handle_cast_spell skips the prompt and falls
+      # through to the heal-self branch.
+      insert_spell(spell_id, %{
+        target: 1,
+        auto_lanzar: true,
+        sube_hp: 1,
+        min_hp: 20,
+        max_hp: 20
+      })
 
       caster = make_entity(%{mana: 200, hp: 60, max_hp: 100, spells: [spell_id]})
       state = make_state(%{caster: caster})
@@ -314,10 +325,14 @@ defmodule Arena.SpellSelectionParityTest do
         spells: [spell_id]
       })
 
+      # Target an empty tile so the heal-self branch runs end-to-end
+      # (matching the modern client's client-side targeting). With nil
+      # targets the server now emits WriteWorkRequestTarget per VB6
+      # modHechizos.bas:4150-4156.
       state = make_state(%{caster: caster})
 
       {:reply, :ok, new_state} =
-        CombatHandlers.handle_cast_spell(state, :caster, 1, nil, nil)
+        CombatHandlers.handle_cast_spell(state, :caster, 1, 51, 50)
 
       updated = new_state.players.caster
       # VB6: meditation is broken when casting a spell
@@ -344,10 +359,13 @@ defmodule Arena.SpellSelectionParityTest do
         spells: [spell_id]
       })
 
+      # Target empty tile to fall through to self-heal. See
+      # casting-breaks-meditation test above for why we no longer rely on
+      # nil-target = self-cast.
       state = make_state(%{caster: caster})
 
       {:reply, :ok, new_state} =
-        CombatHandlers.handle_cast_spell(state, :caster, 1, nil, nil)
+        CombatHandlers.handle_cast_spell(state, :caster, 1, 51, 50)
 
       updated = new_state.players.caster
       # VB6: resting is broken when casting a spell
