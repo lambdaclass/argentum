@@ -229,7 +229,7 @@ defmodule Arena.RuntimeSettingsIntegrationTest do
       state = make_state(%{player.char_id => player}, sessions: %{player.char_id => self()})
       before = System.monotonic_time(:millisecond)
 
-      {:reply, :ok, new_state} = InventoryHandlers.handle_use_item(state, player.char_id, 0)
+      {:ok, new_state, _effects} = InventoryHandlers.handle_use_item(state, player.char_id, 0)
 
       assert new_state.players[player.char_id].next_item_use_at - before >= 1150
     end

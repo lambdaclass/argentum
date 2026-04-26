@@ -164,7 +164,7 @@ defmodule Arena.CraftingBankTrainDriftTest do
           meta: %{objects: [%{x: 50, y: 49, obj_index: 384, amount: 1}]}
         )
 
-      assert {:reply, :ok, _state} = InventoryHandlers.handle_use_item(state, 1, 0, 50, 49)
+      assert {:ok, _state, _effects} = InventoryHandlers.handle_use_item(state, 1, 0, 50, 49)
       assert_receive {:send_raw, _}, 500
       assert_receive {:send_raw, _}, 500
     end
@@ -186,7 +186,7 @@ defmodule Arena.CraftingBankTrainDriftTest do
           npcs_live: %{}
         )
 
-      assert {:reply, :ok, _state} = InventoryHandlers.handle_use_item(state, 1, 0)
+      assert {:ok, _state, _effects} = InventoryHandlers.handle_use_item(state, 1, 0)
       assert_receive {:send_raw, _}, 500
       assert_receive {:send_raw, _}, 500
     end

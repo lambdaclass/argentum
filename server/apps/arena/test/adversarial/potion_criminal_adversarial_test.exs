@@ -379,7 +379,7 @@ defmodule Arena.Adversarial.PotionCriminalAdversarialTest do
 
       state = state_with(entity)
 
-      assert {:ok, returned_entity, _state} =
+      assert {:ok, returned_entity, _state, _effects} =
                InventoryHandlers.apply_item_use(entity, item_def, 0, state)
 
       # Heal must be skipped
@@ -409,7 +409,7 @@ defmodule Arena.Adversarial.PotionCriminalAdversarialTest do
 
       state = state_with(entity)
 
-      assert {:ok, returned_entity, _state} =
+      assert {:ok, returned_entity, _state, _effects} =
                InventoryHandlers.apply_item_use(entity, item_def, 0, state)
 
       assert returned_entity.divine_blood == 3,
@@ -502,8 +502,13 @@ defmodule Arena.Adversarial.PotionCriminalAdversarialTest do
 
       state = state_with(entity)
 
-      assert {:reply, {:error, :cooldown}, _state} =
-               InventoryHandlers.handle_use_item(state, 1, 0)
+      # Roadmap #4: cooldown rejection is now a silent no-op at the handler
+      # contract level — handler returns {:ok, state, []} and emits no
+      # effects. The state must NOT advance (no consumption).
+      next_use_before = entity.next_item_use_at
+      assert {:ok, new_state, []} = InventoryHandlers.handle_use_item(state, 1, 0)
+      assert new_state.players[1].next_item_use_at == next_use_before,
+             "cooldown rejection must NOT bump next_item_use_at"
     end
   end
 

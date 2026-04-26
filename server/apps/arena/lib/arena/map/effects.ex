@@ -131,6 +131,21 @@ defmodule Arena.Map.Effects do
     {:noreply, state}
   end
 
+  @doc """
+  `handle_call` variant of `run_handler/2` — runs the handler, executes its
+  effects, and returns `{:reply, :ok, state}`. Handler contract is identical
+  to the cast variant (`{:ok, state, effects}`); rejection is communicated
+  via console-message effects rather than a non-`:ok` reply term, keeping
+  the contract uniform across cast and call dispatch.
+  """
+  @spec run_handler_call(map(), (map() -> {:ok, map(), [Arena.Map.Effect.t()]})) ::
+          {:reply, :ok, map()}
+  def run_handler_call(state, fun) when is_function(fun, 1) do
+    {:ok, state, effects} = fun.(state)
+    run(state, effects)
+    {:reply, :ok, state}
+  end
+
   defp dispatch(state, {:send, char_id, outbound}) do
     Helpers.send_outbound(state.sessions, char_id, outbound)
   end

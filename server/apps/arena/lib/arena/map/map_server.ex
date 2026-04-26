@@ -538,18 +538,29 @@ defmodule Arena.Map.MapServer do
   # ---- Inventory (delegated) ----
 
   @impl true
-  def handle_call({:pick_up, char_id}, _from, state), do: InventoryHandlers.handle_pick_up(state, char_id)
+  def handle_call({:pick_up, char_id}, _from, state),
+    do: Effects.run_handler_call(state, fn s -> InventoryHandlers.handle_pick_up(s, char_id) end)
+
   @impl true
   def handle_call({:drop_item, char_id, slot, amount}, _from, state),
-    do: InventoryHandlers.handle_drop_item(state, char_id, slot, amount)
+    do:
+      Effects.run_handler_call(state, fn s ->
+        InventoryHandlers.handle_drop_item(s, char_id, slot, amount)
+      end)
 
   @impl true
   def handle_call({:equip_item, char_id, slot}, _from, state),
-    do: InventoryHandlers.handle_equip_item(state, char_id, slot)
+    do:
+      Effects.run_handler_call(state, fn s ->
+        InventoryHandlers.handle_equip_item(s, char_id, slot)
+      end)
 
   @impl true
   def handle_call({:use_item, char_id, slot, target_x, target_y}, _from, state),
-    do: InventoryHandlers.handle_use_item(state, char_id, slot, target_x, target_y)
+    do:
+      Effects.run_handler_call(state, fn s ->
+        InventoryHandlers.handle_use_item(s, char_id, slot, target_x, target_y)
+      end)
 
   # ---- Combat (delegated) ----
 

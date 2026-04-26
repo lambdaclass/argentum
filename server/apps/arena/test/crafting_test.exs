@@ -733,6 +733,10 @@ defmodule Arena.CraftingTest do
   end
 
   describe "working tool use opens production forms" do
+    # Roadmap #4: handle_use_item returns {:ok, state, effects}. The crafting
+    # branch (obj_type 18) still routes through `Arena.Map.Crafting` which
+    # uses the legacy `Helpers.send_to_session/3` shim, so the production
+    # form packets continue to arrive as `{:send_raw, _}` for now.
     test "carpentry form opens from using the equipped saw without any workstation NPC" do
       entity = %PlayerEntity{
         char_id: 1,
@@ -742,7 +746,7 @@ defmodule Arena.CraftingTest do
       }
 
       state = make_state(%{1 => entity}, sessions: %{1 => self()})
-      assert {:reply, :ok, _state} = InventoryHandlers.handle_use_item(state, 1, 0)
+      assert {:ok, _state, _effects} = InventoryHandlers.handle_use_item(state, 1, 0)
       assert_receive {:send_raw, _}
       assert_receive {:send_raw, _}
     end
@@ -764,7 +768,7 @@ defmodule Arena.CraftingTest do
           objects: [%{x: 50, y: 49, obj_index: 384, amount: 1}]
         )
 
-      assert {:reply, :ok, _state} = InventoryHandlers.handle_use_item(state, 1, 0, 50, 49)
+      assert {:ok, _state, _effects} = InventoryHandlers.handle_use_item(state, 1, 0, 50, 49)
       assert_receive {:send_raw, _}
       assert_receive {:send_raw, _}
     end
@@ -780,7 +784,11 @@ defmodule Arena.CraftingTest do
       }
 
       state = make_state(%{1 => entity}, sessions: %{1 => self()})
-      assert {:reply, {:error, :missing_target}, _state} = InventoryHandlers.handle_use_item(state, 1, 0)
+      # Rejection from Crafting.handle_tool_use returns {:error, :missing_target}
+      # but apply_item_use bubbles it up; handle_use_item swallows the error
+      # and replies {:ok, state, []}. The crafting console message is still
+      # sent via the legacy shim from inside Crafting.
+      assert {:ok, _state, _effects} = InventoryHandlers.handle_use_item(state, 1, 0)
       assert_receive {:send_raw, _}
     end
   end

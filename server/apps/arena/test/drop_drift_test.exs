@@ -5,6 +5,10 @@ defmodule Arena.DropDriftTest do
   D11: intirable semantics -- Intirable=1 means "cannot be dropped" (blocks drop)
   D9:  Missing trading/mounted/instransferible checks in drop handler
   D10: Gold dropping (slot 200) not supported
+
+  Roadmap #4: `handle_drop_item/4` returns `{:ok, state, effects}`. Rejection
+  no longer surfaces as `{:error, reason}` — the handler emits a console-message
+  effect and the gold/inventory state is left untouched.
   """
   use ExUnit.Case, async: true
 
@@ -51,6 +55,16 @@ defmodule Arena.DropDriftTest do
     )
   end
 
+  defp effect_payload_contains?(effects, needle) do
+    Enum.any?(effects, fn
+      {:send, _char_id, %{payload: payload}} when is_binary(payload) ->
+        :binary.match(payload, needle) != :nomatch
+
+      _ ->
+        false
+    end)
+  end
+
   # ── D11: intirable semantics ──────────────────────────────────────────
 
   describe "D11: intirable semantics -- Intirable=1 blocks drop" do
@@ -80,9 +94,16 @@ defmodule Arena.DropDriftTest do
         ent = make_entity(2, inventory: inv)
         st = make_state(2, ent)
 
-        {:reply, result, _} = InventoryHandlers.handle_drop_item(st, 2, 0, 1)
-        assert result == {:error, :not_throwable},
-               "Item with intirable=true must be blocked from dropping"
+        {:ok, new_state, effects} = InventoryHandlers.handle_drop_item(st, 2, 0, 1)
+
+        # Inventory must be untouched.
+        assert new_state.players[2].inventory == inv
+
+        # No ground item must be created.
+        assert new_state.ground_items == %{}
+
+        assert effect_payload_contains?(effects, "no se puede tirar"),
+               "Item with intirable=true must emit a not-throwable console message"
       end
     end
 
@@ -100,9 +121,11 @@ defmodule Arena.DropDriftTest do
         ent = make_entity(3, inventory: inv)
         st = make_state(3, ent)
 
-        {:reply, result, _} = InventoryHandlers.handle_drop_item(st, 3, 0, 1)
-        assert result == :ok,
-               "Item with intirable=false must be allowed to drop"
+        {:ok, new_state, _effects} = InventoryHandlers.handle_drop_item(st, 3, 0, 1)
+
+        # Drop succeeds: ground gains item, inventory loses it.
+        assert Map.has_key?(new_state.ground_items, {50, 50})
+        assert Enum.at(new_state.players[3].inventory, 0) == nil
       end
     end
   end
@@ -124,9 +147,13 @@ defmodule Arena.DropDriftTest do
         ent = make_entity(4, inventory: inv, trade_partner_id: 999)
         st = make_state(4, ent)
 
-        {:reply, result, _} = InventoryHandlers.handle_drop_item(st, 4, 0, 1)
-        assert result == {:error, :trading},
-               "VB6: Comerciando blocks drop"
+        {:ok, new_state, effects} = InventoryHandlers.handle_drop_item(st, 4, 0, 1)
+
+        assert new_state.players[4].inventory == inv
+        assert new_state.ground_items == %{}
+
+        assert effect_payload_contains?(effects, "comercias"),
+               "VB6: Comerciando blocks drop with comerciando console message"
       end
     end
   end
@@ -146,9 +173,13 @@ defmodule Arena.DropDriftTest do
         ent = make_entity(5, inventory: inv, mounted: true)
         st = make_state(5, ent)
 
-        {:reply, result, _} = InventoryHandlers.handle_drop_item(st, 5, 0, 1)
-        assert result == {:error, :mounted},
-               "VB6: Montado blocks drop"
+        {:ok, new_state, effects} = InventoryHandlers.handle_drop_item(st, 5, 0, 1)
+
+        assert new_state.players[5].inventory == inv
+        assert new_state.ground_items == %{}
+
+        assert effect_payload_contains?(effects, "montura"),
+               "VB6: Montado blocks drop with mount console message"
       end
     end
   end
@@ -157,7 +188,7 @@ defmodule Arena.DropDriftTest do
     test "cannot drop instransferible items" do
       # All real instransferible items in obj.dat also have intirable=true
       # and newbie=true, so other guards fire first. We verify the drop IS
-      # blocked (the specific error depends on which guard fires first).
+      # blocked (the specific message depends on which guard fires first).
       real_instransferible_id = find_any_instransferible_item()
 
       if real_instransferible_id do
@@ -171,14 +202,17 @@ defmodule Arena.DropDriftTest do
         ent = make_entity(6, inventory: inv)
         st = make_state(6, ent)
 
-        {:reply, result, _} = InventoryHandlers.handle_drop_item(st, 6, 0, 1)
+        {:ok, new_state, effects} = InventoryHandlers.handle_drop_item(st, 6, 0, 1)
 
-        assert result in [
-                 {:error, :newbie_item},
-                 {:error, :not_throwable},
-                 {:error, :instransferible}
-               ],
-               "VB6: Instransferible items must be blocked from dropping"
+        assert new_state.players[6].inventory == inv
+        assert new_state.ground_items == %{}
+
+        # Any rejection message is acceptable as long as drop is blocked.
+        rejected =
+          effect_payload_contains?(effects, "newbies") or
+            effect_payload_contains?(effects, "no se puede tirar")
+
+        assert rejected, "VB6: Instransferible items must be blocked from dropping"
       end
     end
 
@@ -191,9 +225,6 @@ defmodule Arena.DropDriftTest do
 
       assert source =~ "item_def.instransferible",
              "inventory_handlers.ex must check item_def.instransferible in drop guard"
-
-      assert source =~ ":instransferible",
-             "inventory_handlers.ex must return :instransferible error"
     end
   end
 
@@ -204,8 +235,7 @@ defmodule Arena.DropDriftTest do
       ent = make_entity(10, gold: 5000)
       st = make_state(10, ent)
 
-      {:reply, result, new_state} = InventoryHandlers.handle_drop_item(st, 10, @gold_slot, 1000)
-      assert result == :ok
+      {:ok, new_state, _effects} = InventoryHandlers.handle_drop_item(st, 10, @gold_slot, 1000)
 
       updated_entity = new_state.players[10]
       assert updated_entity.gold == 4000,
@@ -216,7 +246,8 @@ defmodule Arena.DropDriftTest do
       ent = make_entity(11, gold: 500_000)
       st = make_state(11, ent)
 
-      {:reply, :ok, new_state} = InventoryHandlers.handle_drop_item(st, 11, @gold_slot, 200_000)
+      {:ok, new_state, _effects} =
+        InventoryHandlers.handle_drop_item(st, 11, @gold_slot, 200_000)
 
       updated_entity = new_state.players[11]
       assert updated_entity.gold == 400_000,
@@ -227,15 +258,17 @@ defmodule Arena.DropDriftTest do
       ent = make_entity(12, gold: 50)
       st = make_state(12, ent)
 
-      {:reply, result, _} = InventoryHandlers.handle_drop_item(st, 12, @gold_slot, 100)
-      assert result == {:error, :insufficient_gold}
+      {:ok, new_state, effects} = InventoryHandlers.handle_drop_item(st, 12, @gold_slot, 100)
+
+      assert new_state.players[12].gold == 50, "gold must NOT change on insufficient_gold"
+      assert effect_payload_contains?(effects, "suficiente oro")
     end
 
     test "gold drop places gold on ground" do
       ent = make_entity(13, gold: 5000)
       st = make_state(13, ent)
 
-      {:reply, :ok, new_state} = InventoryHandlers.handle_drop_item(st, 13, @gold_slot, 1000)
+      {:ok, new_state, _effects} = InventoryHandlers.handle_drop_item(st, 13, @gold_slot, 1000)
 
       ground = Map.get(new_state.ground_items, {50, 50})
       assert ground != nil, "Gold must appear on ground"
@@ -247,24 +280,30 @@ defmodule Arena.DropDriftTest do
       ent = make_entity(14, gold: 5000, dead: true)
       st = make_state(14, ent)
 
-      {:reply, result, _} = InventoryHandlers.handle_drop_item(st, 14, @gold_slot, 1000)
-      assert result == {:error, :dead}
+      {:ok, new_state, effects} = InventoryHandlers.handle_drop_item(st, 14, @gold_slot, 1000)
+
+      assert new_state.players[14].gold == 5000, "gold must NOT change on dead"
+      assert effects == [], "dead drop is a silent no-op"
     end
 
     test "gold drop while trading is blocked" do
       ent = make_entity(15, gold: 5000, trade_partner_id: 999)
       st = make_state(15, ent)
 
-      {:reply, result, _} = InventoryHandlers.handle_drop_item(st, 15, @gold_slot, 1000)
-      assert result == {:error, :trading}
+      {:ok, new_state, effects} = InventoryHandlers.handle_drop_item(st, 15, @gold_slot, 1000)
+
+      assert new_state.players[15].gold == 5000
+      assert effect_payload_contains?(effects, "comercias")
     end
 
     test "gold drop while mounted is blocked" do
       ent = make_entity(16, gold: 5000, mounted: true)
       st = make_state(16, ent)
 
-      {:reply, result, _} = InventoryHandlers.handle_drop_item(st, 16, @gold_slot, 1000)
-      assert result == {:error, :mounted}
+      {:ok, new_state, effects} = InventoryHandlers.handle_drop_item(st, 16, @gold_slot, 1000)
+
+      assert new_state.players[16].gold == 5000
+      assert effect_payload_contains?(effects, "montura")
     end
   end
 

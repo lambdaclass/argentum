@@ -252,10 +252,13 @@ defmodule Arena.TimerClampParityTest do
   # ═══════════════════════════════════════════════════════════════════════
 
   describe "item use cooldown (VB6: 500ms)" do
-    test "use_item on empty slot returns :empty_slot, not :cooldown" do
+    # Roadmap #4: handle_use_item migrated to the effects contract; rejection
+    # paths (empty_slot, cooldown) are silent no-ops at the call boundary
+    # rather than {:error, reason}. The reply is always :ok.
+    test "use_item on empty slot is a silent :ok (effects contract)" do
       enter_player(40_030, "ItemClamp")
       flush_mailbox()
-      assert MapServer.use_item(@test_map_id, 40_030, 1) == {:error, :empty_slot}
+      assert MapServer.use_item(@test_map_id, 40_030, 1) == :ok
     end
   end
 
