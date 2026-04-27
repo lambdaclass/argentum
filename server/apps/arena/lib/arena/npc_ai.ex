@@ -650,7 +650,10 @@ defmodule Arena.NpcAi do
                            Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})}
                         ]
 
-                    {player, state} = Arena.Map.PlayerDeath.handle_player_death(state, target_id, player)
+                    {player, state, pd_effects} =
+                      Arena.Map.PlayerDeath.handle_player_death(state, target_id, player)
+
+                    Arena.Map.Effects.run(state, pd_effects)
                     {player, state, effects}
                   else
                     {player, state, effects}
@@ -764,7 +767,11 @@ defmodule Arena.NpcAi do
 
                   npc = %{npc | target_id: nil}
                   state = put_in(state.npcs_live[instance_id], npc)
-                  {player, state} = Arena.Map.PlayerDeath.handle_player_death(state, target_char_id, player)
+
+                  {player, state, pd_effects} =
+                    Arena.Map.PlayerDeath.handle_player_death(state, target_char_id, player)
+
+                  Arena.Map.Effects.run(state, pd_effects)
                   {player, state, effects}
                 else
                   {player, state, effects}

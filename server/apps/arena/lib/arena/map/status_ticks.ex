@@ -108,7 +108,11 @@ defmodule Arena.Map.StatusTicks do
           {:send_raw, Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})}
         )
 
-        Arena.Map.PlayerDeath.handle_player_death(state, char_id, entity)
+        {entity, state, pd_effects} =
+          Arena.Map.PlayerDeath.handle_player_death(state, char_id, entity)
+
+        Arena.Map.Effects.run(state, pd_effects)
+        {entity, state}
       else
         {entity, state}
       end

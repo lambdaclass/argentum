@@ -374,20 +374,23 @@ defmodule Arena.Map.SpellEffects do
         # Guild war: no criminal flag when attacking enemy guild members
         guild_war = Arena.GuildServer.players_at_war?(char_id, defender_id)
 
-        {entity, state} =
+        {entity, state, criminal_effects} =
           if not defender.criminal and not guild_war do
             # VB6 Modulo_UsUaRiOs.bas:2260 — VolverCriminal handles
             # sanctuary tiles, Ciudadano→Criminal score reset, NoPKs
             # warping, and party disband.
             Arena.Map.CriminalStatus.volver_criminal(state, char_id, entity)
           else
-            {entity, state}
+            {entity, state, []}
           end
 
         {defender, state, death_effects} =
           if new_hp <= 0 do
-            {defender, state} = Arena.Map.PlayerDeath.handle_player_death(state, defender_id, defender)
-            {defender, state, [Effects.send(defender_id, console("Has muerto!", 5))]}
+            {defender, state, pd_effects} =
+              Arena.Map.PlayerDeath.handle_player_death(state, defender_id, defender)
+
+            {defender, state,
+             [Effects.send(defender_id, console("Has muerto!", 5)) | pd_effects]}
           else
             {defender, state, []}
           end
@@ -415,7 +418,7 @@ defmodule Arena.Map.SpellEffects do
         char_change_effects =
           if defender.dead, do: [Effects.broadcast_character_change(defender)], else: []
 
-        {state, hit_effects ++ death_effects ++ char_change_effects}
+        {state, hit_effects ++ criminal_effects ++ death_effects ++ char_change_effects}
     end
   end
 

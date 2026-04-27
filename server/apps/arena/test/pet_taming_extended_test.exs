@@ -414,7 +414,7 @@ defmodule Arena.PetTamingExtendedTest do
         meta: %{safe_zone: true}
       )
 
-      {_player, state} = PlayerDeath.handle_player_death(state, 7, owner)
+      {_player, state, _pd_effects} = PlayerDeath.handle_player_death(state, 7, owner)
 
       # Both pets should be removed from npcs_live
       refute Map.has_key?(state.npcs_live, 1),

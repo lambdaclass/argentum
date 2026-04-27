@@ -123,7 +123,7 @@ defmodule Arena.VolverCriminalTest do
       entity = make_entity(%{x: 50, y: 50, criminal: false})
       state = state_with(entity, %{trigger_map: %{{50, 50} => 6}})
 
-      {new_entity, _new_state} = CriminalStatus.volver_criminal(state, :player, entity)
+      {new_entity, _new_state, _vc_effects} = CriminalStatus.volver_criminal(state, :player, entity)
 
       assert new_entity.criminal == false,
              "VB6 VolverCriminal early-returns when MapData(pos).trigger == 6"
@@ -133,7 +133,7 @@ defmodule Arena.VolverCriminalTest do
       entity = make_entity(%{x: 50, y: 50, criminal: false})
       state = state_with(entity, %{trigger_map: %{}})
 
-      {new_entity, _new_state} = CriminalStatus.volver_criminal(state, :player, entity)
+      {new_entity, _new_state, _vc_effects} = CriminalStatus.volver_criminal(state, :player, entity)
 
       assert new_entity.criminal == true
     end
@@ -147,7 +147,7 @@ defmodule Arena.VolverCriminalTest do
       entity = make_entity(%{faction: :none, faction_score: 150, criminal: false})
       state = state_with(entity)
 
-      {new_entity, _new_state} = CriminalStatus.volver_criminal(state, :player, entity)
+      {new_entity, _new_state, _vc_effects} = CriminalStatus.volver_criminal(state, :player, entity)
 
       assert new_entity.criminal == true
       assert new_entity.faction_score == 0,
@@ -161,7 +161,7 @@ defmodule Arena.VolverCriminalTest do
       entity = make_entity(%{faction: :chaos_legion, faction_score: 500, criminal: false})
       state = state_with(entity)
 
-      {new_entity, _new_state} = CriminalStatus.volver_criminal(state, :player, entity)
+      {new_entity, _new_state, _vc_effects} = CriminalStatus.volver_criminal(state, :player, entity)
 
       assert new_entity.faction_score == 500
       # Caos/Concilio early-return -> entity unchanged
@@ -181,7 +181,7 @@ defmodule Arena.VolverCriminalTest do
           salida: %{map: 5, x: 60, y: 70}
         })
 
-      {new_entity, _new_state} = CriminalStatus.volver_criminal(state, :player, entity)
+      {new_entity, _new_state, _vc_effects} = CriminalStatus.volver_criminal(state, :player, entity)
 
       assert new_entity.criminal == true
       assert_receive {:transfer, 5, 60, 70, _entity}, 200
@@ -197,7 +197,7 @@ defmodule Arena.VolverCriminalTest do
           salida: %{map: 5, x: 60, y: 70}
         })
 
-      {_new_entity, _new_state} = CriminalStatus.volver_criminal(state, :player, entity)
+      {_new_entity, _new_state, _vc_effects} = CriminalStatus.volver_criminal(state, :player, entity)
 
       refute_receive {:transfer, _, _, _, _}, 50
     end
@@ -211,7 +211,7 @@ defmodule Arena.VolverCriminalTest do
           salida: %{map: 5, x: 60, y: 70}
         })
 
-      {_new_entity, _new_state} = CriminalStatus.volver_criminal(state, :player, entity)
+      {_new_entity, _new_state, _vc_effects} = CriminalStatus.volver_criminal(state, :player, entity)
 
       refute_receive {:transfer, _, _, _, _}, 50
     end
@@ -226,7 +226,7 @@ defmodule Arena.VolverCriminalTest do
           salida: %{map: 0, x: 0, y: 0}
         })
 
-      {_new_entity, _new_state} = CriminalStatus.volver_criminal(state, :player, entity)
+      {_new_entity, _new_state, _vc_effects} = CriminalStatus.volver_criminal(state, :player, entity)
 
       refute_receive {:transfer, _, _, _, _}, 50
     end
@@ -251,7 +251,7 @@ defmodule Arena.VolverCriminalTest do
           meta: %{safe_zone: false, no_pks: false, salida: nil, trigger_map: %{}, rain: false}
         )
 
-      {new_leader, _new_state} = CriminalStatus.volver_criminal(state, leader.char_id, leader)
+      {new_leader, _new_state, _vc_effects} = CriminalStatus.volver_criminal(state, leader.char_id, leader)
 
       assert new_leader.criminal == true
       # Allow PartyServer cast to process.
@@ -286,7 +286,7 @@ defmodule Arena.VolverCriminalTest do
           meta: %{safe_zone: false, no_pks: false, salida: nil, trigger_map: %{}, rain: false}
         )
 
-      {new_member, _new_state} = CriminalStatus.volver_criminal(state, member.char_id, member)
+      {new_member, _new_state, _vc_effects} = CriminalStatus.volver_criminal(state, member.char_id, member)
 
       assert new_member.criminal == true
       Process.sleep(20)

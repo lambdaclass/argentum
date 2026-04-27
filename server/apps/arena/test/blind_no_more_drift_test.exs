@@ -384,7 +384,7 @@ defmodule Arena.BlindNoMoreDriftTest do
 
       state = make_state(%{target: target})
 
-      {dead_entity, _new_state} =
+      {dead_entity, _new_state, _effects} =
         Arena.Map.PlayerDeath.handle_player_death(state, :target, target)
 
       assert dead_entity.blind == false, "death must clear blind flag"

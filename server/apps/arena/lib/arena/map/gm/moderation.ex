@@ -164,7 +164,10 @@ defmodule Arena.Map.Gm.Moderation do
           Helpers.gm_console(state, char_id, "#{target.name} is already dead.")
           {:noreply, state}
         else
-          {target, state} = Arena.Map.PlayerDeath.handle_player_death(state, target_id, %{target | hp: 0})
+          {target, state, pd_effects} =
+            Arena.Map.PlayerDeath.handle_player_death(state, target_id, %{target | hp: 0})
+
+          Arena.Map.Effects.run(state, pd_effects)
           players = Map.put(state.players, target_id, target)
           state = %{state | players: players}
 

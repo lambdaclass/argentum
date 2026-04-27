@@ -1,14 +1,24 @@
 defmodule Arena.Map.PlayerDeath do
-  @moduledoc "Player death handling, inventory drops, and PvP kill tracking."
+  @moduledoc """
+  Player death handling, inventory drops, and PvP kill tracking.
 
-  alias Arena.Map.Helpers
+  `handle_player_death/3` returns `{player, state, effects}`. Pet despawn
+  side effects emitted by `Arena.NpcAi.despawn_pet` are still run inline
+  (they go through the legacy `:send_raw` shim and the npc-ai dispatch
+  chain), so only direct player-facing emissions surface here as
+  `Effect.t()` values.
+  """
+
+  alias Arena.Map.{Effects, Helpers}
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
   @doc """
-  VB6 deep death: clear all transient combat/status state.
-  Called from every path that sets dead: true.
-  Despawns pets owned by the dying player.
+  VB6 deep death: clear all transient combat/status state. Returns
+  `{player, state, effects}`.
+
+  Despawns pets owned by the dying player (pet effects dispatched inline
+  via the legacy NPC-AI side-channel).
   """
   def handle_player_death(state, char_id, player) do
     player = %{
@@ -43,14 +53,15 @@ defmodule Arena.Map.PlayerDeath do
     {player, unequipped_slots} = unequip_all_on_death(player)
 
     # VB6: TirarTodosLosItems — drop inventory on ground in unsafe zones
-    {player, state} =
+    {player, state, drop_effects} =
       if not Map.get(state.meta, :safe_zone, false) do
         drop_inventory_on_death(state, player)
       else
-        {player, state}
+        {player, state, []}
       end
 
-    # Despawn all pets owned by this player
+    # Despawn all pets owned by this player. Pet effects keep going through
+    # NpcAi's legacy dispatch chain (different effect-tuple shape).
     pet_ids =
       state.npcs_live
       |> Enum.filter(fn {_id, npc} -> npc.owner_id == char_id end)
@@ -59,7 +70,9 @@ defmodule Arena.Map.PlayerDeath do
     state =
       Enum.reduce(pet_ids, state, fn instance_id, st ->
         case Map.get(st.npcs_live, instance_id) do
-          nil -> st
+          nil ->
+            st
+
           npc ->
             {st, effects} = Arena.NpcAi.despawn_pet(st, instance_id, npc)
             Arena.NpcAi.dispatch_effects(st, effects)
@@ -68,28 +81,57 @@ defmodule Arena.Map.PlayerDeath do
       end)
 
     # Send unequip slot updates to client
-    for slot <- unequipped_slots do
-      Helpers.send_inventory_slot(state.sessions, char_id, player.inventory, slot)
-    end
+    slot_effects =
+      Enum.map(unequipped_slots, fn slot ->
+        Effects.send(char_id, encoded_inventory_slot(player.inventory, slot))
+      end)
 
-    # VB6: /HOGAR message in unsafe zones
-    if not Map.get(state.meta, :safe_zone, false) do
-      Helpers.send_to_session(
-        state.sessions,
-        char_id,
-        {:send_raw,
-         Encoder.encode(
-           {:console_msg, %{message: "Escribe /HOGAR si deseas regresar rápido a tu hogar.", font_index: 5}}
-         )}
-      )
-    end
+    hogar_effect =
+      if not Map.get(state.meta, :safe_zone, false) do
+        [
+          Effects.send(
+            char_id,
+            Encoder.encode(
+              {:console_msg,
+               %{message: "Escribe /HOGAR si deseas regresar rápido a tu hogar.", font_index: 5}}
+            )
+          )
+        ]
+      else
+        []
+      end
 
     # VB6: MuereEnReto — notify DuelServer when a dueling player dies
     if player.in_duel do
       notify_duel_death(char_id)
     end
 
-    {player, state}
+    {player, state, drop_effects ++ slot_effects ++ hogar_effect}
+  end
+
+  defp encoded_inventory_slot(inventory, slot_idx) do
+    case Enum.at(inventory, slot_idx) do
+      nil ->
+        Encoder.encode(
+          {:change_inventory_slot,
+           %{slot: slot_idx + 1, obj_index: 0, amount: 0, equipped: false, valor: 0.0}}
+        )
+
+      item ->
+        item_def = GameData.get_item(item.item_id)
+        valor = if item_def, do: item_def.valor / 1, else: 0.0
+
+        Encoder.encode(
+          {:change_inventory_slot,
+           %{
+             slot: slot_idx + 1,
+             obj_index: item.item_id,
+             amount: item.amount,
+             equipped: Map.get(item, :equipped, false),
+             valor: valor
+           }}
+        )
+    end
   end
 
   # VB6: CriminalesMatados / ciudadanosMatados — track kill type based on victim status
@@ -141,53 +183,61 @@ defmodule Arena.Map.PlayerDeath do
 
   # Drop all non-newbie items on the ground at player position.
   # VB6: TirarTodosLosItems — drops each item from inventory to the floor.
+  # Returns {player, state, effects}.
   defp drop_inventory_on_death(state, player) do
-    {new_inventory, state} =
+    {new_inventory, state, effects} =
       player.inventory
       |> Enum.with_index()
-      |> Enum.reduce({player.inventory, state}, fn {item, idx}, {inv, st} ->
+      |> Enum.reduce({player.inventory, state, []}, fn {item, idx}, {inv, st, effs} ->
         if item != nil do
           item_def = GameData.get_item(item.item_id)
           # VB6: don't drop newbie items or quest items
           newbie = item_def != nil and Map.get(item_def, :newbie, false)
 
           if newbie do
-            {inv, st}
+            {inv, st, effs}
           else
             pos = {player.x, player.y}
             # Only drop if tile doesn't already have a ground item
-            st =
-              unless Map.has_key?(st.ground_items, pos) do
-                ground_items =
-                  Map.put(st.ground_items, pos, %{
-                    item_id: item.item_id,
-                    amount: item.amount,
-                    elemental_tags: Map.get(item, :elemental_tags, 0)
-                  })
+            if Map.has_key?(st.ground_items, pos) do
+              {inv, st, effs}
+            else
+              elemental_tags = Map.get(item, :elemental_tags, 0)
 
-                st = %{st | ground_items: ground_items}
+              ground_items =
+                Map.put(st.ground_items, pos, %{
+                  item_id: item.item_id,
+                  amount: item.amount,
+                  elemental_tags: elemental_tags
+                })
 
-                Helpers.broadcast_object_create(
-                  st,
-                  player.x,
-                  player.y,
-                  item.item_id,
-                  item.amount,
-                  Map.get(item, :elemental_tags, 0)
-                )
+              st = %{st | ground_items: ground_items}
+              effect = object_create_effect(player.x, player.y, item.item_id, item.amount, elemental_tags)
 
-                st
-              else
-                st
-              end
-
-            {List.replace_at(inv, idx, nil), st}
+              {List.replace_at(inv, idx, nil), st, effs ++ [effect]}
+            end
           end
         else
-          {inv, st}
+          {inv, st, effs}
         end
       end)
 
-    {%{player | inventory: new_inventory}, state}
+    {%{player | inventory: new_inventory}, state, effects}
+  end
+
+  defp object_create_effect(x, y, item_id, amount, elemental_tags) do
+    grh =
+      case GameData.get_item(item_id) do
+        nil -> 0
+        item_def -> item_def.grh_index
+      end
+
+    packet =
+      Encoder.encode(
+        {:object_create,
+         %{x: x, y: y, obj_index: grh, amount: amount, elemental_tags: elemental_tags}}
+      )
+
+    Effects.broadcast_visible_all(x, y, packet)
   end
 end

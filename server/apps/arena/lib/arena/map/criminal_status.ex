@@ -16,7 +16,7 @@ defmodule Arena.Map.CriminalStatus do
   the result into their existing reducer-style flow.
   """
 
-  alias Arena.Map.Helpers
+  alias Arena.Map.{Effects, Helpers}
   alias AoProtocol.Server.Encoder
 
   @trigger_safe_zone 6
@@ -25,23 +25,21 @@ defmodule Arena.Map.CriminalStatus do
   Promote `entity` to criminal status, replicating all of VB6's
   `VolverCriminal` side-effects.
 
-  Returns `{entity, state}`.  The returned `state` may have been updated to
-  reflect any warp and the updated player map.
-
-  Note: the current implementation sends a `{:transfer, map, x, y, entity}`
-  message to the player's session when a NoPKs warp fires, matching the
-  existing `{:transfer, ...}` convention used by `/GOTO`.  The session
-  process is responsible for running the cross-map transfer.
+  Returns `{entity, state, effects}`. Note: the NoPKs warp emits a
+  `{:transfer, map, x, y, entity}` direct send (out-of-band of the egress
+  envelope, same convention used by `/GOTO`); only the console messages
+  for the criminal-zone notice and party-disband notice flow as map
+  effects.
   """
   def volver_criminal(state, char_id, entity) do
     cond do
       # VB6:2263 — tile trigger 6 is a sanctuary; never become criminal here.
       tile_trigger(state, entity.x, entity.y) == @trigger_safe_zone ->
-        {entity, state}
+        {entity, state, []}
 
       # VB6:2271 — Caos / Concilio players cannot become criminal.
       entity.faction in [:chaos_legion, :council] ->
-        {entity, state}
+        {entity, state, []}
 
       true ->
         entity = maybe_reset_faction_score(entity)
@@ -50,9 +48,9 @@ defmodule Arena.Map.CriminalStatus do
         # expulsion path remains handled separately by faction code).
         entity = %{entity | criminal: true}
 
-        {entity, state} = maybe_warp_no_pks(state, char_id, entity)
-        state = handle_party(state, char_id, entity)
-        {entity, state}
+        {entity, state, warp_effects} = maybe_warp_no_pks(state, char_id, entity)
+        {state, party_effects} = handle_party(state, char_id, entity)
+        {entity, state, warp_effects ++ party_effects}
     end
   end
 
@@ -73,6 +71,9 @@ defmodule Arena.Map.CriminalStatus do
     salida = Map.get(state.meta, :salida)
 
     if no_pks and not gm?(entity) and valid_salida?(salida) do
+      # The `{:transfer, _, _, _, _}` tuple is out-of-band of the egress
+      # envelope — same convention as `/GOTO`. The session process picks it
+      # up directly and handles the cross-map transfer.
       Helpers.send_to_session(
         state.sessions,
         char_id,
@@ -80,10 +81,14 @@ defmodule Arena.Map.CriminalStatus do
       )
 
       # Msg580 parity: inform the user they can't be criminals here.
-      Helpers.msg(state, char_id, "En este mapa no se admiten criminales.")
-      {entity, state}
+      msg_packet =
+        Encoder.encode(
+          {:console_msg, %{message: "En este mapa no se admiten criminales.", font_index: 0}}
+        )
+
+      {entity, state, [Effects.send(char_id, msg_packet)]}
     else
-      {entity, state}
+      {entity, state, []}
     end
   end
 
@@ -99,22 +104,26 @@ defmodule Arena.Map.CriminalStatus do
   defp handle_party(state, char_id, _entity) do
     case Arena.PartyServer.get_party(char_id) do
       {:ok, party} ->
-        Helpers.msg(
-          state,
-          char_id,
-          "Ahora sos criminal, no podes estar en un grupo con ciudadanos."
-        )
-
         # VB6: if lider.ArrayIndex == UserIndex => FinalizarGrupo else SalirDeGrupo
         # Our PartyServer.leave/1 already handles both cases:
         #   - leader leaving dissolves the party (FinalizarGrupo)
         #   - member leaving removes them and keeps the rest (SalirDeGrupo)
         _ = party
         Arena.PartyServer.leave(char_id)
-        state
+
+        msg_packet =
+          Encoder.encode(
+            {:console_msg,
+             %{
+               message: "Ahora sos criminal, no podes estar en un grupo con ciudadanos.",
+               font_index: 0
+             }}
+          )
+
+        {state, [Effects.send(char_id, msg_packet)]}
 
       _ ->
-        state
+        {state, []}
     end
   end
 
