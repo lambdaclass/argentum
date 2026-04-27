@@ -145,8 +145,8 @@ defmodule Arena.NpcDeathTest do
       owner = make_player(pet_ids: [1])
       state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
 
-      result = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
-      state = result
+      {result_entity, result_state, _result_effects} = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
+      state = result_state
 
       refute Map.has_key?(state.npcs_live, 1),
              "Pet should be removed from npcs_live on death"
@@ -157,7 +157,7 @@ defmodule Arena.NpcDeathTest do
       owner = make_player(pet_ids: [1, 2])
       state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
 
-      state = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
+      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
 
       assert state.players[7].pet_ids == [2],
              "Owner's pet_ids should no longer contain the dead pet"
@@ -172,7 +172,7 @@ defmodule Arena.NpcDeathTest do
       occupancy = Helpers.set_occupancy(state.occupancy, 10, 10, {:npc, 1})
       state = %{state | occupancy: occupancy}
 
-      state = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
+      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
 
       assert Helpers.get_occupancy(state.occupancy, 10, 10) == nil,
              "Occupancy should be cleared at pet's death position"
@@ -189,13 +189,13 @@ defmodule Arena.NpcDeathTest do
         sessions: %{7 => self(), 8 => self()}
       )
 
-      result = NpcDeath.resolve_npc_death(state, 1, pet,
+      {result_entity, result_state, _result_effects} = NpcDeath.resolve_npc_death(state, 1, pet,
         source: :pet,
         killer_char_id: 8,
         killer_entity: killer
       )
 
-      assert {entity, new_state} = result
+      assert {entity, new_state} = {result_entity, result_state}
       assert entity.char_id == 8, "Should return the killer entity"
       refute Map.has_key?(new_state.npcs_live, 1)
     end
@@ -205,7 +205,7 @@ defmodule Arena.NpcDeathTest do
       pet = make_npc(owner_id: 99, instance_id: 1)
       state = make_state(players: %{7 => make_player()}, npcs: %{1 => pet})
 
-      state = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
+      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
 
       refute Map.has_key?(state.npcs_live, 1),
              "Pet should be removed even if owner is not on map"
@@ -222,7 +222,7 @@ defmodule Arena.NpcDeathTest do
       killer = make_player(char_id: 7)
       state = make_state(players: %{7 => killer}, npcs: %{1 => npc})
 
-      {_entity, state} = NpcDeath.resolve_npc_death(state, 1, npc,
+      {_entity, state, _effects} = NpcDeath.resolve_npc_death(state, 1, npc,
         killer_char_id: 7,
         killer_entity: killer,
         final_damage: 20,
@@ -239,7 +239,7 @@ defmodule Arena.NpcDeathTest do
       state = make_state(players: %{7 => killer}, npcs: %{1 => npc})
       before_time = System.monotonic_time(:millisecond)
 
-      {_entity, state} = NpcDeath.resolve_npc_death(state, 1, npc,
+      {_entity, state, _effects} = NpcDeath.resolve_npc_death(state, 1, npc,
         killer_char_id: 7,
         killer_entity: killer,
         final_damage: 20,
@@ -260,7 +260,7 @@ defmodule Arena.NpcDeathTest do
       occupancy = Helpers.set_occupancy(state.occupancy, 20, 20, {:npc, 1})
       state = %{state | occupancy: occupancy}
 
-      {_entity, state} = NpcDeath.resolve_npc_death(state, 1, npc,
+      {_entity, state, _effects} = NpcDeath.resolve_npc_death(state, 1, npc,
         killer_char_id: 7,
         killer_entity: killer,
         final_damage: 20,
@@ -276,7 +276,7 @@ defmodule Arena.NpcDeathTest do
       killer = make_player(char_id: 7, npcs_killed: 5)
       state = make_state(players: %{7 => killer}, npcs: %{1 => npc})
 
-      {entity, _state} = NpcDeath.resolve_npc_death(state, 1, npc,
+      {entity, _state, _effects} = NpcDeath.resolve_npc_death(state, 1, npc,
         killer_char_id: 7,
         killer_entity: killer,
         final_damage: 20,
@@ -292,7 +292,7 @@ defmodule Arena.NpcDeathTest do
       killer = make_player(char_id: 7, xp: 0, level: 5)
       state = make_state(players: %{7 => killer}, npcs: %{1 => npc})
 
-      {entity, _state} = NpcDeath.resolve_npc_death(state, 1, npc,
+      {entity, _state, _effects} = NpcDeath.resolve_npc_death(state, 1, npc,
         killer_char_id: 7,
         killer_entity: killer,
         final_damage: 50,
@@ -308,14 +308,14 @@ defmodule Arena.NpcDeathTest do
       killer = make_player(char_id: 7)
       state = make_state(players: %{7 => killer}, npcs: %{1 => npc})
 
-      result = NpcDeath.resolve_npc_death(state, 1, npc,
+      {result_entity, result_state, _result_effects} = NpcDeath.resolve_npc_death(state, 1, npc,
         killer_char_id: 7,
         killer_entity: killer,
         final_damage: 10,
         source: :melee
       )
 
-      assert {_entity, _state} = result
+      assert {_entity, _state} = {result_entity, result_state}
     end
   end
 
@@ -328,10 +328,10 @@ defmodule Arena.NpcDeathTest do
       npc = make_npc(instance_id: 1)
       state = make_state(npcs: %{1 => npc})
 
-      result = NpcDeath.resolve_npc_death(state, 1, npc, source: :melee)
+      {result_entity, result_state, _result_effects} = NpcDeath.resolve_npc_death(state, 1, npc, source: :melee)
 
       # When no killer_entity and no killer_char_id, returns bare state
-      assert %{npcs_live: _} = result,
+      assert %{npcs_live: _} = result_state,
              "Should return bare state, not a tuple"
     end
 
@@ -339,7 +339,7 @@ defmodule Arena.NpcDeathTest do
       npc = make_npc(instance_id: 1)
       state = make_state(npcs: %{1 => npc})
 
-      state = NpcDeath.resolve_npc_death(state, 1, npc)
+      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, npc)
 
       assert state.npcs_live[1].alive == false
     end
@@ -351,7 +351,7 @@ defmodule Arena.NpcDeathTest do
       occupancy = Helpers.set_occupancy(state.occupancy, 30, 30, {:npc, 1})
       state = %{state | occupancy: occupancy}
 
-      state = NpcDeath.resolve_npc_death(state, 1, npc)
+      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, npc)
 
       assert Helpers.get_occupancy(state.occupancy, 30, 30) == nil
     end
@@ -360,7 +360,7 @@ defmodule Arena.NpcDeathTest do
       npc = make_npc(instance_id: 1)
       state = make_state(players: %{}, npcs: %{1 => npc}, sessions: %{})
 
-      state = NpcDeath.resolve_npc_death(state, 1, npc)
+      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, npc)
 
       assert state.npcs_live[1].alive == false
     end
@@ -375,7 +375,7 @@ defmodule Arena.NpcDeathTest do
       npc = make_npc(instance_id: 1)
       state = make_state(npcs: %{1 => npc})
 
-      state = NpcDeath.resolve_npc_death(state, 1, npc,
+      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, npc,
         source: :gm_perm,
         permanent: true
       )
@@ -388,7 +388,7 @@ defmodule Arena.NpcDeathTest do
       npc = make_npc(instance_id: 1)
       state = make_state(npcs: %{1 => npc})
 
-      state = NpcDeath.resolve_npc_death(state, 1, npc,
+      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, npc,
         source: :gm_perm,
         permanent: true
       )
@@ -404,7 +404,7 @@ defmodule Arena.NpcDeathTest do
       occupancy = Helpers.set_occupancy(state.occupancy, 40, 40, {:npc, 1})
       state = %{state | occupancy: occupancy}
 
-      state = NpcDeath.resolve_npc_death(state, 1, npc,
+      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, npc,
         source: :gm_perm,
         permanent: true
       )
@@ -416,13 +416,13 @@ defmodule Arena.NpcDeathTest do
       npc = make_npc(instance_id: 1)
       state = make_state(npcs: %{1 => npc})
 
-      result = NpcDeath.resolve_npc_death(state, 1, npc,
+      {result_entity, result_state, _result_effects} = NpcDeath.resolve_npc_death(state, 1, npc,
         source: :gm_perm,
         permanent: true
       )
 
       # No killer_entity => bare state returned
-      assert %{npcs_live: _} = result
+      assert %{npcs_live: _} = result_state
     end
   end
 
@@ -442,14 +442,14 @@ defmodule Arena.NpcDeathTest do
       )
 
       # Should not crash even though char_id 99 is not in state.players
-      result = NpcDeath.resolve_npc_death(state, 1, npc,
+      {result_entity, result_state, _result_effects} = NpcDeath.resolve_npc_death(state, 1, npc,
         killer_char_id: 99,
         killer_entity: killer,
         final_damage: 10,
         source: :melee
       )
 
-      assert {_entity, _state} = result
+      assert {_entity, _state} = {result_entity, result_state}
     end
 
     test "does not crash when killer_entity is provided but killer_char_id is nil" do
@@ -458,13 +458,13 @@ defmodule Arena.NpcDeathTest do
       state = make_state(npcs: %{1 => npc})
 
       # killer_entity set but killer_char_id nil => no rewards path, returns bare state
-      result = NpcDeath.resolve_npc_death(state, 1, npc,
+      {result_entity, result_state, _result_effects} = NpcDeath.resolve_npc_death(state, 1, npc,
         killer_char_id: nil,
         killer_entity: killer,
         source: :melee
       )
 
-      assert %{npcs_live: _} = result
+      assert %{npcs_live: _} = result_state
     end
   end
 
@@ -477,11 +477,11 @@ defmodule Arena.NpcDeathTest do
       dead_npc = make_npc(instance_id: 1, alive: false, hp: 0)
       state = make_state(npcs: %{1 => dead_npc})
 
-      result = NpcDeath.resolve_npc_death(state, 1, dead_npc)
+      {result_entity, result_state, _result_effects} = NpcDeath.resolve_npc_death(state, 1, dead_npc)
 
       # Function should handle gracefully — NPC stays dead
-      assert %{npcs_live: _} = result
-      assert result.npcs_live[1].alive == false
+      assert %{npcs_live: _} = result_state
+      assert result_state.npcs_live[1].alive == false
     end
 
     test "already-dead NPC with killer does not award double rewards" do
@@ -489,7 +489,7 @@ defmodule Arena.NpcDeathTest do
       killer = make_player(char_id: 7, npcs_killed: 10)
       state = make_state(players: %{7 => killer}, npcs: %{1 => dead_npc})
 
-      {entity, _state} = NpcDeath.resolve_npc_death(state, 1, dead_npc,
+      {entity, _state, _effects} = NpcDeath.resolve_npc_death(state, 1, dead_npc,
         killer_char_id: 7,
         killer_entity: killer,
         final_damage: 0,
@@ -513,14 +513,14 @@ defmodule Arena.NpcDeathTest do
       killer = make_player(char_id: 7)
       state = make_state(players: %{7 => killer}, npcs: %{1 => npc})
 
-      result = NpcDeath.resolve_npc_death(state, 1, npc,
+      {result_entity, result_state, _result_effects} = NpcDeath.resolve_npc_death(state, 1, npc,
         killer_char_id: 7,
         killer_entity: killer,
         final_damage: 20,
         source: :melee
       )
 
-      assert {_entity, new_state} = result
+      assert {_entity, new_state} = {result_entity, result_state}
       # NPC should still be marked dead
       assert new_state.npcs_live[1].alive == false
     end
@@ -530,7 +530,7 @@ defmodule Arena.NpcDeathTest do
       state = make_state(npcs: %{1 => npc})
       before_time = System.monotonic_time(:millisecond)
 
-      state = NpcDeath.resolve_npc_death(state, 1, npc)
+      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, npc)
 
       dead_npc = state.npcs_live[1]
       # Default respawn is 60 seconds
@@ -542,7 +542,7 @@ defmodule Arena.NpcDeathTest do
       npc = make_npc(instance_id: 1, npc_id: @test_npc_id_no_def)
       state = make_state(npcs: %{1 => npc})
 
-      state = NpcDeath.resolve_npc_death(state, 1, npc,
+      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, npc,
         source: :gm_perm,
         permanent: true
       )
@@ -560,13 +560,13 @@ defmodule Arena.NpcDeathTest do
       npc = make_npc(instance_id: 1)
       state = make_state(npcs: %{1 => npc})
 
-      state = NpcDeath.resolve_npc_death(state, 1, npc)
+      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, npc)
       # NPC is now dead in npcs_live
       dead_npc = state.npcs_live[1]
       assert dead_npc.alive == false
 
       # Call again with the original npc struct (simulating a race)
-      state = NpcDeath.resolve_npc_death(state, 1, npc)
+      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, npc)
       # Should still be in npcs_live, still dead
       assert state.npcs_live[1].alive == false
     end
@@ -576,7 +576,7 @@ defmodule Arena.NpcDeathTest do
       killer = make_player(char_id: 7)
       state = make_state(players: %{7 => killer}, npcs: %{1 => npc})
 
-      {entity1, state} = NpcDeath.resolve_npc_death(state, 1, npc,
+      {entity1, state, _effects} = NpcDeath.resolve_npc_death(state, 1, npc,
         killer_char_id: 7,
         killer_entity: killer,
         final_damage: 20,
@@ -584,7 +584,7 @@ defmodule Arena.NpcDeathTest do
       )
 
       # Second call with the updated entity as killer
-      {entity2, _state} = NpcDeath.resolve_npc_death(state, 1, npc,
+      {entity2, _state, _effects} = NpcDeath.resolve_npc_death(state, 1, npc,
         killer_char_id: 7,
         killer_entity: entity1,
         final_damage: 0,
@@ -599,7 +599,7 @@ defmodule Arena.NpcDeathTest do
       npc = make_npc(instance_id: 1)
       state = make_state(npcs: %{1 => npc})
 
-      state = NpcDeath.resolve_npc_death(state, 1, npc,
+      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, npc,
         source: :gm_perm,
         permanent: true
       )
@@ -607,7 +607,7 @@ defmodule Arena.NpcDeathTest do
       refute Map.has_key?(state.npcs_live, 1)
 
       # Second permanent kill — NPC no longer in npcs_live
-      state = NpcDeath.resolve_npc_death(state, 1, npc,
+      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, npc,
         source: :gm_perm,
         permanent: true
       )
@@ -621,11 +621,11 @@ defmodule Arena.NpcDeathTest do
       owner = make_player(pet_ids: [1])
       state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
 
-      state = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
+      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
       refute Map.has_key?(state.npcs_live, 1)
 
       # Second pet death — pet already gone
-      state = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
+      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
       refute Map.has_key?(state.npcs_live, 1),
              "Double pet death should not crash"
     end

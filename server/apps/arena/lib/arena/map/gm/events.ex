@@ -76,7 +76,10 @@ defmodule Arena.Map.Gm.Events do
             npc_def = GameData.get_npc(npc.npc_id)
             npc_name = if npc_def, do: npc_def.name, else: "NPC #{npc.npc_id}"
 
-            state = Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :gm)
+            {nil, state, effects} =
+              Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :gm)
+
+            Arena.Map.Effects.run(state, effects)
             AuditLog.log_gm_action(char_id, "kill_npc", npc_name)
             Helpers.gm_console(state, char_id, "Killed NPC #{npc_name} (respawn enabled).")
             {:noreply, state}
@@ -102,7 +105,10 @@ defmodule Arena.Map.Gm.Events do
             npc_def = GameData.get_npc(npc.npc_id)
             npc_name = if npc_def, do: npc_def.name, else: "NPC #{npc.npc_id}"
 
-            state = Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :gm, permanent: true)
+            {nil, state, effects} =
+              Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :gm, permanent: true)
+
+            Arena.Map.Effects.run(state, effects)
             AuditLog.log_gm_action(char_id, "kill_npc_permanent", npc_name)
             Helpers.gm_console(state, char_id, "Killed NPC #{npc_name} permanently (no respawn).")
             {:noreply, state}
@@ -121,7 +127,10 @@ defmodule Arena.Map.Gm.Events do
     {killed, state} =
       Enum.reduce(state.npcs_live, {0, state}, fn {inst_id, npc}, {count, st} ->
         if npc.alive and abs(npc.x - entity.x) <= aoi_x and abs(npc.y - entity.y) <= aoi_y do
-          st = Arena.Map.NpcDeath.resolve_npc_death(st, inst_id, npc, source: :gm, permanent: true)
+          {nil, st, effects} =
+            Arena.Map.NpcDeath.resolve_npc_death(st, inst_id, npc, source: :gm, permanent: true)
+
+          Arena.Map.Effects.run(st, effects)
           {count + 1, st}
         else
           {count, st}

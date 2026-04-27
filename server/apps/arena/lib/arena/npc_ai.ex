@@ -59,8 +59,13 @@ defmodule Arena.NpcAi do
 
   @doc false
   def despawn_pet(state, instance_id, npc) do
-    # Delegate to consolidated NPC death handler (pet despawn — no killer, no rewards)
-    state = Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :pet)
+    # Delegate to consolidated NPC death handler (pet despawn — no killer, no rewards).
+    # Run the resulting map-effects inline since NpcAi's outer dispatch_effects/2
+    # only handles legacy {:send_raw, _}-flavoured tuples.
+    {nil, state, effects} =
+      Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :pet)
+
+    Arena.Map.Effects.run(state, effects)
     {state, []}
   end
 
@@ -361,8 +366,13 @@ defmodule Arena.NpcAi do
       target_npc = %{target_npc | hp: new_hp}
 
       if new_hp <= 0 do
-        # Target NPC died — delegate to consolidated death handler
-        state = Arena.Map.NpcDeath.resolve_npc_death(state, target_instance_id, target_npc, source: :pet)
+        # Target NPC died — delegate to consolidated death handler. Run the
+        # resulting map-effects inline; NpcAi's own effect-dispatch chain
+        # (dispatch_effects/2) carries different-shaped tuples.
+        {nil, state, death_effects} =
+          Arena.Map.NpcDeath.resolve_npc_death(state, target_instance_id, target_npc, source: :pet)
+
+        Arena.Map.Effects.run(state, death_effects)
         {state, effects}
       else
         {put_in(state.npcs_live[target_instance_id], target_npc), effects}

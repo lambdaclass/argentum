@@ -258,10 +258,10 @@ defmodule Arena.Map.SpellEffects do
       )
 
     if new_hp <= 0 do
-      # NPC died — delegate to consolidated death handler (legacy; the
-      # send_mana_update: true flag asks NpcDeath to flush an update_mana
-      # via the legacy shim, so we don't double-send here).
-      {entity, state} =
+      # NPC died — delegate to consolidated death handler. send_mana_update
+      # appends an update_mana effect for the killer, so we don't add one
+      # here.
+      {entity, state, death_effects} =
         Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc,
           killer_char_id: char_id,
           killer_entity: entity,
@@ -271,21 +271,23 @@ defmodule Arena.Map.SpellEffects do
         )
 
       players = Map.put(state.players, char_id, entity)
-      {%{state | players: players}, [hit_effect]}
+      {%{state | players: players}, [hit_effect | death_effects]}
     else
       npc = %{npc | target_id: char_id}
       state = put_in(state.npcs_live[instance_id], npc)
 
       # VB6: per-hit proportional XP (no XP for hitting pets)
-      {entity, state} =
+      {entity, state, xp_effects} =
         if npc.owner_id == nil do
           Arena.Map.CombatHandlers.award_hit_xp(state, char_id, entity, final_damage, npc_def, instance_id)
         else
-          {entity, state}
+          {entity, state, []}
         end
 
       players = Map.put(state.players, char_id, entity)
-      {%{state | players: players}, [hit_effect, update_mana_effect(char_id, entity)]}
+
+      {%{state | players: players},
+       [hit_effect | xp_effects] ++ [update_mana_effect(char_id, entity)]}
     end
   end
 
@@ -834,6 +836,10 @@ defmodule Arena.Map.SpellEffects do
   # Deprecated: pet death is now handled by Arena.Map.NpcDeath.resolve_npc_death/4
   @doc false
   def handle_pet_death(state, instance_id, npc) do
-    Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :pet)
+    {nil, state, effects} =
+      Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :pet)
+
+    Effects.run(state, effects)
+    state
   end
 end

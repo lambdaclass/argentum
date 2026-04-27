@@ -7,6 +7,10 @@ defmodule Arena.Map.NpcDeath do
   reward sequence across combat_handlers, spell_effects, npc_ai, and
   gm_commands.
 
+  Returns `{entity_or_nil, state, effects}` — uniform shape regardless of
+  whether a `killer_entity` was provided. When no killer is given the
+  entity slot is `nil`.
+
   ## Options
 
     * `:killer_char_id`  — the player character id that killed the NPC (nil when
@@ -17,19 +21,17 @@ defmodule Arena.Map.NpcDeath do
     * `:source`          — `:melee`, `:spell`, `:pet`, `:gm`, or `:gm_perm`.
     * `:permanent`       — if true, the NPC is deleted from npcs_live with no
       respawn (GM /KILLNPCPERM and /MASSKILL).
-    * `:send_mana_update` — if true, send an `update_mana` packet to the killer
-      (spell kills need this).
+    * `:send_mana_update` — if true, append an `update_mana` packet to the
+      killer's effects (spell kills need this).
   """
 
   alias Arena.Data.GameData
-  alias Arena.Map.{Helpers, Visibility}
+  alias Arena.Map.{Effects, Helpers}
   alias AoProtocol.Server.Encoder
 
   @doc """
-  Handle the death of an NPC instance.
-
-  Returns `{updated_entity_or_nil, state}` when a `killer_entity` is provided,
-  or just `state` when there is no killer entity (pet-vs-NPC, GM kills).
+  Handle the death of an NPC instance. Returns
+  `{entity_or_nil, state, effects}`.
   """
   def resolve_npc_death(state, instance_id, npc, opts \\ []) do
     killer_char_id = Keyword.get(opts, :killer_char_id)
@@ -72,43 +74,39 @@ defmodule Arena.Map.NpcDeath do
     state = %{state | occupancy: occupancy}
 
     # --- 3. Broadcast NPC removal ---
-    remove_raw = Encoder.encode({:character_remove, %{char_index: npc.char_index}})
-
-    Visibility.broadcast_visible_all(state, npc.x, npc.y, fn pid ->
-      send(pid, {:send_raw, remove_raw})
-    end)
+    remove_effect =
+      Effects.broadcast_visible_all(
+        npc.x,
+        npc.y,
+        Encoder.encode({:character_remove, %{char_index: npc.char_index}})
+      )
 
     # --- 4. Player rewards (only for player-killed wild NPCs) ---
-    if killer_entity != nil and killer_char_id != nil and not is_pet and not permanent do
-      {entity, state} = award_player_rewards(state, killer_char_id, killer_entity, npc, npc_def, final_damage, instance_id)
+    cond do
+      killer_entity != nil and killer_char_id != nil and not is_pet and not permanent ->
+        {entity, state, reward_effects} =
+          award_player_rewards(state, killer_char_id, killer_entity, npc, npc_def, final_damage, instance_id)
 
-      # Spell kills send mana update
-      if send_mana_update do
-        Helpers.send_to_session(
-          state.sessions,
-          killer_char_id,
-          {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
-        )
-      end
+        mana_effects =
+          if send_mana_update,
+            do: [Effects.send(killer_char_id, Encoder.encode({:update_mana, %{min_mana: entity.mana}}))],
+            else: []
 
-      {entity, state}
-    else
-      if killer_entity != nil and killer_char_id != nil and is_pet do
-        # Killing a pet: no rewards, but still need to return entity
+        {entity, state, [remove_effect | reward_effects] ++ mana_effects}
+
+      killer_entity != nil and killer_char_id != nil and is_pet ->
+        # Killing a pet: no rewards, but still return the killer entity
         entity = killer_entity
 
-        if send_mana_update do
-          Helpers.send_to_session(
-            state.sessions,
-            killer_char_id,
-            {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
-          )
-        end
+        mana_effects =
+          if send_mana_update,
+            do: [Effects.send(killer_char_id, Encoder.encode({:update_mana, %{min_mana: entity.mana}}))],
+            else: []
 
-        {entity, state}
-      else
-        state
-      end
+        {entity, state, [remove_effect | mana_effects]}
+
+      true ->
+        {nil, state, [remove_effect]}
     end
   end
 
@@ -133,7 +131,7 @@ defmodule Arena.Map.NpcDeath do
 
   defp award_player_rewards(state, char_id, entity, npc, npc_def, final_damage, instance_id) do
     # Per-hit XP on the killing blow
-    {entity, state} =
+    {entity, state, xp_effects} =
       Arena.Map.CombatHandlers.award_hit_xp(state, char_id, entity, final_damage, npc_def, instance_id)
 
     # Increment kill counter
@@ -162,15 +160,15 @@ defmodule Arena.Map.NpcDeath do
 
     # VB6: NPCTirarOro — drop gold on the floor at NPC position
     give_gld = if npc_def, do: npc_def.give_gld, else: 0
-    state = Arena.Map.CombatHandlers.drop_npc_gold(state, npc, give_gld)
+    {state, gold_effects} = Arena.Map.CombatHandlers.drop_npc_gold(state, npc, give_gld)
 
     # Drop loot
-    state = Arena.Map.CombatHandlers.drop_npc_loot(state, npc, npc_def)
+    {state, loot_effects} = Arena.Map.CombatHandlers.drop_npc_loot(state, npc, npc_def)
 
     # Persist entity into state
     players = Map.put(state.players, char_id, entity)
     state = %{state | players: players}
 
-    {entity, state}
+    {entity, state, xp_effects ++ gold_effects ++ loot_effects}
   end
 end

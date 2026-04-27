@@ -346,10 +346,10 @@ defmodule Arena.PetTamingExtendedTest do
       state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
 
       # Pet death with source: :pet — no killer_entity, so no rewards branch
-      result = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
+      {result_entity, result_state, _result_effects} = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
 
       # When no killer_entity is provided, returns just state (not {entity, state})
-      state = result
+      state = result_state
       assert is_map(state), "resolve_npc_death with no killer returns state map"
 
       # Owner's npcs_killed should be unchanged
@@ -367,7 +367,7 @@ defmodule Arena.PetTamingExtendedTest do
       occupancy = Helpers.set_occupancy(state.occupancy, 10, 10, {:npc, 1})
       state = %{state | occupancy: occupancy}
 
-      state = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
+      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
 
       assert Helpers.get_occupancy(state.occupancy, 10, 10) == nil,
              "Pet death should clear occupancy at pet position"
@@ -379,7 +379,7 @@ defmodule Arena.PetTamingExtendedTest do
 
       state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
 
-      state = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
+      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
 
       # Pet should be completely gone from npcs_live (not just dead with respawn_at)
       refute Map.has_key?(state.npcs_live, 1),
@@ -396,7 +396,7 @@ defmodule Arena.PetTamingExtendedTest do
         npc_char_indices: %{200 => 2}
       )
 
-      state = NpcDeath.resolve_npc_death(state, 2, pet, source: :pet)
+      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 2, pet, source: :pet)
 
       assert state.players[7].pet_ids == [1, 3],
              "Pet death should remove instance_id 2 from owner's pet_ids"
@@ -434,7 +434,7 @@ defmodule Arena.PetTamingExtendedTest do
         npcs: %{1 => pet}
       )
 
-      {entity, _state} = NpcDeath.resolve_npc_death(
+      {entity, _state, _effects} = NpcDeath.resolve_npc_death(
         state, 1, pet,
         source: :pet,
         killer_char_id: 7,
@@ -865,7 +865,7 @@ defmodule Arena.PetTamingExtendedTest do
       state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
 
       # Simulate pet death through resolve_npc_death (same path as combat)
-      state = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
+      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
 
       refute Map.has_key?(state.npcs_live, 1),
              "Dead pet should be removed from npcs_live"
@@ -895,7 +895,7 @@ defmodule Arena.PetTamingExtendedTest do
       )
 
       # Should not crash even though owner 99 is not in players
-      state = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
+      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
 
       refute Map.has_key?(state.npcs_live, 1),
              "Pet should still be removed even if owner is absent"

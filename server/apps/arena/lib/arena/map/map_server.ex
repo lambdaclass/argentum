@@ -530,7 +530,10 @@ defmodule Arena.Map.MapServer do
         {:reply, {:error, :npc_not_found}, state}
 
       npc ->
-        state = Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :gm, permanent: true)
+        {nil, state, effects} =
+          Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :gm, permanent: true)
+
+        Effects.run(state, effects)
         {:reply, :ok, state}
     end
   end

@@ -287,7 +287,7 @@ defmodule Arena.Map.CombatHandlers do
             npc = %{npc | hp: new_hp}
 
             # VB6: weapon skill gain on hit
-            {entity, state} = maybe_gain_skill(state, char_id, entity, skill_name)
+            {entity, state, skill_effects} = maybe_gain_skill(state, char_id, entity, skill_name)
 
             hit_effect =
               Effects.send(
@@ -296,8 +296,8 @@ defmodule Arena.Map.CombatHandlers do
               )
 
             if new_hp <= 0 do
-              # NPC died — delegate to consolidated death handler (legacy)
-              {entity, state} =
+              # NPC died — delegate to consolidated death handler.
+              {entity, state, death_effects} =
                 Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc,
                   killer_char_id: char_id,
                   killer_entity: entity,
@@ -306,7 +306,8 @@ defmodule Arena.Map.CombatHandlers do
                 )
 
               players = Map.put(state.players, char_id, entity)
-              {%{state | players: players}, [hit_effect]}
+
+              {%{state | players: players}, [hit_effect | skill_effects] ++ death_effects}
             else
               state = put_in(state.npcs_live[instance_id], npc)
               # NPC acquires target on being hit
@@ -314,15 +315,15 @@ defmodule Arena.Map.CombatHandlers do
               state = put_in(state.npcs_live[instance_id], npc)
 
               # VB6: per-hit proportional XP (no XP for hitting pets)
-              {entity, state} =
+              {entity, state, xp_effects} =
                 if npc.owner_id == nil do
                   award_hit_xp(state, char_id, entity, final_damage, npc_def, instance_id)
                 else
-                  {entity, state}
+                  {entity, state, []}
                 end
 
               players = Map.put(state.players, char_id, entity)
-              {%{state | players: players}, [hit_effect]}
+              {%{state | players: players}, [hit_effect | skill_effects] ++ xp_effects}
             end
           else
             # Miss — NPC still acquires aggro on the attacker (VB6 parity)
@@ -417,7 +418,7 @@ defmodule Arena.Map.CombatHandlers do
             if :rand.uniform(100) <= hit_roll do
               # --- HIT: deal damage ---
               # VB6: weapon skill gain on hit
-              {entity, state} = maybe_gain_skill(state, char_id, entity, skill_name)
+              {entity, state, skill_effects} = maybe_gain_skill(state, char_id, entity, skill_name)
 
               # VB6: base user damage added to weapon damage
               {user_min, user_max} = Combat.base_user_damage(entity.level, class_id)
@@ -521,7 +522,7 @@ defmodule Arena.Map.CombatHandlers do
               char_change_effects =
                 if defender.dead, do: [Effects.broadcast_character_change(defender)], else: []
 
-              {state, hit_effects ++ death_effects ++ char_change_effects}
+              {state, skill_effects ++ hit_effects ++ death_effects ++ char_change_effects}
             else
               # --- MISS: Drift #3 — shield block checked AFTER miss (second chance) ---
               # VB6 ref: SistemaCombate.bas UsuarioImpacto (line 1014-1033)
@@ -531,7 +532,8 @@ defmodule Arena.Map.CombatHandlers do
               # Drift #3: Use DEFENDER's tactics (not attacker's weapons skill)
               if shield_pct > 0 and Combat.shield_block?(shield_pct, def_skill, def_tactics) do
                 # Shield blocked the attack
-                {defender, state} = maybe_gain_skill(state, defender_id, defender, :combat_defense)
+                {defender, state, def_skill_effects} =
+                  maybe_gain_skill(state, defender_id, defender, :combat_defense)
 
                 block_effects = [
                   Effects.send(defender_id, Encoder.encode({:blocked_with_shield_user, %{}})),
@@ -548,7 +550,7 @@ defmodule Arena.Map.CombatHandlers do
                   |> Map.put(char_id, entity)
                   |> Map.put(defender_id, defender)
 
-                {%{state | players: players}, block_effects}
+                {%{state | players: players}, def_skill_effects ++ block_effects}
               else
                 # Pure miss — no block
                 players = Map.put(state.players, char_id, entity)
@@ -793,6 +795,9 @@ defmodule Arena.Map.CombatHandlers do
   # VB6: SubirSkill (Modulo_UsUaRiOs.bas:1617-1670). Practice-based skill-up.
   # Gates on hunger/thirst, per-level cap, quadratic probability; on success
   # bumps the skill, awards 5 * ExpMult XP, and checks for level-up.
+  #
+  # Returns `{entity, state, effects}`. Effects: level-up packets (level_up,
+  # update_user_stats, console nivel) and the update_exp refresh.
   def maybe_gain_skill(state, char_id, entity, skill_name) do
     current = Map.get(entity.skills, skill_name, 0)
     expert? = Map.get(entity, :expert_skill_pending, false)
@@ -806,12 +811,11 @@ defmodule Arena.Map.CombatHandlers do
             xp: entity.xp + bonus_exp
         }
 
-        entity = check_level_up(entity, state.sessions, char_id)
-        send_xp_update(state, char_id, entity)
-        {entity, state}
+        {entity, level_effects} = check_level_up(entity, char_id)
+        {entity, state, level_effects ++ [send_xp_update_effect(char_id, entity)]}
 
       :no_gain ->
-        {entity, state}
+        {entity, state, []}
     end
   end
 
@@ -821,64 +825,81 @@ defmodule Arena.Map.CombatHandlers do
     if nearby == [] do
       # Solo — full XP
       entity = %{entity | xp: entity.xp + xp_gained}
-      entity = check_level_up(entity, state.sessions, char_id)
-      send_xp_update(state, char_id, entity)
-      {entity, state}
+      {entity, level_effects} = check_level_up(entity, char_id)
+      {entity, state, level_effects ++ [send_xp_update_effect(char_id, entity)]}
     else
       # Split among killer + nearby party members
       share_count = length(nearby) + 1
       share = max(div(xp_gained, share_count), 1)
 
       entity = %{entity | xp: entity.xp + share}
-      entity = check_level_up(entity, state.sessions, char_id)
-      send_xp_update(state, char_id, entity)
+      {entity, killer_level_effects} = check_level_up(entity, char_id)
+      killer_effects = killer_level_effects ++ [send_xp_update_effect(char_id, entity)]
 
-      state =
-        Enum.reduce(nearby, state, fn mid, state ->
-          case Map.get(state.players, mid) do
+      {state, member_effects} =
+        Enum.reduce(nearby, {state, []}, fn mid, {acc_state, acc_effects} ->
+          case Map.get(acc_state.players, mid) do
             nil ->
-              state
+              {acc_state, acc_effects}
 
             member ->
               member = %{member | xp: member.xp + share}
-              member = check_level_up(member, state.sessions, mid)
-              send_xp_update(state, mid, member)
-              %{state | players: Map.put(state.players, mid, member)}
+              {member, m_level_effects} = check_level_up(member, mid)
+
+              acc_state = %{acc_state | players: Map.put(acc_state.players, mid, member)}
+              {acc_state, acc_effects ++ m_level_effects ++ [send_xp_update_effect(mid, member)]}
           end
         end)
 
-      {entity, state}
+      {entity, state, killer_effects ++ member_effects}
     end
   end
 
-  defp send_xp_update(state, char_id, entity) do
-    Helpers.send_to_session(
-      state.sessions,
+  defp send_xp_update_effect(char_id, entity) do
+    Effects.send(
       char_id,
-      {:send_raw,
-       Encoder.encode({:update_exp, %{current_xp: entity.xp, next_xp: GameData.exp_for_level(entity.level + 1) || 0}})}
+      Encoder.encode({:update_exp, %{current_xp: entity.xp, next_xp: GameData.exp_for_level(entity.level + 1) || 0}})
     )
   end
 
   # VB6: NPCTirarOro — drop gold on the floor at the NPC's death position.
   # Gold item ID 12 (iORO), capped at @max_stack per ground tile.
+  # Returns `{state, effects}`.
   @gold_item_id 12
-  def drop_npc_gold(state, _npc, give_gld) when give_gld <= 0, do: state
+  def drop_npc_gold(state, _npc, give_gld) when give_gld <= 0, do: {state, []}
 
   def drop_npc_gold(state, npc, give_gld) do
     pos = {npc.x, npc.y}
 
-    unless Map.has_key?(state.ground_items, pos) do
+    if Map.has_key?(state.ground_items, pos) do
+      {state, []}
+    else
       ground_items = Map.put(state.ground_items, pos, %{item_id: @gold_item_id, amount: give_gld, elemental_tags: 0})
       state = %{state | ground_items: ground_items}
-      Helpers.broadcast_object_create(state, npc.x, npc.y, @gold_item_id, give_gld)
-      state
-    else
-      state
+      {state, [object_create_effect(npc.x, npc.y, @gold_item_id, give_gld, 0)]}
     end
   end
 
-  def check_level_up(entity, sessions, char_id) do
+  defp object_create_effect(x, y, item_id, amount, elemental_tags) do
+    grh =
+      case GameData.get_item(item_id) do
+        nil -> 0
+        item_def -> item_def.grh_index
+      end
+
+    packet =
+      Encoder.encode(
+        {:object_create,
+         %{x: x, y: y, obj_index: grh, amount: amount, elemental_tags: elemental_tags}}
+      )
+
+    Effects.broadcast_visible_all(x, y, packet)
+  end
+
+  # Returns `{entity, effects}`. Effects: level_up + update_user_stats +
+  # console "Has alcanzado el nivel ..." per level gained, recursing for
+  # multi-level jumps.
+  def check_level_up(entity, char_id) do
     class_id = Helpers.class_atom_to_id(entity.class)
 
     case Combat.level_up_gains(entity.level, class_id, entity.int, entity.agi, entity.xp, :rand.uniform()) do
@@ -902,57 +923,49 @@ defmodule Arena.Map.CombatHandlers do
             skill_points: entity.skill_points + gains.skill_points
         }
 
-        # Level-up packet
-        Helpers.send_to_session(sessions, char_id, {:send_raw, Encoder.encode({:level_up, %{level: gains.new_level}})})
-
-        # Full stat refresh
-        Helpers.send_to_session(
-          sessions,
-          char_id,
-          {:send_raw,
-           Encoder.encode(
-             {:update_user_stats,
-              %{
-                max_hp: entity.max_hp,
-                min_hp: entity.hp,
-                shield: 0,
-                max_mana: entity.max_mana,
-                min_mana: entity.mana,
-                max_sta: entity.max_stamina,
-                min_sta: entity.stamina,
-                gold: entity.gold,
-                gold_cap: 1_000_000,
-                level: entity.level,
-                exp_next_level: GameData.exp_for_level(entity.level + 1) || 0,
-                exp: entity.xp,
-                class: Helpers.class_atom_to_id(entity.class)
-              }}
-           )}
-        )
-
-        Helpers.send_to_session(
-          sessions,
-          char_id,
-          {:send_raw,
-           Encoder.encode({:console_msg, %{message: "Has alcanzado el nivel #{gains.new_level}!", font_index: 0}})}
-        )
+        level_effects = [
+          Effects.send(char_id, Encoder.encode({:level_up, %{level: gains.new_level}})),
+          Effects.send(
+            char_id,
+            Encoder.encode(
+              {:update_user_stats,
+               %{
+                 max_hp: entity.max_hp,
+                 min_hp: entity.hp,
+                 shield: 0,
+                 max_mana: entity.max_mana,
+                 min_mana: entity.mana,
+                 max_sta: entity.max_stamina,
+                 min_sta: entity.stamina,
+                 gold: entity.gold,
+                 gold_cap: 1_000_000,
+                 level: entity.level,
+                 exp_next_level: GameData.exp_for_level(entity.level + 1) || 0,
+                 exp: entity.xp,
+                 class: Helpers.class_atom_to_id(entity.class)
+               }}
+            )
+          ),
+          Effects.send(char_id, console("Has alcanzado el nivel #{gains.new_level}!"))
+        ]
 
         # Recursive check for multiple level ups
-        check_level_up(entity, sessions, char_id)
+        {entity, more_effects} = check_level_up(entity, char_id)
+        {entity, level_effects ++ more_effects}
 
       :no_level_up ->
-        entity
+        {entity, []}
     end
   end
 
   @doc """
-  VB6 deep death: clear all transient combat/status state.
-  Called from every path that sets dead: true.
-  Despawns pets owned by the dying player.
+  Per-hit XP award. Returns `{entity, state, effects}`. Caps XP against
+  the NPC's `exp_count` pool and threads any level-up + update_exp effects
+  back to the caller.
   """
   def award_hit_xp(state, char_id, entity, final_damage, npc_def, instance_id) do
     if npc_def == nil or final_damage <= 0 do
-      {entity, state}
+      {entity, state, []}
     else
       give_exp = npc_def.give_exp || 0
       npc_level = npc_def.npc_level || 1
@@ -975,29 +988,31 @@ defmodule Arena.Map.CombatHandlers do
       if xp_gained > 0 do
         award_xp_with_party(state, char_id, entity, xp_gained)
       else
-        {entity, state}
+        {entity, state, []}
       end
     end
   end
 
-  def drop_npc_loot(state, _npc, nil), do: state
+  # Returns `{state, effects}`.
+  def drop_npc_loot(state, _npc, nil), do: {state, []}
 
   def drop_npc_loot(state, npc, npc_def) do
-    Enum.reduce(npc_def.loot_table, state, fn %{item_id: item_id, amount: amount}, state ->
+    Enum.reduce(npc_def.loot_table, {state, []}, fn %{item_id: item_id, amount: amount}, {acc, effs} ->
       # Simple probability: 1 in 5 chance per loot entry
       if :rand.uniform(5) == 1 do
         pos = {npc.x, npc.y}
 
-        unless Map.has_key?(state.ground_items, pos) do
-          ground_items = Map.put(state.ground_items, pos, %{item_id: item_id, amount: amount, elemental_tags: 0})
-          state = %{state | ground_items: ground_items}
-          Helpers.broadcast_object_create(state, npc.x, npc.y, item_id, amount)
-          state
+        if Map.has_key?(acc.ground_items, pos) do
+          {acc, effs}
         else
-          state
+          ground_items =
+            Map.put(acc.ground_items, pos, %{item_id: item_id, amount: amount, elemental_tags: 0})
+
+          acc = %{acc | ground_items: ground_items}
+          {acc, effs ++ [object_create_effect(npc.x, npc.y, item_id, amount, 0)]}
         end
       else
-        state
+        {acc, effs}
       end
     end)
   end
