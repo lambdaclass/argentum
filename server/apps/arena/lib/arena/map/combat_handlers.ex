@@ -10,7 +10,7 @@ defmodule Arena.Map.CombatHandlers do
 
   import Bitwise
 
-  alias Arena.Map.{Effects, Helpers, Visibility}
+  alias Arena.Map.{Effects, Helpers}
   alias Arena.{Combat, CombatStats, Data.GameData}
   alias AoProtocol.Server.Encoder
 
@@ -59,10 +59,12 @@ defmodule Arena.Map.CombatHandlers do
   # `handle_attack/4` runs this through `Effects.run_handler_call_reply/2` to
   # preserve the `{:reply, reply, state}` surface that callers depend on.
   #
-  # Slice 1 scope: outer rejects + swing broadcast emitted as effects.
-  # `handle_attack_target/{4,5}` and `handle_ranged_attack/7` still run their
-  # own `{:send_raw, _}` shim writes — bridged here as `effects = []`. They
-  # migrate in Slice 2 and Slice 5 respectively.
+  # Slice 2 scope: outer rejects + swing/melee/ranged emit effects via the
+  # runner. `handle_attack_target/{4,5}` returns `{state, effects}`;
+  # `handle_ranged_attack/7` returns `{state, reply, effects}`. Inner
+  # helpers (NpcDeath, PlayerDeath, CriminalStatus, maybe_gain_skill,
+  # drop_npc_*) still write through the legacy `{:send_raw, _}` shim — they
+  # migrate in slice 5.
   defp do_handle_attack_effects(state, char_id, target_x, target_y) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
@@ -88,10 +90,10 @@ defmodule Arena.Map.CombatHandlers do
             is_ranged = weapon_def != nil and weapon_def.proyectil > 0
 
             if is_ranged and target_x != nil and target_y != nil do
-              {:reply, reply, state} =
+              {state, reply, ranged_effects} =
                 handle_ranged_attack(state, char_id, entity, weapon_def, target_x, target_y, now)
 
-              {:ok, state, reply, []}
+              {:ok, state, reply, ranged_effects}
             else
               # Melee attack
               {tx, ty} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
@@ -102,8 +104,8 @@ defmodule Arena.Map.CombatHandlers do
               swing_packet = Encoder.encode({:char_swing, %{char_index: entity.char_index}})
               swing_effect = Effects.broadcast_visible_except(entity.x, entity.y, char_id, swing_packet)
 
-              state = handle_attack_target(state, char_id, entity, target)
-              {:ok, state, :ok, [swing_effect]}
+              {state, target_effects} = handle_attack_target(state, char_id, entity, target)
+              {:ok, state, :ok, [swing_effect | target_effects]}
             end
         end
 
@@ -112,28 +114,19 @@ defmodule Arena.Map.CombatHandlers do
     end
   end
 
+  # Returns `{state, reply, effects}`. Effects-contract sibling of
+  # `do_handle_attack_effects/4`; the caller folds them into the outer
+  # `{:ok, state, reply, effects}` return.
   def handle_ranged_attack(state, char_id, entity, _weapon_def, target_x, target_y, now) do
     cond do
       target_x < 1 or target_x > Helpers.map_width() or target_y < 1 or target_y > Helpers.map_height() ->
-        {:reply, {:error, :out_of_range}, state}
+        {state, {:error, :out_of_range}, []}
 
       max(abs(entity.x - target_x), abs(entity.y - target_y)) > @ranged_max_distance ->
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw, Encoder.encode({:console_msg, %{message: "Demasiado lejos.", font_index: 0}})}
-        )
-
-        {:reply, {:error, :out_of_range}, state}
+        {state, {:error, :out_of_range}, [Effects.send(char_id, console("Demasiado lejos."))]}
 
       entity.equipment[:municion] == nil ->
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw, Encoder.encode({:console_msg, %{message: "No tienes municiones equipadas.", font_index: 0}})}
-        )
-
-        {:reply, {:error, :no_ammo}, state}
+        {state, {:error, :no_ammo}, [Effects.send(char_id, console("No tienes municiones equipadas."))]}
 
       true ->
         ammo_id = entity.equipment[:municion]
@@ -147,17 +140,14 @@ defmodule Arena.Map.CombatHandlers do
         if ammo_slot_idx == nil do
           entity = %{entity | equipment: Map.put(entity.equipment, :municion, nil)}
           players = Map.put(state.players, char_id, entity)
-          {:reply, {:error, :no_ammo}, %{state | players: players}}
+          {%{state | players: players}, {:error, :no_ammo}, []}
         else
           ammo_def = GameData.get_item(ammo_id)
-          entity = consume_ammo(entity, state, char_id, ammo_slot_idx, ammo_id)
+          {entity, ammo_effects} = consume_ammo(entity, char_id, ammo_slot_idx, ammo_id)
           entity = %{entity | next_attack_at: now + attack_cooldown_ms(), last_attacked_at: now}
 
-          swing_raw = Encoder.encode({:char_swing, %{char_index: entity.char_index}})
-
-          Visibility.broadcast_visible(state, entity.x, entity.y, char_id, fn pid ->
-            send(pid, {:send_raw, swing_raw})
-          end)
+          swing_packet = Encoder.encode({:char_swing, %{char_index: entity.char_index}})
+          swing_effect = Effects.broadcast_visible_except(entity.x, entity.y, char_id, swing_packet)
 
           target = Helpers.get_occupancy(state.occupancy, target_x, target_y)
 
@@ -165,13 +155,16 @@ defmodule Arena.Map.CombatHandlers do
           {ammo_min, ammo_max} = if ammo_def, do: {ammo_def.min_hit, ammo_def.max_hit}, else: {0, 0}
           opts = [skill: :ranged_weapons, extra_min: ammo_min, extra_max: ammo_max]
 
-          state = handle_attack_target(state, char_id, entity, target, opts)
-          {:reply, :ok, state}
+          {state, target_effects} = handle_attack_target(state, char_id, entity, target, opts)
+          {state, :ok, ammo_effects ++ [swing_effect | target_effects]}
         end
     end
   end
 
-  def consume_ammo(entity, state, char_id, slot_idx, ammo_id) do
+  # Returns `{entity, effects}`. Effects-contract sibling of consume_ammo's
+  # legacy form; the caller folds the inventory-update effect into its own
+  # effects list.
+  def consume_ammo(entity, char_id, slot_idx, ammo_id) do
     slot = Enum.at(entity.inventory, slot_idx)
     new_amount = slot.amount - 1
 
@@ -184,32 +177,22 @@ defmodule Arena.Map.CombatHandlers do
 
     entity = %{entity | inventory: inventory, equipment: equipment}
 
-    # Send inventory update to client
-    if new_amount <= 0 do
-      Helpers.send_to_session(
-        state.sessions,
-        char_id,
-        {:send_raw,
-         Encoder.encode(
-           {:change_inventory_slot, %{slot: slot_idx + 1, obj_index: 0, amount: 0, equipped: false, valor: 0.0}}
-         )}
-      )
-    else
-      item_def = GameData.get_item(ammo_id)
-      valor = if item_def, do: item_def.valor / 1, else: 0.0
+    inv_packet =
+      if new_amount <= 0 do
+        Encoder.encode(
+          {:change_inventory_slot, %{slot: slot_idx + 1, obj_index: 0, amount: 0, equipped: false, valor: 0.0}}
+        )
+      else
+        item_def = GameData.get_item(ammo_id)
+        valor = if item_def, do: item_def.valor / 1, else: 0.0
 
-      Helpers.send_to_session(
-        state.sessions,
-        char_id,
-        {:send_raw,
-         Encoder.encode(
-           {:change_inventory_slot,
-            %{slot: slot_idx + 1, obj_index: ammo_id, amount: new_amount, equipped: true, valor: valor}}
-         )}
-      )
-    end
+        Encoder.encode(
+          {:change_inventory_slot,
+           %{slot: slot_idx + 1, obj_index: ammo_id, amount: new_amount, equipped: true, valor: valor}}
+        )
+      end
 
-    entity
+    {entity, [Effects.send(char_id, inv_packet)]}
   end
 
   defp attack_cooldown_ms, do: Arena.Settings.get(:attack_cooldown_ms)
@@ -230,18 +213,22 @@ defmodule Arena.Map.CombatHandlers do
     end
   end
 
+  # Returns `{state, effects}`. Side effects emitted as `Effect.t()` values
+  # for the runner; inner helpers (NpcDeath, PlayerDeath, CriminalStatus,
+  # maybe_gain_skill, drop_npc_*) still issue their own `{:send_raw, _}`
+  # writes — bridged here as no extra effects, until slice 5.
   def handle_attack_target(state, char_id, entity, target, opts \\ [])
 
   def handle_attack_target(state, char_id, entity, {:npc, instance_id}, opts) do
     case Map.get(state.npcs_live, instance_id) do
       nil ->
         players = Map.put(state.players, char_id, entity)
-        %{state | players: players}
+        {%{state | players: players}, []}
 
       npc ->
         if not npc.alive do
           players = Map.put(state.players, char_id, entity)
-          %{state | players: players}
+          {%{state | players: players}, []}
         else
           npc_def = GameData.get_npc(npc.npc_id)
           {min_weapon, max_weapon} = CombatStats.effective_damage(entity.equipment)
@@ -302,15 +289,14 @@ defmodule Arena.Map.CombatHandlers do
             # VB6: weapon skill gain on hit
             {entity, state} = maybe_gain_skill(state, char_id, entity, skill_name)
 
-            # Send damage feedback to attacker
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw, Encoder.encode({:user_hitted_user, %{char_index: npc.char_index, damage: final_damage}})}
-            )
+            hit_effect =
+              Effects.send(
+                char_id,
+                Encoder.encode({:user_hitted_user, %{char_index: npc.char_index, damage: final_damage}})
+              )
 
             if new_hp <= 0 do
-              # NPC died — delegate to consolidated death handler
+              # NPC died — delegate to consolidated death handler (legacy)
               {entity, state} =
                 Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc,
                   killer_char_id: char_id,
@@ -320,8 +306,7 @@ defmodule Arena.Map.CombatHandlers do
                 )
 
               players = Map.put(state.players, char_id, entity)
-              state = %{state | players: players}
-              state
+              {%{state | players: players}, [hit_effect]}
             else
               state = put_in(state.npcs_live[instance_id], npc)
               # NPC acquires target on being hit
@@ -337,14 +322,14 @@ defmodule Arena.Map.CombatHandlers do
                 end
 
               players = Map.put(state.players, char_id, entity)
-              %{state | players: players}
+              {%{state | players: players}, [hit_effect]}
             end
           else
             # Miss — NPC still acquires aggro on the attacker (VB6 parity)
             npc = %{npc | target_id: char_id}
             state = put_in(state.npcs_live[instance_id], npc)
             players = Map.put(state.players, char_id, entity)
-            %{state | players: players}
+            {%{state | players: players}, []}
           end
         end
     end
@@ -354,7 +339,7 @@ defmodule Arena.Map.CombatHandlers do
     case Map.get(state.players, defender_id) do
       nil ->
         players = Map.put(state.players, char_id, entity)
-        %{state | players: players}
+        {%{state | players: players}, []}
 
       defender ->
         # VB6: EnReto — in-duel restriction: can only attack duel opponent
@@ -367,64 +352,35 @@ defmodule Arena.Map.CombatHandlers do
 
         cond do
           in_duel_attacking_wrong_target ->
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw,
-               Encoder.encode(
-                 {:console_msg, %{message: "Solo puedes atacar a tu oponente de reto.", font_index: 0}}
-               )}
-            )
-
             players = Map.put(state.players, char_id, entity)
-            %{state | players: players}
+
+            {%{state | players: players},
+             [Effects.send(char_id, console("Solo puedes atacar a tu oponente de reto."))]}
 
           entity.safe_mode and not duel_pvp_exception ->
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: "Tienes el seguro activado.", font_index: 0}})}
-            )
-
             players = Map.put(state.players, char_id, entity)
-            %{state | players: players}
+            {%{state | players: players}, [Effects.send(char_id, console("Tienes el seguro activado."))]}
 
           same_faction?(entity, defender) and not duel_pvp_exception ->
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw,
-               Encoder.encode({:console_msg, %{message: "No puedes atacar a un miembro de tu faccion.", font_index: 0}})}
-            )
-
             players = Map.put(state.players, char_id, entity)
-            %{state | players: players}
+
+            {%{state | players: players},
+             [Effects.send(char_id, console("No puedes atacar a un miembro de tu faccion."))]}
 
           party_safe_block?(char_id, defender) and not duel_pvp_exception ->
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw,
-               Encoder.encode({:console_msg, %{message: "No puedes atacar a un miembro de tu grupo.", font_index: 0}})}
-            )
-
             players = Map.put(state.players, char_id, entity)
-            %{state | players: players}
+
+            {%{state | players: players},
+             [Effects.send(char_id, console("No puedes atacar a un miembro de tu grupo."))]}
 
           state.meta.safe_zone and not faction_pvp_exception?(state.map_id, entity, defender) and
               not duel_pvp_exception ->
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: "Zona segura.", font_index: 0}})}
-            )
-
             players = Map.put(state.players, char_id, entity)
-            %{state | players: players}
+            {%{state | players: players}, [Effects.send(char_id, console("Zona segura."))]}
 
           defender.dead ->
             players = Map.put(state.players, char_id, entity)
-            %{state | players: players}
+            {%{state | players: players}, []}
 
           true ->
             class_id = Helpers.class_atom_to_id(entity.class)
@@ -505,25 +461,17 @@ defmodule Arena.Map.CombatHandlers do
               new_hp = max(defender.hp - final_damage, 0)
               defender = %{defender | hp: new_hp}
 
-              Helpers.send_to_session(
-                state.sessions,
-                char_id,
-                {:send_raw,
-                 Encoder.encode({:user_hitted_user, %{char_index: defender.char_index, damage: final_damage}})}
-              )
-
-              Helpers.send_to_session(
-                state.sessions,
-                defender_id,
-                {:send_raw,
-                 Encoder.encode({:user_hitted_by_user, %{char_index: entity.char_index, damage: final_damage}})}
-              )
-
-              Helpers.send_to_session(
-                state.sessions,
-                defender_id,
-                {:send_raw, Encoder.encode({:update_hp, %{min_hp: new_hp}})}
-              )
+              hit_effects = [
+                Effects.send(
+                  char_id,
+                  Encoder.encode({:user_hitted_user, %{char_index: defender.char_index, damage: final_damage}})
+                ),
+                Effects.send(
+                  defender_id,
+                  Encoder.encode({:user_hitted_by_user, %{char_index: entity.char_index, damage: final_damage}})
+                ),
+                Effects.send(defender_id, Encoder.encode({:update_hp, %{min_hp: new_hp}}))
+              ]
 
               # Guild war: no criminal flag when attacking enemy guild members
               guild_war = Arena.GuildServer.players_at_war?(char_id, defender_id)
@@ -538,17 +486,12 @@ defmodule Arena.Map.CombatHandlers do
                   {entity, state}
                 end
 
-              {defender, state} =
+              {defender, state, death_effects} =
                 if new_hp <= 0 do
-                  Helpers.send_to_session(
-                    state.sessions,
-                    defender_id,
-                    {:send_raw, Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})}
-                  )
-
-                  Arena.Map.PlayerDeath.handle_player_death(state, defender_id, defender)
+                  {defender, state} = Arena.Map.PlayerDeath.handle_player_death(state, defender_id, defender)
+                  {defender, state, [Effects.send(defender_id, console("Has muerto!", 5))]}
                 else
-                  {defender, state}
+                  {defender, state, []}
                 end
 
               # Faction score + kill counters + guild XP on PvP kill
@@ -575,11 +518,10 @@ defmodule Arena.Map.CombatHandlers do
 
               state = %{state | players: players}
 
-              if defender.dead do
-                Helpers.broadcast_character_change(state, defender)
-              end
+              char_change_effects =
+                if defender.dead, do: [Effects.broadcast_character_change(defender)], else: []
 
-              state
+              {state, hit_effects ++ death_effects ++ char_change_effects}
             else
               # --- MISS: Drift #3 — shield block checked AFTER miss (second chance) ---
               # VB6 ref: SistemaCombate.bas UsuarioImpacto (line 1014-1033)
@@ -591,28 +533,26 @@ defmodule Arena.Map.CombatHandlers do
                 # Shield blocked the attack
                 {defender, state} = maybe_gain_skill(state, defender_id, defender, :combat_defense)
 
-                Helpers.send_to_session(
-                  state.sessions,
-                  defender_id,
-                  {:send_raw, Encoder.encode({:blocked_with_shield_user, %{}})}
-                )
-
-                block_raw = Encoder.encode({:blocked_with_shield_other, %{char_index: defender.char_index}})
-
-                Visibility.broadcast_visible(state, defender.x, defender.y, defender_id, fn pid ->
-                  send(pid, {:send_raw, block_raw})
-                end)
+                block_effects = [
+                  Effects.send(defender_id, Encoder.encode({:blocked_with_shield_user, %{}})),
+                  Effects.broadcast_visible_except(
+                    defender.x,
+                    defender.y,
+                    defender_id,
+                    Encoder.encode({:blocked_with_shield_other, %{char_index: defender.char_index}})
+                  )
+                ]
 
                 players =
                   state.players
                   |> Map.put(char_id, entity)
                   |> Map.put(defender_id, defender)
 
-                %{state | players: players}
+                {%{state | players: players}, block_effects}
               else
                 # Pure miss — no block
                 players = Map.put(state.players, char_id, entity)
-                %{state | players: players}
+                {%{state | players: players}, []}
               end
             end
         end
@@ -621,7 +561,11 @@ defmodule Arena.Map.CombatHandlers do
 
   def handle_attack_target(state, char_id, entity, _no_target, _opts) do
     players = Map.put(state.players, char_id, entity)
-    %{state | players: players}
+    {%{state | players: players}, []}
+  end
+
+  defp console(message, font_index \\ 0) do
+    Encoder.encode({:console_msg, %{message: message, font_index: font_index}})
   end
 
   # ==================================================================

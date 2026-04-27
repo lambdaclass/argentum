@@ -132,7 +132,7 @@ defmodule Arena.MeleeAggroAndNpcSpellLevelTest do
         seed_for_miss()
       end
 
-      new_state = CombatHandlers.handle_attack_target(state, char_id, entity, {:npc, 1})
+      {new_state, _effects} = CombatHandlers.handle_attack_target(state, char_id, entity, {:npc, 1})
       npc_after = new_state.npcs_live[1]
 
       # NPC should have aggro on attacker even after a miss
@@ -149,7 +149,8 @@ defmodule Arena.MeleeAggroAndNpcSpellLevelTest do
       final_state =
         Enum.reduce(1..20, state, fn _, acc_state ->
           ent = acc_state.players[char_id]
-          CombatHandlers.handle_attack_target(acc_state, char_id, ent, {:npc, 1})
+          {next_state, _effects} = CombatHandlers.handle_attack_target(acc_state, char_id, ent, {:npc, 1})
+          next_state
         end)
 
       npc_after = final_state.npcs_live[1]
