@@ -78,6 +78,8 @@ defmodule Arena.PetTamingExtendedTest do
       npcs_killed: overrides[:npcs_killed] || 0,
       buffs: [],
       paralyzed: false,
+      blind: false,
+      dumb: false,
       equipment: %{},
       mana: overrides[:mana] || 100,
       max_mana: overrides[:max_mana] || 100,
@@ -346,7 +348,7 @@ defmodule Arena.PetTamingExtendedTest do
       state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
 
       # Pet death with source: :pet — no killer_entity, so no rewards branch
-      {result_entity, result_state, _result_effects} = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
+      {_result_entity, result_state, _result_effects} = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
 
       # When no killer_entity is provided, returns just state (not {entity, state})
       state = result_state

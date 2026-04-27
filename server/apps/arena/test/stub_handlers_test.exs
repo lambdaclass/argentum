@@ -75,7 +75,10 @@ defmodule Arena.StubHandlersTest do
     entity
   end
 
-  # Collect all {:send_raw, binary} messages received within timeout
+  # Collect all outbound packet messages received within timeout. Accepts
+  # both the legacy `{:send_raw, binary}` shape and the new effects-runner
+  # `{:egress, %Outbound{payload: binary}}` shape so tests can stay agnostic
+  # about which lane a handler currently uses.
   defp collect_messages(timeout) do
     collect_messages_acc(timeout, [])
   end
@@ -83,6 +86,7 @@ defmodule Arena.StubHandlersTest do
   defp collect_messages_acc(timeout, acc) do
     receive do
       {:send_raw, binary} -> collect_messages_acc(timeout, [binary | acc])
+      {:egress, %{payload: binary}} -> collect_messages_acc(timeout, [binary | acc])
       {:send_packet, _} = msg -> collect_messages_acc(timeout, [msg | acc])
     after
       timeout -> Enum.reverse(acc)

@@ -563,7 +563,7 @@ defmodule Arena.Adversarial.PotionCriminalAdversarialTest do
 
       state = state_with(entity)
 
-      {new_entity, _new_state} = CriminalStatus.volver_criminal(state, :already_crim, entity)
+      {new_entity, _new_state, _vc_effects} = CriminalStatus.volver_criminal(state, :already_crim, entity)
 
       assert new_entity.criminal == true
       # faction_score was already 0, must not wrap-around or touch anything weird
@@ -581,7 +581,7 @@ defmodule Arena.Adversarial.PotionCriminalAdversarialTest do
 
       state = state_with(entity)
 
-      {new_entity, _new_state} = CriminalStatus.volver_criminal(state, :ciud, entity)
+      {new_entity, _new_state, _vc_effects} = CriminalStatus.volver_criminal(state, :ciud, entity)
 
       assert new_entity.faction_score == 0,
              "faction_score must not go negative; got #{new_entity.faction_score}"
@@ -598,7 +598,7 @@ defmodule Arena.Adversarial.PotionCriminalAdversarialTest do
       state = state_with(entity, %{no_pks: true, salida: nil})
 
       # The helper must not crash; it returns {entity, state}.
-      {new_entity, _new_state} = CriminalStatus.volver_criminal(state, :stuck, entity)
+      {new_entity, _new_state, _vc_effects} = CriminalStatus.volver_criminal(state, :stuck, entity)
 
       assert new_entity.criminal == true
       refute_receive {:transfer, _, _, _, _}, 50
@@ -609,7 +609,7 @@ defmodule Arena.Adversarial.PotionCriminalAdversarialTest do
       entity = make_entity(%{char_id: :nopatch, criminal: false})
       state = state_with(entity, %{trigger_map: nil})
 
-      {new_entity, _new_state} = CriminalStatus.volver_criminal(state, :nopatch, entity)
+      {new_entity, _new_state, _vc_effects} = CriminalStatus.volver_criminal(state, :nopatch, entity)
 
       assert new_entity.criminal == true,
              "With no trigger map, player must still become criminal"
@@ -632,7 +632,7 @@ defmodule Arena.Adversarial.PotionCriminalAdversarialTest do
           meta: %{no_pks: false, salida: nil, trigger_map: %{}, rain: false}
         )
 
-      {new_leader, _} = CriminalStatus.volver_criminal(state, leader.char_id, leader)
+      {new_leader, _, _vc_effects} = CriminalStatus.volver_criminal(state, leader.char_id, leader)
       Process.sleep(20)
 
       assert new_leader.criminal == true
@@ -657,7 +657,7 @@ defmodule Arena.Adversarial.PotionCriminalAdversarialTest do
 
       state = state_with(entity)
 
-      {new_entity, _new_state} = CriminalStatus.volver_criminal(state, :trader, entity)
+      {new_entity, _new_state, _vc_effects} = CriminalStatus.volver_criminal(state, :trader, entity)
 
       assert new_entity.trade_partner_id == 9999,
              "Trade partner id must be preserved — VB6 does not close trade on VolverCriminal"
@@ -688,7 +688,7 @@ defmodule Arena.Adversarial.PotionCriminalAdversarialTest do
 
       state = state_with(entity, %{trigger_map: %{{50, 50} => 6}})
 
-      {new_entity, _new_state} = CriminalStatus.volver_criminal(state, :caos_tile, entity)
+      {new_entity, _new_state, _vc_effects} = CriminalStatus.volver_criminal(state, :caos_tile, entity)
 
       assert new_entity.criminal == false
       assert new_entity.faction_score == 500
@@ -705,7 +705,7 @@ defmodule Arena.Adversarial.PotionCriminalAdversarialTest do
 
       state = state_with(entity)
 
-      {new_entity, _new_state} = CriminalStatus.volver_criminal(state, :concilio, entity)
+      {new_entity, _new_state, _vc_effects} = CriminalStatus.volver_criminal(state, :concilio, entity)
 
       assert new_entity.criminal == false,
              "Council player must not become criminal (VB6:2271)"
@@ -737,7 +737,7 @@ defmodule Arena.Adversarial.PotionCriminalAdversarialTest do
           salida: %{map: 5, x: 60, y: 70}
         })
 
-      {new_entity, _new_state} = CriminalStatus.volver_criminal(state, :gm, entity)
+      {new_entity, _new_state, _vc_effects} = CriminalStatus.volver_criminal(state, :gm, entity)
 
       refute_receive {:transfer, _, _, _, _}, 50
       assert new_entity.criminal == true,
@@ -769,8 +769,8 @@ defmodule Arena.Adversarial.PotionCriminalAdversarialTest do
       t1 = Task.async(fn -> CriminalStatus.volver_criminal(state, leader.char_id, leader) end)
       t2 = Task.async(fn -> CriminalStatus.volver_criminal(state, member.char_id, member) end)
 
-      {new_leader, _} = Task.await(t1, 1000)
-      {new_member, _} = Task.await(t2, 1000)
+      {new_leader, _, _} = Task.await(t1, 1000)
+      {new_member, _, _} = Task.await(t2, 1000)
 
       assert new_leader.criminal == true
       assert new_member.criminal == true

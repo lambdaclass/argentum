@@ -210,7 +210,8 @@ defmodule Arena.WorkRequestTargetDriftTest do
         CombatHandlers.handle_cast_spell(state, :caster, 1, nil, nil)
 
       assert reply == :ok
-      assert_receive {:send_raw, @prompt_point}, 200
+      prompt = @prompt_point
+      assert_receive {:egress, %{payload: ^prompt}}, 200
 
       # No mana drained, no cooldown set -- the spell hasn't actually run.
       updated = new_state.players[:caster]
@@ -239,7 +240,8 @@ defmodule Arena.WorkRequestTargetDriftTest do
 
       {:reply, :ok, _new} = CombatHandlers.handle_cast_spell(state, :caster, 1, nil, nil)
 
-      assert_receive {:send_raw, @prompt_aoe_radio_3}, 200
+      prompt = @prompt_aoe_radio_3
+      assert_receive {:egress, %{payload: ^prompt}}, 200
 
       :ets.delete(:arena_game_data, {:spell, spell_id})
     end
@@ -273,8 +275,10 @@ defmodule Arena.WorkRequestTargetDriftTest do
 
       _ = CombatHandlers.handle_cast_spell(state, :caster, 1, nil, nil)
 
-      refute_receive {:send_raw, @prompt_point}, 100
-      refute_receive {:send_raw, @prompt_aoe_radio_3}, 50
+      prompt_point = @prompt_point
+      prompt_aoe = @prompt_aoe_radio_3
+      refute_receive {:egress, %{payload: ^prompt_point}}, 100
+      refute_receive {:egress, %{payload: ^prompt_aoe}}, 50
 
       :ets.delete(:arena_game_data, {:spell, spell_id})
     end
@@ -307,7 +311,8 @@ defmodule Arena.WorkRequestTargetDriftTest do
 
       {:reply, :ok, new} = CombatHandlers.handle_cast_spell(state, :caster, 1, 50, 50)
 
-      refute_receive {:send_raw, @prompt_point}, 50
+      prompt = @prompt_point
+      refute_receive {:egress, %{payload: ^prompt}}, 50
 
       # Spell DID run -- mana drained.
       assert new.players[:caster].mana < 200
@@ -333,7 +338,8 @@ defmodule Arena.WorkRequestTargetDriftTest do
       {:reply, reply, _new} = CombatHandlers.handle_cast_spell(state, :caster, 1, nil, nil)
 
       assert reply == {:error, :invalid_slot}
-      refute_receive {:send_raw, @prompt_point}, 50
+      prompt = @prompt_point
+      refute_receive {:egress, %{payload: ^prompt}}, 50
     end
   end
 
@@ -357,7 +363,8 @@ defmodule Arena.WorkRequestTargetDriftTest do
       {:reply, reply, _new} = CombatHandlers.handle_cast_spell(state, :caster, 1, nil, nil)
 
       assert reply == {:error, :dead}
-      refute_receive {:send_raw, @prompt_point}, 50
+      prompt = @prompt_point
+      refute_receive {:egress, %{payload: ^prompt}}, 50
 
       :ets.delete(:arena_game_data, {:spell, spell_id})
     end
@@ -383,7 +390,8 @@ defmodule Arena.WorkRequestTargetDriftTest do
       {:reply, reply, _new} = CombatHandlers.handle_cast_spell(state, :caster, 1, nil, nil)
 
       assert reply == {:error, :paralyzed}
-      refute_receive {:send_raw, @prompt_point}, 50
+      prompt = @prompt_point
+      refute_receive {:egress, %{payload: ^prompt}}, 50
 
       :ets.delete(:arena_game_data, {:spell, spell_id})
     end
@@ -410,7 +418,8 @@ defmodule Arena.WorkRequestTargetDriftTest do
       {:reply, reply, _new} = CombatHandlers.handle_cast_spell(state, :caster, 1, nil, nil)
 
       assert reply == {:error, :cooldown}
-      refute_receive {:send_raw, @prompt_point}, 50
+      prompt = @prompt_point
+      refute_receive {:egress, %{payload: ^prompt}}, 50
 
       :ets.delete(:arena_game_data, {:spell, spell_id})
     end

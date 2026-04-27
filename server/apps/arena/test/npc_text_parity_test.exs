@@ -172,13 +172,17 @@ defmodule Arena.NpcTextParityTest do
   defp collect_console_messages(count \\ 10) do
     Enum.reduce_while(1..count, [], fn _, acc ->
       receive do
-        {:send_raw, raw} ->
-          case raw do
-            <<37::little-signed-16, _::binary>> ->
-              {:cont, [decode_console_msg(raw) | acc]}
-            _ ->
-              {:cont, acc}
-          end
+        {:send_raw, <<37::little-signed-16, _::binary>> = raw} ->
+          {:cont, [decode_console_msg(raw) | acc]}
+
+        {:egress, %{payload: <<37::little-signed-16, _::binary>> = raw}} ->
+          {:cont, [decode_console_msg(raw) | acc]}
+
+        {:send_raw, _} ->
+          {:cont, acc}
+
+        {:egress, _} ->
+          {:cont, acc}
       after
         50 -> {:halt, acc}
       end
@@ -229,6 +233,7 @@ defmodule Arena.NpcTextParityTest do
       # Must NOT show the old wrong "Ganancias" computation (7 - 3 = 4)
       refute all_text =~ "Ganancias"
       refute_receive {:send_raw, _}, 50
+      refute_receive {:egress, _}, 50
     end
   end
 
@@ -267,7 +272,8 @@ defmodule Arena.NpcTextParityTest do
           fresh_state = make_map_state(fresh_entity, %{timbero: timbero})
           drain_messages()
 
-          {:noreply, _st} = NpcInteraction.handle_gamble(fresh_state, :player, 100, nil)
+          {:ok, ran_st, effects} = NpcInteraction.handle_gamble(fresh_state, :player, 100, nil)
+          Arena.Map.Effects.run(ran_st, effects)
 
           msgs = collect_console_messages()
           win_found = Enum.find(msgs, &String.contains?(&1, "ganado"))

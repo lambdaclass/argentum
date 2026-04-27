@@ -9,7 +9,7 @@ defmodule Arena.Map.PlayerDeath do
   `Effect.t()` values.
   """
 
-  alias Arena.Map.{Effects, Helpers}
+  alias Arena.Map.Effects
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 

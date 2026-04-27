@@ -207,7 +207,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{})
 
-      {:noreply, new_state} = NpcInteraction.handle_gamble(state, :player, 50, nil)
+      {:ok, new_state, _effects} = NpcInteraction.handle_gamble(state, :player, 50, nil)
       # Gold must not change — gamble should be rejected
       assert new_state.players[:player].gold == 100
       assert new_state.players[:player].gamble_plays == 0
@@ -227,7 +227,7 @@ defmodule Arena.BugRegressionTest do
 
       # We need a real NPC def with npc_type=10 (timbero). GameData may not have one,
       # so we test the NPC lookup path. If no NPC def exists, it falls through.
-      {:noreply, new_state} = NpcInteraction.handle_gamble(state, :player, 50, nil)
+      {:ok, new_state, _effects} = NpcInteraction.handle_gamble(state, :player, 50, nil)
       # If GameData has no timbero NPC, it should reject (no timbero found)
       # If it does have one, gold changes. Either way, the NPC check runs.
       p = new_state.players[:player]
@@ -247,7 +247,7 @@ defmodule Arena.BugRegressionTest do
         npcs_live: %{npc1: non_timbero}
       )
 
-      {:noreply, new_state} = NpcInteraction.handle_gamble(state, :player, 50, nil)
+      {:ok, new_state, _effects} = NpcInteraction.handle_gamble(state, :player, 50, nil)
       assert new_state.players[:player].gold == 100
     end
   end
@@ -264,7 +264,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{})
 
-      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player, 5000)
+      {:ok, new_state, _effects} = NpcInteraction.handle_forgive(state, :player, 5000)
       # Criminal status must not change — forgive should be rejected
       assert new_state.players[:player].criminal == true
     end
@@ -280,7 +280,7 @@ defmodule Arena.BugRegressionTest do
         npcs_live: %{npc1: non_priest}
       )
 
-      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player, 5000)
+      {:ok, new_state, _effects} = NpcInteraction.handle_forgive(state, :player, 5000)
       assert new_state.players[:player].criminal == true
     end
   end

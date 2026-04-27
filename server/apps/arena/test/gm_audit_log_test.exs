@@ -53,6 +53,7 @@ defmodule Arena.GmAuditLogTest do
       dead: false, poisoned: false, criminal: false,
       invisible: false, oculto: false, oculto_timer: 0,
       no_detectable: false, paralyzed: false, immobilized: false,
+      blind: false, dumb: false,
       meditating: false, resting: false, safe_mode: false, navigating: false,
       gm: true,
       faction: :none,

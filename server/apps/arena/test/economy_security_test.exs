@@ -1259,7 +1259,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = NpcInteraction.handle_gamble(state, :player, 50, nil)
+      {:ok, new_state, _effects} = NpcInteraction.handle_gamble(state, :player, 50, nil)
       p = new_state.players[:player]
       # Gold must not change — no timbero nearby
       assert p.gold == 100
@@ -1273,7 +1273,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = NpcInteraction.handle_gamble(state, :player, 50, nil)
+      {:ok, new_state, _effects} = NpcInteraction.handle_gamble(state, :player, 50, nil)
       assert new_state.players[:player].gold == 100
       assert new_state.players[:player].gamble_plays == 0
     end
@@ -1285,7 +1285,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = NpcInteraction.handle_gamble(state, :player, 0, nil)
+      {:ok, new_state, _effects} = NpcInteraction.handle_gamble(state, :player, 0, nil)
       assert new_state.players[:player].gold == 100
     end
 
@@ -1294,7 +1294,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = NpcInteraction.handle_gamble(state, :player, -50, nil)
+      {:ok, new_state, _effects} = NpcInteraction.handle_gamble(state, :player, -50, nil)
       assert new_state.players[:player].gold == 100
     end
 
@@ -1303,13 +1303,13 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = NpcInteraction.handle_gamble(state, :player, 999, nil)
+      {:ok, new_state, _effects} = NpcInteraction.handle_gamble(state, :player, 999, nil)
       assert new_state.players[:player].gold == 100
     end
 
     test "gamble for unknown player is a no-op" do
       state = make_map_state(%{})
-      {:noreply, new_state} = NpcInteraction.handle_gamble(state, :unknown, 50, nil)
+      {:ok, new_state, _effects} = NpcInteraction.handle_gamble(state, :unknown, 50, nil)
       assert new_state == state
     end
   end
@@ -1325,7 +1325,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player, 5000)
+      {:ok, new_state, _effects} = NpcInteraction.handle_forgive(state, :player, 5000)
       # Criminal status must not change — no priest nearby
       assert new_state.players[:player].criminal == true
     end
@@ -1337,13 +1337,13 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :player, 5000)
+      {:ok, new_state, _effects} = NpcInteraction.handle_forgive(state, :player, 5000)
       assert new_state.players[:player].criminal == false
     end
 
     test "forgive for unknown player is a no-op" do
       state = make_map_state(%{})
-      {:noreply, new_state} = NpcInteraction.handle_forgive(state, :ghost, 5000)
+      {:ok, new_state, _effects} = NpcInteraction.handle_forgive(state, :ghost, 5000)
       assert new_state == state
     end
   end

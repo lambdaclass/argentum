@@ -331,10 +331,21 @@ defmodule Arena.ServiceWindowsParityTest do
         occupancy: %{{51, 50} => {:npc, 2001}}
       )
 
+      # handle_npc_double_click is a dispatcher: it calls Effects.run_handler/2
+      # internally for the priest branch, so it returns {:noreply, state} and
+      # the effects have already been dispatched by the time we collect.
       {:noreply, _new_state} = NpcInteraction.handle_npc_double_click(state, 1, entity, 2001)
       msgs = collect_messages()
 
-      raw_data = for {:send_raw, data} <- msgs, do: data
+      raw_data =
+        for msg <- msgs,
+            data <-
+              (case msg do
+                 {:send_raw, d} -> [d]
+                 {:egress, %{payload: d}} -> [d]
+                 _ -> []
+               end),
+            do: data
       all_text = Enum.join(raw_data)
 
       # After the fix, clicking a priest should show the prontuario record
@@ -357,10 +368,21 @@ defmodule Arena.ServiceWindowsParityTest do
         occupancy: %{{51, 50} => {:npc, 2001}}
       )
 
+      # handle_npc_double_click is a dispatcher: it calls Effects.run_handler/2
+      # internally for the priest branch, so it returns {:noreply, state} and
+      # the effects have already been dispatched by the time we collect.
       {:noreply, _new_state} = NpcInteraction.handle_npc_double_click(state, 1, entity, 2001)
       msgs = collect_messages()
 
-      raw_data = for {:send_raw, data} <- msgs, do: data
+      raw_data =
+        for msg <- msgs,
+            data <-
+              (case msg do
+                 {:send_raw, d} -> [d]
+                 {:egress, %{payload: d}} -> [d]
+                 _ -> []
+               end),
+            do: data
       all_text = Enum.join(raw_data)
 
       # With no punishments, clicking priest should mention "Sin prontuario" or similar

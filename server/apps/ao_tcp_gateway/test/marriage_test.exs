@@ -98,7 +98,7 @@ defmodule AoTcpGateway.MarriageTest do
       # Move player A far from priest
       state = put_in(state.players[1], %{state.players[1] | x: 100, y: 100})
 
-      {:noreply, new_state} = Arena.Map.Social.handle_propose_marriage(state, 1, 2)
+      {:ok, new_state, _effects} = Arena.Map.Social.handle_propose_marriage(state, 1, 2)
 
       assert new_state.players[1].spouse_id == 0
       assert new_state.players[2].spouse_id == 0
@@ -111,7 +111,7 @@ defmodule AoTcpGateway.MarriageTest do
           %{state.players[1] | last_clicked_npc_instance_id: nil, last_clicked_npc_type: nil}
         )
 
-      {:noreply, new_state} = Arena.Map.Social.handle_propose_marriage(state, 1, 2)
+      {:ok, new_state, _effects} = Arena.Map.Social.handle_propose_marriage(state, 1, 2)
 
       assert new_state.players[1].spouse_id == 0
       assert new_state.players[2].spouse_id == 0
@@ -119,7 +119,7 @@ defmodule AoTcpGateway.MarriageTest do
     end
 
     test "cannot marry yourself", %{state: state} do
-      {:noreply, new_state} = Arena.Map.Social.handle_propose_marriage(state, 1, 1)
+      {:ok, new_state, _effects} = Arena.Map.Social.handle_propose_marriage(state, 1, 1)
 
       assert new_state.players[1].spouse_id == 0
     end
@@ -127,7 +127,7 @@ defmodule AoTcpGateway.MarriageTest do
     test "already married proposer is rejected", %{state: state} do
       state = put_in(state.players[1], %{state.players[1] | spouse_id: 999})
 
-      {:noreply, new_state} = Arena.Map.Social.handle_propose_marriage(state, 1, 2)
+      {:ok, new_state, _effects} = Arena.Map.Social.handle_propose_marriage(state, 1, 2)
 
       assert new_state.players[1].spouse_id == 999
       assert new_state.players[2].spouse_id == 0
@@ -136,13 +136,13 @@ defmodule AoTcpGateway.MarriageTest do
     test "already married target is rejected", %{state: state} do
       state = put_in(state.players[2], %{state.players[2] | spouse_id: 999})
 
-      {:noreply, new_state} = Arena.Map.Social.handle_propose_marriage(state, 1, 2)
+      {:ok, new_state, _effects} = Arena.Map.Social.handle_propose_marriage(state, 1, 2)
 
       assert new_state.players[1].spouse_id == 0
     end
 
     test "first proposal sets candidato on proposer", %{state: state} do
-      {:noreply, new_state} = Arena.Map.Social.handle_propose_marriage(state, 1, 2)
+      {:ok, new_state, _effects} = Arena.Map.Social.handle_propose_marriage(state, 1, 2)
 
       assert new_state.players[1].marriage_proposal_target == 2
       assert new_state.players[1].spouse_id == 0
@@ -154,7 +154,7 @@ defmodule AoTcpGateway.MarriageTest do
       state = put_in(state.players[1], %{state.players[1] | marriage_proposal_target: 2})
 
       # Bob proposes to Alice -> mutual -> marriage!
-      {:noreply, new_state} = Arena.Map.Social.handle_propose_marriage(state, 2, 1)
+      {:ok, new_state, _effects} = Arena.Map.Social.handle_propose_marriage(state, 2, 1)
 
       assert new_state.players[1].spouse_id == 2
       assert new_state.players[2].spouse_id == 1
@@ -163,15 +163,16 @@ defmodule AoTcpGateway.MarriageTest do
     end
 
     test "target not on map is rejected", %{state: state} do
-      {:noreply, new_state} = Arena.Map.Social.handle_propose_marriage(state, 1, 999)
+      {:ok, new_state, _effects} = Arena.Map.Social.handle_propose_marriage(state, 1, 999)
 
       assert new_state.players[1].spouse_id == 0
     end
 
     test "proposal sends notification to target", %{state: state} do
-      {:noreply, _new_state} = Arena.Map.Social.handle_propose_marriage(state, 1, 2)
+      {:ok, ran_state, effects} = Arena.Map.Social.handle_propose_marriage(state, 1, 2)
+      Arena.Map.Effects.run(ran_state, effects)
 
-      # Social.msg sends {:send_raw, binary} -- check we got messages
+      # Effects.run dispatches via AoSession.Egress.enqueue (sends {:egress, _}).
       messages = flush_all_messages()
       assert length(messages) >= 2
 
@@ -179,6 +180,7 @@ defmodule AoTcpGateway.MarriageTest do
       raw_messages =
         Enum.flat_map(messages, fn
           {:send_raw, data} -> [data]
+          {:egress, %{payload: data}} -> [data]
           _ -> []
         end)
 
@@ -220,7 +222,7 @@ defmodule AoTcpGateway.MarriageTest do
     end
 
     test "divorce clears both spouses when on same map", %{state: state} do
-      {:noreply, new_state} = Arena.Map.Social.handle_divorce(state, 1)
+      {:ok, new_state, _effects} = Arena.Map.Social.handle_divorce(state, 1)
 
       assert new_state.players[1].spouse_id == 0
       assert new_state.players[2].spouse_id == 0
@@ -229,7 +231,7 @@ defmodule AoTcpGateway.MarriageTest do
     test "divorce clears proposer side when spouse is on different map", %{state: state} do
       state = %{state | players: Map.delete(state.players, 2)}
 
-      {:noreply, new_state} = Arena.Map.Social.handle_divorce(state, 1)
+      {:ok, new_state, _effects} = Arena.Map.Social.handle_divorce(state, 1)
 
       assert new_state.players[1].spouse_id == 0
     end
@@ -237,20 +239,24 @@ defmodule AoTcpGateway.MarriageTest do
     test "divorce when not married is rejected", %{state: state} do
       state = put_in(state.players[1], %{state.players[1] | spouse_id: 0})
 
-      {:noreply, new_state} = Arena.Map.Social.handle_divorce(state, 1)
+      {:ok, new_state, _effects} = Arena.Map.Social.handle_divorce(state, 1)
 
       assert new_state.players[1].spouse_id == 0
     end
 
     test "divorce notifies spouse on same map", %{state: state} do
-      {:noreply, _new_state} = Arena.Map.Social.handle_divorce(state, 1)
+      {:ok, ran_state, effects} = Arena.Map.Social.handle_divorce(state, 1)
+      Arena.Map.Effects.run(ran_state, effects)
 
-      # Social.msg sends {:send_raw, binary} -- check we got messages for both players
+      # Effects.run dispatches via AoSession.Egress.enqueue, which sends
+      # {:egress, %Outbound{}} to the configured session pid; the legacy
+      # {:send_raw, _} shim is no longer in this path.
       messages = flush_all_messages()
 
       raw_messages =
         Enum.flat_map(messages, fn
           {:send_raw, data} -> [data]
+          {:egress, %{payload: data}} -> [data]
           _ -> []
         end)
 

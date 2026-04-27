@@ -279,7 +279,11 @@ defmodule Arena.Map.StatusTicks do
         # Kill on starvation
         {entity, state} =
           if entity.hp <= 0 and not entity.dead do
-            Arena.Map.PlayerDeath.handle_player_death(state, char_id, %{entity | hp: 0})
+            {entity, state, pd_effects} =
+              Arena.Map.PlayerDeath.handle_player_death(state, char_id, %{entity | hp: 0})
+
+            Arena.Map.Effects.run(state, pd_effects)
+            {entity, state}
           else
             {entity, state}
           end

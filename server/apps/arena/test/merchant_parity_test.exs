@@ -150,28 +150,39 @@ defmodule Arena.MerchantParityTest do
 
       # Force a win by trying with known seed
       :rand.seed(:exsss, {100, 200, 300})
-      {:noreply, _state} = NpcInteraction.handle_gamble(state, :player, 100, :timbero_inst)
+      {:ok, ran_state, effects} = NpcInteraction.handle_gamble(state, :player, 100, :timbero_inst)
+      Arena.Map.Effects.run(ran_state, effects)
 
       messages = collect_messages()
 
-      # Extract console messages
+      # Extract console messages — accept both legacy {:send_raw, _} and new
+      # effects-runner {:egress, %{payload: _}} envelope shapes.
       assert Enum.any?(messages, fn
                {:send_raw, _} -> true
+               {:egress, %{payload: _}} -> true
                _ -> false
              end),
              "Expected at least one message to be sent"
 
       flush_mailbox()
       :rand.seed(:exsss, {100, 200, 300})
-      {:noreply, _state2} = NpcInteraction.handle_gamble(state, :player, 100, :timbero_inst)
+
+      {:ok, ran_state2, effects2} =
+        NpcInteraction.handle_gamble(state, :player, 100, :timbero_inst)
+
+      Arena.Map.Effects.run(ran_state2, effects2)
 
       all_raw =
         collect_messages()
         |> Enum.filter(fn
           {:send_raw, _} -> true
+          {:egress, %{payload: _}} -> true
           _ -> false
         end)
-        |> Enum.map(fn {:send_raw, data} -> data end)
+        |> Enum.map(fn
+          {:send_raw, data} -> data
+          {:egress, %{payload: data}} -> data
+        end)
 
       # Concatenate all raw binary data into a string for inspection
       combined = Enum.join(all_raw)
@@ -211,7 +222,8 @@ defmodule Arena.MerchantParityTest do
         for seed <- 1..20 do
           flush_mailbox()
           :rand.seed(:exsss, {seed, seed * 2, seed * 3})
-          {:noreply, _s} = NpcInteraction.handle_gamble(state, :player, 100, :timbero_inst)
+          {:ok, ran_s, effs} = NpcInteraction.handle_gamble(state, :player, 100, :timbero_inst)
+          Arena.Map.Effects.run(ran_s, effs)
 
           msgs = collect_messages()
 
@@ -219,9 +231,13 @@ defmodule Arena.MerchantParityTest do
             msgs
             |> Enum.filter(fn
               {:send_raw, _} -> true
+              {:egress, %{payload: _}} -> true
               _ -> false
             end)
-            |> Enum.map(fn {:send_raw, data} -> data end)
+            |> Enum.map(fn
+              {:send_raw, data} -> data
+              {:egress, %{payload: data}} -> data
+            end)
             |> Enum.join()
 
           combined

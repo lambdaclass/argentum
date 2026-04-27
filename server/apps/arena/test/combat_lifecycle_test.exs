@@ -99,6 +99,7 @@ defmodule Arena.CombatLifecycleTest do
   defp collect_messages_acc(timeout, acc) do
     receive do
       {:send_raw, binary} -> collect_messages_acc(timeout, [binary | acc])
+      {:egress, %{payload: binary}} -> collect_messages_acc(timeout, [binary | acc])
       {:send_packet, _} = msg -> collect_messages_acc(timeout, [msg | acc])
     after
       timeout -> Enum.reverse(acc)
