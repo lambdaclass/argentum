@@ -5,18 +5,26 @@
 - Backend parity is effectively closed except for one scoped partial item:
   - remaining outbound packet wiring for `blind_no_more`,
     `dumb_no_more`, `work_request_target`, and `stun_start`
-- Effects refactor: `Arena.Map.Healing` is fully on the contract.
-  - All four handlers (`rest`, `meditate`, `heal`, `resucitate`) return
-    `{:ok, state, effects}` and never see a session pid
-  - `MapServer` adapter extracted as `Effects.run_handler/2`; the four
-    healing casts collapse to one-liners
-  - `Helpers.broadcast_character_change/2` now routes through
-    `AoSession.Egress.enqueue/2`; the legacy `{:send_raw, _}` shim is no
-    longer in the healing path
-  - Adversarial test suite landed (constructor robustness, runner
-    failure modes, end-to-end MapServer casts proving no `{:send_raw, _}`
-    reception)
-  - `NpcInteraction` is the next active target
+- Effects refactor: complete end-to-end across `Healing`, `NpcInteraction`,
+  `Social`, `InventoryHandlers`, and `CombatHandlers` (incl. `SpellEffects`,
+  `NpcDeath`, `PlayerDeath`, `CriminalStatus`, and the XP / level / loot
+  helpers). All public combat & spell handlers return
+  `{:ok, state, reply, effects}` (or `{:ok, state, effects}` for casts) and
+  dispatch through `Effects.run_handler*/2`.
+  - `Effects.run_handler_call_reply/2` carries the `:ok | {:error, reason}`
+    reply for `attack` / `cast_spell` so gateway and tests still branch on
+    `{:error, :dead}` etc.
+  - New effect kind `:broadcast_visible_except` for animation packets the
+    originating client renders locally (swing, blocked-with-shield-other).
+  - Death helpers (`NpcDeath`, `PlayerDeath`, `CriminalStatus`) all return
+    `{entity_or_nil, state, effects}`. Legacy callers that pre-date the
+    effects lane (NPC AI status ticks, GM moderation) bridge via
+    `Effects.run/2` inline so map-effects from the death path still
+    traverse the runner without forcing those callers onto the contract.
+  - One scoped exception: `Helpers.break_invisibility/3` and `StatusTicks`
+    expiry-tick reveal/hide paths still write `{:send_raw, _}` directly.
+    They are part of the deferred "egress shim cleanup" lane and do not
+    block this rollout.
 - Backpressure foundation, Prometheus `/metrics`, slow-client soak profile,
   monitoring runbook, and autosave supervision are landed
 - Constraint for the effects lane:
@@ -37,18 +45,7 @@
    - `Effects.run_handler/2` adapter extracted; convention documented in
      `Arena.Map.Effects` moduledoc; `Healing` is the reference implementation
 
-3. `ACTIVE` Migrate `Arena.Map.NpcInteraction` to the effects contract.
-   - Only migrate behavior that benefits from explicit effects
-   - Do not mix unrelated cleanup into the same commits
-   - Follow the `Healing` reference: handlers return `{:ok, state, effects}`,
-     casts use `Effects.run_handler/2`, no session pid in handlers
-   - Finish it in this order:
-     - pure text and info paths
-     - gamble and forgive
-     - arena entry via `:transfer`
-     - fish delivery, quest NPC click, and subastador click
-   - Defer the main `handle_npc_double_click` dispatcher flip until the
-     sibling modules it delegates to are also on the effects contract
+3. ~~Migrate `Arena.Map.NpcInteraction` to the effects contract.~~ Done.
 
 4. Build a deterministic scenario harness.
    - Synthetic maps
@@ -76,15 +73,26 @@
      potions, and other high-drift flows
    - Expected outcomes should live in data, not only handwritten assertions
 
-9. Migrate `Arena.Map.Social` or `Arena.Map.InventoryHandlers` to the effects contract.
-   - Pick the module with the cleaner blast radius first
+9. ~~Migrate `Arena.Map.Social` and `Arena.Map.InventoryHandlers` to the effects contract.~~ Done.
 
-10. Flip `NpcInteraction` dispatcher paths onto the effects contract once its sibling modules are ready.
-   - Do not force mixed `{:noreply, state}` and `{:ok, state, effects}`
-     returns through the same dispatcher during the transition
+10. ~~Flip `NpcInteraction` dispatcher paths onto the effects contract.~~ Done.
 
-11. Leave `Arena.Map.CombatHandlers` for last.
-   - Only start after the pattern is proven on simpler modules
+11. ~~Migrate `Arena.Map.CombatHandlers` (incl. `SpellEffects`, `NpcDeath`,
+    `PlayerDeath`, `CriminalStatus`).~~ Done in 5 slices (handle_attack
+    outer rejects → handle_attack_target + handle_ranged_attack →
+    handle_cast_spell rejects → SpellEffects → death/XP/loot helpers).
+    Public `handle_attack/4` and `handle_cast_spell/5` keep their
+    `{:reply, reply, state}` surface; reply preserved for gateway and
+    test contracts via `Effects.run_handler_call_reply/2`.
+
+11a. (Deferred) Egress shim cleanup lane.
+    - `Helpers.break_invisibility/3` and `StatusTicks` expiry-tick
+      reveal/hide still emit `{:send_raw, _}` directly.
+    - Pet despawn dispatch in `NpcAi.dispatch_effects/2` uses a
+      different effect-tuple shape from the map-layer runner; pet
+      effects are run inline at the death-handler bridge.
+    - This lane is intentionally deferred — the effects refactor goal
+      (uniform handler return contract + runner dispatch) is achieved.
 
 12. Close the last partial parity item.
    - Wire `blind_no_more`
