@@ -69,6 +69,24 @@ defmodule Arena.Map.Effects do
     {:broadcast_visible_all, x, y, build_envelope(packet, opts)}
   end
 
+  @doc """
+  Broadcast `packet` to every player whose AoI covers (x, y), skipping
+  `exclude_char_id`. Used for animation packets (e.g. `char_swing`,
+  `blocked_with_shield_other`) where the originating client renders the
+  effect locally and would otherwise see a duplicate.
+  """
+  @spec broadcast_visible_except(
+          pos_integer(),
+          pos_integer(),
+          term(),
+          binary(),
+          keyword()
+        ) :: Arena.Map.Effect.t()
+  def broadcast_visible_except(x, y, exclude_char_id, packet, opts \\ [])
+      when is_binary(packet) do
+    {:broadcast_visible_except, x, y, exclude_char_id, build_envelope(packet, opts)}
+  end
+
   @doc "Broadcast a character_change packet for `entity` to its visibility region."
   @spec broadcast_character_change(map()) :: Arena.Map.Effect.t()
   def broadcast_character_change(entity) do
@@ -198,6 +216,12 @@ defmodule Arena.Map.Effects do
 
   defp dispatch(state, {:broadcast_visible_all, x, y, outbound}) do
     Visibility.broadcast_visible_all(state, x, y, fn pid ->
+      AoSession.Egress.enqueue(pid, outbound)
+    end)
+  end
+
+  defp dispatch(state, {:broadcast_visible_except, x, y, exclude_char_id, outbound}) do
+    Visibility.broadcast_visible(state, x, y, exclude_char_id, fn pid ->
       AoSession.Egress.enqueue(pid, outbound)
     end)
   end

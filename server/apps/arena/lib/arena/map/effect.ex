@@ -11,8 +11,15 @@ defmodule Arena.Map.Effect do
     * `{:send, char_id, packet}` — unicast a server packet (iodata) to one
       player session. Goes through `Helpers.send_to_session/3`.
     * `{:broadcast_visible, x, y, packet}` — send the packet to every player
-      whose AoI covers `(x, y)`, excluding origin if the call site does so.
-    * `{:broadcast_visible_all, x, y, packet}` — same, including origin.
+      whose AoI covers `(x, y)`. The runner does not exclude any session;
+      use `:broadcast_visible_except` when origin must be skipped.
+    * `{:broadcast_visible_all, x, y, packet}` — alias of `:broadcast_visible`
+      with intent: include origin (used for ground-item create/delete and
+      similar fanouts where the caller is also a recipient).
+    * `{:broadcast_visible_except, x, y, exclude_char_id, packet}` —
+      broadcast to every visible session whose char_id is not
+      `exclude_char_id`. Used for animation packets like `char_swing` where
+      the originating client renders the effect locally.
     * `{:broadcast_map, packet}` — broadcasts the packet to every session on
       the map, ignoring AoI. Used for global announcements (marriage,
       world-state). Envelope is built via the same classifier used for
@@ -47,6 +54,7 @@ defmodule Arena.Map.Effect do
           {:send, char_id(), packet()}
           | {:broadcast_visible, coord(), coord(), packet()}
           | {:broadcast_visible_all, coord(), coord(), packet()}
+          | {:broadcast_visible_except, coord(), coord(), char_id(), packet()}
           | {:broadcast_map, packet()}
           | {:broadcast_character_change, entity :: map()}
           | {:hide_from_non_gm, entity :: map()}

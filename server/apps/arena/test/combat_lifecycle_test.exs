@@ -151,11 +151,14 @@ defmodule Arena.CombatLifecycleTest do
 
       # Attack facing tile — no target there, but swing animation is broadcast to
       # other players on the map (the attacker itself is excluded from the broadcast).
+      # Both attacker and observer share self() as session_pid; the runner sends
+      # one `{:egress, _}` for the observer (attacker is excluded).
       MapServer.attack(@test_map_id, 30010)
-      msgs = collect_messages(300)
+      char_swing_id = AoProtocol.PacketIds.Server.char_swing()
 
-      # The observer (whose session_pid is also self()) should receive the swing packet
-      assert length(msgs) > 0
+      assert_receive {:egress,
+                      %{payload: <<^char_swing_id::little-signed-integer-16, _::binary>>}},
+                     300
     end
   end
 

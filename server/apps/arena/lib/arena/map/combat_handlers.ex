@@ -10,7 +10,7 @@ defmodule Arena.Map.CombatHandlers do
 
   import Bitwise
 
-  alias Arena.Map.{Helpers, Visibility}
+  alias Arena.Map.{Effects, Helpers, Visibility}
   alias Arena.{Combat, CombatStats, Data.GameData}
   alias AoProtocol.Server.Encoder
 
@@ -35,7 +35,12 @@ defmodule Arena.Map.CombatHandlers do
 
   def handle_attack(state, char_id, target_x, target_y) do
     start = System.monotonic_time()
-    result = do_handle_attack(state, char_id, target_x, target_y)
+
+    result =
+      Effects.run_handler_call_reply(state, fn s ->
+        do_handle_attack_effects(s, char_id, target_x, target_y)
+      end)
+
     duration = System.monotonic_time() - start
 
     attack_result =
@@ -50,23 +55,31 @@ defmodule Arena.Map.CombatHandlers do
     result
   end
 
-  defp do_handle_attack(state, char_id, target_x, target_y) do
+  # Effects-contract body. Returns `{:ok, state, reply, effects}`; the public
+  # `handle_attack/4` runs this through `Effects.run_handler_call_reply/2` to
+  # preserve the `{:reply, reply, state}` surface that callers depend on.
+  #
+  # Slice 1 scope: outer rejects + swing broadcast emitted as effects.
+  # `handle_attack_target/{4,5}` and `handle_ranged_attack/7` still run their
+  # own `{:send_raw, _}` shim writes — bridged here as `effects = []`. They
+  # migrate in Slice 2 and Slice 5 respectively.
+  defp do_handle_attack_effects(state, char_id, target_x, target_y) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         now = System.monotonic_time(:millisecond)
 
         cond do
           now < entity.next_attack_at ->
-            {:reply, {:error, :cooldown}, state}
+            {:ok, state, {:error, :cooldown}, []}
 
           entity.dead ->
-            {:reply, {:error, :dead}, state}
+            {:ok, state, {:error, :dead}, []}
 
           entity.paralyzed ->
-            {:reply, {:error, :paralyzed}, state}
+            {:ok, state, {:error, :paralyzed}, []}
 
           entity.mounted ->
-            {:reply, {:error, :mounted}, state}
+            {:ok, state, {:error, :mounted}, []}
 
           true ->
             entity = Helpers.break_invisibility(entity, state, char_id)
@@ -75,7 +88,10 @@ defmodule Arena.Map.CombatHandlers do
             is_ranged = weapon_def != nil and weapon_def.proyectil > 0
 
             if is_ranged and target_x != nil and target_y != nil do
-              handle_ranged_attack(state, char_id, entity, weapon_def, target_x, target_y, now)
+              {:reply, reply, state} =
+                handle_ranged_attack(state, char_id, entity, weapon_def, target_x, target_y, now)
+
+              {:ok, state, reply, []}
             else
               # Melee attack
               {tx, ty} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
@@ -83,19 +99,16 @@ defmodule Arena.Map.CombatHandlers do
 
               entity = %{entity | next_attack_at: now + attack_cooldown_ms(), last_attacked_at: now}
 
-              swing_raw = Encoder.encode({:char_swing, %{char_index: entity.char_index}})
-
-              Visibility.broadcast_visible(state, entity.x, entity.y, char_id, fn pid ->
-                send(pid, {:send_raw, swing_raw})
-              end)
+              swing_packet = Encoder.encode({:char_swing, %{char_index: entity.char_index}})
+              swing_effect = Effects.broadcast_visible_except(entity.x, entity.y, char_id, swing_packet)
 
               state = handle_attack_target(state, char_id, entity, target)
-              {:reply, :ok, state}
+              {:ok, state, :ok, [swing_effect]}
             end
         end
 
       :error ->
-        {:reply, {:error, :not_on_map}, state}
+        {:ok, state, {:error, :not_on_map}, []}
     end
   end
 
