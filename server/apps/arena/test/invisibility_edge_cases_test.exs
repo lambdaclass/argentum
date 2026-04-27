@@ -255,7 +255,7 @@ defmodule Arena.InvisibilityEdgeCasesTest do
 
       spell = make_spell(%{remove_invisibility: true})
 
-      new_state =
+      {new_state, _effects} =
         SpellEffects.apply_spell_remove_invisibility(state, :caster, caster, spell, 50, 50)
 
       updated_target = new_state.players[:target]
@@ -280,7 +280,7 @@ defmodule Arena.InvisibilityEdgeCasesTest do
 
       spell = make_spell(%{remove_invisibility: true})
 
-      new_state =
+      {new_state, _effects} =
         SpellEffects.apply_spell_remove_invisibility(state, :caster, caster, spell, 50, 50)
 
       updated_target = new_state.players[:target]
@@ -305,7 +305,7 @@ defmodule Arena.InvisibilityEdgeCasesTest do
 
       spell = make_spell(%{remove_invisibility: true})
 
-      new_state =
+      {new_state, _effects} =
         SpellEffects.apply_spell_remove_invisibility(state, :caster, caster, spell, 50, 50)
 
       updated_target = new_state.players[:target]

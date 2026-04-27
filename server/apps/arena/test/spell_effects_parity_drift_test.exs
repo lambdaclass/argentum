@@ -214,7 +214,7 @@ defmodule Arena.SpellEffectsParityDriftTest do
           occupancy: %{{51, 50} => {:player, :guerrero_target}}
         )
 
-      state_g = SpellEffects.apply_spell(state_g, :caster, caster, spell, 51, 50)
+      {state_g, _effects} = SpellEffects.apply_spell(state_g, :caster, caster, spell, 51, 50)
       guerrero_after = state_g.players[:guerrero_target]
       assert guerrero_after.paralyzed == true
       guerrero_buff = Enum.find(guerrero_after.buffs, &(&1.type == :paralyzed))
@@ -227,7 +227,7 @@ defmodule Arena.SpellEffectsParityDriftTest do
           occupancy: %{{52, 50} => {:player, :mago_target}}
         )
 
-      state_m = SpellEffects.apply_spell(state_m, :caster, caster, spell, 52, 50)
+      {state_m, _effects} = SpellEffects.apply_spell(state_m, :caster, caster, spell, 52, 50)
       mago_after = state_m.players[:mago_target]
       assert mago_after.paralyzed == true
       mago_buff = Enum.find(mago_after.buffs, &(&1.type == :paralyzed))
@@ -267,7 +267,7 @@ defmodule Arena.SpellEffectsParityDriftTest do
           occupancy: %{{51, 50} => {:player, :target}}
         )
 
-      state = SpellEffects.apply_spell(state, :caster, caster, spell, 51, 50)
+      {state, _effects} = SpellEffects.apply_spell(state, :caster, caster, spell, 51, 50)
       target_after = state.players[:target]
       buff = Enum.find(target_after.buffs, &(&1.type == :paralyzed))
 
@@ -309,7 +309,7 @@ defmodule Arena.SpellEffectsParityDriftTest do
           occupancy: %{{51, 50} => {:player, :cazador_target}}
         )
 
-      state_c = SpellEffects.apply_spell(state_c, :caster, caster, spell, 51, 50)
+      {state_c, _effects} = SpellEffects.apply_spell(state_c, :caster, caster, spell, 51, 50)
       cazador_after = state_c.players[:cazador_target]
       cazador_buff = Enum.find(cazador_after.buffs, &(&1.type == :paralyzed))
 
@@ -320,7 +320,7 @@ defmodule Arena.SpellEffectsParityDriftTest do
           occupancy: %{{52, 50} => {:player, :clerigo_target}}
         )
 
-      state_cl = SpellEffects.apply_spell(state_cl, :caster, caster, spell, 52, 50)
+      {state_cl, _effects} = SpellEffects.apply_spell(state_cl, :caster, caster, spell, 52, 50)
       clerigo_after = state_cl.players[:clerigo_target]
       clerigo_buff = Enum.find(clerigo_after.buffs, &(&1.type == :paralyzed))
 
@@ -365,7 +365,7 @@ defmodule Arena.SpellEffectsParityDriftTest do
           occupancy: %{{51, 50} => {:player, :guerrero_target}}
         )
 
-      state_g = SpellEffects.apply_spell(state_g, :caster, caster, spell, 51, 50)
+      {state_g, _effects} = SpellEffects.apply_spell(state_g, :caster, caster, spell, 51, 50)
       guerrero_after = state_g.players[:guerrero_target]
       assert guerrero_after.immobilized == true
       guerrero_buff = Enum.find(guerrero_after.buffs, &(&1.type == :immobilized))
@@ -377,7 +377,7 @@ defmodule Arena.SpellEffectsParityDriftTest do
           occupancy: %{{52, 50} => {:player, :mago_target}}
         )
 
-      state_m = SpellEffects.apply_spell(state_m, :caster, caster, spell, 52, 50)
+      {state_m, _effects} = SpellEffects.apply_spell(state_m, :caster, caster, spell, 52, 50)
       mago_after = state_m.players[:mago_target]
       mago_buff = Enum.find(mago_after.buffs, &(&1.type == :immobilized))
 
@@ -419,7 +419,7 @@ defmodule Arena.SpellEffectsParityDriftTest do
           occupancy: %{{51, 50} => {:player, :cazador_target}}
         )
 
-      state_c = SpellEffects.apply_spell(state_c, :caster, caster, spell, 51, 50)
+      {state_c, _effects} = SpellEffects.apply_spell(state_c, :caster, caster, spell, 51, 50)
       cazador_after = state_c.players[:cazador_target]
       cazador_buff = Enum.find(cazador_after.buffs, &(&1.type == :immobilized))
 
@@ -429,7 +429,7 @@ defmodule Arena.SpellEffectsParityDriftTest do
           occupancy: %{{52, 50} => {:player, :bardo_target}}
         )
 
-      state_b = SpellEffects.apply_spell(state_b, :caster, caster, spell, 52, 50)
+      {state_b, _effects} = SpellEffects.apply_spell(state_b, :caster, caster, spell, 52, 50)
       bardo_after = state_b.players[:bardo_target]
       bardo_buff = Enum.find(bardo_after.buffs, &(&1.type == :immobilized))
 
@@ -491,7 +491,7 @@ defmodule Arena.SpellEffectsParityDriftTest do
           occupancy: %{{51, 50} => {:player, :defender}}
         )
 
-      state_with_weapon = SpellEffects.apply_spell(state_with_weapon, :caster, caster, spell, 51, 50)
+      {state_with_weapon, _effects} = SpellEffects.apply_spell(state_with_weapon, :caster, caster, spell, 51, 50)
       defender_after_w = state_with_weapon.players[:defender]
 
       # Now without weapon
@@ -503,7 +503,7 @@ defmodule Arena.SpellEffectsParityDriftTest do
           occupancy: %{{51, 50} => {:player, :defender}}
         )
 
-      state_no_weapon = SpellEffects.apply_spell(state_no_weapon, :caster, caster_no_weapon, spell, 51, 50)
+      {state_no_weapon, _effects} = SpellEffects.apply_spell(state_no_weapon, :caster, caster_no_weapon, spell, 51, 50)
       defender_after_nw = state_no_weapon.players[:defender]
 
       # With 50% magic bonus weapon, damage should be higher (HP should be lower)
@@ -557,7 +557,7 @@ defmodule Arena.SpellEffectsParityDriftTest do
           occupancy: %{{51, 50} => {:player, :defender}}
         )
 
-      state = SpellEffects.apply_spell(state, :caster, caster, spell, 51, 50)
+      {state, _effects} = SpellEffects.apply_spell(state, :caster, caster, spell, 51, 50)
       defender_after = state.players[:defender]
       damage = defender.hp - defender_after.hp
 
@@ -634,7 +634,7 @@ defmodule Arena.SpellEffectsParityDriftTest do
           occupancy: %{{51, 50} => {:player, :defender}}
         )
 
-      state_r = SpellEffects.apply_spell(state_r, :caster, caster_with_ring, spell, 51, 50)
+      {state_r, _effects} = SpellEffects.apply_spell(state_r, :caster, caster_with_ring, spell, 51, 50)
       damage_with_ring = defender.hp - state_r.players[:defender].hp
 
       # Without ring (no penetration, full 30% MR applies)
@@ -644,7 +644,7 @@ defmodule Arena.SpellEffectsParityDriftTest do
           occupancy: %{{51, 50} => {:player, :defender}}
         )
 
-      state_nr = SpellEffects.apply_spell(state_nr, :caster, caster_no_ring, spell, 51, 50)
+      {state_nr, _effects} = SpellEffects.apply_spell(state_nr, :caster, caster_no_ring, spell, 51, 50)
       damage_without_ring = defender.hp - state_nr.players[:defender].hp
 
       assert damage_with_ring > damage_without_ring,
@@ -689,7 +689,7 @@ defmodule Arena.SpellEffectsParityDriftTest do
           occupancy: %{{51, 50} => {:player, :defender}}
         )
 
-      state1 = SpellEffects.apply_spell(state1, :caster, caster, spell_no_anti, 51, 50)
+      {state1, _effects} = SpellEffects.apply_spell(state1, :caster, caster, spell_no_anti, 51, 50)
       damage_normal = defender.hp - state1.players[:defender].hp
 
       # With anti_rm: MR is ignored
@@ -699,7 +699,7 @@ defmodule Arena.SpellEffectsParityDriftTest do
           occupancy: %{{51, 50} => {:player, :defender}}
         )
 
-      state2 = SpellEffects.apply_spell(state2, :caster, caster, spell_anti, 51, 50)
+      {state2, _effects} = SpellEffects.apply_spell(state2, :caster, caster, spell_anti, 51, 50)
       damage_anti = defender.hp - state2.players[:defender].hp
 
       assert damage_anti > damage_normal,
@@ -756,7 +756,7 @@ defmodule Arena.SpellEffectsParityDriftTest do
           occupancy: %{{51, 50} => {:player, :defender}}
         )
 
-      state_a = SpellEffects.apply_spell(state_a, :caster, caster, spell, 51, 50)
+      {state_a, _effects} = SpellEffects.apply_spell(state_a, :caster, caster, spell, 51, 50)
       damage_armored = defender_armored.hp - state_a.players[:defender].hp
 
       # Naked defender
@@ -766,7 +766,7 @@ defmodule Arena.SpellEffectsParityDriftTest do
           occupancy: %{{51, 50} => {:player, :defender}}
         )
 
-      state_n = SpellEffects.apply_spell(state_n, :caster, caster, spell, 51, 50)
+      {state_n, _effects} = SpellEffects.apply_spell(state_n, :caster, caster, spell, 51, 50)
       damage_naked = defender_naked.hp - state_n.players[:defender].hp
 
       assert damage_armored < damage_naked,

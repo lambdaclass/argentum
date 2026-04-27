@@ -1,9 +1,18 @@
 defmodule Arena.Map.SpellEffects do
-  @moduledoc "Spell effect application (damage, heal, status, resurrect, buffs)."
+  @moduledoc """
+  Spell effect application (damage, heal, status, resurrect, buffs).
+
+  All `apply_spell_*` functions return `{state, effects}` — pure-ish bodies
+  that produce `Arena.Map.Effect.t()` values for the runner. Inner death /
+  criminal-flag / XP helpers (NpcDeath, PlayerDeath, CriminalStatus,
+  CombatHandlers.award_hit_xp) still write through the legacy
+  `{:send_raw, _}` shim and are bridged here as no extra effects until
+  slice 5.
+  """
 
   import Bitwise
 
-  alias Arena.Map.{Helpers, Visibility}
+  alias Arena.Map.{Effects, Helpers, Visibility}
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
@@ -13,54 +22,74 @@ defmodule Arena.Map.SpellEffects do
   @poison_tick_interval 3600
 
   def apply_spell(state, char_id, entity, spell_def, target_x, target_y) do
-    # Broadcast FX at target center
-    broadcast_spell_fx(state, entity, spell_def, target_x, target_y)
+    fx_effects = broadcast_spell_fx(state, entity, spell_def, target_x, target_y)
 
-    # VB6 AoE: area_radio > 0 means square radius; area_afecta: 1=users, 2=NPCs, 3=both
-    if spell_def.area_radio > 0 and target_x != nil and target_y != nil do
-      apply_spell_aoe(state, char_id, entity, spell_def, target_x, target_y)
-    else
-      apply_spell_single(state, char_id, entity, spell_def, target_x, target_y)
-    end
+    {state, effects} =
+      if spell_def.area_radio > 0 and target_x != nil and target_y != nil do
+        apply_spell_aoe(state, char_id, entity, spell_def, target_x, target_y)
+      else
+        apply_spell_single(state, char_id, entity, spell_def, target_x, target_y)
+      end
+
+    {state, fx_effects ++ effects}
   end
 
+  # Returns the FX/wav broadcast effects (no state mutation).
   def broadcast_spell_fx(state, entity, spell_def, target_x, target_y) do
-    if spell_def.fx_grh > 0 do
-      target_occ = if target_x && target_y, do: Helpers.get_occupancy(state.occupancy, target_x, target_y), else: nil
+    fx_effect =
+      if spell_def.fx_grh > 0 do
+        target_occ =
+          if target_x && target_y,
+            do: Helpers.get_occupancy(state.occupancy, target_x, target_y),
+            else: nil
 
-      fx_char_index =
-        case target_occ do
-          {:player, pid} ->
-            case Map.get(state.players, pid) do
-              nil -> 0
-              p -> p.char_index
-            end
+        fx_char_index =
+          case target_occ do
+            {:player, pid} ->
+              case Map.get(state.players, pid) do
+                nil -> 0
+                p -> p.char_index
+              end
 
-          {:npc, iid} ->
-            case Map.get(state.npcs_live, iid) do
-              nil -> 0
-              n -> n.char_index
-            end
+            {:npc, iid} ->
+              case Map.get(state.npcs_live, iid) do
+                nil -> 0
+                n -> n.char_index
+              end
 
-          _ ->
-            entity.char_index
-        end
+            _ ->
+              entity.char_index
+          end
 
-      fx_x = if target_x, do: target_x, else: entity.x
-      fx_y = if target_y, do: target_y, else: entity.y
+        fx_x = if target_x, do: target_x, else: entity.x
+        fx_y = if target_y, do: target_y, else: entity.y
 
-      fx_raw =
-        Encoder.encode(
-          {:create_fx, %{char_index: fx_char_index, fx: spell_def.fx_grh, loops: spell_def.loops, x: fx_x, y: fx_y}}
-        )
+        packet =
+          Encoder.encode(
+            {:create_fx,
+             %{
+               char_index: fx_char_index,
+               fx: spell_def.fx_grh,
+               loops: spell_def.loops,
+               x: fx_x,
+               y: fx_y
+             }}
+          )
 
-      Visibility.broadcast_visible_all(state, entity.x, entity.y, fn pid -> send(pid, {:send_raw, fx_raw}) end)
-    end
+        [Effects.broadcast_visible_all(entity.x, entity.y, packet)]
+      else
+        []
+      end
 
-    if spell_def.wav > 0 do
-      wav_raw = Encoder.encode({:play_wave, %{wav: spell_def.wav, x: entity.x, y: entity.y}})
-      Visibility.broadcast_visible_all(state, entity.x, entity.y, fn pid -> send(pid, {:send_raw, wav_raw}) end)
-    end
+    wav_effect =
+      if spell_def.wav > 0 do
+        packet = Encoder.encode({:play_wave, %{wav: spell_def.wav, x: entity.x, y: entity.y}})
+        [Effects.broadcast_visible_all(entity.x, entity.y, packet)]
+      else
+        []
+      end
+
+    fx_effect ++ wav_effect
   end
 
   # VB6: iterate square area centered on target, apply spell to matching occupants
@@ -88,9 +117,10 @@ defmodule Arena.Map.SpellEffects do
 
     # Apply spell to each target, threading state. Re-fetch entity from state each iteration
     # since damage spells can update entity (XP, criminal flag).
-    Enum.reduce(targets, state, fn {tx, ty, _occ}, acc ->
+    Enum.reduce(targets, {state, []}, fn {tx, ty, _occ}, {acc, effects} ->
       caster = Map.get(acc.players, char_id, entity)
-      apply_spell_single(acc, char_id, caster, spell_def, tx, ty)
+      {acc, more} = apply_spell_single(acc, char_id, caster, spell_def, tx, ty)
+      {acc, effects ++ more}
     end)
   end
 
@@ -143,8 +173,16 @@ defmodule Arena.Map.SpellEffects do
       # Default: just update mana
       true ->
         players = Map.put(state.players, char_id, entity)
-        %{state | players: players}
+        {%{state | players: players}, []}
     end
+  end
+
+  defp console(message, font_index \\ 0) do
+    Encoder.encode({:console_msg, %{message: message, font_index: font_index}})
+  end
+
+  defp update_mana_effect(char_id, entity) do
+    Effects.send(char_id, Encoder.encode({:update_mana, %{min_mana: entity.mana}}))
   end
 
   # VB6 26g: RemoveInvisibility spell — reveals invisible players in 11-tile radius
@@ -154,34 +192,26 @@ defmodule Arena.Map.SpellEffects do
     cy = target_y || entity.y
     radius = 11
 
-    state =
-      Enum.reduce(state.players, state, fn {pid, target}, acc ->
+    {state, effects} =
+      Enum.reduce(state.players, {state, []}, fn {pid, target}, {acc, effs} ->
         if pid != char_id and target.invisible and not target.no_detectable and
              abs(target.x - cx) <= radius and abs(target.y - cy) <= radius do
           buffs = Enum.reject(target.buffs, &(&1.type == :invisible))
           updated = %{target | invisible: false, buffs: buffs}
           players = Map.put(acc.players, pid, updated)
-
-          Helpers.send_to_session(
-            acc.sessions,
-            pid,
-            {:send_raw,
-             Encoder.encode(
-               {:console_msg, %{message: "Tu invisibilidad ya no tiene efecto.", font_index: 0}}
-             )}
-          )
-
           acc = %{acc | players: players}
-          # Reveal the now-visible player to non-GM clients
+          # Reveal the now-visible player to non-GM clients (legacy: writes raw
+          # character_create packets; bridged here as no extra effect).
           Visibility.reveal_to_non_gm(acc, updated)
-          acc
+
+          {acc, [Effects.send(pid, console("Tu invisibilidad ya no tiene efecto.")) | effs]}
         else
-          acc
+          {acc, effs}
         end
       end)
 
     players = Map.put(state.players, char_id, entity)
-    %{state | players: players}
+    {%{state | players: players}, effects}
   end
 
   def apply_spell_damage(state, char_id, entity, damage, spell_def, target_x, target_y) do
@@ -195,28 +225,22 @@ defmodule Arena.Map.SpellEffects do
 
           _ ->
             players = Map.put(state.players, char_id, entity)
-            %{state | players: players}
+            {%{state | players: players}, []}
         end
 
       {:player, target_id} when target_id != char_id ->
         case Map.get(state.players, target_id) do
           nil ->
             players = Map.put(state.players, char_id, entity)
-            %{state | players: players}
+            {%{state | players: players}, []}
 
           defender ->
             apply_spell_damage_to_player(state, char_id, entity, damage, spell_def, target_id, defender)
         end
 
       _ ->
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
-        )
-
         players = Map.put(state.players, char_id, entity)
-        %{state | players: players}
+        {%{state | players: players}, [update_mana_effect(char_id, entity)]}
     end
   end
 
@@ -227,14 +251,16 @@ defmodule Arena.Map.SpellEffects do
     new_hp = max(npc.hp - final_damage, 0)
     npc = %{npc | hp: new_hp}
 
-    Helpers.send_to_session(
-      state.sessions,
-      char_id,
-      {:send_raw, Encoder.encode({:user_hitted_user, %{char_index: npc.char_index, damage: final_damage}})}
-    )
+    hit_effect =
+      Effects.send(
+        char_id,
+        Encoder.encode({:user_hitted_user, %{char_index: npc.char_index, damage: final_damage}})
+      )
 
     if new_hp <= 0 do
-      # NPC died — delegate to consolidated death handler
+      # NPC died — delegate to consolidated death handler (legacy; the
+      # send_mana_update: true flag asks NpcDeath to flush an update_mana
+      # via the legacy shim, so we don't double-send here).
       {entity, state} =
         Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc,
           killer_char_id: char_id,
@@ -245,8 +271,7 @@ defmodule Arena.Map.SpellEffects do
         )
 
       players = Map.put(state.players, char_id, entity)
-      state = %{state | players: players}
-      state
+      {%{state | players: players}, [hit_effect]}
     else
       npc = %{npc | target_id: char_id}
       state = put_in(state.npcs_live[instance_id], npc)
@@ -259,14 +284,8 @@ defmodule Arena.Map.SpellEffects do
           {entity, state}
         end
 
-      Helpers.send_to_session(
-        state.sessions,
-        char_id,
-        {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
-      )
-
       players = Map.put(state.players, char_id, entity)
-      %{state | players: players}
+      {%{state | players: players}, [hit_effect, update_mana_effect(char_id, entity)]}
     end
   end
 
@@ -281,58 +300,13 @@ defmodule Arena.Map.SpellEffects do
       Map.get(state.meta, :safe_zone, false) and
           not Arena.Map.CombatHandlers.faction_pvp_exception?(state.map_id, entity, defender) and
           not duel_pvp_exception ->
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw, Encoder.encode({:console_msg, %{message: "Zona segura.", font_index: 0}})}
-        )
-
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
-        )
-
-        players = Map.put(state.players, char_id, entity)
-        %{state | players: players}
+        spell_pvp_reject(state, char_id, entity, "Zona segura.")
 
       Arena.Map.CombatHandlers.same_faction?(entity, defender) ->
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw,
-           Encoder.encode(
-             {:console_msg, %{message: "No puedes atacar a un miembro de tu faccion.", font_index: 0}}
-           )}
-        )
-
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
-        )
-
-        players = Map.put(state.players, char_id, entity)
-        %{state | players: players}
+        spell_pvp_reject(state, char_id, entity, "No puedes atacar a un miembro de tu faccion.")
 
       Arena.Map.CombatHandlers.party_safe_block?(char_id, defender) ->
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw,
-           Encoder.encode(
-             {:console_msg, %{message: "No puedes atacar a un miembro de tu grupo.", font_index: 0}}
-           )}
-        )
-
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
-        )
-
-        players = Map.put(state.players, char_id, entity)
-        %{state | players: players}
+        spell_pvp_reject(state, char_id, entity, "No puedes atacar a un miembro de tu grupo.")
 
       true ->
         # VB6 full PvP magic damage formula (modHechizos.bas:3289-3331)
@@ -382,31 +356,18 @@ defmodule Arena.Map.SpellEffects do
         new_hp = max(defender.hp - final_damage, 0)
         defender = %{defender | hp: new_hp}
 
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw,
-           Encoder.encode({:user_hitted_user, %{char_index: defender.char_index, damage: final_damage}})}
-        )
-
-        Helpers.send_to_session(
-          state.sessions,
-          defender_id,
-          {:send_raw,
-           Encoder.encode({:user_hitted_by_user, %{char_index: entity.char_index, damage: final_damage}})}
-        )
-
-        Helpers.send_to_session(
-          state.sessions,
-          defender_id,
-          {:send_raw, Encoder.encode({:update_hp, %{min_hp: new_hp}})}
-        )
-
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
-        )
+        hit_effects = [
+          Effects.send(
+            char_id,
+            Encoder.encode({:user_hitted_user, %{char_index: defender.char_index, damage: final_damage}})
+          ),
+          Effects.send(
+            defender_id,
+            Encoder.encode({:user_hitted_by_user, %{char_index: entity.char_index, damage: final_damage}})
+          ),
+          Effects.send(defender_id, Encoder.encode({:update_hp, %{min_hp: new_hp}})),
+          update_mana_effect(char_id, entity)
+        ]
 
         # Guild war: no criminal flag when attacking enemy guild members
         guild_war = Arena.GuildServer.players_at_war?(char_id, defender_id)
@@ -421,17 +382,12 @@ defmodule Arena.Map.SpellEffects do
             {entity, state}
           end
 
-        {defender, state} =
+        {defender, state, death_effects} =
           if new_hp <= 0 do
-            Helpers.send_to_session(
-              state.sessions,
-              defender_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})}
-            )
-
-            Arena.Map.PlayerDeath.handle_player_death(state, defender_id, defender)
+            {defender, state} = Arena.Map.PlayerDeath.handle_player_death(state, defender_id, defender)
+            {defender, state, [Effects.send(defender_id, console("Has muerto!", 5))]}
           else
-            {defender, state}
+            {defender, state, []}
           end
 
         # Faction score + kill counters + guild XP on PvP spell kill
@@ -454,12 +410,20 @@ defmodule Arena.Map.SpellEffects do
         players = state.players |> Map.put(char_id, entity) |> Map.put(defender_id, defender)
         state = %{state | players: players}
 
-        if defender.dead do
-          Helpers.broadcast_character_change(state, defender)
-        end
+        char_change_effects =
+          if defender.dead, do: [Effects.broadcast_character_change(defender)], else: []
 
-        state
+        {state, hit_effects ++ death_effects ++ char_change_effects}
     end
+  end
+
+  # Common reject path for PvP spells that fail safe-zone / faction / party
+  # checks: refund-feel update_mana plus the relevant console message.
+  defp spell_pvp_reject(state, char_id, entity, message) do
+    players = Map.put(state.players, char_id, entity)
+
+    {%{state | players: players},
+     [Effects.send(char_id, console(message)), update_mana_effect(char_id, entity)]}
   end
 
   def apply_spell_heal(state, char_id, entity, heal, _spell_def, target_x, target_y) do
@@ -470,43 +434,29 @@ defmodule Arena.Map.SpellEffects do
         case Map.get(state.players, target_id) do
           nil ->
             players = Map.put(state.players, char_id, entity)
-            %{state | players: players}
+            {%{state | players: players}, []}
 
           target_entity ->
             # VB6: cannot heal dead targets
             if target_entity.dead do
-              Helpers.send_to_session(
-                state.sessions,
-                char_id,
-                {:send_raw, Encoder.encode({:console_msg, %{message: "Esta muerto.", font_index: 5}})}
-              )
-
-              Helpers.send_to_session(
-                state.sessions,
-                char_id,
-                {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
-              )
-
               players = Map.put(state.players, char_id, entity)
-              %{state | players: players}
+
+              {%{state | players: players},
+               [
+                 Effects.send(char_id, console("Esta muerto.", 5)),
+                 update_mana_effect(char_id, entity)
+               ]}
             else
               new_hp = min(target_entity.hp + heal, target_entity.max_hp)
               target_entity = %{target_entity | hp: new_hp}
 
-              Helpers.send_to_session(
-                state.sessions,
-                target_id,
-                {:send_raw, Encoder.encode({:update_hp, %{min_hp: new_hp}})}
-              )
-
-              Helpers.send_to_session(
-                state.sessions,
-                char_id,
-                {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
-              )
-
               players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, target_entity)
-              %{state | players: players}
+
+              {%{state | players: players},
+               [
+                 Effects.send(target_id, Encoder.encode({:update_hp, %{min_hp: new_hp}})),
+                 update_mana_effect(char_id, entity)
+               ]}
             end
         end
 
@@ -514,17 +464,13 @@ defmodule Arena.Map.SpellEffects do
         # Self-heal
         new_hp = min(entity.hp + heal, entity.max_hp)
         entity = %{entity | hp: new_hp}
-
-        Helpers.send_to_session(state.sessions, char_id, {:send_raw, Encoder.encode({:update_hp, %{min_hp: new_hp}})})
-
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
-        )
-
         players = Map.put(state.players, char_id, entity)
-        %{state | players: players}
+
+        {%{state | players: players},
+         [
+           Effects.send(char_id, Encoder.encode({:update_hp, %{min_hp: new_hp}})),
+           update_mana_effect(char_id, entity)
+         ]}
     end
   end
 
@@ -541,7 +487,7 @@ defmodule Arena.Map.SpellEffects do
     case Map.get(state.players, target_id) do
       nil ->
         players = Map.put(state.players, char_id, entity)
-        %{state | players: players}
+        {%{state | players: players}, []}
 
       target_entity ->
         # VB6: offensive status spells (paralysis, poison, immobilize) blocked in safe zone
@@ -557,136 +503,109 @@ defmodule Arena.Map.SpellEffects do
         if offensive_status and is_other_player and safe_zone and
              not Arena.Map.CombatHandlers.faction_pvp_exception?(state.map_id, entity, target_entity) and
              not duel_pvp_exception do
-          Helpers.send_to_session(
-            state.sessions,
-            char_id,
-            {:send_raw, Encoder.encode({:console_msg, %{message: "Zona segura.", font_index: 0}})}
-          )
-
           players = Map.put(state.players, char_id, entity)
-          %{state | players: players}
+          {%{state | players: players}, [Effects.send(char_id, console("Zona segura."))]}
         else
+          duration_ms = max((spell_def.duration || 0) * 1000, 3000)
 
-        duration_ms = max((spell_def.duration || 0) * 1000, 3000)
+          target_entity_before = target_entity
 
-        target_entity_before = target_entity
+          target_entity =
+            cond do
+              spell_def.paraliza ->
+                # VB6: Warrior/Hunter get 0.7x duration, others get full duration.
+                effective_dur =
+                  if target_entity.class in [:guerrero, :cazador],
+                    do: trunc(duration_ms * 0.7),
+                    else: duration_ms
 
-        target_entity =
-          cond do
-            spell_def.paraliza ->
-              # VB6: Warrior/Hunter get 0.7x duration, others get full duration.
-              effective_dur =
-                if target_entity.class in [:guerrero, :cazador],
-                  do: trunc(duration_ms * 0.7),
-                  else: duration_ms
+                buff = %{type: :paralyzed, expires_at: now + effective_dur}
+                buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :paralyzed))]
+                %{target_entity | paralyzed: true, buffs: buffs}
 
-              buff = %{type: :paralyzed, expires_at: now + effective_dur}
-              buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :paralyzed))]
-              %{target_entity | paralyzed: true, buffs: buffs}
+              spell_def.envenena ->
+                buff = %{type: :poisoned, expires_at: now + duration_ms, next_tick: now + @poison_tick_interval}
+                buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :poisoned))]
+                %{target_entity | poisoned: true, buffs: buffs}
 
-            spell_def.envenena ->
-              buff = %{type: :poisoned, expires_at: now + duration_ms, next_tick: now + @poison_tick_interval}
-              buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :poisoned))]
-              %{target_entity | poisoned: true, buffs: buffs}
+              spell_def.cura_veneno ->
+                buffs = Enum.reject(target_entity.buffs, &(&1.type == :poisoned))
+                %{target_entity | poisoned: false, buffs: buffs}
 
-            spell_def.cura_veneno ->
-              buffs = Enum.reject(target_entity.buffs, &(&1.type == :poisoned))
-              %{target_entity | poisoned: false, buffs: buffs}
+              spell_def.ciega ->
+                effective_dur =
+                  if target_entity.class in [:guerrero, :cazador],
+                    do: trunc(duration_ms * 0.7),
+                    else: duration_ms
 
-            spell_def.ciega ->
-              # VB6: Warrior/Hunter get 0.7x duration, others get full duration.
-              effective_dur =
-                if target_entity.class in [:guerrero, :cazador],
-                  do: trunc(duration_ms * 0.7),
-                  else: duration_ms
+                buff = %{type: :blind, expires_at: now + effective_dur}
+                buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :blind))]
+                %{target_entity | blind: true, buffs: buffs}
 
-              buff = %{type: :blind, expires_at: now + effective_dur}
-              buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :blind))]
-              %{target_entity | blind: true, buffs: buffs}
+              spell_def.cura_ceguera ->
+                buffs = Enum.reject(target_entity.buffs, &(&1.type == :blind))
+                %{target_entity | blind: false, buffs: buffs}
 
-            spell_def.cura_ceguera ->
-              buffs = Enum.reject(target_entity.buffs, &(&1.type == :blind))
-              %{target_entity | blind: false, buffs: buffs}
+              spell_def.estupidez ->
+                effective_dur =
+                  if target_entity.class in [:guerrero, :cazador],
+                    do: trunc(duration_ms * 0.7),
+                    else: duration_ms
 
-            spell_def.estupidez ->
-              # VB6: Warrior/Hunter get 0.7x duration, others get full duration.
-              effective_dur =
-                if target_entity.class in [:guerrero, :cazador],
-                  do: trunc(duration_ms * 0.7),
-                  else: duration_ms
+                buff = %{type: :dumb, expires_at: now + effective_dur}
+                buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :dumb))]
+                %{target_entity | dumb: true, buffs: buffs}
 
-              buff = %{type: :dumb, expires_at: now + effective_dur}
-              buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :dumb))]
-              %{target_entity | dumb: true, buffs: buffs}
+              spell_def.cura_estupidez ->
+                buffs = Enum.reject(target_entity.buffs, &(&1.type == :dumb))
+                %{target_entity | dumb: false, buffs: buffs}
 
-            spell_def.cura_estupidez ->
-              buffs = Enum.reject(target_entity.buffs, &(&1.type == :dumb))
-              %{target_entity | dumb: false, buffs: buffs}
+              spell_def.invisibilidad ->
+                buff = %{type: :invisible, expires_at: now + duration_ms}
+                buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :invisible))]
+                %{target_entity | invisible: true, buffs: buffs}
 
-            spell_def.invisibilidad ->
-              buff = %{type: :invisible, expires_at: now + duration_ms}
-              buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :invisible))]
-              %{target_entity | invisible: true, buffs: buffs}
+              spell_def.inmoviliza ->
+                effective_dur =
+                  if target_entity.class in [:guerrero, :cazador],
+                    do: trunc(duration_ms * 0.7),
+                    else: duration_ms
 
-            spell_def.inmoviliza ->
-              # VB6: Warrior/Hunter get 0.7x duration, others get full duration.
-              effective_dur =
-                if target_entity.class in [:guerrero, :cazador],
-                  do: trunc(duration_ms * 0.7),
-                  else: duration_ms
+                buff = %{type: :immobilized, expires_at: now + effective_dur}
+                buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :immobilized))]
+                %{target_entity | immobilized: true, buffs: buffs}
 
-              buff = %{type: :immobilized, expires_at: now + effective_dur}
-              buffs = [buff | Enum.reject(target_entity.buffs, &(&1.type == :immobilized))]
-              %{target_entity | immobilized: true, buffs: buffs}
+              true ->
+                target_entity
+            end
 
-            true ->
-              target_entity
-          end
+          was_visible = not Map.get(target_entity_before, :invisible, false)
+          now_invisible = target_entity.invisible
 
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
-        )
+          # VB6 modHechizos.bas: only writes BlindNoMore / DumbNoMore when the
+          # target was previously blind / dumb (mirrors the `.flags.Ceguera > 0`
+          # / `.flags.Estupidez > 0` guards).
+          was_blind = Map.get(target_entity_before, :blind, false)
+          was_dumb = Map.get(target_entity_before, :dumb, false)
 
-        was_visible = not (Map.get(target_entity_before, :invisible, false))
-        now_invisible = target_entity.invisible
+          status_effects =
+            [update_mana_effect(char_id, entity)] ++
+              if(was_blind and not target_entity.blind,
+                do: [Effects.send(target_id, Encoder.encode({:blind_no_more, %{}}))],
+                else: []
+              ) ++
+              if(was_dumb and not target_entity.dumb,
+                do: [Effects.send(target_id, Encoder.encode({:dumb_no_more, %{}}))],
+                else: []
+              ) ++
+              if(was_visible and now_invisible,
+                do: [Effects.hide_from_non_gm(target_entity)],
+                else: []
+              )
 
-        # VB6 modHechizos.bas (cura_ceguera handler) only writes BlindNoMore
-        # when the target was previously blind. Mirror the `If .flags.Ceguera > 0`
-        # guard.
-        was_blind = Map.get(target_entity_before, :blind, false)
+          players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, target_entity)
 
-        if was_blind and not target_entity.blind do
-          Helpers.send_to_session(
-            state.sessions,
-            target_id,
-            {:send_raw, Encoder.encode({:blind_no_more, %{}})}
-          )
-        end
-
-        # VB6 modHechizos.bas (cura_estupidez handler) only writes DumbNoMore
-        # when the target was previously dumb. Mirror the `If .flags.Estupidez > 0`
-        # guard.
-        was_dumb = Map.get(target_entity_before, :dumb, false)
-
-        if was_dumb and not target_entity.dumb do
-          Helpers.send_to_session(
-            state.sessions,
-            target_id,
-            {:send_raw, Encoder.encode({:dumb_no_more, %{}})}
-          )
-        end
-
-        players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, target_entity)
-        state = %{state | players: players}
-
-        # When becoming invisible, hide from non-GM clients
-        if was_visible and now_invisible do
-          Visibility.hide_from_non_gm(state, target_entity)
-        end
-
-        state
+          {%{state | players: players}, status_effects}
         end
     end
   end
@@ -723,55 +642,34 @@ defmodule Arena.Map.SpellEffects do
           oculto: false
       }
 
-      # Notify revived player
-      Helpers.send_to_session(
-        state.sessions,
-        target_id,
-        {:send_raw, Encoder.encode({:update_hp, %{min_hp: revive_hp}})}
-      )
-
-      Helpers.send_to_session(state.sessions, target_id, {:send_raw, Encoder.encode({:update_mana, %{min_mana: 0}})})
-
-      Helpers.send_to_session(
-        state.sessions,
-        target_id,
-        {:send_raw,
-         Encoder.encode({:update_hunger_and_thirst, %{max_hunger: 100, min_hunger: 0, max_thirst: 100, min_thirst: 0}})}
-      )
-
-      Helpers.send_to_session(
-        state.sessions,
-        target_id,
-        {:send_raw, Encoder.encode({:console_msg, %{message: "Has sido resucitado!", font_index: 0}})}
-      )
-
-      # Update caster mana
-      Helpers.send_to_session(
-        state.sessions,
-        char_id,
-        {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
-      )
-
       players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, revived)
       state = %{state | players: players}
-      Helpers.broadcast_character_change(state, revived)
-      state
+
+      effects = [
+        Effects.send(target_id, Encoder.encode({:update_hp, %{min_hp: revive_hp}})),
+        Effects.send(target_id, Encoder.encode({:update_mana, %{min_mana: 0}})),
+        Effects.send(
+          target_id,
+          Encoder.encode(
+            {:update_hunger_and_thirst,
+             %{max_hunger: 100, min_hunger: 0, max_thirst: 100, min_thirst: 0}}
+          )
+        ),
+        Effects.send(target_id, console("Has sido resucitado!")),
+        update_mana_effect(char_id, entity),
+        Effects.broadcast_character_change(revived)
+      ]
+
+      {state, effects}
     else
       # No dead player at target -- just update caster mana
-      Helpers.send_to_session(
-        state.sessions,
-        char_id,
-        {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
-      )
-
-      Helpers.send_to_session(
-        state.sessions,
-        char_id,
-        {:send_raw, Encoder.encode({:console_msg, %{message: "No hay un jugador muerto ahi.", font_index: 5}})}
-      )
-
       players = Map.put(state.players, char_id, entity)
-      %{state | players: players}
+
+      {%{state | players: players},
+       [
+         update_mana_effect(char_id, entity),
+         Effects.send(char_id, console("No hay un jugador muerto ahi.", 5))
+       ]}
     end
   end
 
@@ -788,7 +686,7 @@ defmodule Arena.Map.SpellEffects do
     case Map.get(state.players, target_id) do
       nil ->
         players = Map.put(state.players, char_id, entity)
-        %{state | players: players}
+        {%{state | players: players}, []}
 
       target_entity ->
         {sube, min_val, max_val} =
@@ -814,14 +712,8 @@ defmodule Arena.Map.SpellEffects do
         buffs = [buff | target_entity.buffs]
         target_entity = %{target_entity | buffs: buffs}
 
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
-        )
-
         players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, target_entity)
-        %{state | players: players}
+        {%{state | players: players}, [update_mana_effect(char_id, entity)]}
     end
   end
 
@@ -837,7 +729,7 @@ defmodule Arena.Map.SpellEffects do
     case Map.get(state.players, target_id) do
       nil ->
         players = Map.put(state.players, char_id, entity)
-        %{state | players: players}
+        {%{state | players: players}, []}
 
       target_entity ->
         amount =
@@ -854,20 +746,13 @@ defmodule Arena.Map.SpellEffects do
             %{target_entity | mana: max(target_entity.mana - amount, 0)}
           end
 
-        Helpers.send_to_session(
-          state.sessions,
-          target_id,
-          {:send_raw, Encoder.encode({:update_mana, %{min_mana: target_entity.mana}})}
-        )
-
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
-        )
-
         players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, target_entity)
-        %{state | players: players}
+
+        {%{state | players: players},
+         [
+           Effects.send(target_id, Encoder.encode({:update_mana, %{min_mana: target_entity.mana}})),
+           update_mana_effect(char_id, entity)
+         ]}
     end
   end
 
@@ -883,7 +768,7 @@ defmodule Arena.Map.SpellEffects do
     case Map.get(state.players, target_id) do
       nil ->
         players = Map.put(state.players, char_id, entity)
-        %{state | players: players}
+        {%{state | players: players}, []}
 
       target_entity ->
         amount =
@@ -898,20 +783,13 @@ defmodule Arena.Map.SpellEffects do
             %{target_entity | stamina: max(target_entity.stamina - amount, 0)}
           end
 
-        Helpers.send_to_session(
-          state.sessions,
-          target_id,
-          {:send_raw, Encoder.encode({:update_stamina, %{min_sta: target_entity.stamina}})}
-        )
-
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw, Encoder.encode({:update_mana, %{min_mana: entity.mana}})}
-        )
-
         players = state.players |> Map.put(char_id, entity) |> Map.put(target_id, target_entity)
-        %{state | players: players}
+
+        {%{state | players: players},
+         [
+           Effects.send(target_id, Encoder.encode({:update_stamina, %{min_sta: target_entity.stamina}})),
+           update_mana_effect(char_id, entity)
+         ]}
     end
   end
 

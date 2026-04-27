@@ -191,7 +191,7 @@ defmodule Arena.DumbNoMoreDriftTest do
       # Synthetic spell with very short duration; floor of 3000ms — fast-forward past it.
       spell = make_spell(%{estupidez: true, duration: 1, mana_required: 20})
 
-      state =
+      {state, _effects} =
         SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
 
       assert state.players[:target].dumb == true,
@@ -235,7 +235,7 @@ defmodule Arena.DumbNoMoreDriftTest do
 
       drain_mailbox()
 
-      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
+      {new_state, effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
 
       cleared = new_state.players[:target]
       assert cleared.dumb == false, "cura_estupidez must clear the dumb flag"
@@ -243,7 +243,13 @@ defmodule Arena.DumbNoMoreDriftTest do
       refute Enum.any?(cleared.buffs, &(&1.type == :dumb)),
              "cura_estupidez must drop the :dumb buff entry"
 
-      assert_receive {:send_raw, @dumb_no_more_packet}, 200
+      dumb_no_more_packet = @dumb_no_more_packet
+
+      assert Enum.any?(effects, fn
+               {:send, :target, %{payload: ^dumb_no_more_packet}} -> true
+               _ -> false
+             end),
+             "cura_estupidez must emit a dumb_no_more :send effect to the target"
     end
   end
 
@@ -270,7 +276,7 @@ defmodule Arena.DumbNoMoreDriftTest do
 
       drain_mailbox()
 
-      _new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
+      {_new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
 
       refute_receive {:send_raw, @dumb_no_more_packet}, 100
     end
@@ -325,7 +331,7 @@ defmodule Arena.DumbNoMoreDriftTest do
       spell = make_spell(%{estupidez: true, duration: 10, mana_required: 20})
 
       now_before = System.monotonic_time(:millisecond)
-      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
       now_after = System.monotonic_time(:millisecond)
 
       updated = new_state.players[:target]
@@ -356,7 +362,7 @@ defmodule Arena.DumbNoMoreDriftTest do
       spell = make_spell(%{estupidez: true, duration: 10, mana_required: 20})
 
       now_before = System.monotonic_time(:millisecond)
-      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
       now_after = System.monotonic_time(:millisecond)
 
       updated = new_state.players[:target]
@@ -415,7 +421,7 @@ defmodule Arena.DumbNoMoreDriftTest do
 
       spell = make_spell(%{revivir: true, min_hp: 10, mana_required: 20, work_on_dead: true})
 
-      new_state = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 50, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 50, 50)
 
       revived = new_state.players[:target]
       assert revived.dead == false

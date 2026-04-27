@@ -306,7 +306,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster})
 
       spell = make_spell(%{sube_hp: 1, min_hp: 50, max_hp: 50, mana_required: 20})
-      new_state = SpellEffects.apply_spell_heal(state, :caster, caster, 50, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_heal(state, :caster, caster, 50, spell, nil, nil)
 
       updated = new_state.players[:caster]
       # 80 + 50 = 130, capped at max_hp = 100
@@ -318,7 +318,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster})
 
       spell = make_spell(%{sube_hp: 1, min_hp: 30, max_hp: 30, mana_required: 20})
-      new_state = SpellEffects.apply_spell_heal(state, :caster, caster, 30, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_heal(state, :caster, caster, 30, spell, nil, nil)
 
       updated = new_state.players[:caster]
       # 40 + 30 = 70
@@ -330,7 +330,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster})
 
       spell = make_spell(%{sube_hp: 1, min_hp: 50, max_hp: 50, mana_required: 20})
-      new_state = SpellEffects.apply_spell_heal(state, :caster, caster, 50, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_heal(state, :caster, caster, 50, spell, nil, nil)
 
       updated = new_state.players[:caster]
       assert updated.hp == 100
@@ -341,7 +341,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster})
 
       spell = make_spell(%{sube_hp: 1, min_hp: 0, max_hp: 0, mana_required: 20})
-      new_state = SpellEffects.apply_spell_heal(state, :caster, caster, 0, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_heal(state, :caster, caster, 0, spell, nil, nil)
 
       updated = new_state.players[:caster]
       assert updated.hp == 50
@@ -357,7 +357,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
 
       spell = make_spell(%{sube_hp: 1, min_hp: 40, max_hp: 40, mana_required: 20})
-      new_state = SpellEffects.apply_spell_heal(state, :caster, caster, 40, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_heal(state, :caster, caster, 40, spell, 51, 50)
 
       assert new_state.players[:target].hp == 70
       # Caster HP unchanged
@@ -372,7 +372,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
 
       spell = make_spell(%{sube_hp: 1, min_hp: 40, max_hp: 40, mana_required: 20})
-      new_state = SpellEffects.apply_spell_heal(state, :caster, caster, 40, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_heal(state, :caster, caster, 40, spell, 51, 50)
 
       # Dead target HP not changed
       assert new_state.players[:target].hp == 0
@@ -393,7 +393,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
 
       spell = make_spell(%{paraliza: true, duration: 10, mana_required: 20})
-      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, 51, 50)
 
       updated_target = new_state.players[:target]
       assert updated_target.paralyzed == true
@@ -411,7 +411,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster})
 
       spell = make_spell(%{envenena: true, duration: 10, mana_required: 20})
-      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, nil, nil)
 
       updated = new_state.players[:caster]
       assert updated.poisoned == true
@@ -437,7 +437,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster})
 
       spell = make_spell(%{cura_veneno: true, mana_required: 20})
-      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, nil, nil)
 
       updated = new_state.players[:caster]
       assert updated.poisoned == false
@@ -449,7 +449,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster})
 
       spell = make_spell(%{cura_veneno: true, mana_required: 20})
-      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, nil, nil)
 
       updated = new_state.players[:caster]
       assert updated.poisoned == false
@@ -463,7 +463,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster})
 
       spell = make_spell(%{invisibilidad: true, duration: 15, mana_required: 20})
-      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, nil, nil)
 
       updated = new_state.players[:caster]
       assert updated.invisible == true
@@ -482,7 +482,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster})
 
       spell = make_spell(%{invisibilidad: true, duration: 30, mana_required: 20})
-      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, nil, nil)
 
       updated = new_state.players[:caster]
       invis_buffs = Enum.filter(updated.buffs, &(&1.type == :invisible))
@@ -500,7 +500,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
 
       spell = make_spell(%{inmoviliza: true, duration: 10, mana_required: 20})
-      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, 51, 50)
 
       updated_target = new_state.players[:target]
       assert updated_target.immobilized == true
@@ -520,7 +520,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster})
 
       spell = make_spell(%{sube_fu: 1, min_fu: 10, max_fu: 10, duration: 20, mana_required: 20})
-      new_state = SpellEffects.apply_spell_attribute_buff(state, :caster, caster, spell, :str, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_attribute_buff(state, :caster, caster, spell, :str, nil, nil)
 
       updated = new_state.players[:caster]
       assert updated.str_buff == 10
@@ -534,7 +534,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster})
 
       spell = make_spell(%{sube_fu: 2, min_fu: 5, max_fu: 5, duration: 20, mana_required: 20})
-      new_state = SpellEffects.apply_spell_attribute_buff(state, :caster, caster, spell, :str, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_attribute_buff(state, :caster, caster, spell, :str, nil, nil)
 
       updated = new_state.players[:caster]
       assert updated.str_buff == -5
@@ -548,7 +548,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster})
 
       spell = make_spell(%{sube_fu: 1, min_fu: 7, max_fu: 7, duration: 20, mana_required: 20})
-      new_state = SpellEffects.apply_spell_attribute_buff(state, :caster, caster, spell, :str, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_attribute_buff(state, :caster, caster, spell, :str, nil, nil)
 
       updated = new_state.players[:caster]
       # 5 + 7 = 12
@@ -563,7 +563,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster})
 
       spell = make_spell(%{sube_ag: 1, min_ag: 8, max_ag: 8, duration: 20, mana_required: 20})
-      new_state = SpellEffects.apply_spell_attribute_buff(state, :caster, caster, spell, :agi, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_attribute_buff(state, :caster, caster, spell, :agi, nil, nil)
 
       updated = new_state.players[:caster]
       assert updated.agi_buff == 8
@@ -577,7 +577,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster})
 
       spell = make_spell(%{sube_ag: 2, min_ag: 6, max_ag: 6, duration: 20, mana_required: 20})
-      new_state = SpellEffects.apply_spell_attribute_buff(state, :caster, caster, spell, :agi, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_attribute_buff(state, :caster, caster, spell, :agi, nil, nil)
 
       updated = new_state.players[:caster]
       assert updated.agi_buff == -6
@@ -594,7 +594,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster})
 
       spell = make_spell(%{sube_mana: 1, min_mana: 50, max_mana: 50, mana_required: 20})
-      new_state = SpellEffects.apply_spell_mana(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_mana(state, :caster, caster, spell, nil, nil)
 
       updated = new_state.players[:caster]
       # 180 + 50 = 230, capped at 200
@@ -606,7 +606,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster})
 
       spell = make_spell(%{sube_mana: 2, min_mana: 50, max_mana: 50, mana_required: 0})
-      new_state = SpellEffects.apply_spell_mana(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_mana(state, :caster, caster, spell, nil, nil)
 
       updated = new_state.players[:caster]
       # 30 - 50 = -20, floored at 0
@@ -618,7 +618,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster})
 
       spell = make_spell(%{sube_mana: 1, min_mana: 30, max_mana: 30, mana_required: 0})
-      new_state = SpellEffects.apply_spell_mana(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_mana(state, :caster, caster, spell, nil, nil)
 
       updated = new_state.players[:caster]
       assert updated.mana == 130
@@ -635,7 +635,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster})
 
       spell = make_spell(%{sube_sta: 1, min_sta: 30, max_sta: 30, mana_required: 20})
-      new_state = SpellEffects.apply_spell_stamina(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_stamina(state, :caster, caster, spell, nil, nil)
 
       updated = new_state.players[:caster]
       # 80 + 30 = 110, capped at 100
@@ -647,7 +647,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster})
 
       spell = make_spell(%{sube_sta: 2, min_sta: 25, max_sta: 25, mana_required: 20})
-      new_state = SpellEffects.apply_spell_stamina(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_stamina(state, :caster, caster, spell, nil, nil)
 
       updated = new_state.players[:caster]
       # 10 - 25 = -15, floored at 0
@@ -684,7 +684,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       # VB6: min_hp is revive percentage, e.g., 10 means 10% of max_hp
       spell = make_spell(%{revivir: true, min_hp: 10, mana_required: 20, work_on_dead: true})
-      new_state = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 51, 50)
 
       revived = new_state.players[:target]
       assert revived.dead == false
@@ -722,7 +722,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       # 50% of 500 = 250 HP
       spell = make_spell(%{revivir: true, min_hp: 50, mana_required: 20, work_on_dead: true})
-      new_state = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 51, 50)
 
       assert new_state.players[:target].hp == 250
       assert new_state.players[:target].dead == false
@@ -736,7 +736,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
 
       spell = make_spell(%{revivir: true, min_hp: 10, mana_required: 20, work_on_dead: true})
-      new_state = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 51, 50)
 
       # Living target unchanged
       assert new_state.players[:target].hp == 50
@@ -763,7 +763,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       # VB6: revive_pct = max(spell_def.min_hp, 10)
       spell = make_spell(%{revivir: true, min_hp: 3, mana_required: 20, work_on_dead: true})
-      new_state = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 51, 50)
 
       # Uses 10% floor: div(100 * 10, 100) = 10
       assert new_state.players[:target].hp == 10
@@ -1129,7 +1129,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster})
 
       spell = make_spell(%{sube_hp: 2, min_hp: 20, max_hp: 20, mana_required: 20})
-      new_state = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
 
       # State updated (caster stored)
       assert Map.has_key?(new_state.players, :caster)
@@ -1140,7 +1140,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster})
 
       spell = make_spell(%{sube_hp: 1, min_hp: 20, max_hp: 20, mana_required: 20})
-      new_state = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
 
       assert new_state.players[:caster].hp == 70
     end
@@ -1150,7 +1150,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster})
 
       spell = make_spell(%{sanacion: true, min_hp: 15, max_hp: 15, mana_required: 20})
-      new_state = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
 
       assert new_state.players[:caster].hp == 65
     end
@@ -1163,7 +1163,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
 
       spell = make_spell(%{revivir: true, min_hp: 10, mana_required: 20, work_on_dead: true})
-      new_state = SpellEffects.apply_spell_single(state, :caster, caster, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_single(state, :caster, caster, spell, 51, 50)
 
       assert new_state.players[:target].dead == false
     end
@@ -1190,7 +1190,7 @@ defmodule Arena.SpellEffectGoldenTest do
       now_before = System.monotonic_time(:millisecond)
 
       spell = make_spell(%{invisibilidad: true, duration: 0, mana_required: 20})
-      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, nil, nil)
 
       now_after = System.monotonic_time(:millisecond)
 
@@ -1208,7 +1208,7 @@ defmodule Arena.SpellEffectGoldenTest do
       now_before = System.monotonic_time(:millisecond)
 
       spell = make_spell(%{invisibilidad: true, duration: 1, mana_required: 20})
-      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, nil, nil)
 
       now_after = System.monotonic_time(:millisecond)
 
@@ -1226,7 +1226,7 @@ defmodule Arena.SpellEffectGoldenTest do
       now_before = System.monotonic_time(:millisecond)
 
       spell = make_spell(%{invisibilidad: true, duration: 10, mana_required: 20})
-      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, nil, nil)
 
       now_after = System.monotonic_time(:millisecond)
 
@@ -1253,7 +1253,7 @@ defmodule Arena.SpellEffectGoldenTest do
       now_before = System.monotonic_time(:millisecond)
 
       spell = make_spell(%{paraliza: true, duration: 20, mana_required: 20})
-      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, 51, 50)
 
       now_after = System.monotonic_time(:millisecond)
 
@@ -1274,7 +1274,7 @@ defmodule Arena.SpellEffectGoldenTest do
       now_before = System.monotonic_time(:millisecond)
 
       spell = make_spell(%{inmoviliza: true, duration: 20, mana_required: 20})
-      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, 51, 50)
 
       now_after = System.monotonic_time(:millisecond)
 
@@ -1337,7 +1337,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster}, occupancy: occupancy, npcs_live: %{1 => npc})
 
       # Apply 30 damage directly (bypassing random roll)
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 30, %SpellDef{}, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_damage(state, :caster, caster, 30, %SpellDef{}, 51, 50)
 
       # npc_id 99999 has no NPC def, so magic_resistance = 0, full damage passes
       updated_npc = new_state.npcs_live[1]
@@ -1354,7 +1354,7 @@ defmodule Arena.SpellEffectGoldenTest do
       occupancy = %{{51, 50} => {:npc, 1}}
       state = make_state(%{caster: caster}, occupancy: occupancy, npcs_live: %{1 => npc})
 
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 20, %SpellDef{}, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_damage(state, :caster, caster, 20, %SpellDef{}, 51, 50)
 
       updated_npc = new_state.npcs_live[1]
       assert updated_npc.target_id == :caster
@@ -1370,7 +1370,7 @@ defmodule Arena.SpellEffectGoldenTest do
       occupancy = %{{51, 50} => {:npc, 1}}
       state = make_state(%{caster: caster}, occupancy: occupancy, npcs_live: %{1 => npc})
 
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, %SpellDef{}, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_damage(state, :caster, caster, 50, %SpellDef{}, 51, 50)
 
       # NPC HP unchanged
       assert new_state.npcs_live[1].hp == 0
@@ -1394,7 +1394,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster}, occupancy: occupancy, npcs_live: %{1 => npc})
 
       # 100 raw damage, 50% resistance -> 50 final damage
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 100, %SpellDef{}, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_damage(state, :caster, caster, 100, %SpellDef{}, 51, 50)
 
       assert new_state.npcs_live[1].hp == 150
 
@@ -1419,7 +1419,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster, defender: defender}, occupancy: occupancy)
 
       # 100 raw damage, 30% resistance -> round(100 * 0.7) = 70 final
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 100, %SpellDef{}, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_damage(state, :caster, caster, 100, %SpellDef{}, 51, 50)
 
       assert new_state.players[:defender].hp == 130
     end
@@ -1437,7 +1437,7 @@ defmodule Arena.SpellEffectGoldenTest do
         meta: %{safe_zone: true, sin_invi_ocul: false}
       )
 
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 100, %SpellDef{}, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_damage(state, :caster, caster, 100, %SpellDef{}, 51, 50)
 
       # Defender HP unchanged -- safe zone blocked it
       assert new_state.players[:defender].hp == 200
@@ -1453,7 +1453,7 @@ defmodule Arena.SpellEffectGoldenTest do
       occupancy = %{{51, 50} => {:player, :defender}}
       state = make_state(%{caster: caster, defender: defender}, occupancy: occupancy)
 
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, %SpellDef{}, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_damage(state, :caster, caster, 50, %SpellDef{}, 51, 50)
 
       # Caster becomes criminal for attacking a non-criminal
       assert new_state.players[:caster].criminal == true
@@ -1469,7 +1469,7 @@ defmodule Arena.SpellEffectGoldenTest do
       occupancy = %{{51, 50} => {:player, :defender}}
       state = make_state(%{caster: caster, defender: defender}, occupancy: occupancy)
 
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, %SpellDef{}, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_damage(state, :caster, caster, 50, %SpellDef{}, 51, 50)
 
       assert new_state.players[:caster].criminal == false
     end
@@ -1484,7 +1484,7 @@ defmodule Arena.SpellEffectGoldenTest do
       occupancy = %{{51, 50} => {:player, :defender}}
       state = make_state(%{caster: caster, defender: defender}, occupancy: occupancy)
 
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, %SpellDef{}, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_damage(state, :caster, caster, 50, %SpellDef{}, 51, 50)
 
       # HP unchanged -- same faction blocked it
       assert new_state.players[:defender].hp == 200
@@ -1500,7 +1500,7 @@ defmodule Arena.SpellEffectGoldenTest do
       caster = make_entity(%{mana: 180, hp: 100})
       state = make_state(%{caster: caster})
 
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, %SpellDef{}, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_damage(state, :caster, caster, 50, %SpellDef{}, nil, nil)
 
       # No damage to self -- damage spells require a valid target
       assert new_state.players[:caster].hp == 100
@@ -1510,7 +1510,7 @@ defmodule Arena.SpellEffectGoldenTest do
       caster = make_entity(%{mana: 180, hp: 100})
       state = make_state(%{caster: caster})
 
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, %SpellDef{}, 60, 60)
+      {new_state, _effects} = SpellEffects.apply_spell_damage(state, :caster, caster, 50, %SpellDef{}, 60, 60)
 
       assert new_state.players[:caster].hp == 100
     end
@@ -1521,7 +1521,7 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster}, occupancy: occupancy)
 
       # {:player, :caster} with target_id == char_id falls through to no-op
-      new_state = SpellEffects.apply_spell_damage(state, :caster, caster, 50, %SpellDef{}, 50, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_damage(state, :caster, caster, 50, %SpellDef{}, 50, 50)
 
       assert new_state.players[:caster].hp == 100
     end
@@ -1556,7 +1556,7 @@ defmodule Arena.SpellEffectGoldenTest do
       # AoE heal: area_radio=2, area_afecta=1 (players only)
       spell = make_spell(%{sube_hp: 1, min_hp: 20, max_hp: 20, area_radio: 2, area_afecta: 1})
 
-      new_state = SpellEffects.apply_spell_aoe(state, :caster, caster, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_aoe(state, :caster, caster, spell, 51, 50)
 
       # Both players in radius get healed
       assert new_state.players[:caster].hp == 80
@@ -1591,7 +1591,7 @@ defmodule Arena.SpellEffectGoldenTest do
       # AoE damage: area_afecta=2 (NPC only), radius=2
       spell = make_spell(%{sube_hp: 2, min_hp: 30, max_hp: 30, area_radio: 2, area_afecta: 2})
 
-      new_state = SpellEffects.apply_spell_aoe(state, :caster, caster, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_aoe(state, :caster, caster, spell, 51, 50)
 
       # npc_id 99999 has no NPC def -> magic_resistance=0 -> full spell damage
       # spell_damage(30, 30, 25, false) = 30 + floor(30*0.03*25) = 30 + 22 = 52
@@ -1624,7 +1624,7 @@ defmodule Arena.SpellEffectGoldenTest do
       # AoE heal: area_afecta=3 (both), radius=3
       spell = make_spell(%{sube_hp: 1, min_hp: 15, max_hp: 15, area_radio: 3, area_afecta: 3})
 
-      new_state = SpellEffects.apply_spell_aoe(state, :caster, caster, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_aoe(state, :caster, caster, spell, 51, 50)
 
       # Caster healed twice: once from own tile (50,50) and once from NPC tile (52,50)
       # which falls through to self-heal in apply_spell_heal's wildcard branch.
@@ -1651,7 +1651,7 @@ defmodule Arena.SpellEffectGoldenTest do
       # AoE heal: radius=1, centered at 50,50
       spell = make_spell(%{sube_hp: 1, min_hp: 30, max_hp: 30, area_radio: 1, area_afecta: 1})
 
-      new_state = SpellEffects.apply_spell_aoe(state, :caster, caster, spell, 50, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_aoe(state, :caster, caster, spell, 50, 50)
 
       # Only caster is in radius, gets healed
       assert new_state.players[:caster].hp == 100  # already full
@@ -1678,7 +1678,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{sube_hp: 1, min_hp: 10, max_hp: 10, area_radio: 1, area_afecta: 1, fx_grh: 0})
 
-      new_state = SpellEffects.apply_spell(state, :caster, caster, spell, 50, 50)
+      {new_state, _effects} = SpellEffects.apply_spell(state, :caster, caster, spell, 50, 50)
 
       # Both in radius=1 of center (50,50)
       assert new_state.players[:caster].hp == 60
@@ -1692,7 +1692,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{sube_hp: 1, min_hp: 10, max_hp: 10, area_radio: 0, area_afecta: 0, fx_grh: 0})
 
-      new_state = SpellEffects.apply_spell(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell(state, :caster, caster, spell, nil, nil)
 
       # Self-heal via single target path
       assert new_state.players[:caster].hp == 60
@@ -1716,7 +1716,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{remove_invisibility: true, fx_grh: 0})
 
-      new_state = SpellEffects.apply_spell_remove_invisibility(state, :caster, caster, spell, 50, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_remove_invisibility(state, :caster, caster, spell, 50, 50)
 
       assert new_state.players[:hidden].invisible == false
       assert Enum.filter(new_state.players[:hidden].buffs, &(&1.type == :invisible)) == []
@@ -1734,7 +1734,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{remove_invisibility: true, fx_grh: 0})
 
-      new_state = SpellEffects.apply_spell_remove_invisibility(state, :caster, caster, spell, 50, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_remove_invisibility(state, :caster, caster, spell, 50, 50)
 
       # Stealthy player remains invisible
       assert new_state.players[:stealthy].invisible == true
@@ -1752,7 +1752,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{remove_invisibility: true, fx_grh: 0})
 
-      new_state = SpellEffects.apply_spell_remove_invisibility(state, :caster, caster, spell, 50, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_remove_invisibility(state, :caster, caster, spell, 50, 50)
 
       # Distance = |62 - 50| = 12 > 11, stays invisible
       assert new_state.players[:far].invisible == true
@@ -1769,7 +1769,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{remove_invisibility: true, fx_grh: 0})
 
-      new_state = SpellEffects.apply_spell_remove_invisibility(state, :caster, caster, spell, 50, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_remove_invisibility(state, :caster, caster, spell, 50, 50)
 
       # Caster's invisibility is not removed (pid != char_id check)
       assert new_state.players[:caster].invisible == true
@@ -1794,7 +1794,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{paraliza: true, duration: 10})
 
-      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, 51, 50)
 
       # Target NOT paralyzed -- safe zone blocked it
       assert new_state.players[:target].paralyzed == false
@@ -1813,7 +1813,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{envenena: true, duration: 10})
 
-      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, 51, 50)
 
       assert new_state.players[:target].poisoned == false
     end
@@ -1828,7 +1828,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{invisibilidad: true, duration: 10})
 
-      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, nil, nil)
 
       # Self-cast is allowed
       assert new_state.players[:caster].invisible == true
@@ -1849,7 +1849,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{sube_mana: 1, min_mana: 40, max_mana: 40})
 
-      new_state = SpellEffects.apply_spell_mana(state, :caster, caster, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_mana(state, :caster, caster, spell, 51, 50)
 
       assert new_state.players[:target].mana == 90
       # Caster mana unchanged by the effect itself (mana cost deducted separately)
@@ -1865,7 +1865,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{sube_mana: 2, min_mana: 60, max_mana: 60})
 
-      new_state = SpellEffects.apply_spell_mana(state, :caster, caster, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_mana(state, :caster, caster, spell, 51, 50)
 
       assert new_state.players[:target].mana == 40
     end
@@ -1881,7 +1881,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{sube_sta: 1, min_sta: 50, max_sta: 50})
 
-      new_state = SpellEffects.apply_spell_stamina(state, :caster, caster, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_stamina(state, :caster, caster, spell, 51, 50)
 
       assert new_state.players[:target].stamina == 80
     end
@@ -1895,7 +1895,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{sube_sta: 2, min_sta: 40, max_sta: 40})
 
-      new_state = SpellEffects.apply_spell_stamina(state, :caster, caster, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_stamina(state, :caster, caster, spell, 51, 50)
 
       assert new_state.players[:target].stamina == 20
     end
@@ -1915,7 +1915,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{sube_fu: 1, min_fu: 12, max_fu: 12, duration: 20})
 
-      new_state = SpellEffects.apply_spell_attribute_buff(state, :caster, caster, spell, :str, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_attribute_buff(state, :caster, caster, spell, :str, 51, 50)
 
       assert new_state.players[:target].str_buff == 12
       # Caster str_buff unchanged
@@ -1931,7 +1931,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{sube_ag: 2, min_ag: 8, max_ag: 8, duration: 20})
 
-      new_state = SpellEffects.apply_spell_attribute_buff(state, :caster, caster, spell, :agi, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_attribute_buff(state, :caster, caster, spell, :agi, 51, 50)
 
       assert new_state.players[:target].agi_buff == -8
     end
@@ -1948,7 +1948,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{revivir: true, min_hp: 10, work_on_dead: true})
 
-      new_state = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 60, 60)
+      {new_state, _effects} = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 60, 60)
 
       # No change, caster just gets mana update message
       assert new_state.players[:caster].mana == 180
@@ -1966,7 +1966,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{revivir: true, min_hp: 10, work_on_dead: true})
 
-      new_state = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 51, 50)
 
       # NPC not resurrected
       assert new_state.npcs_live[1].alive == false
@@ -1986,7 +1986,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{revivir: true, min_hp: 10, work_on_dead: true})
 
-      new_state = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 51, 50)
 
       revived = new_state.players[:target]
       assert revived.oculto == false
@@ -2047,7 +2047,7 @@ defmodule Arena.SpellEffectGoldenTest do
       # which is the self-heal path -- but it does NOT heal self when a tile is targeted
       # because the target matched {:npc, _} which doesn't match {:player, _} or nil
       # The code actually falls to the wildcard _ branch which does self-heal
-      new_state = SpellEffects.apply_spell_heal(state, :caster, caster, 20, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_heal(state, :caster, caster, 20, spell, 51, 50)
 
       # The _ branch performs self-heal
       assert new_state.players[:caster].hp == 80
@@ -2073,7 +2073,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{remove_invisibility: true, fx_grh: 0})
 
-      new_state = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
 
       # Routed to remove_invisibility path; caster checks nearby players
       # :hidden is within 11 tiles, so gets revealed
@@ -2086,7 +2086,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{sube_fu: 1, min_fu: 5, max_fu: 5, duration: 10})
 
-      new_state = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
 
       assert new_state.players[:caster].str_buff == 5
     end
@@ -2097,7 +2097,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{sube_ag: 1, min_ag: 3, max_ag: 3, duration: 10})
 
-      new_state = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
 
       assert new_state.players[:caster].agi_buff == 3
     end
@@ -2108,7 +2108,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{sube_mana: 1, min_mana: 25, max_mana: 25})
 
-      new_state = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
 
       assert new_state.players[:caster].mana == 125
     end
@@ -2119,7 +2119,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{sube_sta: 1, min_sta: 20, max_sta: 20})
 
-      new_state = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
 
       assert new_state.players[:caster].stamina == 70
     end
@@ -2169,7 +2169,7 @@ defmodule Arena.SpellEffectGoldenTest do
       # A spell with no active effect flags
       spell = make_spell(%{})
 
-      new_state = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_single(state, :caster, caster, spell, nil, nil)
 
       # State has caster stored, no changes to HP/mana/etc.
       assert new_state.players[:caster].hp == 50
@@ -2190,7 +2190,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{sube_mana: 1, min_mana: 50, max_mana: 50})
 
-      new_state = SpellEffects.apply_spell_mana(state, :caster, caster, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_mana(state, :caster, caster, spell, 51, 50)
 
       # Caster just stored
       assert new_state.players[:caster].mana == 180
@@ -2204,7 +2204,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{sube_sta: 1, min_sta: 30, max_sta: 30})
 
-      new_state = SpellEffects.apply_spell_stamina(state, :caster, caster, spell, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_stamina(state, :caster, caster, spell, 51, 50)
 
       assert new_state.players[:caster].stamina == 50
     end
@@ -2222,7 +2222,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       spell = make_spell(%{envenena: true, duration: 30})
 
-      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, nil, nil)
+      {new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, nil, nil)
 
       now_after = System.monotonic_time(:millisecond)
       updated = new_state.players[:caster]

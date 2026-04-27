@@ -885,7 +885,7 @@ defmodule Arena.BugRegressionTest do
       state = %{state | occupancy: occ}
 
       # Directly call apply_spell_damage with 50 damage at defender's tile
-      new_state = SpellEffects.apply_spell_damage(state, :attacker, attacker, 50, %Arena.Data.SpellDef{}, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_damage(state, :attacker, attacker, 50, %Arena.Data.SpellDef{}, 51, 50)
 
       defender_after = Map.get(new_state.players, :defender)
       assert defender_after.hp == 100, "Spell should not damage players in safe zone"
@@ -909,7 +909,7 @@ defmodule Arena.BugRegressionTest do
       spell_def = %{paraliza: true, envenena: false, cura_veneno: false,
                     invisibilidad: false, inmoviliza: false, duration: 5}
 
-      new_state = SpellEffects.apply_spell_status(state, :attacker, attacker, spell_def, 51, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_status(state, :attacker, attacker, spell_def, 51, 50)
 
       defender_after = Map.get(new_state.players, :defender)
       refute defender_after.paralyzed, "Paralysis spell should not affect players in safe zone"

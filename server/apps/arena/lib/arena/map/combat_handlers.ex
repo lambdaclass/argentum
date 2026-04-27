@@ -771,8 +771,10 @@ defmodule Arena.Map.CombatHandlers do
                         spell_cooldowns: Map.put(entity.spell_cooldowns, spell_slot, now + cooldown_ms)
                     }
 
-                    state = Arena.Map.SpellEffects.apply_spell(state, char_id, entity, spell_def, target_x, target_y)
-                    {:ok, state, :ok, []}
+                    {state, spell_effects} =
+                      Arena.Map.SpellEffects.apply_spell(state, char_id, entity, spell_def, target_x, target_y)
+
+                    {:ok, state, :ok, spell_effects}
                 end
             end
         end

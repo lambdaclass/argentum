@@ -187,7 +187,7 @@ defmodule Arena.BlindNoMoreDriftTest do
       # that with a future `now` value.
       spell = make_spell(%{ciega: true, duration: 1, mana_required: 20})
 
-      state =
+      {state, _effects} =
         SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
 
       assert state.players[:target].blind == true,
@@ -233,7 +233,7 @@ defmodule Arena.BlindNoMoreDriftTest do
 
       drain_mailbox()
 
-      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
+      {new_state, effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
 
       cleared = new_state.players[:target]
       assert cleared.blind == false, "cura_ceguera must clear the blind flag"
@@ -241,7 +241,13 @@ defmodule Arena.BlindNoMoreDriftTest do
       refute Enum.any?(cleared.buffs, &(&1.type == :blind)),
              "cura_ceguera must drop the :blind buff entry"
 
-      assert_receive {:send_raw, @blind_no_more_packet}, 200
+      blind_no_more_packet = @blind_no_more_packet
+
+      assert Enum.any?(effects, fn
+               {:send, :target, %{payload: ^blind_no_more_packet}} -> true
+               _ -> false
+             end),
+             "cura_ceguera must emit a blind_no_more :send effect to the target"
     end
   end
 
@@ -268,7 +274,7 @@ defmodule Arena.BlindNoMoreDriftTest do
 
       drain_mailbox()
 
-      _new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
+      {_new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
 
       refute_receive {:send_raw, @blind_no_more_packet}, 100
     end
@@ -323,7 +329,7 @@ defmodule Arena.BlindNoMoreDriftTest do
       spell = make_spell(%{ciega: true, duration: 10, mana_required: 20})
 
       now_before = System.monotonic_time(:millisecond)
-      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
       now_after = System.monotonic_time(:millisecond)
 
       updated = new_state.players[:target]
@@ -354,7 +360,7 @@ defmodule Arena.BlindNoMoreDriftTest do
       spell = make_spell(%{ciega: true, duration: 10, mana_required: 20})
 
       now_before = System.monotonic_time(:millisecond)
-      new_state = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
       now_after = System.monotonic_time(:millisecond)
 
       updated = new_state.players[:target]
@@ -413,7 +419,7 @@ defmodule Arena.BlindNoMoreDriftTest do
 
       spell = make_spell(%{revivir: true, min_hp: 10, mana_required: 20, work_on_dead: true})
 
-      new_state = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 50, 50)
+      {new_state, _effects} = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 50, 50)
 
       revived = new_state.players[:target]
       assert revived.dead == false
