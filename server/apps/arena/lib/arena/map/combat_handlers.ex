@@ -574,7 +574,12 @@ defmodule Arena.Map.CombatHandlers do
 
   def handle_cast_spell(state, char_id, spell_slot, target_x, target_y) do
     start = System.monotonic_time()
-    result = do_handle_cast_spell(state, char_id, spell_slot, target_x, target_y)
+
+    result =
+      Effects.run_handler_call_reply(state, fn s ->
+        do_handle_cast_spell_effects(s, char_id, spell_slot, target_x, target_y)
+      end)
+
     duration = System.monotonic_time() - start
 
     spell_result =
@@ -589,7 +594,11 @@ defmodule Arena.Map.CombatHandlers do
     result
   end
 
-  defp do_handle_cast_spell(state, char_id, spell_slot, target_x, target_y) do
+  # Effects-contract body for handle_cast_spell. Mirrors
+  # `do_handle_attack_effects/4`: outer rejects + work_request_target prompt
+  # emit effects via the runner. SpellEffects.apply_spell remains legacy
+  # (slice 4) — bridged here as `effects = []`.
+  defp do_handle_cast_spell_effects(state, char_id, spell_slot, target_x, target_y) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         now = System.monotonic_time(:millisecond)
@@ -598,23 +607,23 @@ defmodule Arena.Map.CombatHandlers do
 
         cond do
           now < slot_cd ->
-            {:reply, {:error, :cooldown}, state}
+            {:ok, state, {:error, :cooldown}, []}
 
           entity.dead ->
-            {:reply, {:error, :dead}, state}
+            {:ok, state, {:error, :dead}, []}
 
           entity.paralyzed ->
-            {:reply, {:error, :paralyzed}, state}
+            {:ok, state, {:error, :paralyzed}, []}
 
           entity.mounted ->
-            {:reply, {:error, :mounted}, state}
+            {:ok, state, {:error, :mounted}, []}
 
           true ->
             spell_idx = spell_slot - 1
 
             cond do
               spell_idx < 0 or spell_idx >= length(entity.spells) ->
-                {:reply, {:error, :invalid_slot}, state}
+                {:ok, state, {:error, :invalid_slot}, []}
 
               true ->
                 spell_id = Enum.at(entity.spells, spell_idx)
@@ -649,7 +658,7 @@ defmodule Arena.Map.CombatHandlers do
 
                 cond do
                   spell_def == nil ->
-                    {:reply, {:error, :unknown_spell}, state}
+                    {:ok, state, {:error, :unknown_spell}, []}
 
                   # VB6 modHechizos.bas:4150-4156 (UseSpellSlot): when the player
                   # clicks a non-AutoLanzar spell with no target picked, the
@@ -664,98 +673,80 @@ defmodule Arena.Map.CombatHandlers do
                       radio: spell_def.area_radio
                     }
 
-                    Helpers.send_to_session(
-                      state.sessions,
-                      char_id,
-                      {:send_raw, Encoder.encode({:work_request_target, payload})}
-                    )
-
-                    {:reply, :ok, state}
+                    {:ok, state, :ok,
+                     [Effects.send(char_id, Encoder.encode({:work_request_target, payload}))]}
 
                   not spell_in_range ->
-                    {:reply, {:error, :out_of_range}, state}
+                    {:ok, state, {:error, :out_of_range}, []}
 
                   # VB6: spell target type mismatch
                   invalid_target ->
-                    spell_req_fail_target(state, char_id)
+                    {:ok, state, {:error, :invalid_target},
+                     [Effects.send(char_id, console("Objetivo invalido."))]}
 
                   spell_def.min_skill > 0 and magic_skill < spell_def.min_skill ->
-                    {:reply, {:error, :skill_too_low}, state}
+                    {:ok, state, {:error, :skill_too_low}, []}
 
                   entity.mana < spell_def.mana_required ->
-                    {:reply, {:error, :not_enough_mana}, state}
+                    {:ok, state, {:error, :not_enough_mana}, []}
 
                   entity.stamina < spell_def.sta_required ->
-                    {:reply, {:error, :not_enough_stamina}, state}
+                    {:ok, state, {:error, :not_enough_stamina}, []}
 
                   # VB6: MaxLevelCasteable -- spell has a max caster level
                   spell_def.max_level_casteable > 0 and entity.level > spell_def.max_level_casteable ->
-                    Helpers.send_to_session(
-                      state.sessions,
-                      char_id,
-                      {:send_raw,
-                       Encoder.encode(
-                         {:console_msg, %{message: "Tu nivel es muy alto para lanzar este hechizo.", font_index: 0}}
-                       )}
-                    )
-
-                    {:reply, {:error, :level_too_high}, state}
+                    {:ok, state, {:error, :level_too_high},
+                     [Effects.send(char_id, console("Tu nivel es muy alto para lanzar este hechizo."))]}
 
                   # VB6: NeedStaff -- requires a magic staff equipped
                   spell_def.need_staff and not has_staff_equipped?(entity) ->
-                    Helpers.send_to_session(
-                      state.sessions,
-                      char_id,
-                      {:send_raw,
-                       Encoder.encode({:console_msg, %{message: "Necesitas un baculo equipado.", font_index: 0}})}
-                    )
-
-                    {:reply, {:error, :need_staff}, state}
+                    {:ok, state, {:error, :need_staff},
+                     [Effects.send(char_id, console("Necesitas un baculo equipado."))]}
 
                   # VB6: RequirementMask -- equipment requirements
                   band(req, @req_weapon) != 0 and entity.equipment[:weapon] == nil ->
-                    spell_req_fail(state, char_id, "Necesitas un arma equipada.")
+                    spell_req_fail_effects(state, char_id, "Necesitas un arma equipada.")
 
                   band(req, @req_shield) != 0 and entity.equipment[:shield] == nil ->
-                    spell_req_fail(state, char_id, "Necesitas un escudo equipado.")
+                    spell_req_fail_effects(state, char_id, "Necesitas un escudo equipado.")
 
                   band(req, @req_armor) != 0 and entity.equipment[:armor] == nil ->
-                    spell_req_fail(state, char_id, "Necesitas una armadura equipada.")
+                    spell_req_fail_effects(state, char_id, "Necesitas una armadura equipada.")
 
                   band(req, @req_helm) != 0 and entity.equipment[:helmet] == nil ->
-                    spell_req_fail(state, char_id, "Necesitas un casco equipado.")
+                    spell_req_fail_effects(state, char_id, "Necesitas un casco equipado.")
 
                   band(req, @req_projectile) != 0 and entity.equipment[:municion] == nil ->
-                    spell_req_fail(state, char_id, "Necesitas municion equipada.")
+                    spell_req_fail_effects(state, char_id, "Necesitas municion equipada.")
 
                   # VB6: eRequireShip -- must be navigating
                   band(req, @req_ship) != 0 and not entity.navigating ->
-                    spell_req_fail(state, char_id, "Necesitas estar navegando.")
+                    spell_req_fail_effects(state, char_id, "Necesitas estar navegando.")
 
                   # VB6: eRequireTargetOnLand -- target must be on land
                   band(req, @req_on_land) != 0 and target_x != nil and
                       tile_is_water?(state, target_x, target_y) ->
-                    spell_req_fail(state, char_id, "El objetivo debe estar en tierra.")
+                    spell_req_fail_effects(state, char_id, "El objetivo debe estar en tierra.")
 
                   # VB6: eRequireTargetOnWater -- target must be on water
                   band(req, @req_on_water) != 0 and target_x != nil and
                       not tile_is_water?(state, target_x, target_y) ->
-                    spell_req_fail(state, char_id, "El objetivo debe estar en agua.")
+                    spell_req_fail_effects(state, char_id, "El objetivo debe estar en agua.")
 
                   # VB6: WorkOnDead -- reject if target is dead and spell cannot work on dead
                   not spell_def.work_on_dead and target_x != nil and target_y != nil and
                       target_is_dead?(state, target_x, target_y) ->
-                    spell_req_fail(state, char_id, "No puedes lanzar ese hechizo sobre un muerto.")
+                    spell_req_fail_effects(state, char_id, "No puedes lanzar ese hechizo sobre un muerto.")
 
                   # VB6: StaffAfecta -- requires a weapon of specific obj_type
                   spell_def.staff_afecta > 0 and
                       not has_required_weapon_type?(entity, spell_def.staff_afecta) ->
-                    spell_req_fail(state, char_id, "Necesitas el arma adecuada para lanzar ese hechizo.")
+                    spell_req_fail_effects(state, char_id, "Necesitas el arma adecuada para lanzar ese hechizo.")
 
                   # VB6: RequireWeaponType -- requires weapon of specific e_WeaponType enum
                   spell_def.require_weapon_type > 0 and
                       not has_required_weapon_enum?(entity, spell_def.require_weapon_type) ->
-                    spell_req_fail(state, char_id, "Necesitas el tipo de arma correcto para lanzar ese hechizo.")
+                    spell_req_fail_effects(state, char_id, "Necesitas el tipo de arma correcto para lanzar ese hechizo.")
 
                   true ->
                     # VB6: casting breaks meditation and rest
@@ -781,14 +772,20 @@ defmodule Arena.Map.CombatHandlers do
                     }
 
                     state = Arena.Map.SpellEffects.apply_spell(state, char_id, entity, spell_def, target_x, target_y)
-                    {:reply, :ok, state}
+                    {:ok, state, :ok, []}
                 end
             end
         end
 
       :error ->
-        {:reply, {:error, :not_on_map}, state}
+        {:ok, state, {:error, :not_on_map}, []}
     end
+  end
+
+  # VB6: spell-requirement-mask failure. Returns the effects-contract
+  # rejection tuple with a console_msg effect.
+  defp spell_req_fail_effects(state, char_id, message) do
+    {:ok, state, {:error, :requirement_not_met}, [Effects.send(char_id, console(message))]}
   end
 
   # VB6: SubirSkill (Modulo_UsUaRiOs.bas:1617-1670). Practice-based skill-up.
@@ -1052,17 +1049,6 @@ defmodule Arena.Map.CombatHandlers do
     end
   end
 
-  # VB6: requirement mask failure -- send message and return error reply
-  def spell_req_fail(state, char_id, message) do
-    Helpers.send_to_session(
-      state.sessions,
-      char_id,
-      {:send_raw, Encoder.encode({:console_msg, %{message: message, font_index: 0}})}
-    )
-
-    {:reply, {:error, :requirement_not_met}, state}
-  end
-
   # TileGrid tile values: 0=walkable, 1=blocked, 2=water, 3=lava
   def tile_is_water?(state, x, y) do
     TileGrid.get_tile(state.map_id, x, y) == 2
@@ -1126,19 +1112,6 @@ defmodule Arena.Map.CombatHandlers do
   defp valid_spell_target?(2, {:npc, _}), do: true
   defp valid_spell_target?(2, _), do: false
   defp valid_spell_target?(_, _), do: true
-
-  defp spell_req_fail_target(state, char_id) do
-    Helpers.send_to_session(
-      state.sessions,
-      char_id,
-      {:send_raw,
-       Encoder.encode(
-         {:console_msg, %{message: "Objetivo invalido.", font_index: 0}}
-       )}
-    )
-
-    {:reply, {:error, :invalid_target}, state}
-  end
 
   # VB6 e_WeaponType mapping (Drift #4)
   # Maps integer weapon_type IDs to atoms for critical hit class gating.
