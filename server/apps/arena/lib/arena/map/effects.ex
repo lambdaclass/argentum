@@ -160,6 +160,15 @@ defmodule Arena.Map.Effects do
   def run(_state, []), do: :ok
 
   def run(state, effects) when is_list(effects) do
+    # Test-only recorder hook: when `Arena.Test.Scenario.run/2` is driving
+    # this call it stores `{pid, ref}` under `:arena_effects_recorder` to
+    # capture the effect list for assertions. Production never sets this
+    # key, so the lookup is a single `Process.get/1` with nil result.
+    case Process.get(:arena_effects_recorder) do
+      nil -> :ok
+      pid when is_pid(pid) -> Kernel.send(pid, {:arena_effects_recorded, effects})
+    end
+
     Enum.each(effects, &dispatch(state, &1))
   end
 
