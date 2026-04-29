@@ -181,10 +181,16 @@ defmodule Arena.VolverCriminalTest do
           salida: %{map: 5, x: 60, y: 70}
         })
 
-      {new_entity, _new_state, _vc_effects} = CriminalStatus.volver_criminal(state, :player, entity)
+      {new_entity, _new_state, vc_effects} =
+        CriminalStatus.volver_criminal(state, :player, entity)
 
       assert new_entity.criminal == true
-      assert_receive {:transfer, 5, 60, 70, _entity}, 200
+
+      assert Enum.any?(vc_effects, fn
+               {:transfer, :player, 5, 60, 70, _entity} -> true
+               _ -> false
+             end),
+             "expected a :transfer effect to {map: 5, x: 60, y: 70}"
     end
 
     test "GM is NOT warped from NoPKs map" do

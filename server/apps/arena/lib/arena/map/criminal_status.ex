@@ -16,7 +16,7 @@ defmodule Arena.Map.CriminalStatus do
   the result into their existing reducer-style flow.
   """
 
-  alias Arena.Map.{Effects, Helpers}
+  alias Arena.Map.Effects
   alias AoProtocol.Server.Encoder
 
   @trigger_safe_zone 6
@@ -71,22 +71,21 @@ defmodule Arena.Map.CriminalStatus do
     salida = Map.get(state.meta, :salida)
 
     if no_pks and not gm?(entity) and valid_salida?(salida) do
-      # The `{:transfer, _, _, _, _}` tuple is out-of-band of the egress
-      # envelope — same convention as `/GOTO`. The session process picks it
-      # up directly and handles the cross-map transfer.
-      Helpers.send_to_session(
-        state.sessions,
-        char_id,
-        {:transfer, salida.map, salida.x, salida.y, entity}
-      )
-
-      # Msg580 parity: inform the user they can't be criminals here.
+      # Msg580 parity: inform the user they can't be criminals here, then
+      # warp them via the `:transfer` effect kind. The runner sends the
+      # `{:transfer, _, _, _, _}` tuple to the session pid out-of-band of
+      # the egress envelope — same convention as `/GOTO`.
       msg_packet =
         Encoder.encode(
           {:console_msg, %{message: "En este mapa no se admiten criminales.", font_index: 0}}
         )
 
-      {entity, state, [Effects.send(char_id, msg_packet)]}
+      effects = [
+        Effects.send(char_id, msg_packet),
+        Effects.transfer(char_id, salida.map, salida.x, salida.y, entity)
+      ]
+
+      {entity, state, effects}
     else
       {entity, state, []}
     end
