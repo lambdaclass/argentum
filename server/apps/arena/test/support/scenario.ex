@@ -10,6 +10,7 @@ defmodule Arena.Test.Scenario do
   slice 3 adds tick / clock / seed control.
   """
 
+  alias Arena.Entity.NpcEntity
   alias Arena.Map.{Effects, Helpers, State}
   alias Arena.Test.PlayerFactory
 
@@ -75,6 +76,104 @@ defmodule Arena.Test.Scenario do
     }
 
     %{scenario | state: new_state}
+  end
+
+  @doc """
+  Add an NPC to the scenario. `instance_id` is the key into
+  `state.npcs_live` (matching the live map). Mirrors `with_player/3`:
+
+    * Builds an `%Arena.Entity.NpcEntity{}` with sensible defaults.
+    * Writes the NPC into `state.npcs_live[instance_id]`.
+    * Mirrors `char_index -> instance_id` into
+      `state.npc_char_indices` so `char_index`-based lookups (e.g. AO20
+      packet routing) resolve.
+    * Marks the NPC's `(x, y)` tile as `{:npc, instance_id}` in
+      `state.occupancy` so adjacency / facing-tile lookups succeed.
+
+  Override keys must exist on the `NpcEntity` struct.
+  """
+  @spec with_npc(t, term(), keyword()) :: t
+  def with_npc(scenario, instance_id, overrides \\ []) do
+    overrides =
+      overrides
+      |> Keyword.put_new(:instance_id, instance_id)
+      |> Keyword.put_new(:char_index, 100 + :erlang.phash2(instance_id, 1_000))
+      |> Keyword.put_new(:x, 50)
+      |> Keyword.put_new(:y, 50)
+
+    {x, y} = {Keyword.fetch!(overrides, :x), Keyword.fetch!(overrides, :y)}
+    char_index = Keyword.fetch!(overrides, :char_index)
+
+    overrides =
+      overrides
+      |> Keyword.put_new(:spawn_x, x)
+      |> Keyword.put_new(:spawn_y, y)
+
+    npc = struct!(NpcEntity, overrides)
+
+    new_state = %{
+      scenario.state
+      | npcs_live: Map.put(scenario.state.npcs_live, instance_id, npc),
+        npc_char_indices: Map.put(scenario.state.npc_char_indices, char_index, instance_id),
+        occupancy:
+          Helpers.set_occupancy(scenario.state.occupancy, npc.x, npc.y, {:npc, instance_id})
+    }
+
+    %{scenario | state: new_state}
+  end
+
+  @doc """
+  Stamp `value` into `state.occupancy` at `(x, y)`. Escape hatch for
+  tests that need to set an occupancy slot without going through
+  `with_player`/`with_npc` (e.g. ground items, blocked tiles, or NPCs
+  placed at a different tile than the entity record).
+  """
+  @spec with_occupancy(t, pos_integer(), pos_integer(), term()) :: t
+  def with_occupancy(scenario, x, y, value) do
+    new_state = %{
+      scenario.state
+      | occupancy: Helpers.set_occupancy(scenario.state.occupancy, x, y, value)
+    }
+
+    %{scenario | state: new_state}
+  end
+
+  @doc """
+  Apply a closure that mutates `scenario.state` directly without
+  capturing effects. Use for tests that drive a handler returning a
+  non-effect-shaped value (e.g. `{:noreply, state}` or
+  `{:ok, state}` from synchronous handlers that don't yet thread
+  through `Arena.Map.Effects`). Closures must return `State.t()`.
+
+      scenario
+      |> update_state(fn s ->
+        {:noreply, new_state} = Crafting.handle_work(s, 7, :taming)
+        new_state
+      end)
+  """
+  @spec update_state(t, (State.t() -> State.t())) :: t
+  def update_state(scenario, fun) when is_function(fun, 1) do
+    %{scenario | state: fun.(scenario.state)}
+  end
+
+  @doc """
+  Drive an arbitrary handler that returns `{state, effects}` (no reply
+  tuple), capturing effects through `Effects.run/2` so they land in
+  `emitted_effects/1`.
+
+  Use when calling a handler outside the typed surface of `attack/3` or
+  `cast_spell/4` (e.g. `CombatHandlers.handle_attack_target/4`,
+  `SpellEffects.apply_spell_status/6`, `NpcAi.despawn_pet/3`). The
+  closure receives `state` and returns `{state, effects}`.
+
+      scenario
+      |> run_effects(fn state ->
+        CombatHandlers.handle_attack_target(state, char_id, entity, {:npc, 1})
+      end)
+  """
+  @spec run_effects(t, (State.t() -> {State.t(), [Arena.Map.Effect.t()]})) :: t
+  def run_effects(scenario, fun) when is_function(fun, 1) do
+    drive_run(scenario, fun)
   end
 
   @doc """
