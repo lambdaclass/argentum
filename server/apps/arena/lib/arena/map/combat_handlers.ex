@@ -59,12 +59,12 @@ defmodule Arena.Map.CombatHandlers do
   # `handle_attack/4` runs this through `Effects.run_handler_call_reply/2` to
   # preserve the `{:reply, reply, state}` surface that callers depend on.
   #
-  # Slice 2 scope: outer rejects + swing/melee/ranged emit effects via the
-  # runner. `handle_attack_target/{4,5}` returns `{state, effects}`;
-  # `handle_ranged_attack/7` returns `{state, reply, effects}`. Inner
-  # helpers (NpcDeath, PlayerDeath, CriminalStatus, maybe_gain_skill,
-  # drop_npc_*) still write through the legacy `{:send_raw, _}` shim — they
-  # migrate in slice 5.
+  # All side effects flow through the runner: outer rejects + swing/melee
+  # emit `Effect.t()` directly; `handle_attack_target/{4,5}` returns
+  # `{state, effects}`; `handle_ranged_attack/7` returns
+  # `{state, reply, effects}`; the death / XP / loot helpers (NpcDeath,
+  # PlayerDeath, CriminalStatus, maybe_gain_skill, drop_npc_*) all return
+  # effects tuples since slice 5.
   defp do_handle_attack_effects(state, char_id, target_x, target_y) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
@@ -213,10 +213,10 @@ defmodule Arena.Map.CombatHandlers do
     end
   end
 
-  # Returns `{state, effects}`. Side effects emitted as `Effect.t()` values
-  # for the runner; inner helpers (NpcDeath, PlayerDeath, CriminalStatus,
-  # maybe_gain_skill, drop_npc_*) still issue their own `{:send_raw, _}`
-  # writes — bridged here as no extra effects, until slice 5.
+  # Returns `{state, effects}`. All side effects emitted as `Effect.t()`
+  # values; inner death / criminal-flag / XP helpers (NpcDeath,
+  # PlayerDeath, CriminalStatus, maybe_gain_skill, drop_npc_*) thread
+  # their own effects up through the same return shape since slice 5.
   def handle_attack_target(state, char_id, entity, target, opts \\ [])
 
   def handle_attack_target(state, char_id, entity, {:npc, instance_id}, opts) do

@@ -5,9 +5,9 @@ defmodule Arena.Map.SpellEffects do
   All `apply_spell_*` functions return `{state, effects}` — pure-ish bodies
   that produce `Arena.Map.Effect.t()` values for the runner. Inner death /
   criminal-flag / XP helpers (NpcDeath, PlayerDeath, CriminalStatus,
-  CombatHandlers.award_hit_xp) still write through the legacy
-  `{:send_raw, _}` shim and are bridged here as no extra effects until
-  slice 5.
+  CombatHandlers.award_hit_xp) thread their own effects up through the
+  same return shape; nothing in this module emits `{:send_raw, _}`
+  directly.
   """
 
   import Bitwise
