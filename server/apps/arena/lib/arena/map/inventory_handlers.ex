@@ -12,6 +12,7 @@ defmodule Arena.Map.InventoryHandlers do
   replies — same uniform shape as the migrated NpcInteraction handlers.
   """
 
+  alias Arena.Clock
   alias Arena.Map.{Effects, Helpers}
   alias Arena.Inventory
   alias Arena.Data.GameData
@@ -425,7 +426,7 @@ defmodule Arena.Map.InventoryHandlers do
   def handle_use_item(state, char_id, slot, target_x \\ nil, target_y \\ nil) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
-        now = System.monotonic_time(:millisecond)
+        now = Clock.now_ms()
 
         cond do
           entity.dead ->

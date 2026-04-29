@@ -5,6 +5,7 @@ defmodule Arena.Map.Movement do
   Contains walking, tile-exit detection, and heading changes.
   """
 
+  alias Arena.Clock
   alias Arena.Map.{Helpers, Visibility}
   alias AoProtocol.Server.Encoder
 
@@ -37,7 +38,7 @@ defmodule Arena.Map.Movement do
   defp do_handle_move(state, char_id, direction) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
-        now = System.monotonic_time(:millisecond)
+        now = Clock.now_ms()
         min_interval = trunc(base_walk_interval_ms() / entity.speeding)
 
         cond do

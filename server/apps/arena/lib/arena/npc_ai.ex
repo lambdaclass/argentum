@@ -13,6 +13,7 @@ defmodule Arena.NpcAi do
 
   require Logger
 
+  alias Arena.Clock
   alias Arena.Combat
   alias Arena.Data.GameData
   alias Arena.Map.Helpers
@@ -48,9 +49,9 @@ defmodule Arena.NpcAi do
   def tick(state) do
     # Short-circuit if no players on map
     if map_size(state.players) == 0 do
-      process_respawns(state, System.monotonic_time(:millisecond), [])
+      process_respawns(state, Clock.now_ms(), [])
     else
-      now = System.monotonic_time(:millisecond)
+      now = Clock.now_ms()
 
       {state, effects} = process_respawns(state, now, [])
       process_alive_npcs(state, now, effects)
@@ -618,7 +619,7 @@ defmodule Arena.NpcAi do
             cond do
               # Paralysis spell
               spell_def.paraliza ->
-                now = System.monotonic_time(:millisecond)
+                now = Clock.now_ms()
                 duration_ms = max((spell_def.duration || 0) * 1000, 3000)
                 buff = %{type: :paralyzed, expires_at: now + div(duration_ms, 2)}
                 buffs = [buff | Enum.reject(player.buffs, &(&1.type == :paralyzed))]
@@ -744,7 +745,7 @@ defmodule Arena.NpcAi do
               # poisoned, apply a poison debuff. Duration = veneno * 1000 ms.
               {player, effects} =
                 if npc_def.veneno > 0 and not Map.get(player, :poisoned, false) and new_hp > 0 and :rand.uniform(100) < 30 do
-                  poison_now = System.monotonic_time(:millisecond)
+                  poison_now = Clock.now_ms()
                   duration_ms = npc_def.veneno * 1000
                   buff = %{type: :poisoned, expires_at: poison_now + duration_ms, next_tick: poison_now + @poison_tick_interval}
                   buffs = [buff | Enum.reject(Map.get(player, :buffs, []), &(&1.type == :poisoned))]

@@ -12,6 +12,7 @@ defmodule Arena.Map.SpellEffects do
 
   import Bitwise
 
+  alias Arena.Clock
   alias Arena.Map.{Effects, Helpers}
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
@@ -483,7 +484,7 @@ defmodule Arena.Map.SpellEffects do
 
   def apply_spell_status(state, char_id, entity, spell_def, target_x, target_y) do
     target = if target_x && target_y, do: Helpers.get_occupancy(state.occupancy, target_x, target_y), else: nil
-    now = System.monotonic_time(:millisecond)
+    now = Clock.now_ms()
 
     target_id =
       case target do
@@ -682,7 +683,7 @@ defmodule Arena.Map.SpellEffects do
 
   def apply_spell_attribute_buff(state, char_id, entity, spell_def, attr, target_x, target_y) do
     target = if target_x && target_y, do: Helpers.get_occupancy(state.occupancy, target_x, target_y), else: nil
-    now = System.monotonic_time(:millisecond)
+    now = Clock.now_ms()
 
     target_id =
       case target do

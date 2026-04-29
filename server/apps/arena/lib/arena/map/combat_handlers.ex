@@ -10,6 +10,7 @@ defmodule Arena.Map.CombatHandlers do
 
   import Bitwise
 
+  alias Arena.Clock
   alias Arena.Map.{Effects, Helpers}
   alias Arena.{Combat, CombatStats, Data.GameData}
   alias AoProtocol.Server.Encoder
@@ -68,7 +69,7 @@ defmodule Arena.Map.CombatHandlers do
   defp do_handle_attack_effects(state, char_id, target_x, target_y) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
-        now = System.monotonic_time(:millisecond)
+        now = Clock.now_ms()
 
         cond do
           now < entity.next_attack_at ->
@@ -608,7 +609,7 @@ defmodule Arena.Map.CombatHandlers do
   defp do_handle_cast_spell_effects(state, char_id, spell_slot, target_x, target_y) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
-        now = System.monotonic_time(:millisecond)
+        now = Clock.now_ms()
         # VB6: per-spell-slot cooldown check
         slot_cd = Map.get(entity.spell_cooldowns, spell_slot, -1_000_000_000_000)
 

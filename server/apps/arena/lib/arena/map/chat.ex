@@ -1,6 +1,7 @@
 defmodule Arena.Map.Chat do
   @moduledoc "Chat and yell handlers."
 
+  alias Arena.Clock
   alias Arena.Map.{Helpers, Visibility}
   alias AoProtocol.Server.Encoder
 
@@ -22,7 +23,7 @@ defmodule Arena.Map.Chat do
               {:noreply, state}
           end
         else
-          now = System.monotonic_time(:millisecond)
+          now = Clock.now_ms()
           wall_now = System.system_time(:millisecond)
 
           cond do
@@ -82,7 +83,7 @@ defmodule Arena.Map.Chat do
   def handle_yell(state, char_id, message) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
-        now = System.monotonic_time(:millisecond)
+        now = Clock.now_ms()
         wall_now = System.system_time(:millisecond)
 
         cond do

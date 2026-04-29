@@ -10,6 +10,7 @@ defmodule Arena.Map.Social do
   `run_handler_call_reply/2` for calls whose reply is meaningful.
   """
 
+  alias Arena.Clock
   alias Arena.Map.{Helpers, Faction, Effects}
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
@@ -667,7 +668,7 @@ defmodule Arena.Map.Social do
   end
 
   def handle_ocultarse(state, char_id, skill_level, opts \\ []) do
-    now = Keyword.get(opts, :now, System.monotonic_time(:millisecond))
+    now = Keyword.get(opts, :now, Clock.now_ms())
 
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
