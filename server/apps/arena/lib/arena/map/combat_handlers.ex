@@ -12,6 +12,7 @@ defmodule Arena.Map.CombatHandlers do
 
   alias Arena.Clock
   alias Arena.Map.{Effects, Helpers}
+  alias Arena.Rng
   alias Arena.{Combat, CombatStats, Data.GameData}
   alias AoProtocol.Server.Encoder
 
@@ -257,7 +258,7 @@ defmodule Arena.Map.CombatHandlers do
               hit_bonus
             )
 
-          if :rand.uniform(100) <= hit_roll do
+          if Rng.uniform(100) <= hit_roll do
             # VB6: base user damage added to weapon damage
             {user_min, user_max} = Combat.base_user_damage(entity.level, class_id)
 
@@ -416,7 +417,7 @@ defmodule Arena.Map.CombatHandlers do
             # VB6: meditating reduces evasion by 25%
             hit_roll = Combat.adjust_hit_for_meditate(hit_roll, defender.meditating)
 
-            if :rand.uniform(100) <= hit_roll do
+            if Rng.uniform(100) <= hit_roll do
               # --- HIT: deal damage ---
               # VB6: weapon skill gain on hit
               {entity, state, skill_effects} = maybe_gain_skill(state, char_id, entity, skill_name)
@@ -908,7 +909,7 @@ defmodule Arena.Map.CombatHandlers do
   def check_level_up(entity, char_id) do
     class_id = Helpers.class_atom_to_id(entity.class)
 
-    case Combat.level_up_gains(entity.level, class_id, entity.int, entity.agi, entity.xp, :rand.uniform()) do
+    case Combat.level_up_gains(entity.level, class_id, entity.int, entity.agi, entity.xp, Rng.uniform()) do
       {:level_up, gains} ->
         new_max_hp = entity.max_hp + gains.hp_gain
         new_max_mana = entity.max_mana + gains.mana_gain
@@ -1005,7 +1006,7 @@ defmodule Arena.Map.CombatHandlers do
   def drop_npc_loot(state, npc, npc_def) do
     Enum.reduce(npc_def.loot_table, {state, []}, fn %{item_id: item_id, amount: amount}, {acc, effs} ->
       # Simple probability: 1 in 5 chance per loot entry
-      if :rand.uniform(5) == 1 do
+      if Rng.uniform(5) == 1 do
         pos = {npc.x, npc.y}
 
         if Map.has_key?(acc.ground_items, pos) do

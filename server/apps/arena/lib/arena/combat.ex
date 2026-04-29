@@ -5,6 +5,7 @@ defmodule Arena.Combat do
   """
 
   alias Arena.Data.GameData
+  alias Arena.Rng
 
   @doc """
   Compute hit chance for PvP player melee attack.
@@ -89,7 +90,7 @@ defmodule Arena.Combat do
   def critical_hit?(class, weapon_type, wrestling_skill, extra_crit_chance \\ 0) do
     if class == :bandido and weapon_type == :knuckle do
       chance = trunc(min(max(wrestling_skill * @bandit_crit_chance + extra_crit_chance, 0), 100))
-      :rand.uniform(100) <= chance
+      Rng.uniform(100) <= chance
     else
       false
     end
@@ -393,8 +394,8 @@ defmodule Arena.Combat do
   When influence is 0, result is purely random in [min, max].
   """
   def random_int_biased(min_val, max_val, bias, influence) do
-    random_range = :rand.uniform() * (max_val - min_val) + min_val
-    mix = :rand.uniform() * influence
+    random_range = Rng.uniform() * (max_val - min_val) + min_val
+    mix = Rng.uniform() * influence
     random_range * (1 - mix) + bias * mix
   end
 
@@ -453,7 +454,7 @@ defmodule Arena.Combat do
 
   defp do_roll_skill_gain(level, expert?, xp_mult) do
     prob = trunc(0.1 * level * level + 15)
-    aumenta = :rand.uniform(prob * @skill_difficulty)
+    aumenta = Rng.uniform(prob * @skill_difficulty)
     cutoff = if expert?, do: @expert_skill_cutoff, else: @nonexpert_skill_cutoff
 
     if aumenta < cutoff do

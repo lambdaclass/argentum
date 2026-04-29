@@ -18,9 +18,10 @@ defmodule Arena.Test.Scenario do
   @type t :: %__MODULE__{
           state: State.t(),
           effects: [Arena.Map.Effect.t()],
-          last_reply: term() | nil
+          last_reply: term() | nil,
+          clock_ms: integer()
         }
-  defstruct [:state, effects: [], last_reply: nil]
+  defstruct [:state, effects: [], last_reply: nil, clock_ms: 0]
 
   @doc """
   Build a fresh scenario. Defaults:
@@ -43,7 +44,8 @@ defmodule Arena.Test.Scenario do
         players: %{}
       )
 
-    %__MODULE__{state: state, effects: []}
+    scenario = %__MODULE__{state: state, effects: []}
+    set_clock(scenario, Keyword.get(opts, :clock, 0))
   end
 
   @doc """
@@ -207,4 +209,101 @@ defmodule Arena.Test.Scenario do
   @doc "Clear the recorded effects buffer (e.g. between two actions)."
   @spec clear_effects(t) :: t
   def clear_effects(scenario), do: %{scenario | effects: []}
+
+  @doc """
+  Freeze the test clock at `ms` (a `monotonic_time(:millisecond)`-shaped
+  integer). All subsequent `Arena.Clock.now_ms/0` calls in this test
+  process return `ms` until `advance_clock/2` or another `set_clock/2`.
+  """
+  @spec set_clock(t, integer()) :: t
+  def set_clock(scenario, ms) when is_integer(ms) do
+    Process.put(:arena_clock_ms, ms)
+    %{scenario | clock_ms: ms}
+  end
+
+  @doc """
+  Advance the frozen test clock by `delta` milliseconds. Reads the
+  scenario's `clock_ms` and forwards to `set_clock/2`.
+  """
+  @spec advance_clock(t, non_neg_integer()) :: t
+  def advance_clock(scenario, delta) when is_integer(delta) and delta >= 0 do
+    set_clock(scenario, scenario.clock_ms + delta)
+  end
+
+  @doc """
+  Install a deterministic RNG strategy. `seed` can be a function (used
+  directly), a list (consumed in order via `Arena.Test.Rng.list/1`), or
+  a constant integer/float (returned for every `Arena.Rng.uniform/0,1`
+  call via `Arena.Test.Rng.constant/1`).
+
+  Production code reading `Arena.Rng.uniform/0,1` will now get
+  deterministic values. `:rand`-direct calls are unaffected — those
+  sites need migration to `Arena.Rng` first.
+  """
+  @spec set_seed(t, function() | list() | number()) :: t
+  def set_seed(scenario, fun) when is_function(fun, 1) do
+    Process.put(:arena_test_rng, fun)
+    scenario
+  end
+
+  def set_seed(scenario, list) when is_list(list) do
+    set_seed(scenario, Arena.Test.Rng.list(list))
+  end
+
+  def set_seed(scenario, value) when is_number(value) do
+    set_seed(scenario, Arena.Test.Rng.constant(value))
+  end
+
+  @doc """
+  Run one tick of the named subsystem inline. The synthetic test map
+  already has the periodic timers disabled, so ticks are opt-in:
+
+    * `:regen`  — hunger/thirst drain, regen HP/mana, penalty decrement
+    * `:buff`   — buff expiry, poison damage, blind/dumb/paralyzed timers
+    * `:npc_ai` — respawn checks, NPC movement, NPC combat decisions
+  """
+  @spec tick(t, :regen | :buff | :npc_ai) :: t
+  def tick(scenario, :regen) do
+    drive_run(scenario, fn state ->
+      {Arena.Map.StatusTicks.process_regen_tick(state), []}
+    end)
+  end
+
+  def tick(scenario, :buff) do
+    drive_run(scenario, fn state ->
+      now = Arena.Clock.now_ms()
+
+      new_state =
+        Enum.reduce(state.players, state, fn {char_id, entity}, acc ->
+          Arena.Map.StatusTicks.process_player_buffs(acc, char_id, entity, now)
+        end)
+
+      {new_state, []}
+    end)
+  end
+
+  def tick(scenario, :npc_ai) do
+    drive_run(scenario, fn state ->
+      {new_state, npc_effects} = Arena.NpcAi.tick(state)
+      Arena.NpcAi.dispatch_effects(new_state, npc_effects)
+      {new_state, []}
+    end)
+  end
+
+  # Drive a handler that returns `{state, effects}` (no reply tuple).
+  # Mirrors `drive_call/2`: sets the recorder pid, runs the handler,
+  # dispatches the returned effects through `Effects.run/2` so the
+  # recorder hook captures them, and drains the mailbox.
+  defp drive_run(scenario, fun) when is_function(fun, 1) do
+    Process.put(:arena_effects_recorder, self())
+
+    try do
+      {new_state, returned_effects} = fun.(scenario.state)
+      Effects.run(new_state, returned_effects)
+      captured = drain_recorded_effects()
+      %{scenario | state: new_state, effects: scenario.effects ++ captured}
+    after
+      Process.delete(:arena_effects_recorder)
+    end
+  end
 end
