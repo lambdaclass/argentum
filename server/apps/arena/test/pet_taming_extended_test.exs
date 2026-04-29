@@ -10,6 +10,25 @@ defmodule Arena.PetTamingExtendedTest do
   - Taming edge cases (already-owned, stamina, dead player, skill-up on fail)
   - Pet mode edge cases (stand prevents all movement, mode changes all pets)
   - Pet limits (max 3, /LIBERAR releases head of list)
+
+  Migrated to `Arena.Test.Scenario` in slice 4c. The local 50-line
+  `make_player/1` (a plain map) is gone; we use
+  `Arena.Test.PlayerFactory.player/1`, which returns a real
+  `%PlayerEntity{}` so field-typo bugs raise instead of silently
+  shadowing struct keys. The local `make_npc/1` is replaced by
+  `Scenario.with_npc/3` (which builds `%NpcEntity{}` via `struct!/2`),
+  and `make_state/1` by `Scenario.new/1` plus the with_player /
+  with_npc builders.
+
+  Death helpers (`NpcDeath.resolve_npc_death/4`,
+  `PlayerDeath.handle_player_death/3`, `NpcAi.despawn_pet/3`) are on
+  the effects contract since slice 5b — the `run_effects/2`
+  closure lifts them onto the scenario's recorded effect buffer.
+
+  Pet command handlers (`Pets.handle_pet_*`) and `Crafting.handle_work/3`
+  still return `{:noreply, state}` (they have not been migrated to the
+  effects contract), so we drive them via `update_state/2` and assert on
+  the post-state.
   """
   use ExUnit.Case, async: true
 
@@ -21,7 +40,7 @@ defmodule Arena.PetTamingExtendedTest do
   alias Arena.Map.Pets
   alias Arena.Map.Helpers
 
-  import Arena.Test.MapStateFactory
+  import Arena.Test.Scenario
 
   setup_all do
     case Arena.Data.GameData.start_link() do
@@ -36,94 +55,29 @@ defmodule Arena.PetTamingExtendedTest do
 
   @hostile_npc_id 559
 
-  defp make_npc(overrides \\ []) do
-    %NpcEntity{
-      npc_id: overrides[:npc_id] || @hostile_npc_id,
-      instance_id: overrides[:instance_id] || 1,
-      char_index: overrides[:char_index] || 100,
-      x: overrides[:x] || 50,
-      y: overrides[:y] || 50,
-      hp: overrides[:hp] || 250,
-      max_hp: overrides[:max_hp] || 250,
-      alive: Keyword.get(overrides, :alive, true),
-      target_id: overrides[:target_id],
-      spawn_x: overrides[:spawn_x] || 50,
-      spawn_y: overrides[:spawn_y] || 50,
-      next_attack_at: overrides[:next_attack_at] || -1_000_000_000_000,
-      next_move_at: overrides[:next_move_at] || -1_000_000_000_000,
-      next_spell_at: overrides[:next_spell_at] || -1_000_000_000_000,
-      owner_id: overrides[:owner_id],
-      pet_mode: overrides[:pet_mode] || :follow
-    }
-  end
-
-  defp make_player(overrides \\ []) do
-    %{
-      char_id: overrides[:char_id] || 7,
-      char_index: overrides[:char_index] || 500,
-      name: overrides[:name] || "TestPlayer",
-      x: overrides[:x] || 50,
-      y: overrides[:y] || 50,
-      dead: Keyword.get(overrides, :dead, false),
-      invisible: Keyword.get(overrides, :invisible, false),
-      hp: overrides[:hp] || 100,
-      max_hp: overrides[:max_hp] || 100,
-      pet_ids: overrides[:pet_ids] || [],
-      skills: overrides[:skills] || %{taming: 50},
-      stamina: overrides[:stamina] || 100,
-      level: overrides[:level] || 10,
-      agi: overrides[:agi] || 20,
-      class: overrides[:class] || :warrior,
-      heading: overrides[:heading] || 3,
-      npcs_killed: overrides[:npcs_killed] || 0,
-      buffs: [],
-      paralyzed: false,
-      blind: false,
-      dumb: false,
-      equipment: %{},
-      mana: overrides[:mana] || 100,
-      max_mana: overrides[:max_mana] || 100,
-      oculto: false,
-      inventory: overrides[:inventory] || List.duplicate(nil, 20),
-      deaths: overrides[:deaths] || 0,
-      in_duel: false,
-      criminal: false,
-      faction: :none,
-      citizens_killed: 0,
-      criminals_killed: 0,
-      mounted: false,
-      poisoned: false,
-      meditating: false,
-      resting: false,
-      immobilized: false,
-      oculto_timer: 0,
-      commerce_npc_id: nil,
-      bank_npc_id: nil,
-      trade_partner_id: nil,
-      trade_request_target: nil,
-      trade_offer_gold: 0,
-      trade_offer_items: [],
-      trade_accepted: false,
-      hunger: 100,
-      thirst: 100
-    }
-  end
-
-  defp make_state(opts) do
-    players = opts[:players] || %{7 => make_player()}
-    npcs = opts[:npcs] || %{1 => make_npc()}
-
-    map_state(
-      map_id: 999,
-      players: players,
-      sessions: opts[:sessions] || %{7 => self()},
-      npcs_live: npcs,
-      npc_char_indices: opts[:npc_char_indices] || %{100 => 1},
-      visibility_mode: :global,
-      visible_sets: nil,
-      grid: nil,
-      meta: opts[:meta] || %{}
+  # Default keywords for the pet/wild NpcEntity defaults the legacy
+  # `make_npc/1` provided. with_npc/3 doesn't ship hp/max_hp/alive
+  # defaults (the NpcEntity struct defaults to hp: 0, alive: true) —
+  # this keeps tests concise without extending with_npc with too many
+  # global defaults.
+  defp npc_defaults(overrides) do
+    Keyword.merge(
+      [
+        npc_id: @hostile_npc_id,
+        hp: 250,
+        max_hp: 250,
+        alive: true,
+        next_attack_at: -1_000_000_000_000,
+        next_move_at: -1_000_000_000_000,
+        next_spell_at: -1_000_000_000_000,
+        pet_mode: :follow
+      ],
+      overrides
     )
+  end
+
+  defp with_npc_defaults(scenario, instance_id, overrides) do
+    with_npc(scenario, instance_id, npc_defaults(overrides))
   end
 
   # ================================================================
@@ -169,7 +123,9 @@ defmodule Arena.PetTamingExtendedTest do
 
     test "pet uses NPC definition defense, not owner defense" do
       # NpcEntity struct has no defense field — defense is looked up from npc_def at combat time
-      pet = make_npc(owner_id: 7, instance_id: 1)
+      pet = struct!(NpcEntity, npc_id: @hostile_npc_id, instance_id: 1, owner_id: 7,
+                                x: 50, y: 50, hp: 250, max_hp: 250, char_index: 100,
+                                spawn_x: 50, spawn_y: 50)
       refute Map.has_key?(pet, :defense),
              "NpcEntity should not store defense — it comes from GameData.get_npc at combat time"
     end
@@ -244,43 +200,37 @@ defmodule Arena.PetTamingExtendedTest do
 
     test "pet only attacks hostile wild NPCs — not other pets" do
       # Pet should not attack NPCs that have owner_id set
-      # Both pets belong to same owner so neither gets despawned
-      pet = make_npc(owner_id: 7, instance_id: 1, x: 50, y: 50, char_index: 100)
-      other_pet = make_npc(
-        owner_id: 7, instance_id: 2, x: 51, y: 50, char_index: 200,
-        hp: 100, max_hp: 100, next_move_at: 9_999_999_999_999
-      )
-      owner = make_player(x: 50, y: 51, pet_ids: [1, 2])
+      # Both pets belong to same owner so neither gets despawned. Note
+      # we use the integer `7` as the scenario key so that the pet's
+      # `owner_id: 7` resolves via `state.players[7]` in `process_pet_npc`.
+      s =
+        new()
+        |> with_player(7, x: 50, y: 51, pet_ids: [1, 2])
+        |> with_npc_defaults(1, owner_id: 7, x: 50, y: 50, char_index: 100)
+        |> with_npc_defaults(2,
+          owner_id: 7, x: 51, y: 50, char_index: 200,
+          hp: 100, max_hp: 100, next_move_at: 9_999_999_999_999
+        )
 
-      state = make_state(
-        players: %{7 => owner},
-        npcs: %{1 => pet, 2 => other_pet},
-        npc_char_indices: %{100 => 1, 200 => 2}
-      )
-
-      {state, _effects} = NpcAi.tick(state)
+      s = run_effects(s, fn st -> NpcAi.tick(st) end)
 
       # other_pet HP should be untouched
-      assert state.npcs_live[2].hp == 100,
+      assert state(s).npcs_live[2].hp == 100,
              "Pet should not attack another pet (owner_id != nil)"
     end
 
     test "pet does not attack its own owner (targets only NPCs, not players)" do
       # Pet AI targets wild hostile NPCs via find_nearest_wild_npc,
       # which filters state.npcs_live — players are never in that map
-      pet = make_npc(owner_id: 7, instance_id: 1, x: 50, y: 50, char_index: 100)
-      owner = make_player(x: 51, y: 50, pet_ids: [1], hp: 100, max_hp: 100)
+      s =
+        new()
+        |> with_player(7, x: 51, y: 50, pet_ids: [1], hp: 100, max_hp: 100)
+        |> with_npc_defaults(1, owner_id: 7, x: 50, y: 50, char_index: 100)
 
-      state = make_state(
-        players: %{7 => owner},
-        npcs: %{1 => pet},
-        npc_char_indices: %{100 => 1}
-      )
-
-      {state, _effects} = NpcAi.tick(state)
+      s = run_effects(s, fn st -> NpcAi.tick(st) end)
 
       # Owner HP should remain unchanged
-      assert state.players[7].hp == 100,
+      assert entity(s, 7).hp == 100,
              "Pet should never attack its owner"
     end
 
@@ -289,49 +239,43 @@ defmodule Arena.PetTamingExtendedTest do
       # @pet_aggro_range = 8
 
       # Wild NPC at distance 8 — should be within aggro range
-      pet = make_npc(owner_id: 7, instance_id: 1, x: 50, y: 50, char_index: 100)
-      wild_npc_in_range = make_npc(
-        instance_id: 2, x: 58, y: 50, char_index: 200, hp: 100, max_hp: 100,
-        next_move_at: 9_999_999_999_999
-      )
-      owner = make_player(x: 50, y: 51, invisible: true, pet_ids: [1])
+      s =
+        new()
+        |> with_player(7, x: 50, y: 51, invisible: true, pet_ids: [1])
+        |> with_npc_defaults(1, owner_id: 7, x: 50, y: 50, char_index: 100)
+        |> with_npc_defaults(2,
+          x: 58, y: 50, char_index: 200, hp: 100, max_hp: 100,
+          next_move_at: 9_999_999_999_999
+        )
 
-      state = make_state(
-        players: %{7 => owner},
-        npcs: %{1 => pet, 2 => wild_npc_in_range},
-        npc_char_indices: %{100 => 1, 200 => 2}
-      )
-
-      {state, _effects} = NpcAi.tick(state)
+      s = run_effects(s, fn st -> NpcAi.tick(st) end)
 
       # Pet should have attempted to move toward wild NPC at distance 8
-      pet_after = state.npcs_live[1]
+      pet_after = state(s).npcs_live[1]
       assert pet_after.next_move_at > -1_000_000_000_000,
              "Pet should detect wild NPC at distance 8 (within aggro range)"
     end
 
     test "pet does not aggro on wild NPC beyond 8 tiles" do
       # Wild NPC at distance 9 — should be outside aggro range
-      pet = make_npc(owner_id: 7, instance_id: 1, x: 50, y: 50, char_index: 100)
-      wild_npc_out_of_range = make_npc(
-        instance_id: 2, x: 59, y: 50, char_index: 200, hp: 100, max_hp: 100,
-        next_move_at: 9_999_999_999_999
-      )
       # Owner within follow distance so pet doesn't follow
-      owner = make_player(x: 52, y: 50, invisible: true, pet_ids: [1])
+      s =
+        new()
+        |> with_player(7, x: 52, y: 50, invisible: true, pet_ids: [1])
+        |> with_npc_defaults(1, owner_id: 7, x: 50, y: 50, char_index: 100)
+        |> with_npc_defaults(2,
+          x: 59, y: 50, char_index: 200, hp: 100, max_hp: 100,
+          next_move_at: 9_999_999_999_999
+        )
 
-      state = make_state(
-        players: %{7 => owner},
-        npcs: %{1 => pet, 2 => wild_npc_out_of_range},
-        npc_char_indices: %{100 => 1, 200 => 2}
-      )
-
-      # Seed rand to prevent random idle walk from masking result
+      # NpcAi.tick uses :rand.uniform/1 directly (not Arena.Rng), so
+      # `set_seed/2` won't reach it; seed :rand explicitly to suppress
+      # the random idle walk that could otherwise mask the result.
       :rand.seed(:exsss, {1, 2, 3})
-      {state, _effects} = NpcAi.tick(state)
+      s = run_effects(s, fn st -> NpcAi.tick(st) end)
 
       # Wild NPC should be untouched — pet cannot see it
-      assert state.npcs_live[2].hp == 100,
+      assert state(s).npcs_live[2].hp == 100,
              "Wild NPC at distance 9 should be outside pet aggro range"
     end
   end
@@ -342,109 +286,143 @@ defmodule Arena.PetTamingExtendedTest do
 
   describe "pet death handling" do
     test "pet death does NOT award XP — resolve_npc_death with source: :pet skips rewards" do
-      pet = make_npc(owner_id: 7, instance_id: 1, hp: 0, x: 10, y: 10)
-      owner = make_player(pet_ids: [1], npcs_killed: 5)
+      s =
+        new()
+        |> with_player(7, pet_ids: [1], npcs_killed: 5)
+        |> with_npc_defaults(1, owner_id: 7, hp: 0, x: 10, y: 10, char_index: 100)
 
-      state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
+      pet = state(s).npcs_live[1]
 
-      # Pet death with source: :pet — no killer_entity, so no rewards branch
-      {_result_entity, result_state, _result_effects} = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
-
-      # When no killer_entity is provided, returns just state (not {entity, state})
-      state = result_state
-      assert is_map(state), "resolve_npc_death with no killer returns state map"
+      s =
+        run_effects(s, fn st ->
+          {nil, new_state, effects} = NpcDeath.resolve_npc_death(st, 1, pet, source: :pet)
+          {new_state, effects}
+        end)
 
       # Owner's npcs_killed should be unchanged
-      assert state.players[7].npcs_killed == 5,
+      assert entity(s, 7).npcs_killed == 5,
              "Pet death should not increment owner's kill counter"
     end
 
     test "pet death clears occupancy at pet position" do
-      pet = make_npc(owner_id: 7, instance_id: 1, x: 10, y: 10)
-      owner = make_player(pet_ids: [1])
+      s =
+        new()
+        |> with_player(7, pet_ids: [1])
+        |> with_npc_defaults(1, owner_id: 7, x: 10, y: 10, char_index: 100)
 
-      state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
+      pet = state(s).npcs_live[1]
 
-      # Set occupancy at pet position
-      occupancy = Helpers.set_occupancy(state.occupancy, 10, 10, {:npc, 1})
-      state = %{state | occupancy: occupancy}
+      s =
+        run_effects(s, fn st ->
+          {_, new_state, effects} = NpcDeath.resolve_npc_death(st, 1, pet, source: :pet)
+          {new_state, effects}
+        end)
 
-      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
-
-      assert Helpers.get_occupancy(state.occupancy, 10, 10) == nil,
+      assert Helpers.get_occupancy(state(s).occupancy, 10, 10) == nil,
              "Pet death should clear occupancy at pet position"
     end
 
     test "pet death does NOT trigger respawn — pet removed from npcs_live" do
-      pet = make_npc(owner_id: 7, instance_id: 1, hp: 0)
-      owner = make_player(pet_ids: [1])
+      s =
+        new()
+        |> with_player(7, pet_ids: [1])
+        |> with_npc_defaults(1, owner_id: 7, hp: 0, char_index: 100)
 
-      state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
+      pet = state(s).npcs_live[1]
 
-      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
+      s =
+        run_effects(s, fn st ->
+          {_, new_state, effects} = NpcDeath.resolve_npc_death(st, 1, pet, source: :pet)
+          {new_state, effects}
+        end)
 
       # Pet should be completely gone from npcs_live (not just dead with respawn_at)
-      refute Map.has_key?(state.npcs_live, 1),
+      refute Map.has_key?(state(s).npcs_live, 1),
              "Pet should be removed from npcs_live entirely, not scheduled for respawn"
     end
 
     test "pet death removes instance_id from owner's pet_ids" do
-      pet = make_npc(owner_id: 7, instance_id: 2, char_index: 200)
-      owner = make_player(pet_ids: [1, 2, 3])
+      s =
+        new()
+        |> with_player(7, pet_ids: [1, 2, 3])
+        |> with_npc_defaults(2, owner_id: 7, char_index: 200)
 
-      state = make_state(
-        players: %{7 => owner},
-        npcs: %{2 => pet},
-        npc_char_indices: %{200 => 2}
-      )
+      pet = state(s).npcs_live[2]
 
-      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 2, pet, source: :pet)
+      s =
+        run_effects(s, fn st ->
+          {_, new_state, effects} = NpcDeath.resolve_npc_death(st, 2, pet, source: :pet)
+          {new_state, effects}
+        end)
 
-      assert state.players[7].pet_ids == [1, 3],
+      assert entity(s, 7).pet_ids == [1, 3],
              "Pet death should remove instance_id 2 from owner's pet_ids"
     end
 
     test "player death despawns all owned pets" do
-      pet1 = make_npc(owner_id: 7, instance_id: 1, char_index: 100)
-      pet2 = make_npc(owner_id: 7, instance_id: 2, char_index: 200)
-      owner = make_player(pet_ids: [1, 2], hp: 0, deaths: 0)
+      s =
+        new(meta: %{safe_zone: true})
+        |> with_player(7, pet_ids: [1, 2], hp: 0, deaths: 0)
+        |> with_npc_defaults(1, owner_id: 7, char_index: 100)
+        |> with_npc_defaults(2, owner_id: 7, x: 51, y: 50, char_index: 200)
 
-      state = make_state(
-        players: %{7 => owner},
-        npcs: %{1 => pet1, 2 => pet2},
-        npc_char_indices: %{100 => 1, 200 => 2},
-        meta: %{safe_zone: true}
-      )
+      # PlayerDeath.handle_player_death/3 returns `{player, state, effects}`;
+      # adapt to run_effects/2's `{state, effects}` shape by re-inserting
+      # the dead player into state.players (StatusTicks does the same).
+      s =
+        run_effects(s, fn st ->
+          owner = st.players[7]
 
-      {_player, state, _pd_effects} = PlayerDeath.handle_player_death(state, 7, owner)
+          {dead_player, new_state, effects} =
+            PlayerDeath.handle_player_death(st, 7, owner)
+
+          new_state = %{new_state | players: Map.put(new_state.players, 7, dead_player)}
+          {new_state, effects}
+        end)
 
       # Both pets should be removed from npcs_live
-      refute Map.has_key?(state.npcs_live, 1),
+      refute Map.has_key?(state(s).npcs_live, 1),
              "Pet 1 should be despawned on player death"
-      refute Map.has_key?(state.npcs_live, 2),
+      refute Map.has_key?(state(s).npcs_live, 2),
              "Pet 2 should be despawned on player death"
     end
 
     test "killing a pet does not award XP to the attacker" do
       # When a player kills a pet, resolve_npc_death with killer_entity returns
       # the killer entity unchanged (no XP, no kill counter increment)
-      pet = make_npc(owner_id: 8, instance_id: 1, hp: 0)
-      attacker = make_player(char_id: 7, npcs_killed: 0, pet_ids: [])
+      s =
+        new()
+        |> with_player(7, npcs_killed: 0, pet_ids: [])
+        |> with_player(8, x: 60, y: 60, pet_ids: [1])
+        |> with_npc_defaults(1, owner_id: 8, hp: 0, x: 55, y: 55, char_index: 100)
 
-      state = make_state(
-        players: %{7 => attacker, 8 => make_player(char_id: 8, pet_ids: [1])},
-        npcs: %{1 => pet}
-      )
+      pet = state(s).npcs_live[1]
+      attacker = entity(s, 7)
 
-      {entity, _state, _effects} = NpcDeath.resolve_npc_death(
-        state, 1, pet,
-        source: :pet,
-        killer_char_id: 7,
-        killer_entity: attacker,
-        final_damage: 50
-      )
+      # resolve_npc_death returns `{entity, state, effects}` where the
+      # entity is the (unchanged) killer. run_effects/2 only threads
+      # `{state, effects}`, so we forward the killer-entity slot via the
+      # test mailbox and assert on it after the closure returns.
+      ref = make_ref()
+      test_pid = self()
 
-      assert entity.npcs_killed == 0,
+      _s =
+        run_effects(s, fn st ->
+          {ent, new_state, effects} =
+            NpcDeath.resolve_npc_death(
+              st, 1, pet,
+              source: :pet,
+              killer_char_id: 7,
+              killer_entity: attacker,
+              final_damage: 50
+            )
+
+          send(test_pid, {ref, ent})
+          {new_state, effects}
+        end)
+
+      assert_received {^ref, killer_after}
+      assert killer_after.npcs_killed == 0,
              "Killing a pet should not increment attacker's npcs_killed"
     end
   end
@@ -457,47 +435,60 @@ defmodule Arena.PetTamingExtendedTest do
     test "cannot tame already-owned NPC" do
       # find_tameable_npc filters: npc.owner_id == nil
       # An NPC with owner_id set should never be found as a taming target
-      pet = make_npc(owner_id: 8, instance_id: 1, x: 51, y: 50)
-      tamer = make_player(skills: %{taming: 100}, stamina: 100)
+      s =
+        new()
+        |> with_player(7, skills: %{taming: 100}, stamina: 100)
+        |> with_npc_defaults(1, owner_id: 8, x: 51, y: 50, char_index: 100)
 
-      state = make_state(players: %{7 => tamer}, npcs: %{1 => pet})
-
-      {:noreply, state} = Crafting.handle_work(state, 7, :taming)
+      s =
+        update_state(s, fn st ->
+          {:noreply, st} = Crafting.handle_work(st, 7, :taming)
+          st
+        end)
 
       # Should NOT have gained a pet — the only NPC is already owned
-      assert state.players[7].pet_ids == [],
+      assert entity(s, 7).pet_ids == [],
              "Should not be able to tame an already-owned NPC"
     end
 
     test "cannot tame with insufficient stamina" do
-      wild = make_npc(instance_id: 1, owner_id: nil, x: 51, y: 50)
       # Warrior pays 45 stamina (15 * 3). Set stamina to 10 — insufficient.
-      tamer = make_player(class: :warrior, stamina: 10, skills: %{taming: 100})
+      s =
+        new()
+        |> with_player(7, class: :warrior, stamina: 10, skills: %{taming: 100})
+        |> with_npc_defaults(1, owner_id: nil, x: 51, y: 50, char_index: 100)
 
-      state = make_state(players: %{7 => tamer}, npcs: %{1 => wild})
+      s =
+        update_state(s, fn st ->
+          {:noreply, st} = Crafting.handle_work(st, 7, :taming)
+          st
+        end)
 
-      {:noreply, state} = Crafting.handle_work(state, 7, :taming)
-
+      tamer = entity(s, 7)
       # Should NOT have tamed — insufficient stamina
-      assert state.players[7].pet_ids == [],
+      assert tamer.pet_ids == [],
              "Should not be able to tame with insufficient stamina"
       # Stamina should be unchanged
-      assert state.players[7].stamina == 10,
+      assert tamer.stamina == 10,
              "Stamina should not be consumed when insufficient"
     end
 
     test "taming clears target_id on newly tamed pet" do
       # The taming code does: npc = %{npc | owner_id: char_id, target_id: nil}
-      wild = make_npc(instance_id: 1, owner_id: nil, x: 51, y: 50, target_id: 7)
-      tamer = make_player(skills: %{taming: 100}, stamina: 100, class: :worker)
-
-      state = make_state(players: %{7 => tamer}, npcs: %{1 => wild})
+      s =
+        new()
+        |> with_player(7, skills: %{taming: 100}, stamina: 100, class: :worker)
+        |> with_npc_defaults(1, owner_id: nil, x: 51, y: 50, target_id: 7, char_index: 100)
 
       # Force taming to succeed by setting skill to 100
-      {:noreply, state} = Crafting.handle_work(state, 7, :taming)
+      s =
+        update_state(s, fn st ->
+          {:noreply, st} = Crafting.handle_work(st, 7, :taming)
+          st
+        end)
 
       # If taming succeeded (skill 100 should always pass), target_id should be nil
-      case state.npcs_live[1] do
+      case state(s).npcs_live[1] do
         %{owner_id: 7} = npc ->
           assert npc.target_id == nil,
                  "Taming should clear target_id on newly tamed pet"
@@ -514,31 +505,34 @@ defmodule Arena.PetTamingExtendedTest do
       # @non_worker_stamina_multiplier = 3
       # Worker classes: [:worker, :trabajador]
 
-      wild1 = make_npc(instance_id: 1, owner_id: nil, x: 51, y: 50)
-      wild2 = make_npc(instance_id: 2, owner_id: nil, x: 51, y: 50, char_index: 200)
-
       # Worker: costs 15 stamina
-      worker = make_player(char_id: 7, class: :worker, stamina: 100, skills: %{taming: 50})
-      state = make_state(
-        players: %{7 => worker},
-        npcs: %{1 => wild1},
-        npc_char_indices: %{100 => 1}
-      )
+      s_worker =
+        new()
+        |> with_player(7, class: :worker, stamina: 100, skills: %{taming: 50})
+        |> with_npc_defaults(1, owner_id: nil, x: 51, y: 50, char_index: 100)
 
-      {:noreply, state_after_worker} = Crafting.handle_work(state, 7, :taming)
-      assert state_after_worker.players[7].stamina == 85,
+      s_worker =
+        update_state(s_worker, fn st ->
+          {:noreply, st} = Crafting.handle_work(st, 7, :taming)
+          st
+        end)
+
+      assert entity(s_worker, 7).stamina == 85,
              "Worker should pay 15 stamina for taming (100 - 15 = 85)"
 
       # Warrior (non-worker): costs 45 stamina
-      warrior = make_player(char_id: 7, class: :warrior, stamina: 100, skills: %{taming: 50})
-      state2 = make_state(
-        players: %{7 => warrior},
-        npcs: %{2 => wild2},
-        npc_char_indices: %{200 => 2}
-      )
+      s_warrior =
+        new()
+        |> with_player(7, class: :warrior, stamina: 100, skills: %{taming: 50})
+        |> with_npc_defaults(2, owner_id: nil, x: 51, y: 50, char_index: 200)
 
-      {:noreply, state_after_warrior} = Crafting.handle_work(state2, 7, :taming)
-      assert state_after_warrior.players[7].stamina == 55,
+      s_warrior =
+        update_state(s_warrior, fn st ->
+          {:noreply, st} = Crafting.handle_work(st, 7, :taming)
+          st
+        end)
+
+      assert entity(s_warrior, 7).stamina == 55,
              "Warrior should pay 45 stamina for taming (100 - 45 = 55)"
     end
 
@@ -573,44 +567,48 @@ defmodule Arena.PetTamingExtendedTest do
     end
 
     test "cannot tame when dead" do
-      wild = make_npc(instance_id: 1, owner_id: nil, x: 51, y: 50)
-      dead_player = make_player(dead: true, skills: %{taming: 100}, stamina: 100)
+      s =
+        new()
+        |> with_player(7, dead: true, skills: %{taming: 100}, stamina: 100)
+        |> with_npc_defaults(1, owner_id: nil, x: 51, y: 50, char_index: 100)
 
-      state = make_state(players: %{7 => dead_player}, npcs: %{1 => wild})
+      s =
+        update_state(s, fn st ->
+          {:noreply, st} = Crafting.handle_work(st, 7, :taming)
+          st
+        end)
 
-      {:noreply, state} = Crafting.handle_work(state, 7, :taming)
-
+      tamer = entity(s, 7)
       # Dead player should not be able to tame
-      assert state.players[7].pet_ids == [],
+      assert tamer.pet_ids == [],
              "Dead player should not be able to tame"
       # Stamina should be unchanged
-      assert state.players[7].stamina == 100,
+      assert tamer.stamina == 100,
              "Dead player's stamina should not be consumed"
     end
 
     test "max 3 pets enforced at taming" do
-      wild = make_npc(instance_id: 4, owner_id: nil, x: 51, y: 50, char_index: 400)
       # Player already has 3 pets
-      owner = make_player(
-        pet_ids: [1, 2, 3],
-        skills: %{taming: 100},
-        stamina: 100,
-        class: :worker
-      )
+      s =
+        new()
+        |> with_player(7,
+          pet_ids: [1, 2, 3],
+          skills: %{taming: 100}, stamina: 100, class: :worker
+        )
+        |> with_npc_defaults(4, owner_id: nil, x: 51, y: 50, char_index: 400)
 
-      state = make_state(
-        players: %{7 => owner},
-        npcs: %{4 => wild},
-        npc_char_indices: %{400 => 4}
-      )
+      s =
+        update_state(s, fn st ->
+          {:noreply, st} = Crafting.handle_work(st, 7, :taming)
+          st
+        end)
 
-      {:noreply, state} = Crafting.handle_work(state, 7, :taming)
-
+      owner = entity(s, 7)
       # pet_ids should still be [1, 2, 3] — 4th pet rejected
-      assert state.players[7].pet_ids == [1, 2, 3],
+      assert owner.pet_ids == [1, 2, 3],
              "Should not be able to tame when already at max 3 pets"
       # Stamina should be unchanged (rejected before stamina consumed)
-      assert state.players[7].stamina == 100,
+      assert owner.stamina == 100,
              "Stamina should not be consumed when at pet limit"
     end
   end
@@ -622,21 +620,16 @@ defmodule Arena.PetTamingExtendedTest do
   describe "pet mode edge cases" do
     test "stand mode prevents ALL movement including follow" do
       # Pet in :stand mode with owner far away — should NOT move
-      pet = make_npc(
-        owner_id: 7, instance_id: 1, x: 50, y: 50, pet_mode: :stand,
-        char_index: 100
-      )
-      owner = make_player(x: 70, y: 70, pet_ids: [1])
+      s =
+        new()
+        |> with_player(7, x: 70, y: 70, pet_ids: [1])
+        |> with_npc_defaults(1,
+          owner_id: 7, x: 50, y: 50, pet_mode: :stand, char_index: 100
+        )
 
-      state = make_state(
-        players: %{7 => owner},
-        npcs: %{1 => pet},
-        npc_char_indices: %{100 => 1}
-      )
+      s = run_effects(s, fn st -> NpcAi.tick(st) end)
 
-      {state, _effects} = NpcAi.tick(state)
-
-      npc_after = state.npcs_live[1]
+      npc_after = state(s).npcs_live[1]
       assert npc_after.x == 50, "Stand mode should prevent follow movement (x unchanged)"
       assert npc_after.y == 50, "Stand mode should prevent follow movement (y unchanged)"
       # next_move_at should NOT be advanced since pet skips entirely
@@ -645,86 +638,99 @@ defmodule Arena.PetTamingExtendedTest do
     end
 
     test "stand mode prevents attack even when hostile is adjacent" do
-      pet = make_npc(
-        owner_id: 7, instance_id: 1, x: 50, y: 50, pet_mode: :stand,
-        char_index: 100
-      )
-      wild = make_npc(
-        instance_id: 2, x: 51, y: 50, char_index: 200, hp: 100, max_hp: 100,
-        next_move_at: 9_999_999_999_999
-      )
-      owner = make_player(x: 50, y: 51, invisible: true, pet_ids: [1])
+      s =
+        new()
+        |> with_player(7, x: 50, y: 51, invisible: true, pet_ids: [1])
+        |> with_npc_defaults(1,
+          owner_id: 7, x: 50, y: 50, pet_mode: :stand, char_index: 100
+        )
+        |> with_npc_defaults(2,
+          x: 51, y: 50, char_index: 200, hp: 100, max_hp: 100,
+          next_move_at: 9_999_999_999_999
+        )
 
-      state = make_state(
-        players: %{7 => owner},
-        npcs: %{1 => pet, 2 => wild},
-        npc_char_indices: %{100 => 1, 200 => 2}
-      )
-
-      {state, _effects} = NpcAi.tick(state)
+      s = run_effects(s, fn st -> NpcAi.tick(st) end)
 
       # Wild NPC should be untouched
-      assert state.npcs_live[2].hp == 100,
+      assert state(s).npcs_live[2].hp == 100,
              "Stand mode should prevent pet from attacking"
       # Pet's attack cooldown should NOT have advanced
-      assert state.npcs_live[1].next_attack_at == -1_000_000_000_000,
+      assert state(s).npcs_live[1].next_attack_at == -1_000_000_000_000,
              "Stand mode should not advance next_attack_at"
     end
 
     test "mode commands change ALL pets at once" do
-      pet1 = make_npc(owner_id: 7, instance_id: 1, pet_mode: :follow, char_index: 100)
-      pet2 = make_npc(owner_id: 7, instance_id: 2, pet_mode: :follow, char_index: 200)
-      pet3 = make_npc(owner_id: 7, instance_id: 3, pet_mode: :follow, char_index: 300)
-      owner = make_player(pet_ids: [1, 2, 3])
+      s =
+        new()
+        |> with_player(7, pet_ids: [1, 2, 3])
+        |> with_npc_defaults(1, owner_id: 7, pet_mode: :follow, char_index: 100)
+        |> with_npc_defaults(2, owner_id: 7, pet_mode: :follow, char_index: 200, x: 51, y: 50)
+        |> with_npc_defaults(3, owner_id: 7, pet_mode: :follow, char_index: 300, x: 52, y: 50)
 
-      state = make_state(
-        players: %{7 => owner},
-        npcs: %{1 => pet1, 2 => pet2, 3 => pet3},
-        npc_char_indices: %{100 => 1, 200 => 2, 300 => 3}
-      )
+      s =
+        update_state(s, fn st ->
+          {:noreply, st} = Pets.handle_pet_stand(st, 7, 1)
+          {:noreply, st} = Pets.handle_pet_stand(st, 7, 2)
+          {:noreply, st} = Pets.handle_pet_stand(st, 7, 3)
+          st
+        end)
 
-      {:noreply, state} = Pets.handle_pet_stand(state, 7, 1)
-      {:noreply, state} = Pets.handle_pet_stand(state, 7, 2)
-      {:noreply, state} = Pets.handle_pet_stand(state, 7, 3)
+      assert state(s).npcs_live[1].pet_mode == :stand
+      assert state(s).npcs_live[2].pet_mode == :stand
+      assert state(s).npcs_live[3].pet_mode == :stand
 
-      assert state.npcs_live[1].pet_mode == :stand
-      assert state.npcs_live[2].pet_mode == :stand
-      assert state.npcs_live[3].pet_mode == :stand
+      s =
+        update_state(s, fn st ->
+          {:noreply, st} = Pets.handle_pet_follow_all(st, 7)
+          st
+        end)
 
-      {:noreply, state} = Pets.handle_pet_follow_all(state, 7)
-
-      assert state.npcs_live[1].pet_mode == :follow
-      assert state.npcs_live[2].pet_mode == :follow
-      assert state.npcs_live[3].pet_mode == :follow
+      assert state(s).npcs_live[1].pet_mode == :follow
+      assert state(s).npcs_live[2].pet_mode == :follow
+      assert state(s).npcs_live[3].pet_mode == :follow
     end
 
     test "setting mode on dead player silently fails — modes unchanged" do
-      pet = make_npc(owner_id: 7, instance_id: 1, pet_mode: :follow)
-      owner = make_player(dead: true, pet_ids: [1])
+      s =
+        new()
+        |> with_player(7, dead: true, pet_ids: [1])
+        |> with_npc_defaults(1, owner_id: 7, pet_mode: :follow, char_index: 100)
 
-      state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
+      s_stand =
+        update_state(s, fn st ->
+          {:noreply, st} = Pets.handle_pet_stand(st, 7, 1)
+          st
+        end)
 
-      {:noreply, state_after_stand} = Pets.handle_pet_stand(state, 7, 1)
-      assert state_after_stand.npcs_live[1].pet_mode == :follow,
+      assert state(s_stand).npcs_live[1].pet_mode == :follow,
              "Dead player's stand command should not change pet mode"
 
-      {:noreply, state_after_follow} = Pets.handle_pet_follow(state, 7, 1)
-      assert state_after_follow.npcs_live[1].pet_mode == :follow,
+      s_follow =
+        update_state(s, fn st ->
+          {:noreply, st} = Pets.handle_pet_follow(st, 7, 1)
+          st
+        end)
+
+      assert state(s_follow).npcs_live[1].pet_mode == :follow,
              "Dead player's follow command should not change pet mode"
     end
 
     test "dead player cannot release pets" do
-      pet = make_npc(owner_id: 7, instance_id: 1, pet_mode: :follow)
-      owner = make_player(dead: true, pet_ids: [1])
+      s =
+        new()
+        |> with_player(7, dead: true, pet_ids: [1])
+        |> with_npc_defaults(1, owner_id: 7, pet_mode: :follow, char_index: 100)
 
-      state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
-
-      {:noreply, state} = Pets.handle_pet_leave(state, 7, 1)
+      s =
+        update_state(s, fn st ->
+          {:noreply, st} = Pets.handle_pet_leave(st, 7, 1)
+          st
+        end)
 
       # Pet should still be alive — dead player cannot release
-      assert Map.has_key?(state.npcs_live, 1),
+      assert Map.has_key?(state(s).npcs_live, 1),
              "Dead player should not be able to release pets"
-      assert state.players[7].pet_ids == [1],
+      assert entity(s, 7).pet_ids == [1],
              "Dead player's pet_ids should be unchanged"
     end
   end
@@ -735,116 +741,123 @@ defmodule Arena.PetTamingExtendedTest do
 
   describe "pet limits and /LIBERAR" do
     test "/LIBERAR releases the specified pet by instance ID" do
-      pet1 = make_npc(owner_id: 7, instance_id: 1, char_index: 100)
-      pet2 = make_npc(owner_id: 7, instance_id: 2, char_index: 200)
-      pet3 = make_npc(owner_id: 7, instance_id: 3, char_index: 300)
-      owner = make_player(pet_ids: [1, 2, 3])
+      s =
+        new()
+        |> with_player(7, pet_ids: [1, 2, 3])
+        |> with_npc_defaults(1, owner_id: 7, char_index: 100)
+        |> with_npc_defaults(2, owner_id: 7, x: 51, y: 50, char_index: 200)
+        |> with_npc_defaults(3, owner_id: 7, x: 52, y: 50, char_index: 300)
 
-      state = make_state(
-        players: %{7 => owner},
-        npcs: %{1 => pet1, 2 => pet2, 3 => pet3},
-        npc_char_indices: %{100 => 1, 200 => 2, 300 => 3}
-      )
+      # Release pet 1 by its instance ID. NOTE: Pets.handle_pet_leave/3
+      # is not yet on the effects contract — it calls
+      # `Arena.Map.Effects.run/2` internally for the despawn broadcast
+      # (see pets.ex:84). We drive it via update_state and assert on the
+      # resulting state shape.
+      s =
+        update_state(s, fn st ->
+          {:noreply, st} = Pets.handle_pet_leave(st, 7, 1)
+          st
+        end)
 
-      # Release pet 1 by its instance ID
-      {:noreply, state} = Pets.handle_pet_leave(state, 7, 1)
-
+      live = state(s).npcs_live
       # First pet (instance 1) should be gone
-      refute Map.has_key?(state.npcs_live, 1), "Selected pet should be released"
+      refute Map.has_key?(live, 1), "Selected pet should be released"
       # Others remain
-      assert Map.has_key?(state.npcs_live, 2), "Second pet should remain"
-      assert Map.has_key?(state.npcs_live, 3), "Third pet should remain"
+      assert Map.has_key?(live, 2), "Second pet should remain"
+      assert Map.has_key?(live, 3), "Third pet should remain"
       # pet_ids should now be [2, 3]
-      assert state.players[7].pet_ids == [2, 3]
+      assert entity(s, 7).pet_ids == [2, 3]
     end
 
     test "successive /LIBERAR releases specified pets" do
-      pet1 = make_npc(owner_id: 7, instance_id: 1, char_index: 100)
-      pet2 = make_npc(owner_id: 7, instance_id: 2, char_index: 200)
-      owner = make_player(pet_ids: [1, 2])
-
-      state = make_state(
-        players: %{7 => owner},
-        npcs: %{1 => pet1, 2 => pet2},
-        npc_char_indices: %{100 => 1, 200 => 2}
-      )
+      s =
+        new()
+        |> with_player(7, pet_ids: [1, 2])
+        |> with_npc_defaults(1, owner_id: 7, char_index: 100)
+        |> with_npc_defaults(2, owner_id: 7, x: 51, y: 50, char_index: 200)
 
       # Release pet 2 first (not the head)
-      {:noreply, state} = Pets.handle_pet_leave(state, 7, 2)
-      assert state.players[7].pet_ids == [1]
-      refute Map.has_key?(state.npcs_live, 2)
+      s =
+        update_state(s, fn st ->
+          {:noreply, st} = Pets.handle_pet_leave(st, 7, 2)
+          st
+        end)
+
+      assert entity(s, 7).pet_ids == [1]
+      refute Map.has_key?(state(s).npcs_live, 2)
 
       # Then release pet 1
-      {:noreply, state} = Pets.handle_pet_leave(state, 7, 1)
-      assert state.players[7].pet_ids == []
-      refute Map.has_key?(state.npcs_live, 1)
+      s =
+        update_state(s, fn st ->
+          {:noreply, st} = Pets.handle_pet_leave(st, 7, 1)
+          st
+        end)
+
+      assert entity(s, 7).pet_ids == []
+      refute Map.has_key?(state(s).npcs_live, 1)
     end
 
     test "max pet limit is exactly 3" do
       # @max_pets = 3 in crafting.ex
       # Verify enforcement: player with 2 pets can tame, player with 3 cannot
-      wild = make_npc(instance_id: 10, owner_id: nil, x: 51, y: 50, char_index: 1000)
 
       # Player with 2 pets — should be allowed to attempt taming
-      player_2_pets = make_player(
-        pet_ids: [1, 2],
-        skills: %{taming: 100},
-        stamina: 100,
-        class: :worker
-      )
-      state = make_state(
-        players: %{7 => player_2_pets},
-        npcs: %{10 => wild},
-        npc_char_indices: %{1000 => 10}
-      )
+      s_2 =
+        new()
+        |> with_player(7,
+          pet_ids: [1, 2], skills: %{taming: 100},
+          stamina: 100, class: :worker
+        )
+        |> with_npc_defaults(10, owner_id: nil, x: 51, y: 50, char_index: 1000)
 
-      {:noreply, state_after} = Crafting.handle_work(state, 7, :taming)
+      s_2 =
+        update_state(s_2, fn st ->
+          {:noreply, st} = Crafting.handle_work(st, 7, :taming)
+          st
+        end)
 
       # Stamina should have been consumed (taming was attempted)
-      assert state_after.players[7].stamina < 100,
+      assert entity(s_2, 7).stamina < 100,
              "Player with 2 pets should be allowed to attempt taming (stamina consumed)"
 
       # Player with 3 pets — should be rejected
-      wild2 = make_npc(instance_id: 11, owner_id: nil, x: 51, y: 50, char_index: 1100)
-      player_3_pets = make_player(
-        pet_ids: [1, 2, 3],
-        skills: %{taming: 100},
-        stamina: 100,
-        class: :worker
-      )
-      state2 = make_state(
-        players: %{7 => player_3_pets},
-        npcs: %{11 => wild2},
-        npc_char_indices: %{1100 => 11}
-      )
+      s_3 =
+        new()
+        |> with_player(7,
+          pet_ids: [1, 2, 3], skills: %{taming: 100},
+          stamina: 100, class: :worker
+        )
+        |> with_npc_defaults(11, owner_id: nil, x: 51, y: 50, char_index: 1100)
 
-      {:noreply, state2_after} = Crafting.handle_work(state2, 7, :taming)
+      s_3 =
+        update_state(s_3, fn st ->
+          {:noreply, st} = Crafting.handle_work(st, 7, :taming)
+          st
+        end)
 
       # Stamina should NOT be consumed (rejected before attempt)
-      assert state2_after.players[7].stamina == 100,
+      assert entity(s_3, 7).stamina == 100,
              "Player with 3 pets should be rejected without consuming stamina"
     end
 
     test "taming newly tamed pet is prepended to pet_ids list" do
       # In attempt_taming: entity = %{entity | pet_ids: [instance_id | entity.pet_ids]}
-      wild = make_npc(instance_id: 5, owner_id: nil, x: 51, y: 50, char_index: 500)
-      owner = make_player(
-        pet_ids: [1, 2],
-        skills: %{taming: 100},
-        stamina: 100,
-        class: :worker
-      )
+      s =
+        new()
+        |> with_player(7,
+          pet_ids: [1, 2], skills: %{taming: 100},
+          stamina: 100, class: :worker
+        )
+        |> with_npc_defaults(5, owner_id: nil, x: 51, y: 50, char_index: 500)
 
-      state = make_state(
-        players: %{7 => owner},
-        npcs: %{5 => wild},
-        npc_char_indices: %{500 => 5}
-      )
-
-      {:noreply, state} = Crafting.handle_work(state, 7, :taming)
+      s =
+        update_state(s, fn st ->
+          {:noreply, st} = Crafting.handle_work(st, 7, :taming)
+          st
+        end)
 
       # If taming succeeded, pet_ids should have 5 prepended
-      pet_ids = state.players[7].pet_ids
+      pet_ids = entity(s, 7).pet_ids
 
       if 5 in pet_ids do
         assert hd(pet_ids) == 5,
@@ -861,49 +874,70 @@ defmodule Arena.PetTamingExtendedTest do
 
   describe "pet death via NPC combat integration" do
     test "pet killed by wild NPC attack is removed from npcs_live and owner pet_ids" do
-      pet = make_npc(owner_id: 7, instance_id: 1, hp: 1, x: 50, y: 50, char_index: 100)
-      owner = make_player(pet_ids: [1])
+      s =
+        new()
+        |> with_player(7, pet_ids: [1])
+        |> with_npc_defaults(1, owner_id: 7, hp: 1, x: 50, y: 50, char_index: 100)
 
-      state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
+      pet = state(s).npcs_live[1]
 
       # Simulate pet death through resolve_npc_death (same path as combat)
-      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
+      s =
+        run_effects(s, fn st ->
+          {_, new_state, effects} = NpcDeath.resolve_npc_death(st, 1, pet, source: :pet)
+          {new_state, effects}
+        end)
 
-      refute Map.has_key?(state.npcs_live, 1),
+      refute Map.has_key?(state(s).npcs_live, 1),
              "Dead pet should be removed from npcs_live"
-      assert state.players[7].pet_ids == [],
+      assert entity(s, 7).pet_ids == [],
              "Dead pet's instance_id should be removed from owner's pet_ids"
     end
 
     test "despawn_pet returns the map-layer effects produced by NpcDeath" do
-      pet = make_npc(owner_id: 7, instance_id: 1, x: 10, y: 10)
-      owner = make_player(pet_ids: [1])
+      s =
+        new()
+        |> with_player(7, pet_ids: [1])
+        |> with_npc_defaults(1, owner_id: 7, x: 10, y: 10, char_index: 100)
 
-      state = make_state(players: %{7 => owner}, npcs: %{1 => pet})
+      pet = state(s).npcs_live[1]
 
-      {_state, effects} = NpcAi.despawn_pet(state, 1, pet)
+      # NpcAi.despawn_pet/3 returns {state, effects} — a perfect fit for
+      # run_effects/2. The effects buffer recorded on the scenario must
+      # contain exactly one :broadcast_visible_all character_remove for
+      # the pet at its position. We capture the raw effects via the test
+      # mailbox so the assert can pattern-match the legacy shape exactly.
+      ref = make_ref()
+      test_pid = self()
 
-      # Pet despawn flows through NpcDeath.resolve_npc_death/4 which emits
-      # exactly one effect — a :broadcast_visible_all character_remove
-      # for the pet at its position. The pet-despawn unification commit
-      # (item 4) made these effects map-layer instead of NpcAi-shape, so
-      # callers thread them through Arena.Map.Effects.run/2.
+      _s =
+        run_effects(s, fn st ->
+          {new_state, effects} = NpcAi.despawn_pet(st, 1, pet)
+          send(test_pid, {ref, effects})
+          {new_state, effects}
+        end)
+
+      assert_received {^ref, effects}
       assert [{:broadcast_visible_all, 10, 10, _envelope}] = effects
     end
 
     test "pet death when owner is absent does not crash" do
       # Pet with owner_id 99 (not in players map)
-      pet = make_npc(owner_id: 99, instance_id: 1, hp: 0)
+      s =
+        new()
+        |> with_player(7)
+        |> with_npc_defaults(1, owner_id: 99, hp: 0, char_index: 100)
 
-      state = make_state(
-        players: %{7 => make_player()},
-        npcs: %{1 => pet}
-      )
+      pet = state(s).npcs_live[1]
 
       # Should not crash even though owner 99 is not in players
-      {_, state, _effects} = NpcDeath.resolve_npc_death(state, 1, pet, source: :pet)
+      s =
+        run_effects(s, fn st ->
+          {_, new_state, effects} = NpcDeath.resolve_npc_death(st, 1, pet, source: :pet)
+          {new_state, effects}
+        end)
 
-      refute Map.has_key?(state.npcs_live, 1),
+      refute Map.has_key?(state(s).npcs_live, 1),
              "Pet should still be removed even if owner is absent"
     end
   end
