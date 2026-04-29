@@ -98,7 +98,7 @@ defmodule Arena.InvisibilityNpcSpellAuditTest do
       }
 
       state = %{sessions: %{1 => self()}}
-      result = Helpers.break_invisibility(entity, state, 1)
+      {result, _bi_effects} = Helpers.break_invisibility(entity, state, 1)
 
       assert result.invisible == false
       assert Enum.find(result.buffs, &(&1.type == :invisible)) == nil
@@ -116,7 +116,7 @@ defmodule Arena.InvisibilityNpcSpellAuditTest do
       }
 
       state = %{sessions: %{1 => self()}}
-      result = Helpers.break_invisibility(entity, state, 1)
+      {result, _bi_effects} = Helpers.break_invisibility(entity, state, 1)
 
       assert result.invisible == false
       assert result.buffs == []

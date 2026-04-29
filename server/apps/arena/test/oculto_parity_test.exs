@@ -468,7 +468,7 @@ defmodule Arena.OcultoParityTest do
           visibility_mode: :global
         )
 
-      result = Helpers.break_invisibility(entity, state, 1)
+      {result, _bi_effects} = Helpers.break_invisibility(entity, state, 1)
 
       assert result.oculto == false
       assert result.invisible == false

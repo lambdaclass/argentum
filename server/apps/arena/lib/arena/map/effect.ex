@@ -28,6 +28,10 @@ defmodule Arena.Map.Effect do
       packet for `entity` via the existing helper.
     * `{:hide_from_non_gm, entity}` — fans `character_remove` to every nearby
       non-GM session (used when an entity becomes invisible / oculto).
+    * `{:reveal_to_non_gm, entity}` — symmetric counterpart: fans
+      `character_create` to every nearby non-GM session (used when an
+      entity becomes visible again — break_invisibility,
+      RemoveInvisibility spell, status-tick expiry).
     * `{:transfer, char_id, dest_map, dest_x, dest_y, entity}` — instructs the
       player's session to transfer to `(dest_map, dest_x, dest_y)`. The runner
       resolves `char_id` against `state.sessions` and sends the bare
@@ -58,6 +62,7 @@ defmodule Arena.Map.Effect do
           | {:broadcast_map, packet()}
           | {:broadcast_character_change, entity :: map()}
           | {:hide_from_non_gm, entity :: map()}
+          | {:reveal_to_non_gm, entity :: map()}
           | {:transfer, char_id(), dest_map :: pos_integer(), coord(), coord(),
              entity :: map()}
 end

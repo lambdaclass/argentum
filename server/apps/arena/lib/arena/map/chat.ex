@@ -115,8 +115,11 @@ defmodule Arena.Map.Chat do
 
           true ->
             filtered_message = Arena.ChatFilter.filter(message)
-            # VB6: yelling breaks invisibility
-            entity = Helpers.break_invisibility(entity, state, char_id)
+            # VB6: yelling breaks invisibility. Chat is still on the legacy
+            # GenServer reply contract; bridge break_invisibility's effects
+            # through the runner inline.
+            {entity, invis_effects} = Helpers.break_invisibility(entity, state, char_id)
+            Arena.Map.Effects.run(state, invis_effects)
             entity = %{entity | last_chat_at: now}
             players = Map.put(state.players, char_id, entity)
 

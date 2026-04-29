@@ -264,29 +264,30 @@ defmodule Arena.Map.Helpers do
   def race_to_int(:dwarf), do: 5
   def race_to_int(_), do: 1
 
-  # Break invisibility and oculto (used by combat, inventory, movement)
-  # VB6: RemoveUserInvisibility clears both invisible and oculto flags
-  # Sends character_create to non-GM clients to reveal the player.
-  def break_invisibility(entity, state, char_id) do
+  # Break invisibility and oculto (used by combat, inventory, movement, chat).
+  # VB6: RemoveUserInvisibility clears both invisible and oculto flags.
+  #
+  # Returns `{entity, effects}` — the no-op branch returns `{entity, []}`,
+  # the active branch produces the "Has vuelto a ser visible." console
+  # message and a `:reveal_to_non_gm` effect. Callers on the effects
+  # contract thread the list up; legacy callers run them inline via
+  # `Arena.Map.Effects.run/2`.
+  def break_invisibility(entity, _state, char_id) do
     if entity.invisible or entity.oculto do
       buffs = Enum.reject(entity.buffs, &(&1.type in [:invisible, :oculto]))
       entity = %{entity | invisible: false, oculto: false, oculto_timer: 0, buffs: buffs}
 
-      send_to_session(
-        state.sessions,
-        char_id,
-        {:send_raw, Encoder.encode({:console_msg, %{message: "Has vuelto a ser visible.", font_index: 0}})}
-      )
+      effects = [
+        Arena.Map.Effects.send(
+          char_id,
+          Encoder.encode({:console_msg, %{message: "Has vuelto a ser visible.", font_index: 0}})
+        ),
+        Arena.Map.Effects.reveal_to_non_gm(entity)
+      ]
 
-      # Reveal to non-GM nearby players (only if state has full visibility info)
-      if Map.has_key?(state, :visibility_mode) do
-        temp_state = %{state | players: Map.put(state.players, char_id, entity)}
-        Arena.Map.Visibility.reveal_to_non_gm(temp_state, entity)
-      end
-
-      entity
+      {entity, effects}
     else
-      entity
+      {entity, []}
     end
   end
 

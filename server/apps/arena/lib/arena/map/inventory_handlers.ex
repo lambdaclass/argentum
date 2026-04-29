@@ -25,16 +25,19 @@ defmodule Arena.Map.InventoryHandlers do
         if entity.dead do
           {:ok, state, []}
         else
-          entity = Helpers.break_invisibility(entity, state, char_id)
+          {entity, invis_effects} = Helpers.break_invisibility(entity, state, char_id)
           state = %{state | players: Map.put(state.players, char_id, entity)}
           pos = {entity.x, entity.y}
 
           case Map.get(state.ground_items, pos) do
             nil ->
-              {:ok, state, []}
+              {:ok, state, invis_effects}
 
             ground_item ->
-              do_pick_up(state, char_id, entity, pos, ground_item)
+              {:ok, state, pickup_effects} =
+                do_pick_up(state, char_id, entity, pos, ground_item)
+
+              {:ok, state, invis_effects ++ pickup_effects}
           end
         end
 
@@ -368,28 +371,31 @@ defmodule Arena.Map.InventoryHandlers do
         item = Inventory.get_slot(new_inventory, slot)
         item_def = if item, do: GameData.get_item(item.item_id)
 
-        entity =
+        {entity, invis_effects} =
           if item_def && item_def.obj_type == 44 do
-            entity = Helpers.break_invisibility(entity, state, char_id)
+            {entity, invis_effects} = Helpers.break_invisibility(entity, state, char_id)
 
             # Toggle mount state based on whether saddle is now equipped
             saddle_equipped = new_equipment[:saddle] != nil
 
-            if saddle_equipped do
-              # Block mounting while navigating
-              if entity.navigating do
-                entity
+            entity =
+              if saddle_equipped do
+                # Block mounting while navigating
+                if entity.navigating do
+                  entity
+                else
+                  %{entity |
+                    mounted: true,
+                    saddle_obj_index: item.item_id,
+                    saddle_slot: slot}
+                end
               else
-                %{entity |
-                  mounted: true,
-                  saddle_obj_index: item.item_id,
-                  saddle_slot: slot}
+                %{entity | mounted: false, saddle_obj_index: 0, saddle_slot: 0}
               end
-            else
-              %{entity | mounted: false, saddle_obj_index: 0, saddle_slot: 0}
-            end
+
+            {entity, invis_effects}
           else
-            entity
+            {entity, []}
           end
 
         players = Map.put(state.players, char_id, entity)
@@ -400,7 +406,7 @@ defmodule Arena.Map.InventoryHandlers do
             Effects.send(char_id, inventory_slot_packet(new_inventory, s))
           end
 
-        effects = slot_effects ++ [Effects.broadcast_character_change(entity)]
+        effects = invis_effects ++ slot_effects ++ [Effects.broadcast_character_change(entity)]
 
         {:ok, state, effects}
 

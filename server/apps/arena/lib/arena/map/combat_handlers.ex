@@ -84,7 +84,7 @@ defmodule Arena.Map.CombatHandlers do
             {:ok, state, {:error, :mounted}, []}
 
           true ->
-            entity = Helpers.break_invisibility(entity, state, char_id)
+            {entity, invis_effects} = Helpers.break_invisibility(entity, state, char_id)
             weapon_id = entity.equipment[:weapon]
             weapon_def = if weapon_id, do: GameData.get_item(weapon_id)
             is_ranged = weapon_def != nil and weapon_def.proyectil > 0
@@ -93,7 +93,7 @@ defmodule Arena.Map.CombatHandlers do
               {state, reply, ranged_effects} =
                 handle_ranged_attack(state, char_id, entity, weapon_def, target_x, target_y, now)
 
-              {:ok, state, reply, ranged_effects}
+              {:ok, state, reply, invis_effects ++ ranged_effects}
             else
               # Melee attack
               {tx, ty} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
@@ -105,7 +105,7 @@ defmodule Arena.Map.CombatHandlers do
               swing_effect = Effects.broadcast_visible_except(entity.x, entity.y, char_id, swing_packet)
 
               {state, target_effects} = handle_attack_target(state, char_id, entity, target)
-              {:ok, state, :ok, [swing_effect | target_effects]}
+              {:ok, state, :ok, invis_effects ++ [swing_effect | target_effects]}
             end
         end
 
@@ -759,13 +759,13 @@ defmodule Arena.Map.CombatHandlers do
                     # VB6: casting breaks meditation and rest
                     entity = %{entity | meditating: false, resting: false}
 
-                    # VB6 26c: offensive spell casting breaks invisible + oculto
-                    # Only negative/offensive spells (TargetEffectType=2) break invis
-                    entity =
+                    # VB6 26c: offensive spell casting breaks invisible + oculto.
+                    # Only negative/offensive spells (TargetEffectType=2) break invis.
+                    {entity, invis_effects} =
                       if spell_def.target_effect_type == 2 do
                         Helpers.break_invisibility(entity, state, char_id)
                       else
-                        entity
+                        {entity, []}
                       end
 
                     # VB6: per-spell cooldown in seconds
@@ -781,7 +781,7 @@ defmodule Arena.Map.CombatHandlers do
                     {state, spell_effects} =
                       Arena.Map.SpellEffects.apply_spell(state, char_id, entity, spell_def, target_x, target_y)
 
-                    {:ok, state, :ok, spell_effects}
+                    {:ok, state, :ok, invis_effects ++ spell_effects}
                 end
             end
         end

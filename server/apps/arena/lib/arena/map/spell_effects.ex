@@ -12,7 +12,7 @@ defmodule Arena.Map.SpellEffects do
 
   import Bitwise
 
-  alias Arena.Map.{Effects, Helpers, Visibility}
+  alias Arena.Map.{Effects, Helpers}
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
@@ -200,11 +200,13 @@ defmodule Arena.Map.SpellEffects do
           updated = %{target | invisible: false, buffs: buffs}
           players = Map.put(acc.players, pid, updated)
           acc = %{acc | players: players}
-          # Reveal the now-visible player to non-GM clients (legacy: writes raw
-          # character_create packets; bridged here as no extra effect).
-          Visibility.reveal_to_non_gm(acc, updated)
 
-          {acc, [Effects.send(pid, console("Tu invisibilidad ya no tiene efecto.")) | effs]}
+          reveal_effects = [
+            Effects.send(pid, console("Tu invisibilidad ya no tiene efecto.")),
+            Effects.reveal_to_non_gm(updated)
+          ]
+
+          {acc, reveal_effects ++ effs}
         else
           {acc, effs}
         end

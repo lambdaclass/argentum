@@ -198,7 +198,7 @@ defmodule Arena.InvisibilityEdgeCasesTest do
         })
 
       state = make_state(%{caster: caster})
-      result = Helpers.break_invisibility(caster, state, :caster)
+      {result, _bi_effects} = Helpers.break_invisibility(caster, state, :caster)
 
       assert result.invisible == false
       assert Enum.filter(result.buffs, &(&1.type == :invisible)) == []
@@ -213,7 +213,7 @@ defmodule Arena.InvisibilityEdgeCasesTest do
         })
 
       state = make_state(%{caster: caster})
-      result = Helpers.break_invisibility(caster, state, :caster)
+      {result, _bi_effects} = Helpers.break_invisibility(caster, state, :caster)
 
       assert result.oculto == false
       assert Enum.filter(result.buffs, &(&1.type == :oculto)) == []
@@ -338,7 +338,7 @@ defmodule Arena.InvisibilityEdgeCasesTest do
 
       state = make_state(%{player: entity})
 
-      result = Helpers.break_invisibility(entity, state, :player)
+      {result, _bi_effects} = Helpers.break_invisibility(entity, state, :player)
       assert result.invisible == false
       assert result.oculto == false
       assert Enum.filter(result.buffs, &(&1.type in [:invisible, :oculto])) == []
@@ -348,7 +348,7 @@ defmodule Arena.InvisibilityEdgeCasesTest do
       entity = make_entity(%{char_id: :player, invisible: false, oculto: false})
       state = make_state(%{player: entity})
 
-      result = Helpers.break_invisibility(entity, state, :player)
+      {result, _bi_effects} = Helpers.break_invisibility(entity, state, :player)
       assert result.invisible == false
       assert result.oculto == false
     end
@@ -373,7 +373,7 @@ defmodule Arena.InvisibilityEdgeCasesTest do
         })
 
       state = make_state(%{rider: entity})
-      result = Helpers.break_invisibility(entity, state, :rider)
+      {result, _bi_effects} = Helpers.break_invisibility(entity, state, :rider)
 
       assert result.invisible == false
       assert result.oculto == false
@@ -389,7 +389,7 @@ defmodule Arena.InvisibilityEdgeCasesTest do
         })
 
       state = make_state(%{rider: entity})
-      result = Helpers.break_invisibility(entity, state, :rider)
+      {result, _bi_effects} = Helpers.break_invisibility(entity, state, :rider)
 
       assert result.invisible == false
       assert result.oculto == false

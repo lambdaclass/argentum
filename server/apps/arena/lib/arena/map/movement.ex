@@ -193,9 +193,15 @@ defmodule Arena.Map.Movement do
     # Only Oculto (stealth/hide skill) breaks on walk for non-Thief/Bandit.
     # If the entity is oculto and their class/skill combo doesn't qualify
     # for stealth-while-moving, break their invisibility.
+    #
+    # Movement.handle_move/2 is still on the legacy GenServer reply
+    # contract; bridge break_invisibility's effects through the runner
+    # inline so the reveal/console packets land like before.
     entity =
       if entity.oculto and not can_move_while_hidden?(entity) do
-        Helpers.break_invisibility(entity, state, char_id)
+        {entity, invis_effects} = Helpers.break_invisibility(entity, state, char_id)
+        Arena.Map.Effects.run(state, invis_effects)
+        entity
       else
         entity
       end

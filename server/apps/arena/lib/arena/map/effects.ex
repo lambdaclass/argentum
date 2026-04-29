@@ -115,6 +115,17 @@ defmodule Arena.Map.Effects do
   end
 
   @doc """
+  Symmetric counterpart of `hide_from_non_gm/1`: fan a `character_create`
+  packet to every nearby non-GM session when `entity` becomes visible
+  again. Used by `Helpers.break_invisibility/3`,
+  `apply_spell_remove_invisibility/5`, and the buff-tick reveal path.
+  """
+  @spec reveal_to_non_gm(map()) :: Arena.Map.Effect.t()
+  def reveal_to_non_gm(entity) do
+    {:reveal_to_non_gm, entity}
+  end
+
+  @doc """
   Transfer the player to `(dest_map, dest_x, dest_y)`.
 
   The runner resolves `char_id` against `state.sessions` and sends the bare
@@ -238,6 +249,10 @@ defmodule Arena.Map.Effects do
 
   defp dispatch(state, {:hide_from_non_gm, entity}) do
     Visibility.hide_from_non_gm(state, entity)
+  end
+
+  defp dispatch(state, {:reveal_to_non_gm, entity}) do
+    Visibility.reveal_to_non_gm(state, entity)
   end
 
   defp dispatch(state, {:transfer, char_id, dest_map, dest_x, dest_y, entity}) do
