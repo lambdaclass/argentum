@@ -2,11 +2,12 @@ defmodule Arena.Map.PlayerDeath do
   @moduledoc """
   Player death handling, inventory drops, and PvP kill tracking.
 
-  `handle_player_death/3` returns `{player, state, effects}`. Pet despawn
-  side effects emitted by `Arena.NpcAi.despawn_pet` are still run inline
-  (they go through the legacy `:send_raw` shim and the npc-ai dispatch
-  chain), so only direct player-facing emissions surface here as
-  `Effect.t()` values.
+  `handle_player_death/3` returns `{player, state, effects}` — every
+  side effect (unequip slot updates, /HOGAR console, dropped item
+  broadcasts, pet despawn character_remove broadcasts) flows through
+  the runner. Pet despawn no longer hits the legacy NpcAi side
+  channel; `Arena.NpcAi.despawn_pet/3` returns map-layer effects since
+  the pet-despawn unification commit.
   """
 
   alias Arena.Map.Effects
@@ -15,10 +16,10 @@ defmodule Arena.Map.PlayerDeath do
 
   @doc """
   VB6 deep death: clear all transient combat/status state. Returns
-  `{player, state, effects}`.
-
-  Despawns pets owned by the dying player (pet effects dispatched inline
-  via the legacy NPC-AI side-channel).
+  `{player, state, effects}` — pet despawn effects from
+  `Arena.NpcAi.despawn_pet/3` are folded into the same effects list,
+  so the runner dispatches every player-facing and pet-removal packet
+  uniformly.
   """
   def handle_player_death(state, char_id, player) do
     player = %{
@@ -60,23 +61,22 @@ defmodule Arena.Map.PlayerDeath do
         {player, state, []}
       end
 
-    # Despawn all pets owned by this player. Pet effects keep going through
-    # NpcAi's legacy dispatch chain (different effect-tuple shape).
+    # Despawn all pets owned by this player. NpcAi.despawn_pet/3 returns
+    # map-layer effects, so we accumulate them alongside the rest.
     pet_ids =
       state.npcs_live
       |> Enum.filter(fn {_id, npc} -> npc.owner_id == char_id end)
       |> Enum.map(fn {id, _npc} -> id end)
 
-    state =
-      Enum.reduce(pet_ids, state, fn instance_id, st ->
+    {state, pet_effects} =
+      Enum.reduce(pet_ids, {state, []}, fn instance_id, {st, accum} ->
         case Map.get(st.npcs_live, instance_id) do
           nil ->
-            st
+            {st, accum}
 
           npc ->
-            {st, effects} = Arena.NpcAi.despawn_pet(st, instance_id, npc)
-            Arena.NpcAi.dispatch_effects(st, effects)
-            st
+            {st, effs} = Arena.NpcAi.despawn_pet(st, instance_id, npc)
+            {st, accum ++ effs}
         end
       end)
 
@@ -106,7 +106,7 @@ defmodule Arena.Map.PlayerDeath do
       notify_duel_death(char_id)
     end
 
-    {player, state, drop_effects ++ slot_effects ++ hogar_effect}
+    {player, state, drop_effects ++ pet_effects ++ slot_effects ++ hogar_effect}
   end
 
   defp encoded_inventory_slot(inventory, slot_idx) do

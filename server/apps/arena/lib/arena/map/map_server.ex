@@ -1171,7 +1171,7 @@ defmodule Arena.Map.MapServer do
 
         npc ->
           {state, effects} = Arena.NpcAi.despawn_pet(state, instance_id, npc)
-          Arena.NpcAi.dispatch_effects(state, effects)
+          Effects.run(state, effects)
           state
       end
     end)

@@ -754,4 +754,114 @@ defmodule Arena.Map.EffectsTest do
       assert_receive {:peer_received, %{payload: ^payload}}
     end
   end
+
+  describe "run/2 :reveal_to_non_gm" do
+    # End-to-end: a :reveal_to_non_gm effect emits a character_create
+    # envelope to every nearby non-GM session for the now-visible entity.
+    # GMs are excluded (they see invisibles via the hider/oculto bypass).
+    test "fans a character_create envelope to nearby non-GM sessions" do
+      origin = self()
+
+      peer_pid =
+        spawn_link(fn ->
+          receive do
+            {:egress, env} -> Kernel.send(origin, {:peer_received, env})
+          end
+        end)
+
+      gm_pid =
+        spawn_link(fn ->
+          receive do
+            {:egress, env} -> Kernel.send(origin, {:gm_received, env})
+          end
+        end)
+
+      ox = 50
+      oy = 50
+
+      entity = %{
+        char_id: :revealed,
+        char_index: 11,
+        x: ox,
+        y: oy,
+        heading: :south,
+        body_id: 1,
+        head_id: 2,
+        dead: false,
+        equipment: %{weapon: 0, shield: 0, helmet: 0},
+        hp: 100,
+        max_hp: 100,
+        mana: 50,
+        max_mana: 100,
+        speeding: 1,
+        gm: false,
+        name: "Revealed",
+        guild_id: 0,
+        guild_level: 0,
+        user_tier: :normal
+      }
+
+      players = %{
+        revealed: entity,
+        peer: %{x: ox + 1, y: oy, gm: false, char_index: 8},
+        watcher_gm: %{x: ox + 1, y: oy, gm: true, char_index: 9}
+      }
+
+      state =
+        map_state(
+          players: players,
+          sessions: %{revealed: origin, peer: peer_pid, watcher_gm: gm_pid},
+          visibility_mode: :global
+        )
+
+      create_id = AoProtocol.PacketIds.Server.character_create()
+
+      assert :ok = Effects.run(state, [Effects.reveal_to_non_gm(entity)])
+
+      assert_receive {:peer_received,
+                      %{class: :critical,
+                        payload: <<^create_id::little-signed-integer-16, _::binary>>}}
+
+      # GM peer must NOT receive the create envelope — they always saw
+      # the entity through the invisibility bypass.
+      refute_receive {:gm_received, _}, 50
+
+      # The revealed entity's own session must NOT receive a self-create.
+      refute_receive {:egress, _}, 50
+    end
+
+    test "constructor produces a 2-tuple keyed by entity" do
+      entity = %{char_id: :x, char_index: 1}
+      assert {:reveal_to_non_gm, ^entity} = Effects.reveal_to_non_gm(entity)
+    end
+  end
+
+  describe "run/2 :transfer end-to-end" do
+    # The :transfer kind is intentionally out-of-band of the egress
+    # envelope (matches /GOTO convention). Verify the runner sends the
+    # bare {:transfer, dest_map, dest_x, dest_y, entity} tuple to the
+    # session pid — no envelope wrapping.
+    test "sends bare {:transfer, _, _, _, _} tuple to the session pid" do
+      origin = self()
+      entity = %{char_id: :warpee, x: 10, y: 10}
+
+      state = %{sessions: %{warpee: origin}}
+
+      assert :ok =
+               Effects.run(state, [Effects.transfer(:warpee, 5, 60, 70, entity)])
+
+      assert_receive {:transfer, 5, 60, 70, ^entity}
+      # No :egress envelope — transfers are out-of-band.
+      refute_received {:egress, _}
+    end
+
+    test "missing session is silently dropped" do
+      assert :ok =
+               Effects.run(%{sessions: %{}}, [
+                 Effects.transfer(:ghost, 1, 50, 50, %{char_id: :ghost})
+               ])
+
+      refute_receive _, 50
+    end
+  end
 end

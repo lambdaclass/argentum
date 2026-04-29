@@ -82,7 +82,7 @@ defmodule Arena.Map.Pets do
 
               npc ->
                 {state, effects} = Arena.NpcAi.despawn_pet(state, pet_id, npc)
-                Arena.NpcAi.dispatch_effects(state, effects)
+                Arena.Map.Effects.run(state, effects)
                 entity = Map.fetch!(state.players, char_id)
                 entity = %{entity | pet_ids: List.delete(entity.pet_ids, pet_id)}
                 state = %{state | players: Map.put(state.players, char_id, entity)}
@@ -113,7 +113,7 @@ defmodule Arena.Map.Pets do
                 nil -> st
                 npc ->
                   {st, effects} = Arena.NpcAi.despawn_pet(st, instance_id, npc)
-                  Arena.NpcAi.dispatch_effects(st, effects)
+                  Arena.Map.Effects.run(st, effects)
                   st
               end
             end)

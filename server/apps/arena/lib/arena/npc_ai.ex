@@ -57,16 +57,19 @@ defmodule Arena.NpcAi do
     end
   end
 
-  @doc false
+  @doc """
+  Despawn a pet. Returns `{state, map_effects}` on the
+  `Arena.Map.Effect.t()` shape — callers on the map-layer effects
+  contract (e.g. PlayerDeath.handle_player_death/3) thread them up;
+  callers on NpcAi's own dispatch chain run them inline via
+  `Arena.Map.Effects.run/2`.
+  """
   def despawn_pet(state, instance_id, npc) do
     # Delegate to consolidated NPC death handler (pet despawn — no killer, no rewards).
-    # Run the resulting map-effects inline since NpcAi's outer dispatch_effects/2
-    # only handles legacy {:send_raw, _}-flavoured tuples.
     {nil, state, effects} =
       Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :pet)
 
-    Arena.Map.Effects.run(state, effects)
-    {state, []}
+    {state, effects}
   end
 
   # --- Respawns ---
@@ -249,9 +252,13 @@ defmodule Arena.NpcAi do
   defp process_pet_npc(state, instance_id, npc, npc_def, now, effects) do
     case Map.get(state.players, npc.owner_id) do
       nil ->
-        # Owner left the map — despawn the pet
+        # Owner left the map — despawn the pet. despawn_pet/3 returns
+        # map-layer Effect.t() values; NpcAi's tick chain dispatches its
+        # own different-shaped tuples via dispatch_effects/2, so we run
+        # the death effects through the map-layer runner here.
         {state, pet_effects} = despawn_pet(state, instance_id, npc)
-        {state, effects ++ pet_effects}
+        Arena.Map.Effects.run(state, pet_effects)
+        {state, effects}
 
       owner ->
         if owner.dead or npc.pet_mode == :stand do

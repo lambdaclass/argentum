@@ -875,7 +875,7 @@ defmodule Arena.PetTamingExtendedTest do
              "Dead pet's instance_id should be removed from owner's pet_ids"
     end
 
-    test "despawn_pet returns empty effects list" do
+    test "despawn_pet returns the map-layer effects produced by NpcDeath" do
       pet = make_npc(owner_id: 7, instance_id: 1, x: 10, y: 10)
       owner = make_player(pet_ids: [1])
 
@@ -883,8 +883,12 @@ defmodule Arena.PetTamingExtendedTest do
 
       {_state, effects} = NpcAi.despawn_pet(state, 1, pet)
 
-      assert effects == [],
-             "despawn_pet should return empty effects list"
+      # Pet despawn flows through NpcDeath.resolve_npc_death/4 which emits
+      # exactly one effect — a :broadcast_visible_all character_remove
+      # for the pet at its position. The pet-despawn unification commit
+      # (item 4) made these effects map-layer instead of NpcAi-shape, so
+      # callers thread them through Arena.Map.Effects.run/2.
+      assert [{:broadcast_visible_all, 10, 10, _envelope}] = effects
     end
 
     test "pet death when owner is absent does not crash" do
