@@ -280,7 +280,7 @@ defmodule Arena.WalkAwayParityTest do
           }
         )
 
-      {:noreply, new_state} = NpcInteraction.handle_double_click(state, :player, 50, 50)
+      {:ok, new_state, _effects} = NpcInteraction.handle_double_click(state, :player, 50, 50)
 
       updated = new_state.players[:player]
       assert updated.commerce_npc_id == merchant.npc_id

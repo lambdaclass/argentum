@@ -331,10 +331,13 @@ defmodule Arena.ServiceWindowsParityTest do
         occupancy: %{{51, 50} => {:npc, 2001}}
       )
 
-      # handle_npc_double_click is a dispatcher: it calls Effects.run_handler/2
-      # internally for the priest branch, so it returns {:noreply, state} and
-      # the effects have already been dispatched by the time we collect.
-      {:noreply, _new_state} = NpcInteraction.handle_npc_double_click(state, 1, entity, 2001)
+      # handle_npc_double_click now returns {:ok, state, effects} on the
+      # uniform contract; we run them through the runner here so the egress
+      # envelopes land in the test mailbox.
+      {:ok, ran_state, effects} =
+        NpcInteraction.handle_npc_double_click(state, 1, entity, 2001)
+
+      Arena.Map.Effects.run(ran_state, effects)
       msgs = collect_messages()
 
       raw_data =
@@ -368,10 +371,13 @@ defmodule Arena.ServiceWindowsParityTest do
         occupancy: %{{51, 50} => {:npc, 2001}}
       )
 
-      # handle_npc_double_click is a dispatcher: it calls Effects.run_handler/2
-      # internally for the priest branch, so it returns {:noreply, state} and
-      # the effects have already been dispatched by the time we collect.
-      {:noreply, _new_state} = NpcInteraction.handle_npc_double_click(state, 1, entity, 2001)
+      # handle_npc_double_click now returns {:ok, state, effects} on the
+      # uniform contract; we run them through the runner here so the egress
+      # envelopes land in the test mailbox.
+      {:ok, ran_state, effects} =
+        NpcInteraction.handle_npc_double_click(state, 1, entity, 2001)
+
+      Arena.Map.Effects.run(ran_state, effects)
       msgs = collect_messages()
 
       raw_data =

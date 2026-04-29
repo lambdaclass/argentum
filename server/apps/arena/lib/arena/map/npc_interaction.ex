@@ -75,11 +75,16 @@ defmodule Arena.Map.NpcInteraction do
   defp npc_faccion_to_atom(2), do: :chaos_legion
   defp npc_faccion_to_atom(_), do: :none
 
+  @doc """
+  Cast handler for `{:double_click, char_id, x, y}`. Returns
+  `{:ok, state, effects}` so MapServer can dispatch via
+  `Effects.run_handler/2` uniformly with the rest of the contract.
+  """
   def handle_double_click(state, char_id, x, y) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         if entity.dead do
-          {:noreply, state}
+          {:ok, state, []}
         else
           if abs(entity.x - x) <= 4 and abs(entity.y - y) <= 4 do
             case Helpers.get_occupancy(state.occupancy, x, y) do
@@ -92,49 +97,49 @@ defmodule Arena.Map.NpcInteraction do
                     item_def = GameData.get_item(item_id)
 
                     if item_def != nil and item_def.forum_id > 0 do
-                      Effects.run_handler(state, fn s ->
-                        Arena.Map.Social.handle_forum_open(s, char_id, item_def.forum_id)
-                      end)
+                      Arena.Map.Social.handle_forum_open(state, char_id, item_def.forum_id)
                     else
-                      {:noreply, state}
+                      {:ok, state, []}
                     end
 
                   _ ->
-                    {:noreply, state}
+                    {:ok, state, []}
                 end
             end
           else
-            Effects.run_handler(state, fn s ->
-              {:ok, s, [Effects.send(char_id, console("Estas demasiado lejos."))]}
-            end)
+            {:ok, state, [Effects.send(char_id, console("Estas demasiado lejos."))]}
           end
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
+  @doc """
+  Effects-contract dispatcher for an NPC double-click. Returns
+  `{:ok, state, effects}`; legacy sub-handlers (Commerce, Bank,
+  Faction.handle_enlistador_click) are bridged via `bridge_legacy/2`
+  since their internal side effects still go through the legacy
+  `{:send_raw, _}` shim and they return GenServer-flavoured shapes.
+  """
   def handle_npc_double_click(state, char_id, entity, instance_id) do
     case Map.get(state.npcs_live, instance_id) do
       nil ->
-        {:noreply, state}
+        {:ok, state, []}
 
       npc ->
         npc_def = GameData.get_npc(npc.npc_id)
 
         if npc_def == nil do
-          {:noreply, state}
+          {:ok, state, []}
         else
           entity = remember_selected_npc(entity, instance_id, npc_def.npc_type)
           state = %{state | players: Map.put(state.players, char_id, entity)}
 
           cond do
             npc_def.comercia ->
-              case Commerce.open_npc_commerce(state, char_id, entity, npc) do
-                {:reply, _result, new_state} -> {:noreply, new_state}
-                other -> other
-              end
+              bridge_legacy(state, fn -> Commerce.open_npc_commerce(state, char_id, entity, npc) end)
 
             npc_def.npc_type in [@npc_type_revividor, @npc_type_resucitador_newbie] ->
               priest_msg =
@@ -144,51 +149,44 @@ defmodule Arena.Map.NpcInteraction do
                   "#{npc_def.name} dice: Puedo curarte. Usa el comando /curar."
                 end
 
-              Effects.run_handler(state, fn s ->
-                effects =
-                  [Effects.send(char_id, console(priest_msg))] ++
-                    prontuario_effects(char_id, entity)
+              effects =
+                [Effects.send(char_id, console(priest_msg))] ++
+                  prontuario_effects(char_id, entity)
 
-                {:ok, s, effects}
-              end)
+              {:ok, state, effects}
 
             npc_def.npc_type == @npc_type_enlistador ->
-              Faction.handle_enlistador_click(state, char_id, entity, npc_def)
+              bridge_legacy(state, fn ->
+                Faction.handle_enlistador_click(state, char_id, entity, npc_def)
+              end)
 
             npc_def.npc_type == @npc_type_banquero ->
-              case Arena.Map.Bank.handle_open_bank(state, char_id, npc.x, npc.y) do
-                {:reply, _result, new_state} -> {:noreply, new_state}
-                _ -> {:noreply, state}
-              end
+              bridge_legacy(state, fn ->
+                Arena.Map.Bank.handle_open_bank(state, char_id, npc.x, npc.y)
+              end)
 
             npc_def.npc_type == @npc_type_entrenador ->
-              Effects.run_handler(state, fn s ->
-                {:ok, s,
-                 [
-                   Effects.send(
-                     char_id,
-                     console("#{npc_def.name} dice: Puedo entrenarte. Usa el boton Entrenar.")
-                   )
-                 ]}
-              end)
+              {:ok, state,
+               [
+                 Effects.send(
+                   char_id,
+                   console("#{npc_def.name} dice: Puedo entrenarte. Usa el boton Entrenar.")
+                 )
+               ]}
 
             npc_def.npc_type == @npc_type_entrega_pesca ->
-              Effects.run_handler(state, fn s ->
-                handle_fish_delivery(s, char_id, entity, npc_def)
-              end)
+              handle_fish_delivery(state, char_id, entity, npc_def)
 
             npc_def.npc_type == @npc_type_timbero ->
-              Effects.run_handler(state, fn s ->
-                {:ok, s,
-                 [
-                   Effects.send(
-                     char_id,
-                     console(
-                       "#{npc_def.name} dice: Haz tu apuesta con /APOSTAR cantidad (1-5000 monedas)."
-                     )
+              {:ok, state,
+               [
+                 Effects.send(
+                   char_id,
+                   console(
+                     "#{npc_def.name} dice: Haz tu apuesta con /APOSTAR cantidad (1-5000 monedas)."
                    )
-                 ]}
-              end)
+                 )
+               ]}
 
             npc_def.npc_type == @npc_type_arena_guard ->
               fee = Map.get(npc_def, :arena_price, 0)
@@ -200,26 +198,33 @@ defmodule Arena.Map.NpcInteraction do
                   "#{npc_def.name} dice: Bienvenido a la arena."
                 end
 
-              Effects.run_handler(state, fn s ->
-                {:ok, s, [Effects.send(char_id, console(guard_msg))]}
-              end)
+              {:ok, state, [Effects.send(char_id, console(guard_msg))]}
 
             npc_def.npc_type == @npc_type_subastador ->
-              Effects.run_handler(state, fn s ->
-                handle_subastador_click(s, char_id, entity, npc_def)
-              end)
+              handle_subastador_click(state, char_id, entity, npc_def)
 
             npc_def.npc_type == @npc_type_quest ->
-              Effects.run_handler(state, fn s ->
-                handle_quest_npc_click(s, char_id, entity, instance_id, npc_def)
-              end)
+              handle_quest_npc_click(state, char_id, entity, instance_id, npc_def)
 
             true ->
-              Effects.run_handler(state, fn s ->
-                {:ok, s, [Effects.send(char_id, console("Ves a #{npc_def.name}."))]}
-              end)
+              {:ok, state, [Effects.send(char_id, console("Ves a #{npc_def.name}."))]}
           end
         end
+    end
+  end
+
+  # Adapter for sub-handlers (Commerce, Bank, Faction.handle_enlistador_click)
+  # that still return GenServer-flavoured shapes
+  # (`{:reply, _, state}` / `{:noreply, state}`) and write their packets
+  # through the legacy `{:send_raw, _}` shim. We discard the reply, accept
+  # the new state, and surface zero effects — the legacy side channel has
+  # already fired by the time control returns. They migrate independently
+  # in their own modules' refactor lanes.
+  defp bridge_legacy(default_state, fun) do
+    case fun.() do
+      {:reply, _result, new_state} -> {:ok, new_state, []}
+      {:noreply, new_state} -> {:ok, new_state, []}
+      _ -> {:ok, default_state, []}
     end
   end
 

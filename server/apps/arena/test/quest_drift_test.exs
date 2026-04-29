@@ -359,7 +359,7 @@ defmodule Arena.QuestDriftTest do
 
       # NPC click should detect quest 9998 as completable and complete it
       result = NpcInteraction.handle_npc_double_click(state, 1, entity, 1001)
-      assert {:noreply, new_state} = result
+      assert {:ok, new_state, _effects} = result
 
       # If quest_complete? was called with the map instead of the index,
       # it would return false and skip the completion. Verify the quest
@@ -408,7 +408,7 @@ defmodule Arena.QuestDriftTest do
 
       # This should NOT crash with a match error on {:ok, updated_entity, quest_def}
       result = NpcInteraction.handle_npc_double_click(state, 1, entity, 1001)
-      assert {:noreply, new_state} = result
+      assert {:ok, new_state, _effects} = result
 
       # Verify quest was completed and rewards were granted
       updated = new_state.players[1]

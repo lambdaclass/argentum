@@ -384,13 +384,15 @@ defmodule Arena.Map.NpcInteractionDispatcherE2ETest do
 
       entity = state.players[:player]
 
-      assert {:noreply, _new_state} =
-               Arena.Map.NpcInteraction.handle_npc_double_click(
-                 state,
-                 :player,
-                 entity,
-                 :priest_inst
-               )
+      {:ok, ran_state, effects} =
+        Arena.Map.NpcInteraction.handle_npc_double_click(
+          state,
+          :player,
+          entity,
+          :priest_inst
+        )
+
+      Arena.Map.Effects.run(ran_state, effects)
 
       assert_console("Puedo resucitarte")
       assert_console("Sin prontuario.")

@@ -761,7 +761,8 @@ defmodule Arena.Map.MapServer do
   def handle_cast({:information, char_id}, state),
     do: Effects.run_handler(state, fn s -> NpcInteraction.handle_information(s, char_id) end)
   @impl true
-  def handle_cast({:double_click, char_id, x, y}, state), do: NpcInteraction.handle_double_click(state, char_id, x, y)
+  def handle_cast({:double_click, char_id, x, y}, state),
+    do: Effects.run_handler(state, fn s -> NpcInteraction.handle_double_click(s, char_id, x, y) end)
   @impl true
   def handle_cast({:enlist_faction, char_id, faction}, state), do: Faction.handle_enlist_faction(state, char_id, faction)
   @impl true

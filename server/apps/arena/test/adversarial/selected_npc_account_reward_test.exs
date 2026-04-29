@@ -113,7 +113,7 @@ defmodule Arena.Adversarial.SelectedNpcAccountRewardTest do
       npc = %{npc_id: npc_id, x: 51, y: 50, instance_id: :generic_npc}
       state = make_map_state(make_entity(%{}), %{generic_npc: npc}, occupancy: %{{51, 50} => {:npc, :generic_npc}})
 
-      assert {:noreply, clicked_state} = Arena.Map.NpcInteraction.handle_double_click(state, :player, 51, 50)
+      assert {:ok, clicked_state, _effects} = Arena.Map.NpcInteraction.handle_double_click(state, :player, 51, 50)
       assert clicked_state.players[:player].last_clicked_npc_instance_id == :generic_npc
       assert clicked_state.players[:player].last_clicked_npc_type == npc_def.npc_type
 
