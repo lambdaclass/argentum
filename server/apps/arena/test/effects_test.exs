@@ -606,4 +606,152 @@ defmodule Arena.Map.EffectsTest do
       assert_receive {:peer_received, %{class: :critical, payload: ^expected_payload}}
     end
   end
+
+  describe "broadcast_visible_except/5 constructor" do
+    # The :broadcast_visible_except kind exists for animation packets the
+    # originating client renders locally (char_swing,
+    # blocked_with_shield_other). The constructor must shape the 5-tuple
+    # `{:broadcast_visible_except, x, y, exclude_char_id, outbound}` and
+    # honor classifier defaults + opts overrides exactly like
+    # broadcast_visible_all/4.
+
+    test "produces 5-tuple with the exclude char_id slot populated" do
+      swing_id = AoProtocol.PacketIds.Server.char_swing()
+      packet = <<swing_id::little-signed-integer-16, 7, 0>>
+
+      assert {:broadcast_visible_except, 50, 50, :attacker, env} =
+               Effects.broadcast_visible_except(50, 50, :attacker, packet)
+
+      assert env.payload == packet
+    end
+
+    test "honours class: opts override on an animation packet" do
+      swing_id = AoProtocol.PacketIds.Server.char_swing()
+      packet = <<swing_id::little-signed-integer-16, 7, 0>>
+
+      {:broadcast_visible_except, _x, _y, _ex, env} =
+        Effects.broadcast_visible_except(10, 10, :a, packet, class: :critical)
+
+      assert env.class == :critical
+    end
+
+    test "honours coalesce_key: opts override on a coalesce-classed packet" do
+      # update_hp is :coalesce by the classifier — the opt should override
+      # the default coalesce_key (the packet id) with the explicit value.
+      hp_id = AoProtocol.PacketIds.Server.update_hp()
+      packet = <<hp_id::little-signed-integer-16, 0, 0, 0, 0>>
+
+      {:broadcast_visible_except, _x, _y, _ex, env} =
+        Effects.broadcast_visible_except(10, 10, :a, packet, coalesce_key: {:hp_aoe, :a})
+
+      assert env.class == :coalesce
+      assert env.coalesce_key == {:hp_aoe, :a}
+    end
+
+    test "non-binary packet raises on construction (FunctionClauseError)" do
+      assert_raise FunctionClauseError, fn ->
+        Effects.broadcast_visible_except(10, 10, :a, :not_a_binary)
+      end
+    end
+  end
+
+  describe "run/2 :broadcast_visible_except" do
+    # End-to-end check that the runner skips the excluded char_id but
+    # delivers the envelope to every other visible session. This guards the
+    # combat swing / shield-block paths that depend on origin exclusion.
+
+    test "delivers to peers but excludes the named char_id" do
+      origin = self()
+
+      peer_pid =
+        spawn_link(fn ->
+          receive do
+            {:egress, env} -> Kernel.send(origin, {:peer_received, env})
+          end
+        end)
+
+      ox = 50
+      oy = 50
+
+      players = %{
+        attacker: %{x: ox, y: oy, gm: false},
+        peer: %{x: ox + 1, y: oy, gm: false}
+      }
+
+      state =
+        map_state(
+          players: players,
+          sessions: %{attacker: origin, peer: peer_pid},
+          visibility_mode: :global
+        )
+
+      swing_id = AoProtocol.PacketIds.Server.char_swing()
+      payload = <<swing_id::little-signed-integer-16, 7, 0>>
+
+      assert :ok =
+               Effects.run(state, [
+                 Effects.broadcast_visible_except(ox, oy, :attacker, payload)
+               ])
+
+      assert_receive {:peer_received, %{payload: ^payload}}
+      # The excluded session pid is also self() — make sure no envelope
+      # arrived there by inspecting the mailbox directly.
+      refute_received {:egress, %{payload: ^payload}}
+    end
+
+    test "no-op when only the excluded session is in AoI" do
+      players = %{lonely: %{x: 50, y: 50, gm: false}}
+
+      state =
+        map_state(
+          players: players,
+          sessions: %{lonely: self()},
+          visibility_mode: :global
+        )
+
+      swing_id = AoProtocol.PacketIds.Server.char_swing()
+      payload = <<swing_id::little-signed-integer-16, 7, 0>>
+
+      assert :ok =
+               Effects.run(state, [
+                 Effects.broadcast_visible_except(50, 50, :lonely, payload)
+               ])
+
+      refute_receive _, 50
+    end
+
+    test "delivers to peers when exclude_char_id has no matching session" do
+      # If the exclude id doesn't match any session, every visible session
+      # still receives the envelope — the runner shouldn't filter on
+      # something that doesn't exist.
+      origin = self()
+
+      peer_pid =
+        spawn_link(fn ->
+          receive do
+            {:egress, env} -> Kernel.send(origin, {:peer_received, env})
+          end
+        end)
+
+      players = %{
+        peer: %{x: 50, y: 50, gm: false}
+      }
+
+      state =
+        map_state(
+          players: players,
+          sessions: %{peer: peer_pid},
+          visibility_mode: :global
+        )
+
+      payload = <<0xFF, 0xFF, 1, 2>>
+
+      assert :ok =
+               Effects.run(state, [
+                 Effects.broadcast_visible_except(50, 50, :nonexistent_char_id, payload)
+               ])
+
+      assert_receive {:peer_received, %{payload: ^payload}}
+    end
+  end
 end
