@@ -14,126 +14,25 @@ defmodule Arena.BlindNoMoreDriftTest do
 
   No-op assertions cover the adversarial paths: clear-while-not-blind
   must NOT emit a `:blind_no_more` packet (matching the VB6 guard).
+
+  Migrated to `Arena.Test.Scenario` in slice 4b. The cura_ceguera
+  spell-clear paths drive `SpellEffects.apply_spell_status/6` through
+  `run_effects/2` and assert via `assert_effect`/`refute_effect` (the
+  spell handler emits effects via `Arena.Map.Effects`). The
+  tick-expiry paths still rely on `assert_receive`/`refute_receive`
+  because `StatusTicks.process_player_buffs/4` calls
+  `Helpers.send_to_session/3` directly — those packets land in the
+  test mailbox but are NOT yet on the effects contract. Migrating
+  buff-tick to the contract is slice 5.
   """
   use ExUnit.Case, async: false
 
   alias Arena.Data.SpellDef
-  alias Arena.Map.{SpellEffects, StatusTicks}
+  alias Arena.Map.SpellEffects
   alias AoProtocol.Server.Encoder
 
-  import Arena.Test.MapStateFactory
-
-  # ── Helpers ──────────────────────────────────────────────────────────────
-
-  defp make_entity(overrides) do
-    defaults = %{
-      char_id: :target,
-      name: "Tester",
-      x: 50,
-      y: 50,
-      heading: :south,
-      body_id: 1,
-      base_body_id: 1,
-      head_id: 1,
-      hp: 100,
-      max_hp: 100,
-      mana: 200,
-      max_mana: 200,
-      stamina: 100,
-      max_stamina: 100,
-      hunger: 100,
-      thirst: 100,
-      level: 25,
-      xp: 0,
-      class: :mage,
-      race: :human,
-      gender: :male,
-      str: 18,
-      agi: 18,
-      int: 18,
-      con: 18,
-      cha: 18,
-      gold: 0,
-      inventory: List.duplicate(nil, 24),
-      equipment: %{weapon: nil, armor: nil, shield: nil, helmet: nil, ring: nil, municion: nil},
-      skills: %{magic: 80},
-      spells: [1],
-      buffs: [],
-      min_hit: 0,
-      max_hit: 0,
-      str_buff: 0,
-      agi_buff: 0,
-      dead: false,
-      poisoned: false,
-      criminal: false,
-      invisible: false,
-      oculto: false,
-      oculto_timer: 0,
-      mounted: false,
-      no_detectable: false,
-      paralyzed: false,
-      blind: false,
-      dumb: false,
-      immobilized: false,
-      meditating: false,
-      resting: false,
-      safe_mode: false,
-      navigating: false,
-      gm: false,
-      faction: :none,
-      next_move_at: -1_000_000_000_000,
-      next_attack_at: -1_000_000_000_000,
-      next_spell_at: -1_000_000_000_000,
-      next_item_use_at: -1_000_000_000_000,
-      spell_cooldowns: %{},
-      char_index: 1,
-      map_id: 1,
-      npcs_killed: 0,
-      deaths: 0,
-      penalty: 0,
-      skill_points: 0,
-      home_city: :ullathorpe,
-      faction_kills_royal: 0,
-      faction_kills_chaos: 0,
-      citizens_killed: 0,
-      criminals_killed: 0,
-      faction_score: 0,
-      faction_rank_armada: 0,
-      faction_rank_chaos: 0,
-      faction_reenlistadas: 0,
-      fishing_points: 0,
-      last_step_at: -1_000_000_000_000,
-      speed_hack_counter: 0.0,
-      speeding: 1.0,
-      commerce_npc_id: nil,
-      bank_npc_id: nil,
-      bank_gold: 0,
-      trade_request_target: nil,
-      trade_partner_id: nil,
-      trade_offer_gold: 0,
-      trade_offer_items: [],
-      trade_accepted: false,
-      in_duel: false,
-      duel_opponent_id: nil
-    }
-
-    Map.merge(defaults, overrides)
-  end
-
-  defp make_state(players, opts \\ []) do
-    occupancy_map = Keyword.get(opts, :occupancy, %{})
-
-    sessions =
-      Keyword.get(opts, :sessions) ||
-        Map.new(players, fn {id, _e} -> {id, self()} end)
-
-    map_state(
-      players: players,
-      sessions: sessions,
-      occupancy: occupancy_map,
-      meta: %{safe_zone: false, sin_invi_ocul: false}
-    )
-  end
+  import Arena.Test.Scenario
+  import Arena.Test.Scenario.Assertions
 
   defp make_spell(overrides) do
     defaults = %SpellDef{
@@ -167,42 +66,47 @@ defmodule Arena.BlindNoMoreDriftTest do
 
   describe "tick-expiry emits :blind_no_more" do
     test "expired :blind buff clears flag and emits packet" do
-      caster = make_entity(%{char_id: :caster, mana: 200, x: 49, y: 50, char_index: 1})
+      # Cast the synthetic ciega spell with a frozen clock, then advance
+      # past its `expires_at` and run a buff tick. NOTE:
+      # `StatusTicks.process_player_buffs/4` uses `Helpers.send_to_session/3`
+      # directly, so the :blind_no_more packet lands in the test mailbox
+      # but NOT in `scenario.effects`. We assert via `assert_receive`
+      # until the tick path is migrated to the effects contract (slice 5).
+      now = 1_000_000
 
-      target =
-        make_entity(%{
-          char_id: :target,
+      s =
+        new()
+        |> set_clock(now)
+        |> with_player(:caster, char_index: 1, x: 49, y: 50, mana: 200, max_mana: 200)
+        |> with_player(:target,
+          char_index: 2,
           x: 50,
           y: 50,
-          char_index: 2,
           buffs: [],
-          blind: false
-        })
+          blind: false,
+          mana: 200,
+          max_mana: 200
+        )
 
-      occupancy = %{{50, 50} => {:player, :target}}
-      state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
-
-      # Use a synthetic spell with very short duration. apply_spell_status
-      # floors duration to 3000ms internally, but we'll fast-forward past
-      # that with a future `now` value.
+      caster = entity(s, :caster)
       spell = make_spell(%{ciega: true, duration: 1, mana_required: 20})
 
-      {state, _effects} =
-        SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
+      s =
+        run_effects(s, fn st ->
+          SpellEffects.apply_spell_status(st, :caster, caster, spell, 50, 50)
+        end)
 
-      assert state.players[:target].blind == true,
+      assert entity(s, :target).blind == true,
              "synthetic ciega spell must set blind: true"
 
-      # Drain the update_mana side-effect from the cast
+      # Drain the update_mana side-effect from the cast (it goes through
+      # `Effects.run/2` to the target session = test pid).
       drain_mailbox()
 
-      # Fast-forward past the duration floor (3000ms)
-      future = System.monotonic_time(:millisecond) + 5_000
+      # apply_spell_status floors the duration to 3000ms; advance past it.
+      s = advance_clock(s, 5_000)
 
-      target_after_cast = state.players[:target]
-
-      _new_state =
-        StatusTicks.process_player_buffs(state, :target, target_after_cast, future)
+      _s = tick(s, :buff)
 
       assert_receive {:send_raw, @blind_no_more_packet}, 200
     end
@@ -212,42 +116,37 @@ defmodule Arena.BlindNoMoreDriftTest do
 
   describe "cura_ceguera spell clears blind and emits packet" do
     test "blind target receives :blind_no_more when cura_ceguera lands" do
-      caster = make_entity(%{char_id: :caster, mana: 200, x: 49, y: 50, char_index: 1})
+      now = 1_000_000
 
-      target =
-        make_entity(%{
-          char_id: :target,
+      s =
+        new()
+        |> set_clock(now)
+        |> with_player(:caster, char_index: 1, x: 49, y: 50, mana: 200, max_mana: 200)
+        |> with_player(:target,
+          char_index: 2,
           x: 50,
           y: 50,
-          char_index: 2,
           blind: true,
-          buffs: [
-            %{type: :blind, expires_at: System.monotonic_time(:millisecond) + 60_000}
-          ]
-        })
+          buffs: [%{type: :blind, expires_at: now + 60_000}],
+          mana: 200,
+          max_mana: 200
+        )
 
-      occupancy = %{{50, 50} => {:player, :target}}
-      state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
-
+      caster = entity(s, :caster)
       spell = make_spell(%{cura_ceguera: true, mana_required: 20, duration: 0})
 
-      drain_mailbox()
+      s =
+        run_effects(s, fn st ->
+          SpellEffects.apply_spell_status(st, :caster, caster, spell, 50, 50)
+        end)
 
-      {new_state, effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
-
-      cleared = new_state.players[:target]
+      cleared = entity(s, :target)
       assert cleared.blind == false, "cura_ceguera must clear the blind flag"
 
       refute Enum.any?(cleared.buffs, &(&1.type == :blind)),
              "cura_ceguera must drop the :blind buff entry"
 
-      blind_no_more_packet = @blind_no_more_packet
-
-      assert Enum.any?(effects, fn
-               {:send, :target, %{payload: ^blind_no_more_packet}} -> true
-               _ -> false
-             end),
-             "cura_ceguera must emit a blind_no_more :send effect to the target"
+      assert_effect(s, :send, to: :target, packet: :blind_no_more)
     end
   end
 
@@ -255,28 +154,31 @@ defmodule Arena.BlindNoMoreDriftTest do
 
   describe "cura_ceguera on non-blind target is a no-op (VB6 guard)" do
     test "no :blind_no_more emitted when target was not blind" do
-      caster = make_entity(%{char_id: :caster, mana: 200, x: 49, y: 50, char_index: 1})
+      now = 1_000_000
 
-      target =
-        make_entity(%{
-          char_id: :target,
+      s =
+        new()
+        |> set_clock(now)
+        |> with_player(:caster, char_index: 1, x: 49, y: 50, mana: 200, max_mana: 200)
+        |> with_player(:target,
+          char_index: 2,
           x: 50,
           y: 50,
-          char_index: 2,
           blind: false,
-          buffs: []
-        })
+          buffs: [],
+          mana: 200,
+          max_mana: 200
+        )
 
-      occupancy = %{{50, 50} => {:player, :target}}
-      state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
-
+      caster = entity(s, :caster)
       spell = make_spell(%{cura_ceguera: true, mana_required: 20, duration: 0})
 
-      drain_mailbox()
+      s =
+        run_effects(s, fn st ->
+          SpellEffects.apply_spell_status(st, :caster, caster, spell, 50, 50)
+        end)
 
-      {_new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
-
-      refute_receive {:send_raw, @blind_no_more_packet}, 100
+      refute_effect(s, :send, to: :target, packet: :blind_no_more)
     end
   end
 
@@ -284,22 +186,18 @@ defmodule Arena.BlindNoMoreDriftTest do
 
   describe "tick with no :blind buff emits no packet" do
     test "no :blind_no_more emitted when there's no :blind buff" do
-      target =
-        make_entity(%{
-          char_id: :target,
-          x: 50,
-          y: 50,
-          char_index: 1,
-          blind: false,
-          buffs: []
-        })
+      # NOTE: tick path emits via `Helpers.send_to_session/3`; packets
+      # land in the test mailbox, not `scenario.effects`. Assertion stays
+      # on `refute_receive` until the tick is migrated to the contract.
+      now = 1_000_000
 
-      state = make_state(%{target: target})
+      s =
+        new()
+        |> set_clock(now)
+        |> with_player(:target, char_index: 1, x: 50, y: 50, blind: false, buffs: [])
 
       drain_mailbox()
-      now = System.monotonic_time(:millisecond)
-
-      _new_state = StatusTicks.process_player_buffs(state, :target, target, now)
+      _s = tick(s, :buff)
 
       refute_receive {:send_raw, @blind_no_more_packet}, 100
     end
@@ -309,65 +207,64 @@ defmodule Arena.BlindNoMoreDriftTest do
 
   describe "warrior gets 0.7x blind duration (VB6 parity)" do
     test "warrior class blind buff has 0.7x duration offset" do
-      caster = make_entity(%{char_id: :caster, mana: 200, x: 49, y: 50, char_index: 1})
+      now = 1_000_000
 
-      target =
-        make_entity(%{
-          char_id: :target,
-          class: :guerrero,
+      s =
+        new()
+        |> set_clock(now)
+        |> with_player(:caster, char_index: 1, x: 49, y: 50, mana: 200, max_mana: 200)
+        |> with_player(:target,
+          char_index: 2,
           x: 50,
           y: 50,
-          char_index: 2,
+          class: :guerrero,
           blind: false,
           buffs: []
-        })
+        )
 
-      occupancy = %{{50, 50} => {:player, :target}}
-      state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
+      caster = entity(s, :caster)
 
       # duration 10 → 10000ms; warrior gets 0.7x → 7000ms
       spell = make_spell(%{ciega: true, duration: 10, mana_required: 20})
 
-      now_before = System.monotonic_time(:millisecond)
-      {new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
-      now_after = System.monotonic_time(:millisecond)
+      s =
+        run_effects(s, fn st ->
+          SpellEffects.apply_spell_status(st, :caster, caster, spell, 50, 50)
+        end)
 
-      updated = new_state.players[:target]
-      [buff] = Enum.filter(updated.buffs, &(&1.type == :blind))
+      [buff] = Enum.filter(entity(s, :target).buffs, &(&1.type == :blind))
 
-      # 10000ms * 0.7 = 7000ms
-      assert buff.expires_at >= now_before + 7000
-      assert buff.expires_at <= now_after + 7000 + 50
+      # Frozen clock — exact arithmetic, no jitter window needed.
+      assert buff.expires_at == now + 7000
     end
 
     test "mage gets full duration (no halving)" do
-      caster = make_entity(%{char_id: :caster, mana: 200, x: 49, y: 50, char_index: 1})
+      now = 1_000_000
 
-      target =
-        make_entity(%{
-          char_id: :target,
-          class: :mage,
+      s =
+        new()
+        |> set_clock(now)
+        |> with_player(:caster, char_index: 1, x: 49, y: 50, mana: 200, max_mana: 200)
+        |> with_player(:target,
+          char_index: 2,
           x: 50,
           y: 50,
-          char_index: 2,
+          class: :mage,
           blind: false,
           buffs: []
-        })
+        )
 
-      occupancy = %{{50, 50} => {:player, :target}}
-      state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
-
+      caster = entity(s, :caster)
       spell = make_spell(%{ciega: true, duration: 10, mana_required: 20})
 
-      now_before = System.monotonic_time(:millisecond)
-      {new_state, _effects} = SpellEffects.apply_spell_status(state, :caster, caster, spell, 50, 50)
-      now_after = System.monotonic_time(:millisecond)
+      s =
+        run_effects(s, fn st ->
+          SpellEffects.apply_spell_status(st, :caster, caster, spell, 50, 50)
+        end)
 
-      updated = new_state.players[:target]
-      [buff] = Enum.filter(updated.buffs, &(&1.type == :blind))
+      [buff] = Enum.filter(entity(s, :target).buffs, &(&1.type == :blind))
 
-      assert buff.expires_at >= now_before + 10_000
-      assert buff.expires_at <= now_after + 10_000 + 50
+      assert buff.expires_at == now + 10_000
     end
   end
 
@@ -375,53 +272,71 @@ defmodule Arena.BlindNoMoreDriftTest do
 
   describe "death/resurrect/resucitate clear blind flag" do
     test "PlayerDeath.handle_player_death clears blind: true" do
-      target =
-        make_entity(%{
-          char_id: :target,
+      now = 1_000_000
+
+      s =
+        new()
+        |> set_clock(now)
+        |> with_player(:target,
+          char_index: 1,
+          x: 50,
+          y: 50,
           blind: true,
-          buffs: [%{type: :blind, expires_at: System.monotonic_time(:millisecond) + 60_000}]
-        })
+          buffs: [%{type: :blind, expires_at: now + 60_000}]
+        )
 
-      state = make_state(%{target: target})
+      # `handle_player_death/3` returns `{player, state, effects}` — adapt
+      # to `run_effects/2`'s `{state, effects}` shape by re-inserting the
+      # dead player into the state map ourselves (the production caller
+      # in StatusTicks does the same).
+      s =
+        run_effects(s, fn st ->
+          target = st.players[:target]
 
-      {dead_entity, _new_state, _effects} =
-        Arena.Map.PlayerDeath.handle_player_death(state, :target, target)
+          {dead_player, new_state, effects} =
+            Arena.Map.PlayerDeath.handle_player_death(st, :target, target)
 
-      assert dead_entity.blind == false, "death must clear blind flag"
+          new_state = %{new_state | players: Map.put(new_state.players, :target, dead_player)}
+          {new_state, effects}
+        end)
+
+      assert entity(s, :target).blind == false, "death must clear blind flag"
     end
 
     test "spell_effects resurrect clears blind: true" do
-      caster =
-        make_entity(%{
-          char_id: :caster,
-          mana: 200,
+      now = 1_000_000
+
+      s =
+        new()
+        |> set_clock(now)
+        |> with_player(:caster,
+          char_index: 1,
           x: 49,
           y: 50,
-          char_index: 1,
+          mana: 200,
+          max_mana: 200,
           spells: [99]
-        })
-
-      target =
-        make_entity(%{
-          char_id: :target,
+        )
+        |> with_player(:target,
+          char_index: 2,
+          x: 50,
+          y: 50,
           dead: true,
           hp: 0,
           max_hp: 100,
-          x: 50,
-          y: 50,
-          char_index: 2,
           blind: true,
-          buffs: [%{type: :blind, expires_at: System.monotonic_time(:millisecond) + 60_000}]
-        })
+          buffs: [%{type: :blind, expires_at: now + 60_000}]
+        )
 
-      occupancy = %{{50, 50} => {:player, :target}}
-      state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
-
+      caster = entity(s, :caster)
       spell = make_spell(%{revivir: true, min_hp: 10, mana_required: 20, work_on_dead: true})
 
-      {new_state, _effects} = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 50, 50)
+      s =
+        run_effects(s, fn st ->
+          SpellEffects.apply_spell_resurrect(st, :caster, caster, spell, 50, 50)
+        end)
 
-      revived = new_state.players[:target]
+      revived = entity(s, :target)
       assert revived.dead == false
       assert revived.blind == false, "spell-revive must clear blind flag"
     end
@@ -447,28 +362,41 @@ defmodule Arena.BlindNoMoreDriftTest do
 
       :ets.insert(:arena_game_data, {{:npc, 600}, npc_def})
 
-      target =
-        make_entity(%{
-          char_id: :player,
+      now = 1_000_000
+
+      s =
+        new()
+        |> set_clock(now)
+        |> with_player(:player,
+          char_index: 1,
+          x: 50,
+          y: 50,
           dead: true,
           hp: 0,
           max_hp: 100,
           mana: 50,
           max_mana: 200,
           blind: true,
-          buffs: [%{type: :blind, expires_at: System.monotonic_time(:millisecond) + 60_000}],
+          buffs: [%{type: :blind, expires_at: now + 60_000}],
           last_clicked_npc_instance_id: :rev1,
           last_clicked_npc_type: 1
-        })
+        )
 
-      npcs_live = %{rev1: %{npc_id: 600, x: 51, y: 50, instance_id: :rev1}}
+      # Healing.handle_resucitate looks up the NPC in `state.npcs_live`
+      # via `Helpers.resolve_selected_npc`. Place a synthetic Revividor
+      # adjacent to the player. `with_npc/3` would build a full
+      # %NpcEntity{}; this handler only reads `npc_id`, `x`, `y`,
+      # `instance_id`, so we patch `npcs_live` directly.
+      s = update_state(s, fn st ->
+        %{st | npcs_live: %{rev1: %{npc_id: 600, x: 51, y: 50, instance_id: :rev1}}}
+      end)
 
-      state = make_state(%{player: target}, sessions: %{player: self()})
-      state = %{state | npcs_live: npcs_live}
+      s =
+        run(s, fn st ->
+          Arena.Map.Healing.handle_resucitate(st, :player)
+        end)
 
-      {:ok, new_state, _effects} = Arena.Map.Healing.handle_resucitate(state, :player)
-
-      revived = new_state.players[:player]
+      revived = entity(s, :player)
       assert revived.dead == false
       assert revived.blind == false, "NPC resucitate must clear blind flag"
     end
