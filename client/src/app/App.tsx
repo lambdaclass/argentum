@@ -129,6 +129,7 @@ export function App({ uiDemoMode = false }: AppProps) {
   const [browserRoute, setBrowserRoute] = useState<BrowserRoute>(() =>
     typeof window === "undefined" ? "/" : normalizeBrowserRoute(window.location.pathname)
   );
+  const effectiveBrowserRoute = uiDemoMode ? "/play" : browserRoute;
   const [showTileDebug, setShowTileDebug] = useState(false);
   const [showMoveDebug, setShowMoveDebug] = useState(false);
   const [spellHotkeys, setSpellHotkeys] = useState<Array<number | null>>(() => loadSpellHotkeys());
@@ -149,8 +150,8 @@ export function App({ uiDemoMode = false }: AppProps) {
   const enteredWorldRef = useRef(false);
   const initialSceneBootstrapDoneRef = useRef(false);
   const demoBootstrapRef = useRef(false);
-  const gameplayRouteRef = useRef(browserRoute === "/play");
-  const isGameplayRoute = browserRoute === "/play";
+  const gameplayRouteRef = useRef(effectiveBrowserRoute === "/play");
+  const isGameplayRoute = effectiveBrowserRoute === "/play";
 
   useEffect(() => {
     stateRef.current = state;
@@ -243,6 +244,13 @@ export function App({ uiDemoMode = false }: AppProps) {
   }, [bootConnectAttempts, state.world.map, state.world.mapStatus]);
 
   useEffect(() => {
+    if (uiDemoMode) {
+      initialSceneBootstrapDoneRef.current = true;
+      setSceneBootstrapStatus("ready");
+      setSceneBootstrapError(null);
+      return;
+    }
+
     if (!isGameplayRoute || assetStatus !== "ready" || mapPackStatus !== "ready") {
       if (state.connection.status === "offline" && state.world.map == null) {
         initialSceneBootstrapDoneRef.current = false;
@@ -377,6 +385,7 @@ export function App({ uiDemoMode = false }: AppProps) {
     assetStatus,
     isGameplayRoute,
     mapPackStatus,
+    uiDemoMode,
     state.connection.status,
     state.world.groundObjects,
     state.world.map,
@@ -1358,7 +1367,11 @@ export function App({ uiDemoMode = false }: AppProps) {
                 ) : null}
               </>
             ) : (
-              <div className="world-loading-state">
+              <div
+                className="world-loading-state"
+                data-kind={worldOverlay?.tone ?? "loading"}
+                data-testid="world-overlay-state"
+              >
                 <p className="eyebrow">{worldOverlay?.eyebrow ?? "Viewport"}</p>
                 <h3>
                   {worldOverlay?.title ??

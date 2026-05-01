@@ -8,5 +8,6 @@ test("landing page exposes the smoke routes", async ({ page }) => {
   await expect(nav.getByRole("link", { name: "Session + spellbook" })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Trade" })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Social" })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Product" })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Weather" })).toBeVisible();
 });

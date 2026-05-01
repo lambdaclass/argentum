@@ -1,5 +1,6 @@
 import { Suspense, lazy, useMemo, useState, type ReactNode } from "react";
 import { createInitialState } from "../app/appReducer";
+import type { BrowserRoute } from "../app/browserRoutes";
 import { applyKeyBinding, createDefaultSettings } from "../app/settings";
 import type {
   ClientState,
@@ -11,10 +12,19 @@ import type {
 import { getSpellMetadata } from "../data/gameData";
 import { SessionClient } from "../net/SessionClient";
 import { WorldCanvas } from "../render/WorldCanvas";
+import type { AssetCatalog } from "../render/assetCatalog";
+import type {
+  BrowserAccount,
+  BrowserCharacter,
+  BrowserRankingEntry,
+  CharacterCreationOptions,
+  ProductApiClient
+} from "../product/api";
 import { WorldStatusPanel } from "../ui/WorldStatusPanel";
 import { ClansPanel } from "../ui/ClansPanel";
 import { HechizosPanel } from "../ui/HechizosPanel";
 import { PartyPanel } from "../ui/PartyPanel";
+import { ProductShell } from "../ui/ProductShell";
 import { SessionPanel } from "../ui/SessionPanel";
 import { TradePanel } from "../ui/TradePanel";
 const SpritePreviewPage = lazy(async () => {
@@ -74,6 +84,27 @@ function cloneInitialState(): ClientState {
   return createInitialState();
 }
 
+function createActiveClanState(base: ClientState["clan"]) {
+  return {
+    ...base,
+    open: true,
+    name: "Cronistas",
+    members: ["PlaywrightHero", "Aster", "Marea"],
+    onlineMembers: ["PlaywrightHero", "Aster"],
+    rank: "Lider",
+    leaderName: "PlaywrightHero",
+    founderName: "PlaywrightHero",
+    alignment: "Ciudadano",
+    description: "Clan de prueba para las pantallas sociales.",
+    news: "La cronica de hoy ya esta disponible.",
+    memberCount: 3,
+    level: 2,
+    currentExp: 18,
+    neededExp: 30,
+    pendingRequests: ["Rhea"]
+  };
+}
+
 function HarnessShell({
   title,
   description,
@@ -89,6 +120,7 @@ function HarnessShell({
       { href: "/playwright/session", label: "Session + spellbook" },
       { href: "/playwright/trade", label: "Trade" },
       { href: "/playwright/social", label: "Social" },
+      { href: "/playwright/product", label: "Product" },
       { href: "/playwright/weather", label: "Weather" },
       { href: "/playwright/sprites", label: "Sprites" }
     ],
@@ -169,6 +201,9 @@ function PlaywrightLanding() {
           </a>
           <a className="ghost-button" href="/playwright/social">
             Social
+          </a>
+          <a className="ghost-button" href="/playwright/product">
+            Product
           </a>
           <a className="ghost-button" href="/playwright/weather">
             Weather
@@ -644,20 +679,6 @@ function createSocialState(): ClientState {
   next.party.inviterName = "";
   next.party.safeMode = false;
   next.clan.open = true;
-  next.clan.name = "Cronistas";
-  next.clan.members = ["PlaywrightHero", "Aster", "Marea"];
-  next.clan.onlineMembers = ["PlaywrightHero", "Aster"];
-  next.clan.rank = "Lider";
-  next.clan.leaderName = "PlaywrightHero";
-  next.clan.founderName = "PlaywrightHero";
-  next.clan.alignment = "Ciudadano";
-  next.clan.description = "Clan de prueba para las pantallas sociales.";
-  next.clan.news = "La cronica de hoy ya esta disponible.";
-  next.clan.memberCount = 3;
-  next.clan.level = 2;
-  next.clan.currentExp = 18;
-  next.clan.neededExp = 30;
-  next.clan.pendingRequests = ["Rhea"];
   return next;
 }
 
@@ -678,6 +699,21 @@ function SocialSmokePage() {
         <p className="panel-copy compact">
           Clan: {state.clan.name || "none"} · Members: {state.clan.members.length}
         </p>
+        <div className="merchant-action-row" style={{ marginTop: "0.75rem" }}>
+          <button
+            className="ghost-button"
+            onClick={() => {
+              setState((current) => ({
+                ...current,
+                clan: createActiveClanState(current.clan)
+              }));
+              setTranscript((current) => ["Loaded the sample clan snapshot", ...current]);
+            }}
+            type="button"
+          >
+            Load sample clan
+          </button>
+        </div>
       </section>
 
       <PartyPanel
@@ -714,14 +750,15 @@ function SocialSmokePage() {
             setState((current) => ({
               ...current,
               clan: {
-                ...current.clan,
+                ...createActiveClanState(current.clan),
                 name: clanName,
                 members: ["PlaywrightHero"],
                 onlineMembers: ["PlaywrightHero"],
                 rank: "Fundador",
                 leaderName: "PlaywrightHero",
                 founderName: "PlaywrightHero",
-                memberCount: 1
+                memberCount: 1,
+                pendingRequests: []
               }
             }));
             return;
@@ -772,6 +809,195 @@ function SocialSmokePage() {
   );
 }
 
+function createProductCharacter(id: number, name: string): BrowserCharacter {
+  return {
+    id,
+    name,
+    level: 12 + id,
+    xp: 4000 + id * 250,
+    class: "mage",
+    class_label: "Mago",
+    race: "human",
+    race_label: "Humano",
+    gender: "male",
+    gender_label: "Hombre",
+    home_city: "nix",
+    home_city_label: "Nix",
+    map_id: 47,
+    pos_x: 2,
+    pos_y: 2,
+    dead: false,
+    criminal: false,
+    gold: 500 + id * 100,
+    body_id: 1,
+    head_id: 1,
+    helmet_id: null,
+    weapon_id: null,
+    shield_id: null,
+    online: false
+  };
+}
+
+function createProductOptions(): CharacterCreationOptions {
+  return {
+    races: [{ id: 1, label: "Humano" }],
+    genders: [{ id: 1, label: "Hombre" }],
+    classes: [{ id: 1, label: "Mago" }],
+    home_cities: [{ id: 1, label: "Nix" }],
+    head_ranges: {
+      "1:1": [{ min: 1, max: 3 }]
+    },
+    body_ids: {
+      "1:1": 1
+    },
+    defaults: {
+      race: 1,
+      gender: 1,
+      class: 1,
+      home_city: 1,
+      head: 1
+    }
+  };
+}
+
+function createRankingEntries(): BrowserRankingEntry[] {
+  return [
+    {
+      rank: 1,
+      character: {
+        ...createProductCharacter(91, "Sirena"),
+        kills: 98
+      }
+    },
+    {
+      rank: 2,
+      character: {
+        ...createProductCharacter(92, "Fulgor"),
+        kills: 83
+      }
+    }
+  ];
+}
+
+function ProductSmokePage() {
+  const [route, setRoute] = useState<BrowserRoute>("/");
+  const [summary, setSummary] = useState("No character launched yet.");
+  const [transcript, setTranscript] = useState<string[]>(["Product smoke route ready."]);
+
+  const api = useMemo<ProductApiClient>(() => {
+    const store: {
+      account: BrowserAccount | null;
+      characters: BrowserCharacter[];
+      nextCharacterId: number;
+    } = {
+      account: null,
+      characters: [],
+      nextCharacterId: 100
+    };
+
+    const options = createProductOptions();
+    const ranking = createRankingEntries();
+
+    return {
+      fetchBrowserSession: async () => ({
+        authenticated: store.account != null,
+        account: store.account
+      }),
+      loginBrowserAccount: async (username, _password) => {
+        store.account = {
+          id: 1,
+          username
+        };
+
+        return { account: store.account };
+      },
+      registerBrowserAccount: async (username, _password) => {
+        store.account = {
+          id: 1,
+          username
+        };
+
+        return { account: store.account };
+      },
+      logoutBrowserAccount: async () => {
+        store.account = null;
+        return { logout: true };
+      },
+      fetchCharacterOptions: async () => options,
+      fetchBrowserCharacters: async () => ({
+        characters: [...store.characters]
+      }),
+      createBrowserCharacter: async ({ name }) => {
+        const character = createProductCharacter(store.nextCharacterId, name);
+        store.nextCharacterId += 1;
+        store.characters = [...store.characters, character];
+        return { character };
+      },
+      launchBrowserCharacter: async (characterId) => {
+        const character =
+          store.characters.find((entry) => entry.id === characterId) ??
+          createProductCharacter(characterId, `Character ${characterId}`);
+
+        return {
+          character,
+          credentials: {
+            char_id: character.id,
+            token: `playwright-${character.id}`
+          }
+        };
+      },
+      fetchBrowserRanking: async (_limit) => ({
+        entries: ranking
+      })
+    };
+  }, []);
+
+  const previewAssetLoader = useMemo(
+    () => async (): Promise<AssetCatalog | null> => null,
+    []
+  );
+
+  return (
+    <HarnessShell
+      description="The real browser account and lobby shell with a deterministic in-memory API."
+      title="Product smoke"
+    >
+      <section className="panel" data-testid="playwright-product-summary">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Status</p>
+            <h2>Browser product shell</h2>
+          </div>
+          <span className="panel-tag">{route}</span>
+        </div>
+        <p className="panel-copy compact" data-testid="playwright-product-launch-summary">
+          {summary}
+        </p>
+      </section>
+
+      <ProductShell
+        api={api}
+        currentRoute={route}
+        endpoint={window.location.origin}
+        onClearGameplaySession={() => {
+          setTranscript((current) => ["Cleared the saved gameplay session", ...current]);
+        }}
+        onLaunchCharacter={(character, credentials) => {
+          setSummary(`Launched ${character.name} with token ${credentials.token}`);
+          setTranscript((current) => [`Launched ${character.name}`, ...current]);
+        }}
+        onNavigate={(nextRoute) => {
+          setRoute(nextRoute);
+          setTranscript((current) => [`Navigated to ${nextRoute}`, ...current]);
+        }}
+        previewAssetLoader={previewAssetLoader}
+      />
+
+      <SmokeTranscript entries={transcript} title="Product transcript" />
+    </HarnessShell>
+  );
+}
+
 export function PlaywrightHarness() {
   const pathname = window.location.pathname;
 
@@ -785,6 +1011,10 @@ export function PlaywrightHarness() {
 
   if (pathname.startsWith("/playwright/social")) {
     return <SocialSmokePage />;
+  }
+
+  if (pathname.startsWith("/playwright/product")) {
+    return <ProductSmokePage />;
   }
 
   if (pathname.startsWith("/playwright/weather")) {

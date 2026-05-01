@@ -37,6 +37,7 @@ function readDemoScenario(search: string): DemoScenario {
 function applyDemoScenario(dispatch: Dispatch<ClientAction>, scenario: DemoScenario) {
   switch (scenario) {
     case "dead":
+      dispatch({ type: "trade/close" });
       dispatch({ type: "connection/setStatus", status: "connected" });
       dispatch({ type: "stats/setHp", current: 0, max: 120 });
       dispatch({ type: "world/setSelfDead", dead: true });

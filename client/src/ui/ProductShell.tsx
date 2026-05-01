@@ -2,19 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import type { BrowserRoute } from "../app/browserRoutes";
 import { loadAssetCatalog, type AssetCatalog } from "../render/assetCatalog";
 import {
-  createBrowserCharacter,
-  fetchBrowserCharacters,
-  fetchBrowserRanking,
-  fetchBrowserSession,
-  fetchCharacterOptions,
-  launchBrowserCharacter,
-  loginBrowserAccount,
-  logoutBrowserAccount,
-  registerBrowserAccount,
+  browserProductApi,
   type BrowserAccount,
   type BrowserCharacter,
   type BrowserRankingEntry,
-  type CharacterCreationOptions
+  type CharacterCreationOptions,
+  type ProductApiClient
 } from "../product/api";
 import { CharacterSpritePreview } from "./CharacterSpritePreview";
 import productShellLogoUrl from "../assets/product-shell/logo.png";
@@ -25,6 +18,8 @@ interface ProductShellProps {
   onNavigate: (route: BrowserRoute) => void;
   onLaunchCharacter: (character: BrowserCharacter, credentials: { char_id: number; token: string }) => void;
   onClearGameplaySession: () => void;
+  api?: ProductApiClient;
+  previewAssetLoader?: (endpoint: string) => Promise<AssetCatalog | null>;
 }
 
 interface CreateFormState {
@@ -59,7 +54,9 @@ export function ProductShell({
   currentRoute,
   onNavigate,
   onLaunchCharacter,
-  onClearGameplaySession
+  onClearGameplaySession,
+  api = browserProductApi,
+  previewAssetLoader = loadAssetCatalog
 }: ProductShellProps) {
   const [assetCatalog, setAssetCatalog] = useState<AssetCatalog | null>(null);
   const [assetStatus, setAssetStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
@@ -88,7 +85,8 @@ export function ProductShell({
     setSessionLoading(true);
     setSessionError(null);
 
-    void fetchBrowserSession()
+    void api
+      .fetchBrowserSession()
       .then((payload) => {
         if (cancelled) {
           return;
@@ -110,7 +108,7 @@ export function ProductShell({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [api]);
 
   useEffect(() => {
     if (!account) {
@@ -122,7 +120,8 @@ export function ProductShell({
     let cancelled = false;
     setCharactersLoading(true);
 
-    void fetchBrowserCharacters()
+    void api
+      .fetchBrowserCharacters()
       .then((payload) => {
         if (!cancelled) {
           setCharacters(payload.characters);
@@ -142,7 +141,7 @@ export function ProductShell({
     return () => {
       cancelled = true;
     };
-  }, [account]);
+  }, [account, api]);
 
   useEffect(() => {
     if (currentRoute !== "/ranking") {
@@ -152,7 +151,8 @@ export function ProductShell({
     let cancelled = false;
     setRankingLoading(true);
 
-    void fetchBrowserRanking()
+    void api
+      .fetchBrowserRanking()
       .then((payload) => {
         if (!cancelled) {
           setRanking(payload.entries);
@@ -172,7 +172,7 @@ export function ProductShell({
     return () => {
       cancelled = true;
     };
-  }, [currentRoute]);
+  }, [api, currentRoute]);
 
   useEffect(() => {
     if (currentRoute !== "/create-character" || account == null) {
@@ -186,7 +186,8 @@ export function ProductShell({
     let cancelled = false;
     setOptionsLoading(true);
 
-    void fetchCharacterOptions()
+    void api
+      .fetchCharacterOptions()
       .then((payload) => {
         if (!cancelled) {
           setOptions(payload);
@@ -209,7 +210,7 @@ export function ProductShell({
     return () => {
       cancelled = true;
     };
-  }, [account, currentRoute, options]);
+  }, [account, api, currentRoute, options]);
 
   useEffect(() => {
     if (characters.length === 0) {
@@ -268,7 +269,7 @@ export function ProductShell({
     setAssetStatus("loading");
     setAssetError(null);
 
-    void loadAssetCatalog(endpoint)
+    void previewAssetLoader(endpoint)
       .then((catalog) => {
         if (!cancelled) {
           setAssetCatalog(catalog);
@@ -285,7 +286,7 @@ export function ProductShell({
     return () => {
       cancelled = true;
     };
-  }, [endpoint, needsPreviewAssets]);
+  }, [endpoint, needsPreviewAssets, previewAssetLoader]);
 
   async function handleAuthSubmit() {
     setBusyAction("auth");
@@ -298,11 +299,11 @@ export function ProductShell({
           throw new Error("Passwords do not match.");
         }
 
-        const payload = await registerBrowserAccount(authName, authPassword);
+        const payload = await api.registerBrowserAccount(authName, authPassword);
         setAccount(payload.account);
         setActionNotice("Account created. You can create a character now.");
       } else {
-        const payload = await loginBrowserAccount(authName, authPassword);
+        const payload = await api.loginBrowserAccount(authName, authPassword);
         setAccount(payload.account);
         setActionNotice("Account ready.");
       }
@@ -323,7 +324,7 @@ export function ProductShell({
     setActionNotice(null);
 
     try {
-      await logoutBrowserAccount();
+      await api.logoutBrowserAccount();
       setAccount(null);
       setCharacters([]);
       onClearGameplaySession();
@@ -346,7 +347,7 @@ export function ProductShell({
     setActionNotice(null);
 
     try {
-      const payload = await createBrowserCharacter({
+      const payload = await api.createBrowserCharacter({
         name: createForm.name,
         race: createForm.race,
         gender: createForm.gender,
@@ -376,7 +377,7 @@ export function ProductShell({
     setActionNotice(null);
 
     try {
-      const payload = await launchBrowserCharacter(selectedCharacter.id);
+      const payload = await api.launchBrowserCharacter(selectedCharacter.id);
       onLaunchCharacter(payload.character, payload.credentials);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Could not launch character.");
@@ -386,9 +387,9 @@ export function ProductShell({
   }
 
   return (
-    <div className="product-shell">
+    <div className="product-shell" data-testid="product-shell">
       <main className="product-main">
-        <section className="panel product-hero">
+        <section className="panel product-hero" data-testid="product-hero">
           <div className="product-hero-copy">
             <img alt="Argentum Online" className="product-logo" src={productShellLogoUrl} />
             <p className="eyebrow">Argentum Online</p>
@@ -433,7 +434,7 @@ export function ProductShell({
         {actionNotice ? <section className="panel product-banner success">{actionNotice}</section> : null}
 
         {currentRoute === "/ranking" ? (
-          <section className="panel product-ranking-panel">
+          <section className="panel product-ranking-panel" data-testid="product-ranking-panel">
             <div className="panel-header">
               <div>
                 <p className="eyebrow">General</p>
@@ -471,7 +472,7 @@ export function ProductShell({
         ) : null}
 
         {currentRoute === "/create-character" ? (
-          <section className="panel product-create-panel">
+          <section className="panel product-create-panel" data-testid="product-create-panel">
             <div className="panel-header">
               <div>
                 <p className="eyebrow">Creation</p>
@@ -649,7 +650,7 @@ export function ProductShell({
         ) : null}
 
         {currentRoute === "/" ? (
-          <section className="panel product-lobby-panel">
+          <section className="panel product-lobby-panel" data-testid="product-lobby-panel">
             <div className="panel-header">
               <div>
                 <p className="eyebrow">{account ? "Lobby" : "Account"}</p>
@@ -805,7 +806,7 @@ export function ProductShell({
       </main>
 
       <aside className="product-side">
-        <section className="panel product-side-card">
+        <section className="panel product-side-card" data-testid="product-resource-status">
           <p className="eyebrow">Cliente</p>
           <h3>Estado de recursos</h3>
           <p className="panel-copy compact">
@@ -819,7 +820,7 @@ export function ProductShell({
           </p>
         </section>
 
-        <section className="panel product-side-card">
+        <section className="panel product-side-card" data-testid="product-account-status">
           <p className="eyebrow">Cuenta</p>
           <h3>{sessionLoading ? "Comprobando sesion..." : account ? account.username : "Sin sesion de cuenta"}</h3>
           <p className="panel-copy compact">

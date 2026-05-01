@@ -76,6 +76,18 @@ export interface LaunchCharacterPayload {
   };
 }
 
+export interface ProductApiClient {
+  fetchBrowserSession: typeof fetchBrowserSession;
+  loginBrowserAccount: typeof loginBrowserAccount;
+  registerBrowserAccount: typeof registerBrowserAccount;
+  logoutBrowserAccount: typeof logoutBrowserAccount;
+  fetchCharacterOptions: typeof fetchCharacterOptions;
+  fetchBrowserCharacters: typeof fetchBrowserCharacters;
+  createBrowserCharacter: typeof createBrowserCharacter;
+  launchBrowserCharacter: typeof launchBrowserCharacter;
+  fetchBrowserRanking: typeof fetchBrowserRanking;
+}
+
 interface ApiErrorPayload {
   error?: boolean;
   message?: string;
@@ -178,3 +190,15 @@ export function launchBrowserCharacter(characterId: number) {
 export function fetchBrowserRanking(limit = 50) {
   return requestJson<{ entries: BrowserRankingEntry[] }>(`/api/ranking/general?limit=${limit}`);
 }
+
+export const browserProductApi: ProductApiClient = {
+  fetchBrowserSession,
+  loginBrowserAccount,
+  registerBrowserAccount,
+  logoutBrowserAccount,
+  fetchCharacterOptions,
+  fetchBrowserCharacters,
+  createBrowserCharacter,
+  launchBrowserCharacter,
+  fetchBrowserRanking
+};
