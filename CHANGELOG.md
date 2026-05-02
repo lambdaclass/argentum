@@ -4,6 +4,30 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **Roadmap foundation cleanup (2026-05-02):**
+  - Rewrote `ROADMAP.md` as a remaining-work plan with explicit phases,
+    goals, tasks, and exit criteria.
+  - Moved completed foundation work out of the roadmap so this changelog is
+    the record for shipped work.
+  - Removed stale README references to missing `SERVER_ROADMAP.md` and
+    `CLIENT_ROADMAP.md`.
+
+- **Effects refactor and outbound parity tail closed (2026-05-02):**
+  - Effects refactor completed end-to-end across `Arena.Map.Healing`,
+    `Arena.Map.NpcInteraction`, `Arena.Map.Social`,
+    `Arena.Map.InventoryHandlers`, and `Arena.Map.CombatHandlers`.
+  - Spell, death, criminal-status, XP, level, and loot helper paths now use
+    the common effects return contract and runner pattern.
+  - Public combat and spell handlers use the effects contracts
+    `{:ok, state, reply, effects}` or `{:ok, state, effects}` for cast
+    internals.
+  - Known outbound parity tail now has encoder support and known call-site
+    wiring for `blind_no_more`, `dumb_no_more`, `work_request_target`, and
+    `stun_start`.
+  - Remaining egress shim cleanup is intentionally deferred:
+    `Helpers.break_invisibility/3`, `StatusTicks` reveal/hide expiry paths,
+    and pet despawn dispatch still need alignment with the map-layer runner.
+
 - **Autosave under Task.Supervisor (2026-04-25):**
   - `AoTcpGateway.AutosaveTaskSupervisor` added to the gateway supervision
     tree. `AutosaveWriter.start_write/3` now spawns DB writes via

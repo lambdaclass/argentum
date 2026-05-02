@@ -42,9 +42,7 @@ argentum/
 │   ├── indices/         # Generated sprite index JSONs
 │   └── graficos_char/   # Generated character sprite PNGs
 ├── old/                 # Original VB6 source + old clients (gitignored)
-├── ROADMAP.md           # Linear product / parity / testing plan
-├── SERVER_ROADMAP.md
-└── CLIENT_ROADMAP.md
+└── ROADMAP.md           # Phased product / parity / release plan
 ```
 
 ## Architecture
@@ -62,11 +60,11 @@ argentum/
 - **Periodic timers** handle background-only work: NPC AI (100ms), respawns, buff decay, regen, hunger/thirst drain, autosave.
 - **DB is authoritative only when the player is offline.** Periodic snapshots while online, final save on logout.
 
-Start with [ROADMAP.md](ROADMAP.md) for the linear plan. See [SERVER_ROADMAP.md](SERVER_ROADMAP.md) and [CLIENT_ROADMAP.md](CLIENT_ROADMAP.md) for detailed backend/client notes.
+Start with [ROADMAP.md](ROADMAP.md) for the phased plan.
 
 ## Current State
 
-**Phase status snapshot:** backend gameplay is close to VB6 compatibility; web gameplay client is playable; modern web account/login + character lobby is still missing. The next major milestone is the automated parity gate described in [ROADMAP.md](ROADMAP.md).
+**Phase status snapshot:** backend gameplay is close to VB6 compatibility; web gameplay client is playable; modern web account/login + character lobby is still missing. The next major milestone is the deterministic parity harness described in [ROADMAP.md](ROADMAP.md).
 
 **Implemented so far:**
 - TCP + WebSocket networking with full AO20 binary protocol coverage

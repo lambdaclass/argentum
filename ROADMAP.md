@@ -1,258 +1,361 @@
 # Argentum Roadmap
 
-## Current State
+This file tracks remaining work only. Completed work belongs in
+`CHANGELOG.md`.
 
-- Backend parity is effectively closed except for one scoped partial item:
-  - remaining outbound packet wiring for `blind_no_more`,
-    `dumb_no_more`, `work_request_target`, and `stun_start`
-- Effects refactor: complete end-to-end across `Healing`, `NpcInteraction`,
-  `Social`, `InventoryHandlers`, and `CombatHandlers` (incl. `SpellEffects`,
-  `NpcDeath`, `PlayerDeath`, `CriminalStatus`, and the XP / level / loot
-  helpers). All public combat & spell handlers return
-  `{:ok, state, reply, effects}` (or `{:ok, state, effects}` for casts) and
-  dispatch through `Effects.run_handler*/2`.
-  - `Effects.run_handler_call_reply/2` carries the `:ok | {:error, reason}`
-    reply for `attack` / `cast_spell` so gateway and tests still branch on
-    `{:error, :dead}` etc.
-  - New effect kind `:broadcast_visible_except` for animation packets the
-    originating client renders locally (swing, blocked-with-shield-other).
-  - Death helpers (`NpcDeath`, `PlayerDeath`, `CriminalStatus`) all return
-    `{entity_or_nil, state, effects}`. Legacy callers that pre-date the
-    effects lane (NPC AI status ticks, GM moderation) bridge via
-    `Effects.run/2` inline so map-effects from the death path still
-    traverse the runner without forcing those callers onto the contract.
-  - One scoped exception: `Helpers.break_invisibility/3` and `StatusTicks`
-    expiry-tick reveal/hide paths still write `{:send_raw, _}` directly.
-    They are part of the deferred "egress shim cleanup" lane and do not
-    block this rollout.
-- Backpressure foundation, Prometheus `/metrics`, slow-client soak profile,
-  monitoring runbook, and autosave supervision are landed
-- Constraint for the effects lane:
-  - effects are data
-  - the runner is a plain module
-  - execution stays inside existing `MapServer` processes
-  - do **not** add a new coordinator GenServer
+Work inside a phase can happen in parallel, but phases should close in order
+because later phases depend on the proof, tooling, or operational surface built
+earlier.
 
-## Linear Execution Plan
+## Current Priority
 
-### Immediate Backend Work
+Start with Phase 1. The highest-leverage next deliverable is the deterministic
+scenario harness plus DSL because it makes every later parity and replay task
+cheaper to write and easier to debug.
 
-1. ~~Finish the `Arena.Map.Healing` effects rollout.~~ Done.
-   - All four handlers migrated; runner routes through `AoSession.Egress`;
-     no raw effect tuples at call sites
+## Phase 1: Deterministic Parity Harness
 
-2. ~~Stabilize the effects pattern after `Healing`.~~ Done.
-   - `Effects.run_handler/2` adapter extracted; convention documented in
-     `Arena.Map.Effects` moduledoc; `Healing` is the reference implementation
+Goal: make gameplay parity failures easy to reproduce, inspect, and fix without
+depending on mailbox noise or incidental timing.
 
-3. ~~Migrate `Arena.Map.NpcInteraction` to the effects contract.~~ Done.
+Work:
 
-4. Build a deterministic scenario harness.
+1. Build a deterministic scenario harness.
    - Synthetic maps
    - Frozen clock
    - Background ticks disabled unless explicitly enabled
    - Scripted packet or handler drivers
    - Exact state and effect assertions
 
-5. Add a parity test DSL and real gameplay fixture factories.
-   - High-level helpers like `click_npc`, `use_item`, `cast_spell`,
-     `expect_effect`, and `expect_entity`
+2. Add a parity test DSL and real gameplay fixture factories.
+   - Helpers like `click_npc`, `use_item`, `cast_spell`, `expect_effect`,
+     and `expect_entity`
    - Factories for NPCs, entities, inventory, buffs, and selected-target state
-   - Keep parity tests readable and gameplay-shaped instead of mailbox-shaped
+   - Gameplay-shaped tests instead of mailbox-shaped tests
 
-6. Add structured state and effect snapshots plus failure diff tooling.
+3. Add structured state and effect snapshots plus failure diff tooling.
    - Stable serializers for entity, inventory, buffs, and visible state
-   - Failure output should show the first meaningful divergence, not raw mailbox noise
+   - Failure output showing the first meaningful divergence
 
-7. Standardize RNG control for parity-sensitive tests.
+4. Standardize RNG control for parity-sensitive tests.
    - Seed or inject RNG for gamble, taming, loot-like, and other random flows
    - Remove seed-sensitive parity noise from the default test lane
 
-8. Add per-flow golden fixtures for core gameplay and service flows.
-   - Heal, forgive, gamble, trade, bank, faction enlistment, criminal conversion,
-     potions, and other high-drift flows
-   - Expected outcomes should live in data, not only handwritten assertions
+5. Add per-flow golden fixtures for high-drift gameplay and service flows.
+   - Heal
+   - Forgive
+   - Gamble
+   - Trade
+   - Bank
+   - Faction enlistment
+   - Criminal conversion
+   - Potions
 
-9. ~~Migrate `Arena.Map.Social` and `Arena.Map.InventoryHandlers` to the effects contract.~~ Done.
+6. Clean up deferred effects egress shims.
+   - Route `Helpers.break_invisibility/3` through the normal effects lane.
+   - Route `StatusTicks` reveal/hide expiry packets through the normal effects
+     lane.
+   - Align pet despawn dispatch with the map-layer runner shape.
 
-10. ~~Flip `NpcInteraction` dispatcher paths onto the effects contract.~~ Done.
+7. Close the backend parity tail from source data.
+   - Real per-instance item `elemental_tags`
+   - Faction-exclusive item flags and strip rules
+   - Recipe data expansion and validation against source `.dat` data
 
-11. ~~Migrate `Arena.Map.CombatHandlers` (incl. `SpellEffects`, `NpcDeath`,
-    `PlayerDeath`, `CriminalStatus`).~~ Done in 5 slices (handle_attack
-    outer rejects → handle_attack_target + handle_ranged_attack →
-    handle_cast_spell rejects → SpellEffects → death/XP/loot helpers).
-    Public `handle_attack/4` and `handle_cast_spell/5` keep their
-    `{:reply, reply, state}` surface; reply preserved for gateway and
-    test contracts via `Effects.run_handler_call_reply/2`.
+Exit criteria:
 
-11a. (Deferred) Egress shim cleanup lane.
-    - `Helpers.break_invisibility/3` and `StatusTicks` expiry-tick
-      reveal/hide still emit `{:send_raw, _}` directly.
-    - Pet despawn dispatch in `NpcAi.dispatch_effects/2` uses a
-      different effect-tuple shape from the map-layer runner; pet
-      effects are run inline at the death-handler bridge.
-    - This lane is intentionally deferred — the effects refactor goal
-      (uniform handler return contract + runner dispatch) is achieved.
+- New parity scenarios can be written without hand-assembling full map state.
+- Failing parity tests produce stable diffs.
+- Random flows are deterministic in the default test lane.
+- Core high-drift flows have golden fixtures.
+- Deferred egress shim paths have regression coverage before migration.
+- Source-data parity tail has explicit fixtures or drift tickets.
 
-12. Close the last partial parity item.
-   - Wire `blind_no_more`
-   - Wire `dumb_no_more`
-   - Wire `work_request_target`
-   - Wire `stun_start`
-   - Do not mark this done until call sites exist, not just encoder clauses
+## Phase 2: Automated Proof Gate
 
-### Proof And Repeatability
+Goal: turn parity from a claim into a repeatable gate.
 
-13. Add a high-load bot benchmark.
+Work:
 
-14. Add a load and soak gate.
+1. Add a high-load bot benchmark.
+2. Add a load and soak gate.
+3. Keep the exact parity-gate suites defined in `server/docs/PARITY_GATE.md`.
+4. Build and version a real VB6 packet-capture corpus.
+   - Blocked until a Windows/VB6 capture environment exists.
+5. Add real packet replay coverage for:
+   - Login, character creation, and bootstrap
+   - Movement, transfer, chat, and service requests
+   - Inventory, equip/use, combat, spells, and death
+   - Bank, trade, party, guild, faction, reconnect, and logout
 
-15. Define the exact parity-gate required suites.
+6. Add concurrent combat integration coverage.
+   - Multiple TCP clients attacking the same NPC
+   - Multiple clients attacking the same player where PvP rules allow it
+   - XP, loot, death, and visibility effects stay consistent
 
-16. Build and version a real VB6 packet-capture corpus.
-    - `BLOCKED` on Windows/VB6 environment
+7. Add guild persistence integration coverage.
+   - Create a guild through the live flow
+   - Restart or reload persistence
+   - Verify guild state, membership, rank, and chat eligibility survive
 
-17. Add packet replay coverage for login, character creation, and bootstrap.
-    - `BLOCKED` on the VB6 packet-capture corpus task above
+8. Add full NPC commerce integration coverage.
+   - Buy and sell through TCP-level flow
+   - Verify gold and inventory changes
+   - Verify persistence after reconnect
 
-18. Add packet replay coverage for movement, transfer, chat, and service requests.
-    - `BLOCKED` on the VB6 packet-capture corpus task above
+9. Add long-duration soak coverage.
+   - 10+ minute run
+   - Memory growth tracking
+   - Process growth tracking
+   - Scheduler and queue-depth summary
 
-19. Add packet replay coverage for inventory, equip/use, combat, spells, and death.
-    - `BLOCKED` on the VB6 packet-capture corpus task above
+10. Add combat soak coverage.
+    - Bots fight, loot, die, and resurrect
+    - Combat remains stable under repeated actions
 
-20. Add packet replay coverage for bank, trade, party, guild, faction, reconnect, and logout.
-    - `BLOCKED` on the VB6 packet-capture corpus task above
+11. Add map-transition soak coverage.
+    - Bots repeatedly change maps
+    - No duplicate entities or stale sessions remain
 
-### Observability And Operations
+Exit criteria:
 
-21. Finish telemetry wiring where coverage still matters.
-    - Remaining producer migration beyond `Arena.Map.Visibility`
-    - Any missing bank or guild event coverage
-    - Any missing autosave-task failure or disconnect coverage
+- Fast and slow parity gates are documented and runnable.
+- Load/soak has a repeatable command and pass criteria.
+- Real VB6 packet captures are versioned or the blocker is explicitly tracked.
+- Replay coverage exists for the major protocol surfaces once captures exist.
+- Integration and soak suites cover combat, guilds, commerce, and transfers.
 
-22. Finish metrics and dashboards.
-    - Backpressure queue depth
-    - Disconnect reasons
-    - `send_pend`
-    - Autosave task failures
-    - Egress shed and coalesce counters
+## Phase 3: Observability And Operations
 
-23. Add alerts.
-    - Sustained shedding
-    - Forced backpressure disconnects
+Goal: make the server inspectable and operable before public traffic.
 
-24. Add runtime admin tools for map and process inspection and control.
+Work:
 
-25. Add admin lookup for accounts, characters, and online players.
+1. Finish telemetry wiring where coverage still matters.
+   - Producer migration beyond `Arena.Map.Visibility`
+   - Bank and guild event coverage
+   - Autosave-task failure and disconnect coverage
 
-26. Add admin moderation, world, log, and health actions.
+2. Finish metrics and dashboards.
+   - Backpressure queue depth
+   - Disconnect reasons
+   - `send_pend`
+   - Autosave task failures
+   - Egress shed counters
+   - Egress coalesce counters
 
-### Security And Hardening
+3. Add alerts.
+   - Sustained shedding
+   - Forced backpressure disconnects
 
-27. Keep the exploit and parity audit executable.
+4. Add runtime admin tools.
+   - Map inspection
+   - Process inspection
+   - Map control actions
 
-28. Add anti-cheat hardening.
+5. Add admin lookup.
+   - Accounts
+   - Characters
+   - Online players
 
-### Performance And Backend Architecture
+6. Add admin actions.
+   - Moderation
+   - World actions
+   - Log inspection
+   - Health checks
 
-29. Replace NPC aggro full scans with spatial-grid queries.
-    - This is the next major runtime win after the effects pattern is proven
+7. Add incident runbooks.
+   - Database outage
+   - Map crash
+   - Gateway overload
+   - Deploy rollback
 
-30. Replace pet target full scans with bounded or indexed lookup.
+8. Add structured audit log review and export for moderation actions.
+   - Search by actor, target, action, and time range
+   - Export in an operator-friendly format
 
-31. Split `guild_server.ex` into focused modules.
+Exit criteria:
 
-32. Pre-resolve `.dat` references at load time where hot-path lookups still repeat.
+- Operators can inspect live maps, sessions, and online players.
+- Critical failure modes emit telemetry and metrics.
+- Dashboards and alerts cover backpressure, disconnects, and autosave failures.
+- Incident response and moderation audit flows are documented and usable.
 
-33. Unify interest management for players, NPCs, and ground items.
+## Phase 4: Security And Abuse Hardening
 
-34. Add runtime-tunable settings for intervals, rates, and formula constants.
+Goal: keep parity while making abuse cases executable and visible.
 
-35. Finish the long-term persistence boundary cleanup.
-    - One explicit character write path
-    - One explicit guild write path
-    - Clear ordering, retry, and failure semantics
-    - Keep guild writes synchronous until a separate UX/semantics design is approved
+Work:
 
-### Release And Deployment
+1. Keep the exploit and parity audit executable.
+2. Add anti-cheat hardening.
+3. Expand adversarial tests for protocol abuse, impossible movement, combat
+   abuse, chat abuse, and economic abuse.
 
-36. Add release artifacts, deployment pipeline, and backup/restore runbook.
+Exit criteria:
 
-37. Add TLS for HTTPS and WSS.
+- Abuse checks are represented by automated tests or executable audit tasks.
+- New hardening does not silently break VB6 protocol parity.
 
-38. Add asset CDN and static-delivery strategy.
+## Phase 5: Runtime Performance And Architecture
 
-39. Add automated backups and database connection-pool tuning.
+Goal: remove known hot-path limits after the proof gate is stable.
 
-40. Define the live database migration strategy.
+Work:
 
-41. Add pre-public scripted load and soak runs.
+1. Replace NPC aggro full scans with spatial-grid queries.
+2. Replace pet target full scans with bounded or indexed lookup.
+3. Split `guild_server.ex` into focused modules.
+4. Pre-resolve `.dat` references at load time where hot-path lookups repeat.
+5. Unify interest management for players, NPCs, and ground items.
+6. Add runtime-tunable settings for intervals, rates, and formula constants.
+7. Finish the long-term persistence boundary cleanup.
+   - One explicit character write path
+   - One explicit guild write path
+   - Clear ordering, retry, and failure semantics
+   - Keep guild writes synchronous until a separate UX/semantics design is
+     approved
 
-## Completed Or Mostly Closed Work
+Exit criteria:
 
-- Maintenance discipline remains ongoing.
-- Backend parity work is done except for the last partial parity item.
-- Proof foundations before the current gate are done.
-- Backpressure foundation, Prometheus `/metrics`, slow-client soak profile,
-   monitoring runbook, and autosave supervision are landed.
+- NPC and pet targeting avoid full-map scans on hot paths.
+- Guild code has clear module boundaries.
+- Persistence writes have explicit ownership and failure semantics.
 
-## Future Product Work
+## Phase 6: Release And Deployment
 
-These are real roadmap items, but they are not the next backend priorities.
+Goal: make the project releasable, recoverable, and supportable.
 
-### Optional Legacy Systems
+Work:
 
-42. If clan relations are re-enabled, implement live guild alliance and peace proposal flows.
+1. Add release artifacts.
+2. Add deployment pipeline.
+3. Add backup and restore runbook.
+4. Add TLS for HTTPS and WSS.
+5. Add asset CDN and static-delivery strategy.
+6. Add automated backups.
+7. Tune database connection pools.
+8. Define the live database migration strategy.
+9. Add pre-public scripted load and soak runs.
+10. Pin and document the working toolchain.
+    - Elixir version
+    - Erlang/OTP version
+    - Hex version
+    - Node/npm version
+    - Nix and non-Nix setup paths
 
-43. If guild elections are re-enabled, implement the live election and democratic succession system.
+11. Add a dev-environment verification command.
+    - Check Elixir/Erlang/Hex compatibility
+    - Check Node/npm availability
+    - Check map-pack build prerequisites
+    - Fail with actionable setup output
 
-### Browser Proof
+12. Make client build failure modes explicit.
+    - Surface map-pack prebuild failures clearly
+    - Distinguish toolchain failures from Vite failures
+    - Document the direct Vite fallback for client-only verification
 
-44. Prove browser protocol and reducer correctness.
-    - Clean `typecheck` and `build`
-    - Shared packet fixtures and fuzzing
-    - Reducer/state tests
-    - Visual fixtures
-    - Browser E2E smoke coverage
+13. Make restore drills a release gate.
+    - Restore from backup into a clean environment
+    - Verify account, character, guild, and bank data
+    - Record drill result before public release
 
-### Frontend Product And UX
+Exit criteria:
 
-45. Make the browser UI reflect authoritative server state.
-    - Authoritative party and clan panels
-    - Distinct faction, guild, and party chat streams
-    - Responsive layout passes
-    - Markers and sound effects if they remain in scope
+- A release can be built and deployed from automation.
+- Backups and restores are documented and tested.
+- HTTPS/WSS and static asset delivery are production-ready.
+- Pre-public soak has a documented pass/fail threshold.
+- Toolchain verification catches local setup drift before build/test commands.
+- Restore drills pass before a public release is cut.
 
-### Browser Account And Lobby
+## Phase 7: Browser Product
 
-46. Complete the browser account surface.
-    - Google auth endpoint and flows
-    - Google-only and linked-account support
-    - Browser stat choices during character creation
+Goal: make the browser client releasable as a product, not only playable as a
+technical client.
 
-### Localization
+Work:
 
-47. Make supported languages first-class.
-    - Locale definitions
-    - Translation extraction
-    - Locale preference and persistence
-    - Unicode and IME coverage
+1. Prove browser protocol and reducer correctness.
+   - Clean `typecheck`
+   - Clean `build`
+   - Shared packet fixtures and fuzzing
+   - Reducer/state tests
+   - Visual fixtures
+   - Browser E2E smoke coverage
 
-### Multi-Realm
+2. Make the browser UI reflect authoritative server state.
+   - Authoritative party panel
+   - Authoritative clan panel
+   - Distinct faction, guild, and party chat streams
+   - Responsive layout passes
+   - Markers and sound effects if they remain in scope
 
-48. Add explicit regional realm support.
-    - Realm architecture
-    - Backend and browser realm selection
-    - Realm-aware monitoring
-    - Controlled transfer policy
+3. Complete the browser account surface.
+   - Real browser auth backend endpoints
+   - Google auth endpoint and flows
+   - Google-only and linked-account support
+   - Browser stat choices during character creation
+   - Character creation from browser lobby end-to-end against the server
 
-### Browser Hardening And Release
+4. Make supported languages first-class.
+   - Locale definitions
+   - Translation extraction
+   - Locale preference and persistence
+   - Unicode and IME coverage
 
-49. Make the browser client releasable.
-    - Supported browser matrix
-    - Shared protocol contract tests
-    - Deterministic browser harness
-    - Reconnect, cache, and asset failure handling
-    - Visual baseline discipline
-    - Client telemetry and performance budgets
+5. Make the browser client releasable.
+   - Supported browser matrix
+   - Shared protocol contract tests
+   - Deterministic browser harness
+   - Reconnect, cache, and asset failure handling
+   - Visual baseline discipline
+   - Client telemetry and performance budgets
+
+6. Add browser/server packet contract fixtures shared in CI.
+   - Packet examples shared by server and client tests
+   - Contract failures reported before browser E2E runs
+
+7. Add visual regression screenshots for release-critical browser surfaces.
+   - World rendering
+   - In-world labels
+   - NPCs and objects
+   - Inventory
+   - Bank and trade panels
+
+8. Add asset, cache, and version mismatch recovery tests.
+   - Stale world pack
+   - Missing asset indices
+   - Changed client build hash
+   - Reload/retry paths
+
+Exit criteria:
+
+- Browser account and lobby flows are backed by real server APIs.
+- Browser state is driven by authoritative server packets where available.
+- Browser E2E and visual checks cover the release-critical flows.
+- Shared packet fixtures protect browser/server protocol compatibility in CI.
+- Asset and cache mismatch recovery is covered by tests.
+
+## Phase 8: Optional Legacy And Multi-Realm
+
+These are real product items, but they are not prerequisites for the next
+backend or browser release.
+
+Work:
+
+1. If clan relations are re-enabled, implement live guild alliance and peace
+   proposal flows.
+2. If guild elections are re-enabled, implement live election and democratic
+   succession.
+3. Add explicit regional realm support.
+   - Realm architecture
+   - Backend realm selection
+   - Browser realm selection
+   - Realm-aware monitoring
+   - Controlled transfer policy
+
+Exit criteria:
+
+- Optional legacy systems have explicit product approval.
+- Multi-realm design is documented before implementation starts.

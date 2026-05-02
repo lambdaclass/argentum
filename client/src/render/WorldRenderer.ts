@@ -220,7 +220,7 @@ function tileCenterY(tileY: number) {
 }
 
 function worldLabel(name: string) {
-  return name.length > 14 ? `${name.slice(0, 11)}...` : name;
+  return name;
 }
 
 function clamp(value: number, min: number, max: number) {
