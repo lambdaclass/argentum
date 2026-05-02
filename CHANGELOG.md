@@ -4,6 +4,21 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **Browser product surface foundations (2026-05-02):**
+  - Browser account/lobby basics are wired against real backend APIs:
+    `/api/auth/session`, `/api/auth/login`, `/api/auth/register`,
+    `/api/auth/logout`, `/api/characters`, and
+    `/api/characters/:id/session`.
+  - Browser character creation, listing, and launch-session credential
+    endpoints are covered by backend API tests; the product shell calls those
+    APIs through `client/src/product/api.ts`.
+  - The browser product shell has a deterministic Playwright harness covering
+    register, create character, and launch character.
+  - Party, guild, and faction chat streams have client packet encoders,
+    channel-aware log routing, and UI filters.
+  - Saved reconnect/session-token UX, persisted settings, keybindings, map
+    music, and sound-effect playback are already wired in the client.
+
 - **Roadmap foundation cleanup (2026-05-02):**
   - Rewrote `ROADMAP.md` as a remaining-work plan with explicit phases,
     goals, tasks, and exit criteria.

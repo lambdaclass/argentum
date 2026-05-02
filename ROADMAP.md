@@ -276,7 +276,13 @@ technical client.
 
 Work:
 
-1. Prove browser protocol and reducer correctness.
+1. Add live-backend browser E2E for existing account and lobby flows.
+   - Register or log in through the real browser API
+   - Create a character through the lobby
+   - Launch the character and receive session credentials
+   - Reach the gameplay/reconnect-ready state from those credentials
+
+2. Prove browser protocol and reducer correctness.
    - Clean `typecheck`
    - Clean `build`
    - Shared packet fixtures and fuzzing
@@ -284,27 +290,36 @@ Work:
    - Visual fixtures
    - Browser E2E smoke coverage
 
-2. Make the browser UI reflect authoritative server state.
+3. Make the browser UI reflect authoritative server state.
    - Authoritative party panel
    - Authoritative clan panel
-   - Distinct faction, guild, and party chat streams
    - Responsive layout passes
-   - Markers and sound effects if they remain in scope
+   - Live-backend E2E for party snapshots
+   - Live-backend E2E for clan details/news/online state
 
-3. Complete the browser account surface.
-   - Real browser auth backend endpoints
+4. Complete the remaining browser account surface.
    - Google auth endpoint and flows
    - Google-only and linked-account support
-   - Browser stat choices during character creation
-   - Character creation from browser lobby end-to-end against the server
+   - Manual stat allocation during character creation if product scope
+     requires it
 
-4. Make supported languages first-class.
+5. Add live-backend E2E for social chat streams.
+   - Party chat
+   - Guild chat
+   - Faction chat
+   - Service/system channel separation
+
+6. Clarify and implement custom map/quest markers if still in scope.
+   - Keep existing minimap/world markers if that is enough
+   - Add custom user or quest markers only with explicit product approval
+
+7. Make supported languages first-class.
    - Locale definitions
    - Translation extraction
    - Locale preference and persistence
    - Unicode and IME coverage
 
-5. Make the browser client releasable.
+8. Make the browser client releasable.
    - Supported browser matrix
    - Shared protocol contract tests
    - Deterministic browser harness
@@ -312,18 +327,18 @@ Work:
    - Visual baseline discipline
    - Client telemetry and performance budgets
 
-6. Add browser/server packet contract fixtures shared in CI.
+9. Add browser/server packet contract fixtures shared in CI.
    - Packet examples shared by server and client tests
    - Contract failures reported before browser E2E runs
 
-7. Add visual regression screenshots for release-critical browser surfaces.
+10. Add visual regression screenshots for release-critical browser surfaces.
    - World rendering
    - In-world labels
    - NPCs and objects
    - Inventory
    - Bank and trade panels
 
-8. Add asset, cache, and version mismatch recovery tests.
+11. Add asset, cache, and version mismatch recovery tests.
    - Stale world pack
    - Missing asset indices
    - Changed client build hash
@@ -331,7 +346,8 @@ Work:
 
 Exit criteria:
 
-- Browser account and lobby flows are backed by real server APIs.
+- Browser account, lobby, character creation, and launch flows have live-backend
+  E2E coverage.
 - Browser state is driven by authoritative server packets where available.
 - Browser E2E and visual checks cover the release-critical flows.
 - Shared packet fixtures protect browser/server protocol compatibility in CI.
