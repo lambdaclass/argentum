@@ -86,6 +86,7 @@ export class SessionClient {
   private soundPlayer: ((payload: SoundEffectPayload) => void) | null = null;
   private pendingConsoleChannel: LogChannel | null = null;
   private pendingConsoleChannelDeadline = 0;
+  private movementPacketLoggingEnabled = false;
 
   constructor(dispatch: Dispatch<ClientAction>, getState: () => ClientState) {
     this.dispatch = dispatch;
@@ -94,23 +95,15 @@ export class SessionClient {
       {
         sendWalk: (direction) => {
           this.sendRaw(encodeWalk(direction));
-          this.dispatch({ type: "log/add", level: "packet-out", message: `WALK ${direction}` });
+          this.logMovementPacket(`WALK ${direction}`);
         },
         sendHeading: (direction) => {
           this.sendRaw(encodeChangeHeading(direction));
-          this.dispatch({
-            type: "log/add",
-            level: "packet-out",
-            message: `HEADING ${direction}`
-          });
+          this.logMovementPacket(`HEADING ${direction}`);
         },
         requestPositionUpdate: () => {
           this.sendRaw(encodeRequestPositionUpdate());
-          this.dispatch({
-            type: "log/add",
-            level: "packet-out",
-            message: "REQUEST_POSITION"
-          });
+          this.logMovementPacket("REQUEST_POSITION");
         }
       },
       {
@@ -131,6 +124,10 @@ export class SessionClient {
 
   setSoundPlayer(soundPlayer: ((payload: SoundEffectPayload) => void) | null) {
     this.soundPlayer = soundPlayer;
+  }
+
+  setMovementPacketLogging(enabled: boolean) {
+    this.movementPacketLoggingEnabled = enabled;
   }
 
   connect(endpoint: string, characterName: string, bootstrapPassword: string) {
@@ -732,6 +729,14 @@ export class SessionClient {
     }
 
     this.ws.send(payload);
+  }
+
+  private logMovementPacket(message: string) {
+    if (!this.movementPacketLoggingEnabled) {
+      return;
+    }
+
+    this.dispatch({ type: "log/add", level: "packet-out", message });
   }
 
   private async loadMap(mapId: number) {

@@ -771,6 +771,10 @@ export function App({ uiDemoMode = false }: AppProps) {
   }, [session, sound]);
 
   useEffect(() => {
+    session.setMovementPacketLogging(isGameplayRoute && activeRightTab === "debug");
+  }, [activeRightTab, isGameplayRoute, session]);
+
+  useEffect(() => {
     return () => {
       session.destroy();
       music.destroy();

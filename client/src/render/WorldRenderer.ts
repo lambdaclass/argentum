@@ -488,8 +488,11 @@ function shouldRenderObjectAboveCharacters(catalog: AssetCatalog | null, object:
   return frame.width > TILE_SIZE || frame.height > TILE_SIZE;
 }
 
+const MIN_VISUAL_WALK_MS = 55;
+const VISUAL_WALK_DURATION_SCALE = 0.84;
+
 function walkIntervalForSpeed(baseInterval: number, speed: number) {
-  return Math.max(40, baseInterval / Math.max(speed, 1));
+  return Math.max(MIN_VISUAL_WALK_MS, (baseInterval / Math.max(speed, 1)) * VISUAL_WALK_DURATION_SCALE);
 }
 
 function createCharacterVisual(

@@ -29,6 +29,8 @@ interface RuntimeUiBridge {
   setSelfHeading(heading: number): void;
 }
 
+const PREDICTED_UI_SYNC_INTERVAL_MS = 260;
+
 const runtimeTimers = {
   setTimeout: globalThis.setTimeout.bind(globalThis),
   clearTimeout: globalThis.clearTimeout.bind(globalThis)
@@ -48,6 +50,9 @@ export class GameRuntime {
   private correctionCount = 0;
   private lastCorrectionAt: number | null = null;
   private predictionEnabled = false;
+  private predictedX: number | null = null;
+  private predictedY: number | null = null;
+  private lastPredictedUiSyncAt = Number.NEGATIVE_INFINITY;
   private transferTargetMapId: number | null = null;
   private transferBootstrapReceived = false;
   private transferMapDataReady = false;
@@ -72,6 +77,9 @@ export class GameRuntime {
     this.correctionCount = 0;
     this.lastCorrectionAt = null;
     this.predictionEnabled = false;
+    this.predictedX = null;
+    this.predictedY = null;
+    this.lastPredictedUiSyncAt = Number.NEGATIVE_INFINITY;
     this.transferTargetMapId = null;
     this.transferBootstrapReceived = false;
     this.transferMapDataReady = false;
@@ -109,6 +117,9 @@ export class GameRuntime {
     this.clearPendingWalkSteps();
     this.authorityX = null;
     this.authorityY = null;
+    this.predictedX = null;
+    this.predictedY = null;
+    this.lastPredictedUiSyncAt = Number.NEGATIVE_INFINITY;
     this.predictionEnabled = false;
     this.transferTargetMapId = hadActiveMap ? mapId : null;
     this.transferBootstrapReceived = false;
@@ -150,12 +161,14 @@ export class GameRuntime {
 
     this.authorityX = x;
     this.authorityY = y;
+    this.predictedX = x;
+    this.predictedY = y;
 
     if (!this.consumePendingStep(x, y)) {
       this.renderer?.snapSelfPosition(x, y);
-      this.ui.setSelfPosition(x, y);
     }
 
+    this.syncConfirmedPositionToUi(x, y);
     this.noteTransferBootstrap();
   }
 
@@ -166,8 +179,12 @@ export class GameRuntime {
     this.clearPendingWalkSteps();
     this.authorityX = character.x;
     this.authorityY = character.y;
+    this.predictedX = character.x;
+    this.predictedY = character.y;
+    this.lastPredictedUiSyncAt = Number.NEGATIVE_INFINITY;
     this.renderer?.snapSelfPosition(character.x, character.y);
     this.renderer?.setSelfHeading(character.heading);
+    this.ui.setSelfPosition(character.x, character.y);
     this.noteTransferBootstrap();
   }
 
@@ -177,11 +194,9 @@ export class GameRuntime {
   }
 
   getDebugSnapshot(): MovementDebugSnapshot {
-    const self = this.ui.getState().world.self;
-
     return {
-      predictedX: self.x,
-      predictedY: self.y,
+      predictedX: this.currentPredictedX(),
+      predictedY: this.currentPredictedY(),
       authorityX: this.authorityX,
       authorityY: this.authorityY,
       pendingSteps: this.pendingWalkSteps.length,
@@ -251,21 +266,31 @@ export class GameRuntime {
   }
 
   private predictedDestination(direction: Direction) {
-    const self = this.ui.getState().world.self;
-    if (self.x == null || self.y == null) {
+    const x = this.currentPredictedX();
+    const y = this.currentPredictedY();
+
+    if (x == null || y == null) {
       return null;
     }
 
     switch (direction) {
       case "north":
-        return { x: self.x, y: self.y - 1, heading: 1 };
+        return { x, y: y - 1, heading: 1 };
       case "east":
-        return { x: self.x + 1, y: self.y, heading: 2 };
+        return { x: x + 1, y, heading: 2 };
       case "south":
-        return { x: self.x, y: self.y + 1, heading: 3 };
+        return { x, y: y + 1, heading: 3 };
       case "west":
-        return { x: self.x - 1, y: self.y, heading: 4 };
+        return { x: x - 1, y, heading: 4 };
     }
+  }
+
+  private currentPredictedX() {
+    return this.predictedX ?? this.ui.getState().world.self.x;
+  }
+
+  private currentPredictedY() {
+    return this.predictedY ?? this.ui.getState().world.self.y;
   }
 
   private pushPendingWalkStep(x: number, y: number) {
@@ -349,9 +374,38 @@ export class GameRuntime {
     const walkInterval = this.currentWalkIntervalMs();
     const speed = state.world.self.speed;
     this.renderer?.pushSelfMovement(destination.x, destination.y, walkInterval, speed);
-    this.ui.setSelfPosition(destination.x, destination.y);
+    this.predictedX = destination.x;
+    this.predictedY = destination.y;
+    this.syncPredictedPositionToUi(now);
     this.pushPendingWalkStep(destination.x, destination.y);
     return true;
+  }
+
+  private syncPredictedPositionToUi(now: number) {
+    if (this.predictedX == null || this.predictedY == null) {
+      return;
+    }
+
+    if (now - this.lastPredictedUiSyncAt < PREDICTED_UI_SYNC_INTERVAL_MS) {
+      return;
+    }
+
+    const self = this.ui.getState().world.self;
+    if (self.x === this.predictedX && self.y === this.predictedY) {
+      return;
+    }
+
+    this.lastPredictedUiSyncAt = now;
+    this.ui.setSelfPosition(this.predictedX, this.predictedY);
+  }
+
+  private syncConfirmedPositionToUi(x: number, y: number) {
+    const self = this.ui.getState().world.self;
+    if (self.x === x && self.y === y) {
+      return;
+    }
+
+    this.ui.setSelfPosition(x, y);
   }
 
   private noteTransferBootstrap() {

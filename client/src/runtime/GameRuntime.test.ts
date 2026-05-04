@@ -172,4 +172,56 @@ describe("GameRuntime movement prediction", () => {
     expect(state.world.self.y).toBe(2);
     expect(state.world.self.heading).toBe(2);
   });
+
+  it("keeps consecutive predicted steps moving even when UI position sync is throttled", () => {
+    const state = createInitialState();
+    state.connection.status = "connected";
+    state.world.mapStatus = "ready";
+    state.world.map = {
+      mapId: 1,
+      name: "Test",
+      width: 8,
+      height: 5,
+      tiles: new Uint8Array(40),
+      musicHi: 0,
+      musicLow: 0,
+      layers: [[], [], [], []],
+      npcs: [],
+      exits: []
+    };
+    state.world.self.x = 2;
+    state.world.self.y = 2;
+    state.world.self.heading = 2;
+    state.world.self.speed = 1;
+    state.world.walkIntervalMs = 210;
+
+    const transport = {
+      sendWalk: vi.fn(),
+      sendHeading: vi.fn(),
+      requestPositionUpdate: vi.fn()
+    };
+    const ui = {
+      getState: () => state,
+      setSelfPosition: (x: number, y: number) => {
+        state.world.self.x = x;
+        state.world.self.y = y;
+      },
+      setSelfHeading: (heading: number) => {
+        state.world.self.heading = heading;
+      }
+    };
+
+    const runtime = new GameRuntime(transport, ui);
+    runtime.onMapLoaded(1);
+    runtime.rememberMovementKey("east");
+
+    runtime.tick(1_000);
+    runtime.tick(1_210);
+
+    expect(transport.sendWalk).toHaveBeenCalledTimes(2);
+    expect(state.world.self.x).toBe(3);
+    expect(state.world.self.y).toBe(2);
+    expect(runtime.getDebugSnapshot().predictedX).toBe(4);
+    expect(runtime.getDebugSnapshot().predictedY).toBe(2);
+  });
 });
