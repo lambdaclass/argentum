@@ -11,8 +11,9 @@ defmodule Arena.NpcAiParityTest do
   1. **NPC poison on melee hit** — NpcDef.veneno is parsed but never used.
      VB6: NPCs with veneno > 0 poison the player on a successful melee hit.
 
-  2. **NPC diagonal movement** — direction_toward() only moves on one axis.
-     VB6: NPCs move diagonally toward their target when both dx and dy != 0.
+  2. **NPC cardinal movement** — chase steps must stay on a single axis.
+     VB6 NPCs move on a 4-directional grid (N/E/S/W); a tick that changes
+     both x and y is a parity violation.
 
   3. **Nearest-player tie-breaking** — find_nearest_player uses Manhattan
      distance for min_by but Chebyshev for range. VB6 uses Chebyshev for both.
@@ -309,14 +310,13 @@ defmodule Arena.NpcAiParityTest do
   end
 
   # ================================================================
-  # Gap 2: NPC diagonal movement
+  # Gap 2: NPC cardinal-only movement
   # ================================================================
 
-  describe "NPC diagonal movement (VB6 parity)" do
-    test "NPC moves diagonally toward target when both dx and dy are nonzero" do
-      # NPC at (50,50), target at (55,55) — 5 tiles diagonal
-      # VB6: NPC should move to (51,51) — one step diagonally
-      # Current: NPC moves to (51,50) or (50,51) — only one axis
+  describe "NPC cardinal movement (VB6 parity)" do
+    test "NPC moves on one axis per tick when target is offset on both axes" do
+      # NPC at (50,50), target at (55,55). Cardinal-only: prefer larger-delta
+      # axis; ties go to X. Expected step: (51,50).
       npc = make_npc(npc_id: 572, x: 50, y: 50, target_id: 7, spawn_x: 50, spawn_y: 50)
       player = make_player(x: 55, y: 55)
 
@@ -331,10 +331,10 @@ defmodule Arena.NpcAiParityTest do
       {state, _effects} = NpcAi.tick(state)
       npc_after = state.npcs_live[1]
 
-      # VB6 diagonal: both x and y should change in a single step
-      assert npc_after.x == 51 and npc_after.y == 51,
-             "NPC should move diagonally toward target. " <>
-               "Expected (51,51), got (#{npc_after.x},#{npc_after.y})"
+      assert (npc_after.x == 51 and npc_after.y == 50) or
+               (npc_after.x == 50 and npc_after.y == 51),
+             "NPC must move on a single cardinal axis. " <>
+               "Got (#{npc_after.x},#{npc_after.y})"
     end
 
     test "NPC moves only on one axis when target is axis-aligned" do
@@ -353,18 +353,14 @@ defmodule Arena.NpcAiParityTest do
       {state, _effects} = NpcAi.tick(state)
       npc_after = state.npcs_live[1]
 
-      # When target is on the same axis, movement should be axis-aligned
       assert npc_after.x == 51 and npc_after.y == 50,
              "NPC should move east when target is directly east. " <>
                "Expected (51,50), got (#{npc_after.x},#{npc_after.y})"
     end
 
-    test "NPC reaches diagonal target faster with diagonal movement" do
-      # NPC at (50,50), target at (55,55)
-      # With diagonal: 5 moves to reach adjacent.
-      # Without (axis-only): 9 moves to reach adjacent.
-      # Since tick uses System.monotonic_time and movement has a cooldown,
-      # we reset next_move_at before each tick to simulate enough time passing.
+    test "NPC reaches diagonal target with cardinal-only movement" do
+      # NPC at (50,50), target at (55,55). Cardinal-only takes ~9 moves to
+      # reach adjacency. We run 10 ticks and assert the NPC has arrived.
       npc = make_npc(npc_id: 572, x: 50, y: 50, target_id: 7, spawn_x: 50, spawn_y: 50)
       player = make_player(x: 55, y: 55)
 
@@ -376,9 +372,8 @@ defmodule Arena.NpcAiParityTest do
           sessions: %{7 => self()}
         )
 
-      # Run 5 ticks, resetting next_move_at before each to bypass cooldown
       state =
-        Enum.reduce(1..5, state, fn _, s ->
+        Enum.reduce(1..10, state, fn _, s ->
           npc_cur = s.npcs_live[1]
           npc_cur = %{npc_cur | next_move_at: -1_000_000_000_000}
           s = put_in(s.npcs_live[1], npc_cur)
@@ -387,12 +382,10 @@ defmodule Arena.NpcAiParityTest do
         end)
 
       npc_after = state.npcs_live[1]
-
-      # With diagonal movement, NPC should be at or adjacent to (55,55) after 5 moves
       dist = max(abs(npc_after.x - 55), abs(npc_after.y - 55))
 
       assert dist <= 1,
-             "With diagonal movement, NPC should reach target in ~5 moves. " <>
+             "Cardinal-only NPC should reach target adjacency within 10 ticks. " <>
                "NPC at (#{npc_after.x},#{npc_after.y}), distance #{dist}"
     end
   end

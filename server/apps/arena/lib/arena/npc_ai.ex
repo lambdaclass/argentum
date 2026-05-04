@@ -210,12 +210,7 @@ defmodule Arena.NpcAi do
           interval = max(npc_def.intervalo_movimiento, 200)
 
           if now >= npc.next_move_at do
-            {dx, dy} = direction_toward(npc.x, npc.y, npc.spawn_x, npc.spawn_y)
-
-            {state, npc, effects} =
-              move_npc_to(state, instance_id, npc, npc.x + dx, npc.y + dy, now + interval, effects)
-
-            {state, npc, effects}
+            step_toward(state, instance_id, npc, npc.spawn_x, npc.spawn_y, now + interval, effects)
           else
             {state, npc, effects}
           end
@@ -227,12 +222,7 @@ defmodule Arena.NpcAi do
         interval = max(npc_def.intervalo_movimiento, 200)
 
         if now >= npc.next_move_at do
-          {dx, dy} = direction_toward(npc.x, npc.y, npc.spawn_x, npc.spawn_y)
-
-          {state, npc, effects} =
-            move_npc_to(state, instance_id, npc, npc.x + dx, npc.y + dy, now + interval, effects)
-
-          {state, npc, effects}
+          step_toward(state, instance_id, npc, npc.spawn_x, npc.spawn_y, now + interval, effects)
         else
           state = put_in(state.npcs_live[instance_id], npc)
           {state, npc, effects}
@@ -274,10 +264,8 @@ defmodule Arena.NpcAi do
             # Owner is far away — follow
             dist_x > @pet_follow_distance or dist_y > @pet_follow_distance ->
               if now >= npc.next_move_at do
-                {dx, dy} = direction_toward(npc.x, npc.y, owner.x, owner.y)
-
                 {state, _npc, effects} =
-                  move_npc_to(state, instance_id, npc, npc.x + dx, npc.y + dy, now + interval, effects)
+                  step_toward(state, instance_id, npc, owner.x, owner.y, now + interval, effects)
 
                 {state, effects}
               else
@@ -296,10 +284,8 @@ defmodule Arena.NpcAi do
                     maybe_pet_attack(state, instance_id, npc, npc_def, now, target_instance_id, target_npc, effects)
                   else
                     if now >= npc.next_move_at do
-                      {dx, dy} = direction_toward(npc.x, npc.y, target_npc.x, target_npc.y)
-
                       {state, _npc, effects} =
-                        move_npc_to(state, instance_id, npc, npc.x + dx, npc.y + dy, now + interval, effects)
+                        step_toward(state, instance_id, npc, target_npc.x, target_npc.y, now + interval, effects)
 
                       {state, effects}
                     else
@@ -451,8 +437,7 @@ defmodule Arena.NpcAi do
               if adjacent?(npc.x, npc.y, target.x, target.y) do
                 {state, npc, effects}
               else
-                {dx, dy} = direction_toward(npc.x, npc.y, target.x, target.y)
-                move_npc_to(state, instance_id, npc, npc.x + dx, npc.y + dy, now + interval, effects)
+                step_toward(state, instance_id, npc, target.x, target.y, now + interval, effects)
               end
           end
 
@@ -482,25 +467,10 @@ defmodule Arena.NpcAi do
   end
 
   defp move_npc_to(state, instance_id, npc, nx, ny, next_move_at, effects) do
-    if nx >= 1 and nx <= Helpers.map_width() and ny >= 1 and ny <= Helpers.map_height() and
-         TileGrid.is_walkable(state.map_id, nx, ny) and
-         Helpers.get_occupancy(state.occupancy, nx, ny) == nil do
-      occupancy = Helpers.clear_occupancy(state.occupancy, npc.x, npc.y)
-      occupancy = Helpers.set_occupancy(occupancy, nx, ny, {:npc, instance_id})
-
-      npc = %{npc | x: nx, y: ny, next_move_at: next_move_at}
-      state = %{state | occupancy: occupancy}
-      state = put_in(state.npcs_live[instance_id], npc)
-
-      # Collect broadcast movement effect
-      move_raw = Encoder.encode({:character_move, %{char_index: npc.char_index, x: nx, y: ny}})
-      effects = effects ++ [{:broadcast_visible, nx, ny, move_raw}]
-
-      {state, npc, effects}
+    if step_allowed?(state, nx, ny) do
+      apply_step(state, instance_id, npc, nx, ny, next_move_at, effects)
     else
-      npc = %{npc | next_move_at: next_move_at}
-      state = put_in(state.npcs_live[instance_id], npc)
-      {state, npc, effects}
+      block_step(state, instance_id, npc, next_move_at, effects)
     end
   end
 
@@ -808,23 +778,70 @@ defmodule Arena.NpcAi do
 
   defp adjacent?(x1, y1, x2, y2), do: abs(x1 - x2) <= 1 and abs(y1 - y2) <= 1
 
-  # VB6: NPCs move diagonally when both dx and dy are nonzero.
-  # Returns {dx, dy} where both can be nonzero for diagonal movement.
-  defp direction_toward(x1, y1, x2, y2) do
-    dx =
-      cond do
-        x2 > x1 -> 1
-        x2 < x1 -> -1
-        true -> 0
-      end
+  # VB6 NPCs move on a 4-directional grid (N/E/S/W). Returns the cardinal
+  # steps to attempt, in priority order: prefer the larger-delta axis, fall
+  # back to the perpendicular axis when the primary tile is blocked. Ties go
+  # to the X axis.
+  defp preferred_cardinal_steps(x1, y1, x2, y2) do
+    dx = step_sign(x2 - x1)
+    dy = step_sign(y2 - y1)
 
-    dy =
-      cond do
-        y2 > y1 -> 1
-        y2 < y1 -> -1
-        true -> 0
-      end
+    cond do
+      dx == 0 and dy == 0 -> []
+      dx == 0 -> [{0, dy}]
+      dy == 0 -> [{dx, 0}]
+      abs(x2 - x1) >= abs(y2 - y1) -> [{dx, 0}, {0, dy}]
+      true -> [{0, dy}, {dx, 0}]
+    end
+  end
 
-    {dx, dy}
+  defp step_sign(d) when d > 0, do: 1
+  defp step_sign(d) when d < 0, do: -1
+  defp step_sign(_), do: 0
+
+  defp step_toward(state, instance_id, npc, target_x, target_y, next_move_at, effects) do
+    steps = preferred_cardinal_steps(npc.x, npc.y, target_x, target_y)
+    attempt_steps(state, instance_id, npc, steps, next_move_at, effects)
+  end
+
+  defp attempt_steps(state, instance_id, npc, [], next_move_at, effects) do
+    block_step(state, instance_id, npc, next_move_at, effects)
+  end
+
+  defp attempt_steps(state, instance_id, npc, [{dx, dy} | rest], next_move_at, effects) do
+    nx = npc.x + dx
+    ny = npc.y + dy
+
+    if step_allowed?(state, nx, ny) do
+      apply_step(state, instance_id, npc, nx, ny, next_move_at, effects)
+    else
+      attempt_steps(state, instance_id, npc, rest, next_move_at, effects)
+    end
+  end
+
+  defp step_allowed?(state, nx, ny) do
+    nx >= 1 and nx <= Helpers.map_width() and ny >= 1 and ny <= Helpers.map_height() and
+      TileGrid.is_walkable(state.map_id, nx, ny) and
+      Helpers.get_occupancy(state.occupancy, nx, ny) == nil
+  end
+
+  defp apply_step(state, instance_id, npc, nx, ny, next_move_at, effects) do
+    occupancy = Helpers.clear_occupancy(state.occupancy, npc.x, npc.y)
+    occupancy = Helpers.set_occupancy(occupancy, nx, ny, {:npc, instance_id})
+
+    npc = %{npc | x: nx, y: ny, next_move_at: next_move_at}
+    state = %{state | occupancy: occupancy}
+    state = put_in(state.npcs_live[instance_id], npc)
+
+    move_raw = Encoder.encode({:character_move, %{char_index: npc.char_index, x: nx, y: ny}})
+    effects = effects ++ [{:broadcast_visible, nx, ny, move_raw}]
+
+    {state, npc, effects}
+  end
+
+  defp block_step(state, instance_id, npc, next_move_at, effects) do
+    npc = %{npc | next_move_at: next_move_at}
+    state = put_in(state.npcs_live[instance_id], npc)
+    {state, npc, effects}
   end
 end
