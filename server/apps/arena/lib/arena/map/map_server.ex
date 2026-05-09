@@ -952,7 +952,7 @@ defmodule Arena.Map.MapServer do
   def handle_info(:npc_ai_tick, state) do
     start = System.monotonic_time()
     {state, effects} = Arena.NpcAi.tick(state)
-    Arena.NpcAi.dispatch_effects(state, effects)
+    Arena.Map.Effects.run(state, effects)
     duration = System.monotonic_time() - start
 
     {:message_queue_len, queue_len} = Process.info(self(), :message_queue_len)

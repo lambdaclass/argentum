@@ -1,8 +1,13 @@
 defmodule Arena.NpcAiEffectsTest do
   @moduledoc """
   Adversarial and edge-case tests for the NPC AI effects system.
-  Focuses on verifying the effect tuples returned by tick/1 and
-  the robustness of dispatch_effects/2.
+
+  After the NPC AI effect unification, `NpcAi.tick/1` returns canonical
+  `Arena.Map.Effect.t()` tuples (`{:send, char_id, %{payload: _}}`,
+  `{:broadcast_visible_all, x, y, %{payload: _}}`,
+  `{:broadcast_character_change, entity}`) — same shape every other
+  map-layer handler emits. The runner is `Arena.Map.Effects.run/2`;
+  there is no NpcAi-private dispatcher.
   """
   use ExUnit.Case, async: true
 
@@ -121,7 +126,13 @@ defmodule Arena.NpcAiEffectsTest do
     }
   end
 
-  # ---- Tests: tick/1 effect tuples ----
+  defp broadcast_all_effect?({:broadcast_visible_all, _x, _y, %{payload: _}}), do: true
+  defp broadcast_all_effect?(_), do: false
+
+  defp send_effect_to?({:send, char_id, %{payload: _}}, char_id), do: true
+  defp send_effect_to?(_, _), do: false
+
+  # ---- Tests: tick/1 effect shape ----
 
   describe "tick/1 with empty NPC map" do
     test "returns {state, []} with no NPCs" do
@@ -142,7 +153,7 @@ defmodule Arena.NpcAiEffectsTest do
   end
 
   describe "tick/1 respawn effects" do
-    test "dead NPC with expired respawn_at produces broadcast_visible effect" do
+    test "dead NPC with expired respawn_at produces broadcast_visible_all effect" do
       now = System.monotonic_time(:millisecond)
 
       npc = make_npc(alive: false, respawn_at: now - 1000, x: 50, y: 50, spawn_x: 50, spawn_y: 50)
@@ -151,13 +162,10 @@ defmodule Arena.NpcAiEffectsTest do
 
       {new_state, effects} = NpcAi.tick(state)
 
-      # NPC should be alive again
       assert new_state.npcs_live[1].alive == true
-      # Should have at least one broadcast_visible effect (the NPC creation packet)
-      assert Enum.any?(effects, fn
-        {:broadcast_visible, _x, _y, _raw} -> true
-        _ -> false
-      end), "Expected at least one broadcast_visible effect for NPC respawn, got: #{inspect(effects)}"
+
+      assert Enum.any?(effects, &broadcast_all_effect?/1),
+             "Expected at least one broadcast_visible_all effect for NPC respawn, got: #{inspect(effects)}"
     end
 
     test "dead NPC with future respawn_at produces no effects" do
@@ -182,7 +190,7 @@ defmodule Arena.NpcAiEffectsTest do
   end
 
   describe "tick/1 movement effects" do
-    test "NPC chasing target produces broadcast_visible movement effect" do
+    test "NPC chasing target produces broadcast_visible_all movement effect" do
       # Place NPC 3 tiles away from player (within aggro range, not adjacent)
       npc = make_npc(x: 50, y: 50, spawn_x: 50, spawn_y: 50)
       player = make_player(x: 53, y: 50)
@@ -197,16 +205,10 @@ defmodule Arena.NpcAiEffectsTest do
 
       {new_state, effects} = NpcAi.tick(state)
 
-      # NPC should have moved (x should increase toward player)
       assert new_state.npcs_live[1].x > 50, "NPC should have moved toward player"
 
-      # There should be a broadcast_visible effect for the movement
-      move_effects = Enum.filter(effects, fn
-        {:broadcast_visible, _x, _y, _raw} -> true
-        _ -> false
-      end)
-
-      assert length(move_effects) >= 1, "Expected at least one broadcast_visible for movement"
+      move_effects = Enum.filter(effects, &broadcast_all_effect?/1)
+      assert length(move_effects) >= 1, "Expected at least one broadcast_visible_all for movement"
     end
 
     test "NPC that cannot move (blocked next_move_at) produces no movement effects" do
@@ -225,21 +227,15 @@ defmodule Arena.NpcAiEffectsTest do
 
       {new_state, effects} = NpcAi.tick(state)
 
-      # NPC should NOT have moved
       assert new_state.npcs_live[1].x == 50
 
-      # No broadcast_visible movement effects (may have swing if adjacent — but it's not)
-      move_effects = Enum.filter(effects, fn
-        {:broadcast_visible, _x, _y, _raw} -> true
-        _ -> false
-      end)
-
+      move_effects = Enum.filter(effects, &broadcast_all_effect?/1)
       assert move_effects == []
     end
   end
 
   describe "tick/1 attack effects" do
-    test "NPC attacking adjacent player produces swing broadcast and send_to_session on hit" do
+    test "NPC attacking adjacent player produces swing broadcast and :send on hit" do
       # Seed RNG for determinism — ensures the hit roll succeeds
       :rand.seed(:exsss, {1, 2, 3})
 
@@ -259,27 +255,15 @@ defmodule Arena.NpcAiEffectsTest do
       # Single tick — NPC has next_attack_at in far past, so it will attack once
       {_new_state, effects} = NpcAi.tick(state)
 
-      # Should always have a swing broadcast_visible effect
-      swing_effects = Enum.filter(effects, fn
-        {:broadcast_visible, _x, _y, _raw} -> true
-        _ -> false
-      end)
+      swing_effects = Enum.filter(effects, &broadcast_all_effect?/1)
+      assert length(swing_effects) >= 1, "Expected swing broadcast_visible_all from NPC attack"
 
-      assert length(swing_effects) >= 1, "Expected swing broadcast_visible effect from NPC attack"
-
-      # With seeded RNG and 90% hit chance, we expect send_to_session effects
-      session_effects = Enum.filter(effects, fn
-        {:send_to_session, 7, _raw} -> true
-        _ -> false
-      end)
-
-      assert length(session_effects) > 0,
-             "Expected send_to_session effects for damage/hp update"
+      # With seeded RNG and 90% hit chance, we expect :send effects to the target
+      session_effects = Enum.filter(effects, &send_effect_to?(&1, 7))
+      assert length(session_effects) > 0, "Expected :send effects for damage/hp update"
     end
 
-    test "NPC swing always produces broadcast_visible even on miss" do
-      # Seed RNG to force a miss (find a seed where uniform(100) > 90)
-      # With 90% hit rate, we just check that swing broadcast always appears
+    test "NPC swing always produces broadcast_visible_all even on miss" do
       npc = make_npc(x: 50, y: 50, target_id: 7)
       player = make_player(x: 51, y: 50, hp: 300, max_hp: 300, agi: 1, level: 1)
 
@@ -293,102 +277,8 @@ defmodule Arena.NpcAiEffectsTest do
 
       {_new_state, effects} = NpcAi.tick(state)
 
-      # Swing broadcast should always appear regardless of hit/miss
-      broadcast_effects = Enum.filter(effects, fn
-        {:broadcast_visible, _x, _y, _raw} -> true
-        _ -> false
-      end)
-
-      assert length(broadcast_effects) >= 1, "Swing broadcast_visible should always appear"
-    end
-  end
-
-  describe "dispatch_effects/2" do
-    test "empty effects list does not crash and returns :ok" do
-      state = map_state(map_id: @test_map_id, players: %{}, sessions: %{})
-
-      # dispatch_effects returns the result of Enum.each, which is :ok
-      result = NpcAi.dispatch_effects(state, [])
-      assert result == :ok
-    end
-
-    test "mixed effects list is processed without error" do
-      player = make_player([])
-
-      state =
-        map_state(
-          map_id: @test_map_id,
-          players: %{7 => player},
-          sessions: %{7 => self()}
-        )
-
-      # Only use effect types that don't require full entity fields.
-      # broadcast_character_change requires body_id etc. — test it separately.
-      effects = [
-        {:broadcast_visible, 50, 50, <<1, 2, 3>>},
-        {:send_to_session, 7, <<4, 5, 6>>}
-      ]
-
-      # Should not raise
-      result = NpcAi.dispatch_effects(state, effects)
-      assert result == :ok
-    end
-
-    test "broadcast_character_change effect is processed without error" do
-      # Build a player-like entity with all fields needed by broadcast_character_change
-      entity = %{
-        char_index: 200,
-        x: 50,
-        y: 50,
-        body_id: 1,
-        head_id: 1,
-        heading: 3,
-        weapon_id: 0,
-        shield_id: 0,
-        helmet_id: 0,
-        hp: 100,
-        max_hp: 100,
-        name: "TestPlayer",
-        criminal: false,
-        privileges: 0,
-        dead: false,
-        invisible: false,
-        equipment: %{}
-      }
-
-      state =
-        map_state(
-          map_id: @test_map_id,
-          players: %{7 => make_player([])},
-          sessions: %{7 => self()}
-        )
-
-      result = NpcAi.dispatch_effects(state, [{:broadcast_character_change, entity}])
-      assert result == :ok
-    end
-
-    test "send_to_session delivers message to the session process" do
-      player = make_player([])
-
-      state =
-        map_state(
-          map_id: @test_map_id,
-          players: %{7 => player},
-          sessions: %{7 => self()}
-        )
-
-      raw = <<99, 100, 101>>
-      NpcAi.dispatch_effects(state, [{:send_to_session, 7, raw}])
-
-      assert_receive {:send_raw, ^raw}, 500
-    end
-
-    test "send_to_session with missing char_id does not crash" do
-      state = map_state(map_id: @test_map_id, players: %{}, sessions: %{})
-
-      # char_id 999 does not exist in sessions
-      result = NpcAi.dispatch_effects(state, [{:send_to_session, 999, <<1, 2, 3>>}])
-      assert result == :ok
+      broadcast_effects = Enum.filter(effects, &broadcast_all_effect?/1)
+      assert length(broadcast_effects) >= 1, "Swing broadcast_visible_all should always appear"
     end
   end
 
@@ -408,12 +298,7 @@ defmodule Arena.NpcAiEffectsTest do
 
       {_state, effects} = NpcAi.tick(state)
 
-      # No send_to_session effects (which indicate attacks)
-      session_effects = Enum.filter(effects, fn
-        {:send_to_session, _, _} -> true
-        _ -> false
-      end)
-
+      session_effects = Enum.filter(effects, &send_effect_to?(&1, 7))
       assert session_effects == [], "No attack effects expected when NPC has no target and player out of range"
     end
 
@@ -433,11 +318,7 @@ defmodule Arena.NpcAiEffectsTest do
 
       assert new_state.npcs_live[1].target_id == nil, "Passive NPC should not acquire a target"
 
-      session_effects = Enum.filter(effects, fn
-        {:send_to_session, _, _} -> true
-        _ -> false
-      end)
-
+      session_effects = Enum.filter(effects, &send_effect_to?(&1, 7))
       assert session_effects == [], "Passive NPC should not produce attack effects"
     end
   end
@@ -458,16 +339,10 @@ defmodule Arena.NpcAiEffectsTest do
 
       {new_state, effects} = NpcAi.tick(state)
 
-      # Target should be cleared since player 999 doesn't exist
       assert new_state.npcs_live[1].target_id != 999,
              "NPC should clear invalid target_id, got: #{inspect(new_state.npcs_live[1].target_id)}"
 
-      # Should not crash, and should not produce attack effects for the invalid target
-      invalid_session_effects = Enum.filter(effects, fn
-        {:send_to_session, 999, _} -> true
-        _ -> false
-      end)
-
+      invalid_session_effects = Enum.filter(effects, &send_effect_to?(&1, 999))
       assert invalid_session_effects == [], "No effects should be sent to nonexistent player 999"
     end
 
@@ -488,7 +363,6 @@ defmodule Arena.NpcAiEffectsTest do
       # This should return cleanly with no effects.
       {new_state, effects} = NpcAi.tick(state)
 
-      # NPC is still alive, target_id is unchanged (since no player processing occurred)
       assert new_state.npcs_live[1].alive == true
       assert effects == []
     end

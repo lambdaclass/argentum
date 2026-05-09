@@ -1,14 +1,18 @@
 defmodule Arena.NpcAi do
   @moduledoc """
   NPC AI tick logic. Pure functions that take MapServer state and return
-  `{state, effects}` where effects is a list of side-effect tuples.
-  Called every 500ms from MapServer's :npc_ai_tick handler.
+  `{state, effects}` where `effects` is a list of canonical
+  `Arena.Map.Effect.t()` values produced via `Arena.Map.Effects.*`.
+  Called every 500ms from MapServer's `:npc_ai_tick` handler, which
+  dispatches the returned effects through `Arena.Map.Effects.run/2`.
 
-  ## Effect types
-
-  - `{:broadcast_visible, x, y, raw}` — send raw packet to all players who can see (x, y)
-  - `{:send_to_session, char_id, raw}` — send raw packet to a specific player session
-  - `{:broadcast_character_change, entity}` — broadcast a character_change packet for an entity
+  Previously NpcAi used its own three-tuple effect shape with a private
+  `dispatch_effects/2`. The map-layer contract subsumes those: NPC swings
+  and movement reuse `Effects.broadcast_visible_all/3`, NPC-on-player
+  damage and console msgs reuse `Effects.send/2`, and player death from
+  NPC damage reuses `Effects.broadcast_character_change/1`. PlayerDeath /
+  NpcDeath effects produced by inner death paths are appended to the
+  returned effect list rather than dispatched inline.
   """
 
   require Logger
@@ -16,32 +20,13 @@ defmodule Arena.NpcAi do
   alias Arena.Clock
   alias Arena.Combat
   alias Arena.Data.GameData
-  alias Arena.Map.Helpers
+  alias Arena.Map.{Effects, Helpers}
   alias AoProtocol.Server.Encoder
 
   @aggro_range 10
   @leash_distance 15
   # VB6: poison tick interval in milliseconds (matches status_ticks.ex)
   @poison_tick_interval 3600
-
-  # ---- Effect Dispatcher ----
-
-  @doc """
-  Dispatch a list of effects produced by AI functions.
-  Each effect is a tuple describing a side-effect to perform.
-  """
-  def dispatch_effects(state, effects) do
-    Enum.each(effects, fn
-      {:broadcast_visible, x, y, raw} ->
-        Helpers.broadcast_visible_all(state, x, y, fn pid -> send(pid, {:send_raw, raw}) end)
-
-      {:send_to_session, char_id, raw} ->
-        Helpers.send_to_session(state.sessions, char_id, {:send_raw, raw})
-
-      {:broadcast_character_change, entity} ->
-        Helpers.broadcast_character_change(state, entity)
-    end)
-  end
 
   # ---- Public API ----
 
@@ -122,7 +107,7 @@ defmodule Arena.NpcAi do
       effects =
         if npc_def do
           raw = Encoder.encode(Arena.Map.Helpers.npc_create_packet(npc, npc_def))
-          effects ++ [{:broadcast_visible, x, y, raw}]
+          effects ++ [Effects.broadcast_visible_all(x, y, raw)]
         else
           effects
         end
@@ -243,13 +228,11 @@ defmodule Arena.NpcAi do
   defp process_pet_npc(state, instance_id, npc, npc_def, now, effects) do
     case Map.get(state.players, npc.owner_id) do
       nil ->
-        # Owner left the map — despawn the pet. despawn_pet/3 returns
-        # map-layer Effect.t() values; NpcAi's tick chain dispatches its
-        # own different-shaped tuples via dispatch_effects/2, so we run
-        # the death effects through the map-layer runner here.
+        # Owner left the map — despawn the pet. `despawn_pet/3` already
+        # returns canonical `Arena.Map.Effect.t()` values, so they merge
+        # straight into the tick's effect accumulator.
         {state, pet_effects} = despawn_pet(state, instance_id, npc)
-        Arena.Map.Effects.run(state, pet_effects)
-        {state, effects}
+        {state, effects ++ pet_effects}
 
       owner ->
         if owner.dead or npc.pet_mode == :stand do
@@ -343,7 +326,7 @@ defmodule Arena.NpcAi do
 
       # Broadcast swing
       swing_raw = Encoder.encode({:char_swing, %{char_index: npc.char_index}})
-      effects = effects ++ [{:broadcast_visible, npc.x, npc.y, swing_raw}]
+      effects = effects ++ [Effects.broadcast_visible_all(npc.x, npc.y, swing_raw)]
 
       # Damage calc: use NPC min/max hit from def
       raw_damage =
@@ -360,14 +343,12 @@ defmodule Arena.NpcAi do
       target_npc = %{target_npc | hp: new_hp}
 
       if new_hp <= 0 do
-        # Target NPC died — delegate to consolidated death handler. Run the
-        # resulting map-effects inline; NpcAi's own effect-dispatch chain
-        # (dispatch_effects/2) carries different-shaped tuples.
+        # Target NPC died — NpcDeath returns canonical map-layer effects,
+        # which the tick accumulator passes up to the runner unchanged.
         {nil, state, death_effects} =
           Arena.Map.NpcDeath.resolve_npc_death(state, target_instance_id, target_npc, source: :pet)
 
-        Arena.Map.Effects.run(state, death_effects)
-        {state, effects}
+        {state, effects ++ death_effects}
       else
         {put_in(state.npcs_live[target_instance_id], target_npc), effects}
       end
@@ -555,7 +536,7 @@ defmodule Arena.NpcAi do
             {:create_fx, %{char_index: fx_char, fx: spell_def.fx_grh, loops: spell_def.loops, x: npc.x, y: npc.y}}
           )
 
-        effects ++ [{:broadcast_visible, npc.x, npc.y, fx_raw}]
+        effects ++ [Effects.broadcast_visible_all(npc.x, npc.y, fx_raw)]
       else
         effects
       end
@@ -563,7 +544,7 @@ defmodule Arena.NpcAi do
     effects =
       if spell_def.wav > 0 do
         wav_raw = Encoder.encode({:play_wave, %{wav: spell_def.wav, x: npc.x, y: npc.y}})
-        effects ++ [{:broadcast_visible, npc.x, npc.y, wav_raw}]
+        effects ++ [Effects.broadcast_visible_all(npc.x, npc.y, wav_raw)]
       else
         effects
       end
@@ -598,8 +579,10 @@ defmodule Arena.NpcAi do
                 effects =
                   effects ++
                     [
-                      {:send_to_session, target_id,
-                       Encoder.encode({:console_msg, %{message: "Has sido paralizado!", font_index: 5}})}
+                      Effects.send(
+                        target_id,
+                        Encoder.encode({:console_msg, %{message: "Has sido paralizado!", font_index: 5}})
+                      )
                     ]
 
                 players = Map.put(state.players, target_id, player)
@@ -614,8 +597,8 @@ defmodule Arena.NpcAi do
                 effects =
                   effects ++
                     [
-                      {:send_to_session, target_id, Encoder.encode({:npc_hit_user, %{damage: damage}})},
-                      {:send_to_session, target_id, Encoder.encode({:update_hp, %{min_hp: new_hp}})}
+                      Effects.send(target_id, Encoder.encode({:npc_hit_user, %{damage: damage}})),
+                      Effects.send(target_id, Encoder.encode({:update_hp, %{min_hp: new_hp}}))
                     ]
 
                 {player, state, effects} =
@@ -623,16 +606,17 @@ defmodule Arena.NpcAi do
                     effects =
                       effects ++
                         [
-                          {:send_to_session, target_id, Encoder.encode({:npc_kill_user, %{}})},
-                          {:send_to_session, target_id,
-                           Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})}
+                          Effects.send(target_id, Encoder.encode({:npc_kill_user, %{}})),
+                          Effects.send(
+                            target_id,
+                            Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})
+                          )
                         ]
 
                     {player, state, pd_effects} =
                       Arena.Map.PlayerDeath.handle_player_death(state, target_id, player)
 
-                    Arena.Map.Effects.run(state, pd_effects)
-                    {player, state, effects}
+                    {player, state, effects ++ pd_effects}
                   else
                     {player, state, effects}
                   end
@@ -642,7 +626,7 @@ defmodule Arena.NpcAi do
 
                 effects =
                   if player.dead do
-                    effects ++ [{:broadcast_character_change, player}]
+                    effects ++ [Effects.broadcast_character_change(player)]
                   else
                     effects
                   end
@@ -684,7 +668,7 @@ defmodule Arena.NpcAi do
 
             # Broadcast swing
             swing_raw = Encoder.encode({:char_swing, %{char_index: npc.char_index}})
-            effects = effects ++ [{:broadcast_visible, npc.x, npc.y, swing_raw}]
+            effects = effects ++ [Effects.broadcast_visible_all(npc.x, npc.y, swing_raw)]
 
             # Hit check
             def_class_id = Helpers.class_atom_to_id(player.class)
@@ -707,8 +691,8 @@ defmodule Arena.NpcAi do
               effects =
                 effects ++
                   [
-                    {:send_to_session, target_char_id, Encoder.encode({:npc_hit_user, %{damage: final_damage}})},
-                    {:send_to_session, target_char_id, Encoder.encode({:update_hp, %{min_hp: new_hp}})}
+                    Effects.send(target_char_id, Encoder.encode({:npc_hit_user, %{damage: final_damage}})),
+                    Effects.send(target_char_id, Encoder.encode({:update_hp, %{min_hp: new_hp}}))
                   ]
 
               # VB6: NPC melee poison — if npc_def.veneno > 0 and player is not already
@@ -724,8 +708,10 @@ defmodule Arena.NpcAi do
                   effects =
                     effects ++
                       [
-                        {:send_to_session, target_char_id,
-                         Encoder.encode({:console_msg, %{message: "Has sido envenenado!", font_index: 5}})}
+                        Effects.send(
+                          target_char_id,
+                          Encoder.encode({:console_msg, %{message: "Has sido envenenado!", font_index: 5}})
+                        )
                       ]
 
                   {player, effects}
@@ -738,9 +724,11 @@ defmodule Arena.NpcAi do
                   effects =
                     effects ++
                       [
-                        {:send_to_session, target_char_id, Encoder.encode({:npc_kill_user, %{}})},
-                        {:send_to_session, target_char_id,
-                         Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})}
+                        Effects.send(target_char_id, Encoder.encode({:npc_kill_user, %{}})),
+                        Effects.send(
+                          target_char_id,
+                          Encoder.encode({:console_msg, %{message: "Has muerto!", font_index: 5}})
+                        )
                       ]
 
                   npc = %{npc | target_id: nil}
@@ -749,8 +737,7 @@ defmodule Arena.NpcAi do
                   {player, state, pd_effects} =
                     Arena.Map.PlayerDeath.handle_player_death(state, target_char_id, player)
 
-                  Arena.Map.Effects.run(state, pd_effects)
-                  {player, state, effects}
+                  {player, state, effects ++ pd_effects}
                 else
                   {player, state, effects}
                 end
@@ -760,7 +747,7 @@ defmodule Arena.NpcAi do
 
               effects =
                 if player.dead do
-                  effects ++ [{:broadcast_character_change, player}]
+                  effects ++ [Effects.broadcast_character_change(player)]
                 else
                   effects
                 end
@@ -834,7 +821,7 @@ defmodule Arena.NpcAi do
     state = put_in(state.npcs_live[instance_id], npc)
 
     move_raw = Encoder.encode({:character_move, %{char_index: npc.char_index, x: nx, y: ny}})
-    effects = effects ++ [{:broadcast_visible, nx, ny, move_raw}]
+    effects = effects ++ [Effects.broadcast_visible_all(nx, ny, move_raw)]
 
     {state, npc, effects}
   end

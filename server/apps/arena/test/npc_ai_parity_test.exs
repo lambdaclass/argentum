@@ -293,11 +293,10 @@ defmodule Arena.NpcAiParityTest do
           {s, acc_effects ++ new_effects}
         end)
 
-      # Look for a send_to_session effect with a poison message
+      # Look for a :send effect carrying a poison console message
       poison_msg_effects =
         Enum.filter(effects, fn
-          {:send_to_session, 7, raw} when is_binary(raw) ->
-            # The raw packet should contain "envenenado" or poison-related text
+          {:send, 7, %{payload: raw}} when is_binary(raw) ->
             String.contains?(raw, "envenenado") or String.contains?(raw, "veneno")
 
           _ ->

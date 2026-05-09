@@ -381,9 +381,7 @@ defmodule Arena.Test.Scenario do
 
   def tick(scenario, :npc_ai) do
     drive_run(scenario, fn state ->
-      {new_state, npc_effects} = Arena.NpcAi.tick(state)
-      Arena.NpcAi.dispatch_effects(new_state, npc_effects)
-      {new_state, []}
+      Arena.NpcAi.tick(state)
     end)
   end
 
