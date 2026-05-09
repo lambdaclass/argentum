@@ -76,6 +76,9 @@ defmodule Arena.Map.Gm.Events do
             npc_def = GameData.get_npc(npc.npc_id)
             npc_name = if npc_def, do: npc_def.name, else: "NPC #{npc.npc_id}"
 
+            # Bridge: GM handlers still return `{:noreply, state}`; NpcDeath
+            # returns canonical map effects which we run inline until the GM
+            # surface is migrated to `{:ok, state, effects}`.
             {nil, state, effects} =
               Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :gm)
 
@@ -105,6 +108,7 @@ defmodule Arena.Map.Gm.Events do
             npc_def = GameData.get_npc(npc.npc_id)
             npc_name = if npc_def, do: npc_def.name, else: "NPC #{npc.npc_id}"
 
+            # Bridge — see gm_kill_npc above. Same legacy contract.
             {nil, state, effects} =
               Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :gm, permanent: true)
 
@@ -127,6 +131,8 @@ defmodule Arena.Map.Gm.Events do
     {killed, state} =
       Enum.reduce(state.npcs_live, {0, state}, fn {inst_id, npc}, {count, st} ->
         if npc.alive and abs(npc.x - entity.x) <= aoi_x and abs(npc.y - entity.y) <= aoi_y do
+          # Bridge — see gm_kill_npc. Effects accumulate per-NPC and are
+          # dispatched inline until the GM surface is migrated.
           {nil, st, effects} =
             Arena.Map.NpcDeath.resolve_npc_death(st, inst_id, npc, source: :gm, permanent: true)
 

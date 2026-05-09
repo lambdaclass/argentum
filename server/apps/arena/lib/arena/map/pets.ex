@@ -81,6 +81,10 @@ defmodule Arena.Map.Pets do
                 {:noreply, state}
 
               npc ->
+                # Bridge: Pets handlers are still on the GenServer `{:noreply,
+                # state}` contract. NpcAi.despawn_pet/3 returns canonical map
+                # effects; we run them inline until handle_pet_leave is
+                # migrated to `{:ok, state, effects}`.
                 {state, effects} = Arena.NpcAi.despawn_pet(state, pet_id, npc)
                 Arena.Map.Effects.run(state, effects)
                 entity = Map.fetch!(state.players, char_id)
@@ -112,6 +116,7 @@ defmodule Arena.Map.Pets do
               case Map.get(st.npcs_live, instance_id) do
                 nil -> st
                 npc ->
+                  # Bridge — see handle_pet_leave above. Same legacy contract.
                   {st, effects} = Arena.NpcAi.despawn_pet(st, instance_id, npc)
                   Arena.Map.Effects.run(st, effects)
                   st

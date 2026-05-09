@@ -839,13 +839,4 @@ defmodule Arena.Map.SpellEffects do
     Arena.Combat.apply_elemental_modifiers(damage, attacker_tags, defender_tags)
   end
 
-  # Deprecated: pet death is now handled by Arena.Map.NpcDeath.resolve_npc_death/4
-  @doc false
-  def handle_pet_death(state, instance_id, npc) do
-    {nil, state, effects} =
-      Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :pet)
-
-    Effects.run(state, effects)
-    state
-  end
 end

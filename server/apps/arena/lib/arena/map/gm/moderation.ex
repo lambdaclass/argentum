@@ -164,6 +164,9 @@ defmodule Arena.Map.Gm.Moderation do
           Helpers.gm_console(state, char_id, "#{target.name} is already dead.")
           {:noreply, state}
         else
+          # Bridge: GM moderation is on the legacy `{:noreply, state}`
+          # contract; PlayerDeath returns canonical map effects, which we
+          # run inline until gm_kill is migrated to the effects pipeline.
           {target, state, pd_effects} =
             Arena.Map.PlayerDeath.handle_player_death(state, target_id, %{target | hp: 0})
 
