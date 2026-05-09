@@ -636,14 +636,22 @@ defmodule Arena.Map.MapServer do
     do: Effects.run_handler_call_reply(state, fn s -> Bank.handle_bank_end(s, char_id) end)
   @impl true
   def handle_call({:user_trade_offer, char_id, obj_index, amount}, _from, state),
-    do: Trade.handle_user_trade_offer(state, char_id, obj_index, amount)
+    do:
+      Effects.run_handler_call_reply(state, fn s ->
+        Trade.handle_user_trade_offer(s, char_id, obj_index, amount)
+      end)
 
   @impl true
-  def handle_call({:user_trade_accept, char_id}, _from, state), do: Trade.handle_user_trade_accept(state, char_id)
+  def handle_call({:user_trade_accept, char_id}, _from, state),
+    do: Effects.run_handler_call_reply(state, fn s -> Trade.handle_user_trade_accept(s, char_id) end)
+
   @impl true
-  def handle_call({:user_trade_reject, char_id}, _from, state), do: Trade.handle_user_trade_reject(state, char_id)
+  def handle_call({:user_trade_reject, char_id}, _from, state),
+    do: Effects.run_handler_call_reply(state, fn s -> Trade.handle_user_trade_reject(s, char_id) end)
+
   @impl true
-  def handle_call({:user_trade_end, char_id}, _from, state), do: Trade.handle_user_trade_end(state, char_id)
+  def handle_call({:user_trade_end, char_id}, _from, state),
+    do: Effects.run_handler_call_reply(state, fn s -> Trade.handle_user_trade_end(s, char_id) end)
 
   # ---- Info / Map Data ----
 

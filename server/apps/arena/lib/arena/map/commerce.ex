@@ -48,7 +48,16 @@ defmodule Arena.Map.Commerce do
                 {:reply, {:error, :too_far}, state}
 
               true ->
-                Trade.start_user_trade_request(state, char_id, entity, target_id)
+                # Trade is on the effects contract; translate its
+                # `{:ok, state, reply, effects}` return into a
+                # `{:reply, reply, state}` GenServer response, running the
+                # effects against the post-handler state. Commerce stays
+                # on the legacy contract until its own migration.
+                {:ok, new_state, reply, effects} =
+                  Trade.start_user_trade_request(state, char_id, entity, target_id)
+
+                Arena.Map.Effects.run(new_state, effects)
+                {:reply, reply, new_state}
             end
             end
 

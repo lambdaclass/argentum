@@ -266,7 +266,8 @@ defmodule Arena.BankTradeParityDriftTest do
       sessions = %{p1: self(), p2: self()}
       state = make_map_state_for_trade(%{p1: p1, p2: p2}, sessions)
 
-      {:reply, result, _state} = Trade.handle_user_trade_offer(state, :p1, @instransferible_item_id, 5)
+      {:ok, _state, result, _effects} =
+        Trade.handle_user_trade_offer(state, :p1, @instransferible_item_id, 5)
 
       assert result == {:error, :untradeable},
              "Instransferible items should be rejected from trade, got #{inspect(result)}"
@@ -305,7 +306,8 @@ defmodule Arena.BankTradeParityDriftTest do
       sessions = %{p1: self(), p2: self()}
       state = make_map_state_for_trade(%{p1: p1, p2: p2}, sessions)
 
-      {:reply, result, _state} = Trade.handle_user_trade_offer(state, :p1, @newbie_item_id, 5)
+      {:ok, _state, result, _effects} =
+        Trade.handle_user_trade_offer(state, :p1, @newbie_item_id, 5)
 
       assert result == {:error, :newbie_item},
              "Newbie items should be rejected from trade, got #{inspect(result)}"

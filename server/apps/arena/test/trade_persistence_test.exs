@@ -243,7 +243,7 @@ defmodule Arena.TradePersistenceTest do
       players = %{alice_id => alice_entity, -999 => bob_entity}
       state = make_map_state(players)
 
-      new_state = Trade.execute_trade(state, alice_id, -999)
+      {new_state, _effects} = Trade.execute_trade(state, alice_id, -999)
 
       # Both players' gold and inventory should be unchanged
       alice_after = Map.get(new_state.players, alice_id)
@@ -292,7 +292,7 @@ defmodule Arena.TradePersistenceTest do
       players = %{-1001 => alice_entity, -2002 => bob_entity}
       state = make_map_state(players)
 
-      new_state = Trade.execute_trade(state, -1001, -2002)
+      {new_state, _effects} = Trade.execute_trade(state, -1001, -2002)
 
       alice_after = Map.get(new_state.players, -1001)
       bob_after = Map.get(new_state.players, -2002)
@@ -346,7 +346,7 @@ defmodule Arena.TradePersistenceTest do
       players = %{alice_id => alice_entity, bob_id => bob_entity}
       state = make_map_state(players)
 
-      new_state = Trade.execute_trade(state, alice_id, bob_id)
+      {new_state, _effects} = Trade.execute_trade(state, alice_id, bob_id)
 
       alice_after = Map.get(new_state.players, alice_id)
       bob_after = Map.get(new_state.players, bob_id)
@@ -416,7 +416,8 @@ defmodule Arena.TradePersistenceTest do
       state = make_map_state(players)
 
       # First accept triggers execute_trade
-      {:reply, :ok, state_after_first} = Trade.handle_user_trade_accept(state, alice_id)
+      {:ok, state_after_first, :ok, _effects} =
+        Trade.handle_user_trade_accept(state, alice_id)
 
       # After the trade, both should have trade_partner_id = nil
       alice_after = Map.get(state_after_first.players, alice_id)
@@ -424,7 +425,7 @@ defmodule Arena.TradePersistenceTest do
 
       # A second accept should be a no-op (:not_trading)
       result = Trade.handle_user_trade_accept(state_after_first, alice_id)
-      assert {:reply, {:error, :not_trading}, _} = result
+      assert {:ok, _state, {:error, :not_trading}, _effects} = result
 
       # DB should still show the correct post-trade state (not doubled)
       alice_db = GameBackend.Characters.get(alice_id)
@@ -470,7 +471,7 @@ defmodule Arena.TradePersistenceTest do
       players = %{alice_id => alice_entity, -777 => bob_entity}
       state = make_map_state(players)
 
-      _new_state = Trade.execute_trade(state, alice_id, -777)
+      {_new_state, _effects} = Trade.execute_trade(state, alice_id, -777)
 
       # Alice's DB state should be unchanged (as if she reconnected)
       alice_db = GameBackend.Characters.get(alice_id)

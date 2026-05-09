@@ -66,7 +66,6 @@ are the next migration targets.
 - `arena/lib/arena/map/gm_commands.ex`
 - `arena/lib/arena/map/movement.ex`
 - `arena/lib/arena/map/quest_handlers.ex`
-- `arena/lib/arena/map/trade.ex`
 - `arena/lib/arena/map/training.ex`
 
 `arena/lib/arena/map/map_server.ex` and `arena/lib/arena/map/helpers.ex`
@@ -98,4 +97,5 @@ module here:
 - `arena/lib/arena/map/criminal_status.ex`
 - `arena/lib/arena/map/bank.ex`
 - `arena/lib/arena/map/banking.ex`
+- `arena/lib/arena/map/trade.ex`
 - `arena/lib/arena/npc_ai.ex`

@@ -882,7 +882,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{p1: self(), p2: self()}
       state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
 
-      {:reply, result, _state} = Trade.handle_user_trade_offer(state, :p1, 50, 0)
+      {:ok, _state, result, _effects} = Trade.handle_user_trade_offer(state, :p1, 50, 0)
       assert result == {:error, :invalid_offer}
     end
 
@@ -898,7 +898,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{p1: self(), p2: self()}
       state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
 
-      {:reply, result, _state} = Trade.handle_user_trade_offer(state, :p1, 50, -5)
+      {:ok, _state, result, _effects} = Trade.handle_user_trade_offer(state, :p1, 50, -5)
       assert result == {:error, :invalid_offer}
     end
 
@@ -914,7 +914,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{p1: self(), p2: self()}
       state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
 
-      {:reply, result, _state} = Trade.handle_user_trade_offer(state, :p1, 999, 1)
+      {:ok, _state, result, _effects} = Trade.handle_user_trade_offer(state, :p1, 999, 1)
       assert result == {:error, :invalid_offer}
     end
 
@@ -930,7 +930,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{p1: self(), p2: self()}
       state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
 
-      {:reply, result, _state} = Trade.handle_user_trade_offer(state, :p1, 50, 1)
+      {:ok, _state, result, _effects} = Trade.handle_user_trade_offer(state, :p1, 50, 1)
       assert result == {:error, :invalid_offer}
     end
 
@@ -946,7 +946,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{p1: self(), p2: self()}
       state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
 
-      {:reply, result, _state} = Trade.handle_user_trade_offer(state, :p1, 50, 10)
+      {:ok, _state, result, _effects} = Trade.handle_user_trade_offer(state, :p1, 50, 10)
       assert result == {:error, :invalid_offer}
     end
 
@@ -963,7 +963,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{p1: self(), p2: self()}
       state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
 
-      {:reply, result, _state} = Trade.handle_user_trade_offer(state, :p1, 50, 1)
+      {:ok, _state, result, _effects} = Trade.handle_user_trade_offer(state, :p1, 50, 1)
       assert result == {:error, :dead}
     end
 
@@ -978,7 +978,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{p1: self()}
       state = make_map_state(%{p1: p1}, sessions: sessions)
 
-      {:reply, result, _state} = Trade.handle_user_trade_offer(state, :p1, 50, 1)
+      {:ok, _state, result, _effects} = Trade.handle_user_trade_offer(state, :p1, 50, 1)
       assert result == {:error, :not_trading}
     end
 
@@ -995,7 +995,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{p1: self(), p2: self()}
       state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
 
-      {:reply, result, new_state} = Trade.handle_user_trade_offer(state, :p1, 99, 1)
+      {:ok, new_state, result, _effects} = Trade.handle_user_trade_offer(state, :p1, 99, 1)
       assert result == :ok
       # Item count should not exceed 6
       assert length(new_state.players[:p1].trade_offer_items) == 6
@@ -1008,7 +1008,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{p1: self()}
       state = make_map_state(%{p1: p1}, sessions: sessions)
 
-      {:reply, result, _state} = Trade.handle_user_trade_accept(state, :p1)
+      {:ok, _state, result, _effects} = Trade.handle_user_trade_accept(state, :p1)
       assert result == {:error, :dead}
     end
 
@@ -1017,13 +1017,13 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{p1: self()}
       state = make_map_state(%{p1: p1}, sessions: sessions)
 
-      {:reply, result, _state} = Trade.handle_user_trade_accept(state, :p1)
+      {:ok, _state, result, _effects} = Trade.handle_user_trade_accept(state, :p1)
       assert result == {:error, :not_trading}
     end
 
     test "accept for unknown player returns :not_on_map" do
       state = make_map_state(%{})
-      {:reply, result, _state} = Trade.handle_user_trade_accept(state, :unknown)
+      {:ok, _state, result, _effects} = Trade.handle_user_trade_accept(state, :unknown)
       assert result == {:error, :not_on_map}
     end
   end
@@ -1049,7 +1049,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{p1: self(), p2: self()}
       state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
 
-      new_state = Trade.execute_trade(state, :p1, :p2)
+      {new_state, _effects} = Trade.execute_trade(state, :p1, :p2)
       # Trade should be cancelled — both partners cleared
       assert new_state.players[:p1].trade_partner_id == nil
       assert new_state.players[:p2].trade_partner_id == nil
@@ -1077,7 +1077,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{p1: self(), p2: self()}
       state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
 
-      new_state = Trade.execute_trade(state, :p1, :p2)
+      {new_state, _effects} = Trade.execute_trade(state, :p1, :p2)
       assert new_state.players[:p2].trade_partner_id == nil
       assert new_state.players[:p2].gold == 10
     end
@@ -1105,7 +1105,7 @@ defmodule Arena.EconomySecurityTest do
       state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
 
       total_before = p1.gold + p2.gold
-      new_state = Trade.execute_trade(state, :p1, :p2)
+      {new_state, _effects} = Trade.execute_trade(state, :p1, :p2)
       total_after = new_state.players[:p1].gold + new_state.players[:p2].gold
       assert total_after == total_before, "Gold leaked: before=#{total_before} after=#{total_after}"
     end
@@ -1133,7 +1133,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{p1: self(), p2: self()}
       state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
 
-      new_state = Trade.execute_trade(state, :p1, :p2)
+      {new_state, _effects} = Trade.execute_trade(state, :p1, :p2)
 
       # Count item 50 across both inventories
       count_item = fn inv ->
@@ -1171,7 +1171,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{p1: self(), p2: self()}
       state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
 
-      new_state = Trade.execute_trade(state, :p1, :p2)
+      {new_state, _effects} = Trade.execute_trade(state, :p1, :p2)
 
       # p2 should NOT have received phantom items
       p2_items = Enum.count(new_state.players[:p2].inventory, & &1 != nil)
@@ -1192,9 +1192,9 @@ defmodule Arena.EconomySecurityTest do
       state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
 
       # First offer: 5 of item 50
-      {:reply, :ok, state2} = Trade.handle_user_trade_offer(state, :p1, 50, 5)
+      {:ok, state2, :ok, _effects1} = Trade.handle_user_trade_offer(state, :p1, 50, 5)
       # Second offer: 3 more of same item 50
-      {:reply, :ok, state3} = Trade.handle_user_trade_offer(state2, :p1, 50, 3)
+      {:ok, state3, :ok, _effects2} = Trade.handle_user_trade_offer(state2, :p1, 50, 3)
 
       offers = state3.players[:p1].trade_offer_items
       # Should be one entry with stacked amount, not two entries
@@ -1223,7 +1223,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{p1: self(), p2: self()}
       state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
 
-      {:reply, :ok, new_state} = Trade.handle_user_trade_end(state, :p1)
+      {:ok, new_state, :ok, _effects} = Trade.handle_user_trade_end(state, :p1)
       # Both players should be fully cleaned
       for pid <- [:p1, :p2] do
         p = new_state.players[pid]
@@ -1240,14 +1240,14 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{p1: self(), p2: self()}
       state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
 
-      {:reply, :ok, new_state} = Trade.handle_user_trade_reject(state, :p1)
+      {:ok, new_state, :ok, _effects} = Trade.handle_user_trade_reject(state, :p1)
       assert new_state.players[:p1].trade_partner_id == nil
       assert new_state.players[:p2].trade_partner_id == nil
     end
 
     test "trade_end for unknown player returns :not_on_map" do
       state = make_map_state(%{})
-      {:reply, result, _state} = Trade.handle_user_trade_end(state, :ghost)
+      {:ok, _state, result, _effects} = Trade.handle_user_trade_end(state, :ghost)
       assert result == {:error, :not_on_map}
     end
   end
@@ -1631,7 +1631,9 @@ defmodule Arena.EconomySecurityTest do
       entity = make_entity(%{char_id: :p1})
       state = make_map_state(%{p1: entity})
 
-      {:reply, result, _state} = Trade.start_user_trade_request(state, :p1, entity, :nonexistent)
+      {:ok, _state, result, _effects} =
+        Trade.start_user_trade_request(state, :p1, entity, :nonexistent)
+
       assert result == {:error, :target_not_found}
     end
 
@@ -1641,7 +1643,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{p1: self(), p2: self()}
       state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
 
-      {:reply, :ok, new_state} = Trade.start_user_trade_request(state, :p1, p1, :p2)
+      {:ok, new_state, :ok, _effects} = Trade.start_user_trade_request(state, :p1, p1, :p2)
       assert new_state.players[:p1].trade_partner_id == :p2
       assert new_state.players[:p2].trade_partner_id == :p1
     end
@@ -1652,7 +1654,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{p1: self(), p2: self()}
       state = make_map_state(%{p1: p1, p2: p2}, sessions: sessions)
 
-      {:reply, :ok, new_state} = Trade.start_user_trade_request(state, :p1, p1, :p2)
+      {:ok, new_state, :ok, _effects} = Trade.start_user_trade_request(state, :p1, p1, :p2)
       assert new_state.players[:p1].trade_request_target == :p2
       assert new_state.players[:p1].trade_partner_id == nil
     end

@@ -419,11 +419,11 @@ defmodule Arena.BugRegressionTest do
       state = make_map_state(%{alice: entity_a, bob: entity_b}, sessions: sessions)
 
       # First offer: 3 out of 5 — should succeed
-      {:reply, result1, state2} = Trade.handle_user_trade_offer(state, :alice, 100, 3)
+      {:ok, state2, result1, _effects1} = Trade.handle_user_trade_offer(state, :alice, 100, 3)
       assert result1 == :ok
 
       # Second offer: 3 more — total would be 6, but only 5 owned. Must be rejected.
-      {:reply, result2, state3} = Trade.handle_user_trade_offer(state2, :alice, 100, 3)
+      {:ok, state3, result2, _effects2} = Trade.handle_user_trade_offer(state2, :alice, 100, 3)
       alice = state3.players[:alice]
 
       # Total offered must not exceed 5
@@ -454,7 +454,7 @@ defmodule Arena.BugRegressionTest do
       state = make_map_state(%{alice: entity_a, bob: entity_b}, sessions: sessions)
 
       # Bob accepts — triggers execute_trade
-      {:reply, _result, new_state} = Trade.handle_user_trade_accept(state, :bob)
+      {:ok, new_state, _result, _effects} = Trade.handle_user_trade_accept(state, :bob)
       alice = new_state.players[:alice]
       bob = new_state.players[:bob]
 

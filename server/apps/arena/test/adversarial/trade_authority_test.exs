@@ -202,11 +202,11 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       result = Trade.start_user_trade_request(state, 1001, alice, 1001)
 
       case result do
-        {:reply, {:error, reason}, _state} ->
+        {:ok, _state, {:error, reason}, _effects} ->
           assert reason in [:self_trade, :target_not_found, :invalid_target],
                  "Self-trade request should be rejected, got: #{inspect(reason)}"
 
-        {:reply, :ok, new_state} ->
+        {:ok, new_state, :ok, _effects} ->
           player = Map.get(new_state.players, 1001)
           refute player.trade_partner_id == 1001,
                  "VULNERABILITY: Player started trade request with themselves"
@@ -233,7 +233,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
 
       result = Trade.start_user_trade_request(state, 1001, alice, 3003)
 
-      assert {:reply, {:error, :already_trading}, _state} = result
+      assert {:ok, _state, {:error, :already_trading}, _effects} = result
     end
 
     test "cannot open commerce with another player when already in trade" do
@@ -265,7 +265,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       })
 
       result = Trade.start_user_trade_request(state, 1001, alice, 2002)
-      assert {:reply, {:error, :target_busy}, _state} = result
+      assert {:ok, _state, {:error, :target_busy}, _effects} = result
     end
   end
 
@@ -300,7 +300,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       state = make_map_state(players)
 
       result = Trade.handle_user_trade_offer(state, 1001, 100, 1)
-      assert {:reply, {:error, :dead}, _state} = result
+      assert {:ok, _state, {:error, :dead}, _effects} = result
     end
 
     test "dead player cannot accept trade" do
@@ -314,7 +314,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       state = make_map_state(players)
 
       result = Trade.handle_user_trade_accept(state, 1001)
-      assert {:reply, {:error, :dead}, _state} = result
+      assert {:ok, _state, {:error, :dead}, _effects} = result
     end
 
     test "start_user_trade_request rejects dead target" do
@@ -328,7 +328,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       })
 
       result = Trade.start_user_trade_request(state, 1001, alice, 2002)
-      assert {:reply, {:error, :target_dead}, _state} = result
+      assert {:ok, _state, {:error, :target_dead}, _effects} = result
     end
   end
 
@@ -401,7 +401,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
 
       # obj_index 999 is not in Alice's inventory
       result = Trade.handle_user_trade_offer(state, alice_id, 999, 1)
-      assert {:reply, {:error, :invalid_offer}, _state} = result
+      assert {:ok, _state, {:error, :invalid_offer}, _effects} = result
     end
 
     test "offering an equipped item is rejected" do
@@ -411,7 +411,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       {state, alice_id, _bob_id} = setup_trading_pair(%{inventory: inv}, %{})
 
       result = Trade.handle_user_trade_offer(state, alice_id, 100, 1)
-      assert {:reply, {:error, :invalid_offer}, _state} = result
+      assert {:ok, _state, {:error, :invalid_offer}, _effects} = result
     end
 
     test "offering zero amount is rejected" do
@@ -420,7 +420,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       {state, alice_id, _bob_id} = setup_trading_pair(%{inventory: inv}, %{})
 
       result = Trade.handle_user_trade_offer(state, alice_id, 100, 0)
-      assert {:reply, {:error, :invalid_offer}, _state} = result
+      assert {:ok, _state, {:error, :invalid_offer}, _effects} = result
     end
 
     test "offering negative amount is rejected" do
@@ -429,7 +429,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       {state, alice_id, _bob_id} = setup_trading_pair(%{inventory: inv}, %{})
 
       result = Trade.handle_user_trade_offer(state, alice_id, 100, -1)
-      assert {:reply, {:error, :invalid_offer}, _state} = result
+      assert {:ok, _state, {:error, :invalid_offer}, _effects} = result
     end
   end
 
@@ -444,7 +444,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       {state, alice_id, _bob_id} = setup_trading_pair(%{inventory: inv}, %{})
 
       result = Trade.handle_user_trade_offer(state, alice_id, 100, 10)
-      assert {:reply, {:error, :invalid_offer}, _state} = result
+      assert {:ok, _state, {:error, :invalid_offer}, _effects} = result
     end
 
     test "cumulative offers exceeding inventory amount are rejected" do
@@ -453,11 +453,11 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       {state, alice_id, _bob_id} = setup_trading_pair(%{inventory: inv}, %{})
 
       # First offer of 3 should succeed
-      {:reply, :ok, state} = Trade.handle_user_trade_offer(state, alice_id, 100, 3)
+      {:ok, state, :ok, _effects} = Trade.handle_user_trade_offer(state, alice_id, 100, 3)
 
       # Second offer of 3 would total 6, but only 5 in inventory
       result = Trade.handle_user_trade_offer(state, alice_id, 100, 3)
-      assert {:reply, {:error, :invalid_offer}, _state} = result
+      assert {:ok, _state, {:error, :invalid_offer}, _effects} = result
     end
 
     test "offering exactly the inventory amount succeeds" do
@@ -466,7 +466,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       {state, alice_id, _bob_id} = setup_trading_pair(%{inventory: inv}, %{})
 
       result = Trade.handle_user_trade_offer(state, alice_id, 100, 5)
-      assert {:reply, :ok, _state} = result
+      assert {:ok, _state, :ok, _effects} = result
     end
   end
 
@@ -489,11 +489,11 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       result = Trade.handle_user_trade_accept(state, 1001)
 
       case result do
-        {:reply, {:error, reason}, _state} ->
+        {:ok, _state, {:error, reason}, _effects} ->
           assert reason in [:partner_disconnected, :not_trading, :invalid_trade],
                  "Should reject trade accept when partner is gone, got: #{inspect(reason)}"
 
-        {:reply, :ok, new_state} ->
+        {:ok, new_state, :ok, _effects} ->
           # If it "succeeds", the trade must not actually execute
           player = Map.get(new_state.players, 1001)
           # The trade should not have completed (gold/items should not have changed)
@@ -516,7 +516,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
 
       # Simulate Bob trying to accept (he's not in the map)
       result = Trade.handle_user_trade_accept(state, 2002)
-      assert {:reply, {:error, :not_on_map}, _state} = result
+      assert {:ok, _state, {:error, :not_on_map}, _effects} = result
     end
   end
 
@@ -608,7 +608,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       )
 
       result = Trade.handle_user_trade_offer(state, alice_id, 0, 1)
-      assert {:reply, {:error, :invalid_offer}, _state} = result
+      assert {:ok, _state, {:error, :invalid_offer}, _effects} = result
     end
 
     test "offering item with very large obj_index is rejected" do
@@ -618,7 +618,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       )
 
       result = Trade.handle_user_trade_offer(state, alice_id, 999_999, 1)
-      assert {:reply, {:error, :invalid_offer}, _state} = result
+      assert {:ok, _state, {:error, :invalid_offer}, _effects} = result
     end
 
     test "offering item with negative obj_index is rejected" do
@@ -628,7 +628,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       )
 
       result = Trade.handle_user_trade_offer(state, alice_id, -1, 1)
-      assert {:reply, {:error, :invalid_offer}, _state} = result
+      assert {:ok, _state, {:error, :invalid_offer}, _effects} = result
     end
 
     test "player not in trade cannot offer items" do
@@ -642,14 +642,14 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       state = make_map_state(players)
 
       result = Trade.handle_user_trade_offer(state, 1001, 100, 1)
-      assert {:reply, {:error, :not_trading}, _state} = result
+      assert {:ok, _state, {:error, :not_trading}, _effects} = result
     end
 
     test "player not on map cannot offer items" do
       state = make_map_state(%{})
 
       result = Trade.handle_user_trade_offer(state, 9999, 100, 1)
-      assert {:reply, {:error, :not_on_map}, _state} = result
+      assert {:ok, _state, {:error, :not_on_map}, _effects} = result
     end
 
     test "exceeding max trade item slots (6) does not crash" do
@@ -664,8 +664,8 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       state =
         Enum.reduce(0..6, state, fn i, acc_state ->
           case Trade.handle_user_trade_offer(acc_state, alice_id, 100 + i, 1) do
-            {:reply, :ok, new_state} -> new_state
-            {:reply, {:error, _}, same_state} -> same_state
+            {:ok, new_state, :ok, _effects} -> new_state
+            {:ok, same_state, {:error, _}, _effects} -> same_state
           end
         end)
 
@@ -695,7 +695,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       players = %{1001 => alice, 2002 => bob}
       state = make_map_state(players)
 
-      new_state = Trade.execute_trade(state, 1001, 2002)
+      {new_state, _effects} = Trade.execute_trade(state, 1001, 2002)
 
       # After failed trade, both should have their trade state cleared
       alice_after = Map.get(new_state.players, 1001)
@@ -711,13 +711,13 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       state = make_map_state(players)
 
       result = Trade.handle_user_trade_reject(state, 1001)
-      assert {:reply, :ok, _state} = result
+      assert {:ok, _state, :ok, _effects} = result
     end
 
     test "ending a trade cleans up both players" do
       {state, alice_id, bob_id} = setup_trading_pair()
 
-      {:reply, :ok, new_state} = Trade.handle_user_trade_end(state, alice_id)
+      {:ok, new_state, :ok, _effects} = Trade.handle_user_trade_end(state, alice_id)
 
       alice_after = Map.get(new_state.players, alice_id)
       bob_after = Map.get(new_state.players, bob_id)
@@ -732,7 +732,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       state = make_map_state(%{})
 
       result = Trade.handle_user_trade_end(state, 9999)
-      assert {:reply, {:error, :not_on_map}, _state} = result
+      assert {:ok, _state, {:error, :not_on_map}, _effects} = result
     end
   end
 
@@ -805,14 +805,14 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       result = Trade.handle_user_trade_accept(state, 2002)
 
       case result do
-        {:reply, {:error, :too_far}, new_state} ->
+        {:ok, new_state, {:error, :too_far}, _effects} ->
           # Correctly rejected for distance
           alice_after = Map.get(new_state.players, 1001)
           bob_after = Map.get(new_state.players, 2002)
           assert alice_after.trade_partner_id == nil
           assert bob_after.trade_partner_id == nil
 
-        {:reply, :ok, new_state} ->
+        {:ok, new_state, :ok, _effects} ->
           # If trade went through, gold should NOT have been exchanged
           alice_after = Map.get(new_state.players, 1001)
           bob_after = Map.get(new_state.players, 2002)
@@ -854,7 +854,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       result = Trade.handle_user_trade_accept(state, 2002)
 
       # Should not return :too_far
-      refute match?({:reply, {:error, :too_far}, _}, result),
+      refute match?({:ok, _, {:error, :too_far}, _}, result),
              "Trade should succeed when players are within 3 tiles"
     end
   end
