@@ -597,25 +597,43 @@ defmodule Arena.Map.MapServer do
   @impl true
   def handle_call({:commerce_end, char_id}, _from, state), do: Commerce.handle_commerce_end(state, char_id)
   @impl true
-  def handle_call({:open_bank, char_id, tx, ty}, _from, state), do: Bank.handle_open_bank(state, char_id, tx, ty)
+  def handle_call({:open_bank, char_id, tx, ty}, _from, state),
+    do:
+      Effects.run_handler_call_reply(state, fn s ->
+        Bank.handle_open_bank(s, char_id, tx, ty)
+      end)
+
   @impl true
   def handle_call({:bank_deposit, char_id, slot, amount, slot_destino}, _from, state),
-    do: Bank.handle_bank_deposit(state, char_id, slot, amount, slot_destino)
+    do:
+      Effects.run_handler_call_reply(state, fn s ->
+        Bank.handle_bank_deposit(s, char_id, slot, amount, slot_destino)
+      end)
 
   @impl true
   def handle_call({:bank_extract_item, char_id, slot, amount, slot_destino}, _from, state),
-    do: Bank.handle_bank_extract_item(state, char_id, slot, amount, slot_destino)
+    do:
+      Effects.run_handler_call_reply(state, fn s ->
+        Bank.handle_bank_extract_item(s, char_id, slot, amount, slot_destino)
+      end)
 
   @impl true
   def handle_call({:bank_deposit_gold, char_id, amount}, _from, state),
-    do: Bank.handle_bank_deposit_gold(state, char_id, amount)
+    do:
+      Effects.run_handler_call_reply(state, fn s ->
+        Bank.handle_bank_deposit_gold(s, char_id, amount)
+      end)
 
   @impl true
   def handle_call({:bank_extract_gold, char_id, amount}, _from, state),
-    do: Bank.handle_bank_extract_gold(state, char_id, amount)
+    do:
+      Effects.run_handler_call_reply(state, fn s ->
+        Bank.handle_bank_extract_gold(s, char_id, amount)
+      end)
 
   @impl true
-  def handle_call({:bank_end, char_id}, _from, state), do: Bank.handle_bank_end(state, char_id)
+  def handle_call({:bank_end, char_id}, _from, state),
+    do: Effects.run_handler_call_reply(state, fn s -> Bank.handle_bank_end(s, char_id) end)
   @impl true
   def handle_call({:user_trade_offer, char_id, obj_index, amount}, _from, state),
     do: Trade.handle_user_trade_offer(state, char_id, obj_index, amount)
@@ -806,24 +824,27 @@ defmodule Arena.Map.MapServer do
 
   @impl true
   def handle_cast({:modify_bank_gold, char_id, amount}, state) do
-    case Map.fetch(state.players, char_id) do
-      {:ok, entity} ->
-        new_bank_gold = max((entity.bank_gold || 0) + amount, 0)
-        entity = %{entity | bank_gold: new_bank_gold}
-        state = %{state | players: Map.put(state.players, char_id, entity)}
-        Arena.Map.Bank.save_bank_gold(entity.char_id, new_bank_gold)
+    Effects.run_handler(state, fn s ->
+      case Map.fetch(s.players, char_id) do
+        {:ok, entity} ->
+          new_bank_gold = max((entity.bank_gold || 0) + amount, 0)
+          entity = %{entity | bank_gold: new_bank_gold}
+          s = %{s | players: Map.put(s.players, char_id, entity)}
+          Arena.Map.Bank.save_bank_gold(entity.char_id, new_bank_gold)
 
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw, AoProtocol.Server.Encoder.encode({:update_bank_gold, %{bank_gold: new_bank_gold}})}
-        )
+          effects = [
+            Effects.send(
+              char_id,
+              AoProtocol.Server.Encoder.encode({:update_bank_gold, %{bank_gold: new_bank_gold}})
+            )
+          ]
 
-        {:noreply, state}
+          {:ok, s, effects}
 
-      :error ->
-        {:noreply, state}
-    end
+        :error ->
+          {:ok, s, []}
+      end
+    end)
   end
 
   @impl true
@@ -855,7 +876,10 @@ defmodule Arena.Map.MapServer do
     do: Training.handle_train_creature(state, char_id, payload)
 
   def handle_cast({:bank_gold_transfer, char_id, target_name, amount}, state),
-    do: Banking.handle_bank_gold_transfer(state, char_id, target_name, amount)
+    do:
+      Effects.run_handler(state, fn s ->
+        Banking.handle_bank_gold_transfer(s, char_id, target_name, amount)
+      end)
 
   def handle_cast({:gamble, char_id, amount}, state),
     do: Effects.run_handler(state, fn s -> NpcInteraction.handle_gamble(s, char_id, amount, nil) end)

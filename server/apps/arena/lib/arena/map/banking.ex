@@ -1,15 +1,21 @@
 defmodule Arena.Map.Banking do
-  @moduledoc "NPC banker interaction handlers (bank gold transfer)."
+  @moduledoc """
+  NPC banker interaction handlers (bank gold transfer).
 
-  alias Arena.Map.Helpers
+  All public handlers return `{:ok, state, [Effect.t()]}` — the
+  cast variant of the effects contract. MapServer dispatches through
+  `Arena.Map.Effects.run_handler/2`, which runs the side-effect list
+  against post-handler state and returns `{:noreply, state}` to the
+  GenServer.
+  """
+
+  alias Arena.Map.{Effects, Helpers}
   alias AoProtocol.Server.Encoder
 
   @npc_type_banquero 4
 
   # VB6 parity: 10 second cooldown between transfers
   @transfer_gold_cooldown_ms 10_000
-
-  defp msg(state, char_id, message), do: Helpers.msg(state, char_id, message)
 
   @doc """
   Handle bank gold transfer to another player.
@@ -31,29 +37,27 @@ defmodule Arena.Map.Banking do
         cond do
           # VB6: amount <= 0
           amount <= 0 ->
-            {:noreply, state}
+            {:ok, state, []}
 
           # VB6: .flags.Muerto = 1
           entity.dead ->
-            msg(state, char_id, "Estas muerto!")
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("Estas muerto!"))]}
 
           # VB6: EsGM(UserIndex) blocks transfer
           entity.gm == true ->
-            msg(state, char_id, "Los administradores no pueden transferir oro.")
-            {:noreply, state}
+            {:ok, state,
+             [Effects.send(char_id, console("Los administradores no pueden transferir oro."))]}
 
           # VB6: Stats.Banco < Cantidad
           entity.bank_gold < amount ->
-            msg(state, char_id, "No tienes suficiente oro en el banco.")
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("No tienes suficiente oro en el banco."))]}
 
           true ->
             do_bank_gold_transfer(state, char_id, entity, target_name, amount)
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
@@ -67,18 +71,16 @@ defmodule Arena.Map.Banking do
 
     cond do
       banker_npc == nil ->
-        msg(state, char_id, "Primero selecciona un banquero.")
-        {:noreply, state}
+        {:ok, state, [Effects.send(char_id, console("Primero selecciona un banquero."))]}
 
       # VB6: 10s cooldown check (TicksElapsed(.Counters.LastTransferGold, nowRaw) >= 10000)
       not transfer_cooldown_elapsed?(entity) ->
-        msg(state, char_id, "Espera un momento antes de transferir de nuevo.")
-        {:noreply, state}
+        {:ok, state,
+         [Effects.send(char_id, console("Espera un momento antes de transferir de nuevo."))]}
 
       # Cannot transfer to yourself
       target_name == entity.name ->
-        msg(state, char_id, "No puedes transferirte oro a ti mismo.")
-        {:noreply, state}
+        {:ok, state, [Effects.send(char_id, console("No puedes transferirte oro a ti mismo."))]}
 
       true ->
         # Deduct from sender's bank gold
@@ -103,14 +105,15 @@ defmodule Arena.Map.Banking do
             deliver_offline_bank_gold(target_name, amount)
         end
 
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw, Encoder.encode({:update_bank_gold, %{bank_gold: new_bank_gold}})}
-        )
+        effects = [
+          Effects.send(
+            char_id,
+            Encoder.encode({:update_bank_gold, %{bank_gold: new_bank_gold}})
+          ),
+          Effects.send(char_id, console("El envio se ha realizado con exito."))
+        ]
 
-        msg(state, char_id, "El envio se ha realizado con exito.")
-        {:noreply, state}
+        {:ok, state, effects}
     end
   end
 
@@ -130,5 +133,9 @@ defmodule Arena.Map.Banking do
         new_bank_gold = (char.bank_gold || 0) + amount
         GameBackend.Characters.save_snapshot(char.id, %{bank_gold: new_bank_gold})
     end
+  end
+
+  defp console(message) do
+    Encoder.encode({:console_msg, %{message: message, font_index: 0}})
   end
 end

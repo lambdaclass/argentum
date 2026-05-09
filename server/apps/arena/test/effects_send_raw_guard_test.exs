@@ -33,6 +33,8 @@ defmodule Arena.EffectsSendRawGuardTest do
     "lib/arena/map/player_death.ex",
     "lib/arena/map/npc_death.ex",
     "lib/arena/map/criminal_status.ex",
+    "lib/arena/map/bank.ex",
+    "lib/arena/map/banking.ex",
     "lib/arena/npc_ai.ex"
   ]
 

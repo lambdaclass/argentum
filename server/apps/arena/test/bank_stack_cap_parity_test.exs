@@ -268,7 +268,7 @@ defmodule Arena.BankStackCapParityTest do
       # VB6 parity (modBanco.bas:227-253): when slotdestino would overflow,
       # the code falls through to auto-search and places items in the next
       # available slot (slot 2 in this case).
-      {:reply, result, new_state} = Bank.handle_bank_deposit(state, char_id, 1, 5, 1)
+      {:ok, new_state, result, _effects} = Bank.handle_bank_deposit(state, char_id, 1, 5, 1)
 
       assert result == :ok,
              "VB6 parity: deposit should succeed via auto-search fallback, got: #{inspect(result)}"
@@ -304,7 +304,7 @@ defmodule Arena.BankStackCapParityTest do
       flush_mailbox()
 
       # Try to deposit — all slots are full, no room anywhere
-      {:reply, result, new_state} = Bank.handle_bank_deposit(state, char_id, 1, 5, 0)
+      {:ok, new_state, result, _effects} = Bank.handle_bank_deposit(state, char_id, 1, 5, 0)
 
       assert result == {:error, :stack_full},
              "VB6 parity: deposit must be rejected when all bank slots are full, got: #{inspect(result)}"
@@ -328,7 +328,7 @@ defmodule Arena.BankStackCapParityTest do
       flush_mailbox()
 
       # Deposit 5 with slot_destino=0 (auto-find)
-      {:reply, result, new_state} = Bank.handle_bank_deposit(state, char_id, 1, 5, 0)
+      {:ok, new_state, result, _effects} = Bank.handle_bank_deposit(state, char_id, 1, 5, 0)
 
       assert result == :ok,
              "Auto-find deposit should succeed by using empty slot 2, got: #{inspect(result)}"

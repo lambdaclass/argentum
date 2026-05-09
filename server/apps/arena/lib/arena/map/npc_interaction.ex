@@ -161,9 +161,14 @@ defmodule Arena.Map.NpcInteraction do
               end)
 
             npc_def.npc_type == @npc_type_banquero ->
-              bridge_legacy(state, fn ->
+              # Bank.handle_open_bank/4 returns `{:ok, state, reply, effects}`
+              # (the rich-reply effects contract). We surface the effects but
+              # discard the reply: the double-click path is a cast and there's
+              # no caller waiting for `:ok` / `{:error, _}`.
+              {:ok, new_state, _reply, effects} =
                 Arena.Map.Bank.handle_open_bank(state, char_id, npc.x, npc.y)
-              end)
+
+              {:ok, new_state, effects}
 
             npc_def.npc_type == @npc_type_entrenador ->
               {:ok, state,

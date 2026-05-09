@@ -162,7 +162,7 @@ defmodule Arena.BankPersistenceTest do
 
       log =
         capture_log(fn ->
-          {:reply, result, new_state} = Bank.handle_bank_deposit_gold(state, 99_999, 200)
+          {:ok, new_state, result, _effects} = Bank.handle_bank_deposit_gold(state, 99_999, 200)
           assert result == {:error, :db_error}
 
           # In-memory state must be unchanged
@@ -183,7 +183,7 @@ defmodule Arena.BankPersistenceTest do
 
       log =
         capture_log(fn ->
-          {:reply, result, new_state} = Bank.handle_bank_extract_gold(state, 99_999, 500)
+          {:ok, new_state, result, _effects} = Bank.handle_bank_extract_gold(state, 99_999, 500)
           assert result == {:error, :db_error}
 
           # In-memory state must be unchanged
@@ -205,7 +205,7 @@ defmodule Arena.BankPersistenceTest do
 
       log =
         capture_log(fn ->
-          {:reply, result, new_state} = Bank.handle_bank_deposit(state, 99_999, 1, 5, 1)
+          {:ok, new_state, result, _effects} = Bank.handle_bank_deposit(state, 99_999, 1, 5, 1)
           assert result == {:error, :db_error}
 
           # Inventory must still have the full 10 items
@@ -226,7 +226,7 @@ defmodule Arena.BankPersistenceTest do
       log =
         capture_log(fn ->
           # Extract from bank slot 1 — since char_id is fake, withdraw will fail
-          {:reply, result, new_state} = Bank.handle_bank_extract_item(state, 99_999, 1, 5, 0)
+          {:ok, new_state, result, _effects} = Bank.handle_bank_extract_item(state, 99_999, 1, 5, 0)
 
           # Should get an error — either :empty_bank_slot (because get_bank returns [])
           # or :db_error if the get_bank call itself fails
@@ -250,9 +250,9 @@ defmodule Arena.BankPersistenceTest do
       state = make_state(entity)
 
       capture_log(fn ->
-        {:reply, _, state} = Bank.handle_bank_deposit_gold(state, 99_999, 1000)
-        {:reply, _, state} = Bank.handle_bank_extract_gold(state, 99_999, 500)
-        {:reply, _, state} = Bank.handle_bank_deposit(state, 99_999, 1, 5, 1)
+        {:ok, state, _, _effects} = Bank.handle_bank_deposit_gold(state, 99_999, 1000)
+        {:ok, state, _, _effects} = Bank.handle_bank_extract_gold(state, 99_999, 500)
+        {:ok, state, _, _effects} = Bank.handle_bank_deposit(state, 99_999, 1, 5, 1)
 
         # All operations should have failed — state pristine
         assert state.players[99_999].gold == 5000

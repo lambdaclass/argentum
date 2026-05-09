@@ -346,7 +346,7 @@ defmodule Arena.CraftingBankTrainDriftTest do
              "NpcInteraction.handle_bank_gold_transfer/4 must exist"
 
       # No banker nearby — should fail
-      {:noreply, new_state} =
+      {:ok, new_state, _effects} =
         NpcInteraction.handle_bank_gold_transfer(state, 1, "TargetPlayer", 1000)
 
       # Player's bank gold should be unchanged
@@ -381,7 +381,7 @@ defmodule Arena.CraftingBankTrainDriftTest do
         )
 
       # Transfer 1000 from bank gold
-      {:noreply, new_state} =
+      {:ok, new_state, _effects} =
         NpcInteraction.handle_bank_gold_transfer(state, 1, "TargetPlayer", 1000)
 
       # Wallet gold should be unchanged
@@ -422,7 +422,7 @@ defmodule Arena.CraftingBankTrainDriftTest do
           npcs_live: %{:banker1 => banker_npc}
         )
 
-      {:noreply, new_state} =
+      {:ok, new_state, _effects} =
         NpcInteraction.handle_bank_gold_transfer(state, 1, "TargetPlayer", 1000)
 
       # GM should be blocked — bank_gold unchanged
@@ -456,7 +456,7 @@ defmodule Arena.CraftingBankTrainDriftTest do
           npcs_live: %{:banker1 => banker_npc}
         )
 
-      {:noreply, new_state} =
+      {:ok, new_state, _effects} =
         NpcInteraction.handle_bank_gold_transfer(state, 1, "TargetPlayer", 1000)
 
       # Not enough bank gold — should be unchanged
@@ -492,15 +492,19 @@ defmodule Arena.CraftingBankTrainDriftTest do
           npcs_live: %{:banker_nearby => banker_npc}
         )
 
-      {:noreply, new_state} =
+      {:ok, new_state, effects} =
         NpcInteraction.handle_bank_gold_transfer(state, 1, "TargetPlayer", 1000)
 
       # Must be REJECTED: bank_gold unchanged
       assert new_state.players[1].bank_gold == 5000,
              "transfer must be rejected when no banker is selected, even if one is nearby"
 
-      # Should receive a rejection message telling the player to select a banker
-      assert_receive {:send_raw, _}, 500
+      # Should produce a rejection-message effect telling the player to select a banker
+      assert Enum.any?(effects, fn
+               {:send, 1, _outbound} -> true
+               _ -> false
+             end),
+             "transfer should emit a console-message effect to the sender"
     end
 
     test "handle_bank_gold_transfer rejects when selected NPC is not a banker" do
@@ -540,7 +544,7 @@ defmodule Arena.CraftingBankTrainDriftTest do
           npcs_live: %{:merchant1 => non_banker_npc, :banker_nearby => banker_npc}
         )
 
-      {:noreply, new_state} =
+      {:ok, new_state, _effects} =
         NpcInteraction.handle_bank_gold_transfer(state, 1, "TargetPlayer", 1000)
 
       # Must be REJECTED: selected NPC is not a banker
@@ -576,7 +580,7 @@ defmodule Arena.CraftingBankTrainDriftTest do
           npcs_live: %{:banker1 => banker_npc}
         )
 
-      {:noreply, new_state} =
+      {:ok, new_state, _effects} =
         NpcInteraction.handle_bank_gold_transfer(state, 1, "TargetPlayer", 1000)
 
       # Cooldown should block — bank_gold unchanged

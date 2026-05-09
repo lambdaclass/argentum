@@ -187,7 +187,7 @@ defmodule Arena.BankGuardsParityTest do
       state = make_map_state_with_banker(entity, banker: banker)
       flush_mailbox()
 
-      {:reply, result, _new_state} = Bank.handle_open_bank(state, :player, 51, 50)
+      {:ok, _new_state, result, _effects} = Bank.handle_open_bank(state, :player, 51, 50)
 
       assert result == {:error, :meditating},
              "VB6 parity: meditating player must be blocked from opening bank, got: #{inspect(result)}"
@@ -216,7 +216,7 @@ defmodule Arena.BankGuardsParityTest do
       state = make_map_state_with_banker(entity, banker: banker)
       flush_mailbox()
 
-      {:reply, result, _new_state} = Bank.handle_open_bank(state, :player, 51, 50)
+      {:ok, _new_state, result, _effects} = Bank.handle_open_bank(state, :player, 51, 50)
 
       assert result == {:error, :navigating},
              "VB6 parity: navigating player must be blocked from opening bank, got: #{inspect(result)}"
@@ -245,7 +245,7 @@ defmodule Arena.BankGuardsParityTest do
       state = make_map_state_with_banker(entity, banker: banker)
       flush_mailbox()
 
-      {:reply, result, _new_state} = Bank.handle_open_bank(state, :player, 51, 50)
+      {:ok, _new_state, result, _effects} = Bank.handle_open_bank(state, :player, 51, 50)
 
       assert result == {:error, :paralyzed},
              "VB6 parity: paralyzed player must be blocked from opening bank, got: #{inspect(result)}"

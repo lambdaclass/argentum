@@ -282,7 +282,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, new_state} = Bank.handle_bank_deposit_gold(state, :player, -500)
+      {:ok, new_state, result, _effects} = Bank.handle_bank_deposit_gold(state, :player, -500)
       assert result == {:error, :not_enough_gold}
       # Gold must not change
       assert new_state.players[:player].gold == 1000
@@ -294,7 +294,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, new_state} = Bank.handle_bank_deposit_gold(state, :player, 0)
+      {:ok, new_state, result, _effects} = Bank.handle_bank_deposit_gold(state, :player, 0)
       assert result == {:error, :not_enough_gold}
       assert new_state.players[:player].gold == 1000
     end
@@ -304,7 +304,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, new_state} = Bank.handle_bank_deposit_gold(state, :player, 200)
+      {:ok, new_state, result, _effects} = Bank.handle_bank_deposit_gold(state, :player, 200)
       assert result == {:error, :not_enough_gold}
       assert new_state.players[:player].gold == 100
     end
@@ -314,7 +314,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, _state} = Bank.handle_bank_deposit_gold(state, :player, 100)
+      {:ok, _state, result, _effects} = Bank.handle_bank_deposit_gold(state, :player, 100)
       assert result == {:error, :no_bank}
     end
   end
@@ -325,7 +325,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, new_state} = Bank.handle_bank_extract_gold(state, :player, -500)
+      {:ok, new_state, result, _effects} = Bank.handle_bank_extract_gold(state, :player, -500)
       assert result == {:error, :not_enough_gold}
       assert new_state.players[:player].bank_gold == 1000
       assert new_state.players[:player].gold == 0
@@ -336,7 +336,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _state} = Bank.handle_bank_extract_gold(state, :player, 0)
+      {:ok, _state, result, _effects} = Bank.handle_bank_extract_gold(state, :player, 0)
       assert result == {:error, :not_enough_gold}
     end
 
@@ -345,7 +345,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, new_state} = Bank.handle_bank_extract_gold(state, :player, 200)
+      {:ok, new_state, result, _effects} = Bank.handle_bank_extract_gold(state, :player, 200)
       assert result == {:error, :not_enough_gold}
       assert new_state.players[:player].bank_gold == 100
     end
@@ -355,7 +355,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, _state} = Bank.handle_bank_extract_gold(state, :player, 100)
+      {:ok, _state, result, _effects} = Bank.handle_bank_extract_gold(state, :player, 100)
       assert result == {:error, :no_bank}
     end
   end
@@ -367,7 +367,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 1, 1, 1)
+      {:ok, _state, result, _effects} = Bank.handle_bank_deposit(state, :player, 1, 1, 1)
       assert result == {:error, :no_bank}
     end
 
@@ -376,7 +376,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 5, 1, 1)
+      {:ok, _state, result, _effects} = Bank.handle_bank_deposit(state, :player, 5, 1, 1)
       assert result == {:error, :empty_slot}
     end
 
@@ -386,7 +386,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 1, 10, 1)
+      {:ok, _state, result, _effects} = Bank.handle_bank_deposit(state, :player, 1, 10, 1)
       assert result == {:error, :not_enough}
     end
   end
@@ -397,7 +397,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, _state} = Bank.handle_bank_extract_item(state, :player, 1, 1, 1)
+      {:ok, _state, result, _effects} = Bank.handle_bank_extract_item(state, :player, 1, 1, 1)
       assert result == {:error, :no_bank}
     end
   end
@@ -405,25 +405,25 @@ defmodule Arena.EconomySecurityTest do
   describe "bank for non-existent player" do
     test "bank_deposit_gold for unknown char returns :not_on_map" do
       state = make_map_state(%{})
-      {:reply, result, _state} = Bank.handle_bank_deposit_gold(state, :unknown, 100)
+      {:ok, _state, result, _effects} = Bank.handle_bank_deposit_gold(state, :unknown, 100)
       assert result == {:error, :not_on_map}
     end
 
     test "bank_extract_gold for unknown char returns :not_on_map" do
       state = make_map_state(%{})
-      {:reply, result, _state} = Bank.handle_bank_extract_gold(state, :unknown, 100)
+      {:ok, _state, result, _effects} = Bank.handle_bank_extract_gold(state, :unknown, 100)
       assert result == {:error, :not_on_map}
     end
 
     test "bank_deposit for unknown char returns :not_on_map" do
       state = make_map_state(%{})
-      {:reply, result, _state} = Bank.handle_bank_deposit(state, :unknown, 1, 1, 1)
+      {:ok, _state, result, _effects} = Bank.handle_bank_deposit(state, :unknown, 1, 1, 1)
       assert result == {:error, :not_on_map}
     end
 
     test "bank_extract_item for unknown char returns :not_on_map" do
       state = make_map_state(%{})
-      {:reply, result, _state} = Bank.handle_bank_extract_item(state, :unknown, 1, 1, 1)
+      {:ok, _state, result, _effects} = Bank.handle_bank_extract_item(state, :unknown, 1, 1, 1)
       assert result == {:error, :not_on_map}
     end
   end
@@ -436,7 +436,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 0, 1, 1)
+      {:ok, _state, result, _effects} = Bank.handle_bank_deposit(state, :player, 0, 1, 1)
       assert result == {:error, :invalid_slot}
     end
   end
@@ -625,7 +625,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, _state} = Bank.handle_open_bank(state, :player, 50, 50)
+      {:ok, _state, result, _effects} = Bank.handle_open_bank(state, :player, 50, 50)
       assert result == {:error, :dead}
     end
 
@@ -634,9 +634,13 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, _state} = Bank.handle_open_bank(state, :player, nil, nil)
+      {:ok, _state, result, effects} = Bank.handle_open_bank(state, :player, nil, nil)
       assert result == {:error, :no_banker}
-      assert_receive {:send_raw, _}
+      # Effects-contract: rejection emits a console-message effect to the player.
+      assert Enum.any?(effects, fn
+               {:send, :player, _outbound} -> true
+               _ -> false
+             end)
     end
 
     test "open_bank targeting empty tile returns :no_banker" do
@@ -644,13 +648,13 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, _state} = Bank.handle_open_bank(state, :player, 60, 60)
+      {:ok, _state, result, _effects} = Bank.handle_open_bank(state, :player, 60, 60)
       assert result == {:error, :no_banker}
     end
 
     test "open_bank for unknown char returns :not_on_map" do
       state = make_map_state(%{})
-      {:reply, result, _state} = Bank.handle_open_bank(state, :unknown, 50, 50)
+      {:ok, _state, result, _effects} = Bank.handle_open_bank(state, :unknown, 50, 50)
       assert result == {:error, :not_on_map}
     end
   end
@@ -681,7 +685,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, new_state} = Bank.handle_bank_end(state, :player)
+      {:ok, new_state, result, _effects} = Bank.handle_bank_end(state, :player)
       assert result == :ok
       assert new_state.players[:player].bank_npc_id == nil
     end
@@ -708,7 +712,7 @@ defmodule Arena.EconomySecurityTest do
       state = make_map_state(%{player: entity}, sessions: sessions)
 
       # Without bank_npc_id → :no_bank, proving guard works
-      {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 1, 0, 1)
+      {:ok, _state, result, _effects} = Bank.handle_bank_deposit(state, :player, 1, 0, 1)
       assert result == {:error, :no_bank}
     end
 
@@ -718,7 +722,7 @@ defmodule Arena.EconomySecurityTest do
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
       # amount <= 0 guard fires before inv_item == nil check
-      {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 1, -5, 1)
+      {:ok, _state, result, _effects} = Bank.handle_bank_deposit(state, :player, 1, -5, 1)
       assert result == {:error, :invalid_amount}
     end
 
@@ -730,7 +734,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, new_state} = Bank.handle_bank_deposit(state, :player, 1, -5, 1)
+      {:ok, new_state, result, _effects} = Bank.handle_bank_deposit(state, :player, 1, -5, 1)
       assert result == {:error, :invalid_amount}
       assert Enum.at(new_state.players[:player].inventory, 0).amount == 5
     end
@@ -744,7 +748,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 1, 1, 9999)
+      {:ok, _state, result, _effects} = Bank.handle_bank_deposit(state, :player, 1, 1, 9999)
       assert result == {:error, :invalid_bank_slot}
     end
 
@@ -756,7 +760,7 @@ defmodule Arena.EconomySecurityTest do
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
       # Empty inventory → :empty_slot before reaching slot_destino logic
-      {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 1, 1, 0)
+      {:ok, _state, result, _effects} = Bank.handle_bank_deposit(state, :player, 1, 1, 0)
       assert result == {:error, :empty_slot}
     end
   end
@@ -781,7 +785,7 @@ defmodule Arena.EconomySecurityTest do
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
       # Gold item deposit is now rejected — VB6 stores gold separately
-      {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 1, 50, 1)
+      {:ok, _state, result, _effects} = Bank.handle_bank_deposit(state, :player, 1, 50, 1)
       assert result == {:error, :use_gold_deposit}
     end
   end
@@ -798,7 +802,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, state2} = Bank.handle_bank_deposit_gold(state, :player, 501)
+      {:ok, state2, result, _effects} = Bank.handle_bank_deposit_gold(state, :player, 501)
       assert result == {:error, :not_enough_gold}
       assert state2.players[:player].gold == 500
     end
@@ -808,7 +812,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _state} = Bank.handle_bank_deposit_gold(state, :player, 999_999_999_999)
+      {:ok, _state, result, _effects} = Bank.handle_bank_deposit_gold(state, :player, 999_999_999_999)
       assert result == {:error, :not_enough_gold}
     end
 
@@ -817,7 +821,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _state} = Bank.handle_bank_deposit_gold(state, :player, 0)
+      {:ok, _state, result, _effects} = Bank.handle_bank_deposit_gold(state, :player, 0)
       assert result == {:error, :not_enough_gold}
     end
 
@@ -826,7 +830,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _state} = Bank.handle_bank_deposit_gold(state, :player, -100)
+      {:ok, _state, result, _effects} = Bank.handle_bank_deposit_gold(state, :player, -100)
       assert result == {:error, :not_enough_gold}
     end
   end
@@ -837,7 +841,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, state2} = Bank.handle_bank_extract_gold(state, :player, 301)
+      {:ok, state2, result, _effects} = Bank.handle_bank_extract_gold(state, :player, 301)
       assert result == {:error, :not_enough_gold}
       assert state2.players[:player].bank_gold == 300
     end
@@ -847,7 +851,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _state} = Bank.handle_bank_extract_gold(state, :player, 0)
+      {:ok, _state, result, _effects} = Bank.handle_bank_extract_gold(state, :player, 0)
       assert result == {:error, :not_enough_gold}
     end
 
@@ -856,7 +860,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _state} = Bank.handle_bank_extract_gold(state, :player, -50)
+      {:ok, _state, result, _effects} = Bank.handle_bank_extract_gold(state, :player, -50)
       assert result == {:error, :not_enough_gold}
     end
   end

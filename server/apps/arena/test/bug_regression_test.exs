@@ -93,7 +93,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, new_state} = Bank.handle_bank_deposit(state, :player, 1, 0, 1)
+      {:ok, new_state, result, _effects} = Bank.handle_bank_deposit(state, :player, 1, 0, 1)
       assert result == {:error, :invalid_amount}
       # Inventory must not change
       assert Enum.at(new_state.players[:player].inventory, 0).amount == 5
@@ -105,7 +105,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, new_state} = Bank.handle_bank_deposit(state, :player, 1, -5, 1)
+      {:ok, new_state, result, _effects} = Bank.handle_bank_deposit(state, :player, 1, -5, 1)
       assert result == {:error, :invalid_amount}
       # Inventory must not change — no item duplication
       assert Enum.at(new_state.players[:player].inventory, 0).amount == 5
@@ -125,7 +125,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 1, 1, 9999)
+      {:ok, _state, result, _effects} = Bank.handle_bank_deposit(state, :player, 1, 1, 9999)
       assert result == {:error, :invalid_bank_slot}
     end
 
@@ -135,7 +135,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 1, 1, 41)
+      {:ok, _state, result, _effects} = Bank.handle_bank_deposit(state, :player, 1, 1, 41)
       assert result == {:error, :invalid_bank_slot}
     end
 
@@ -150,7 +150,7 @@ defmodule Arena.BugRegressionTest do
       # The actual upsert will fail without DB — that's OK, we test the guard.
       result =
         try do
-          {:reply, r, _} = Bank.handle_bank_deposit(state, :player, 1, 1, 40)
+          {:ok, _, r, _effects} = Bank.handle_bank_deposit(state, :player, 1, 1, 40)
           r
         rescue
           _ -> :passed_guard
@@ -165,7 +165,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 1, 1, -1)
+      {:ok, _state, result, _effects} = Bank.handle_bank_deposit(state, :player, 1, 1, -1)
       assert result == {:error, :invalid_bank_slot}
     end
   end
@@ -184,7 +184,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _state} = Bank.handle_bank_deposit(state, :player, 1, 50, 1)
+      {:ok, _state, result, _effects} = Bank.handle_bank_deposit(state, :player, 1, 50, 1)
       assert result == {:error, :use_gold_deposit}
     end
   end
@@ -295,7 +295,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _state} = Bank.handle_bank_extract_item(state, :player, 1, 0, 1)
+      {:ok, _state, result, _effects} = Bank.handle_bank_extract_item(state, :player, 1, 0, 1)
       assert result == {:error, :invalid_amount}
     end
 
@@ -304,7 +304,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _state} = Bank.handle_bank_extract_item(state, :player, 1, -5, 1)
+      {:ok, _state, result, _effects} = Bank.handle_bank_extract_item(state, :player, 1, -5, 1)
       assert result == {:error, :invalid_amount}
     end
   end
@@ -384,7 +384,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, new_state} = Bank.handle_bank_deposit(state, :player, 0, 1, 1)
+      {:ok, new_state, result, _effects} = Bank.handle_bank_deposit(state, :player, 0, 1, 1)
       # Must NOT deposit from last slot — slot 0 is invalid
       assert result == {:error, :invalid_slot} or
              Enum.at(new_state.players[:player].inventory, 23) != nil
@@ -396,7 +396,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, new_state} = Bank.handle_bank_deposit(state, :player, -1, 1, 1)
+      {:ok, new_state, result, _effects} = Bank.handle_bank_deposit(state, :player, -1, 1, 1)
       assert result == {:error, :invalid_slot} or
              Enum.at(new_state.players[:player].inventory, 23) != nil
     end
@@ -645,8 +645,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      assert {:reply, {:error, :invalid_slot}, _state} =
-               Bank.handle_bank_deposit(state, :player, 0, 1, 0)
+      assert {:ok, _state, {:error, :invalid_slot}, _effects} = Bank.handle_bank_deposit(state, :player, 0, 1, 0)
     end
 
     test "slot=25 is rejected" do
@@ -655,8 +654,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      assert {:reply, {:error, :invalid_slot}, _state} =
-               Bank.handle_bank_deposit(state, :player, 25, 1, 0)
+      assert {:ok, _state, {:error, :invalid_slot}, _effects} = Bank.handle_bank_deposit(state, :player, 25, 1, 0)
     end
 
     test "slot=-1 is rejected" do
@@ -665,8 +663,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      assert {:reply, {:error, :invalid_slot}, _state} =
-               Bank.handle_bank_deposit(state, :player, -1, 1, 0)
+      assert {:ok, _state, {:error, :invalid_slot}, _effects} = Bank.handle_bank_deposit(state, :player, -1, 1, 0)
     end
   end
 
@@ -779,7 +776,7 @@ defmodule Arena.BugRegressionTest do
       state = make_map_state(%{player: entity}, sessions: sessions,
                              npcs_live: %{npc1: banker_npc})
 
-      {:reply, result, new_state} = Bank.handle_bank_deposit_gold(state, :player, 100)
+      {:ok, new_state, result, _effects} = Bank.handle_bank_deposit_gold(state, :player, 100)
       # Must be rejected — too far from banker
       assert result == {:error, :too_far} or new_state.players[:player].gold == 500
     end
@@ -818,7 +815,7 @@ defmodule Arena.BugRegressionTest do
                              npcs_live: %{npc1: banker_npc},
                              occupancy: %{{51, 50} => {:npc, :npc1}})
 
-      {:reply, result, _state} = Bank.handle_open_bank(state, :player, 51, 50)
+      {:ok, _state, result, _effects} = Bank.handle_open_bank(state, :player, 51, 50)
       assert result == {:error, :already_trading}
     end
   end
@@ -839,7 +836,7 @@ defmodule Arena.BugRegressionTest do
 
       # NPC type 4 (banquero) check will fail since GameData probably doesn't
       # have NPC 1 as a banker. We just test the distance check doesn't reject at 5.
-      {:reply, result, _state} = Bank.handle_open_bank(state, :player, 55, 50)
+      {:ok, _state, result, _effects} = Bank.handle_open_bank(state, :player, 55, 50)
       # Should NOT be :too_far at distance 5 (VB6 allows up to 6)
       assert result != {:error, :too_far}
     end

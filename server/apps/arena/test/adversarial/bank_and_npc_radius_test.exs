@@ -178,7 +178,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, new_state} = Bank.handle_bank_deposit_gold(state, :player, 100)
+      {:ok, new_state, result, _effects} = Bank.handle_bank_deposit_gold(state, :player, 100)
       assert result == {:error, :too_far}
       # Gold must remain unchanged
       assert new_state.players[:player].gold == 1000
@@ -199,7 +199,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, new_state} = Bank.handle_bank_extract_gold(state, :player, 500)
+      {:ok, new_state, result, _effects} = Bank.handle_bank_extract_gold(state, :player, 500)
       assert result == {:error, :too_far}
       assert new_state.players[:player].gold == 0
       assert new_state.players[:player].bank_gold == 1000
@@ -240,7 +240,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _new_state} = Bank.handle_bank_deposit_gold(state, :player, 100)
+      {:ok, _new_state, result, _effects} = Bank.handle_bank_deposit_gold(state, :player, 100)
       assert result == {:error, :too_far}
     end
   end
@@ -262,7 +262,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _new_state} = Bank.handle_bank_deposit(state, :player, 1, 1, 0)
+      {:ok, _new_state, result, _effects} = Bank.handle_bank_deposit(state, :player, 1, 1, 0)
       assert result == {:error, :too_far}
     end
   end
@@ -282,7 +282,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _new_state} = Bank.handle_bank_extract_item(state, :player, 1, 1, 0)
+      {:ok, _new_state, result, _effects} = Bank.handle_bank_extract_item(state, :player, 1, 1, 0)
       assert result == {:error, :too_far}
     end
   end
@@ -307,7 +307,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       # npcs_live is empty — banker was killed/despawned
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{})
 
-      {:reply, result, _new_state} = Bank.handle_bank_deposit_gold(state, :player, 100)
+      {:ok, _new_state, result, _effects} = Bank.handle_bank_deposit_gold(state, :player, 100)
       assert result == {:error, :no_bank}
     end
 
@@ -325,7 +325,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{})
 
-      {:reply, result, _new_state} = Bank.handle_bank_extract_gold(state, :player, 500)
+      {:ok, _new_state, result, _effects} = Bank.handle_bank_extract_gold(state, :player, 500)
       assert result == {:error, :no_bank}
     end
 
@@ -344,7 +344,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{})
 
-      {:reply, result, _new_state} = Bank.handle_bank_deposit(state, :player, 1, 1, 0)
+      {:ok, _new_state, result, _effects} = Bank.handle_bank_deposit(state, :player, 1, 1, 0)
       assert result == {:error, :no_bank}
     end
 
@@ -361,7 +361,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{})
 
-      {:reply, result, _new_state} = Bank.handle_bank_extract_item(state, :player, 1, 1, 0)
+      {:ok, _new_state, result, _effects} = Bank.handle_bank_extract_item(state, :player, 1, 1, 0)
       assert result == {:error, :no_bank}
     end
   end
@@ -383,7 +383,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
           occupancy: %{{51, 50} => {:npc, :merchant1}}
         )
 
-      {:reply, result, _new_state} = Bank.handle_open_bank(state, :player, 51, 50)
+      {:ok, _new_state, result, _effects} = Bank.handle_open_bank(state, :player, 51, 50)
       assert result == {:error, :no_banker}
     end
 
@@ -392,7 +392,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, _new_state} = Bank.handle_open_bank(state, :player, 51, 50)
+      {:ok, _new_state, result, _effects} = Bank.handle_open_bank(state, :player, 51, 50)
       assert result == {:error, :no_banker}
     end
   end
@@ -415,7 +415,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _new_state} = Bank.handle_bank_deposit(state, :player, 1, 1, 0)
+      {:ok, _new_state, result, _effects} = Bank.handle_bank_deposit(state, :player, 1, 1, 0)
       assert result == {:error, :empty_slot}
     end
 
@@ -434,7 +434,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _new_state} = Bank.handle_bank_deposit(state, :player, 1, 10, 0)
+      {:ok, _new_state, result, _effects} = Bank.handle_bank_deposit(state, :player, 1, 10, 0)
       assert result == {:error, :not_enough}
     end
   end
@@ -458,7 +458,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, new_state} = Bank.handle_bank_extract_gold(state, :player, 500)
+      {:ok, new_state, result, _effects} = Bank.handle_bank_extract_gold(state, :player, 500)
       assert result == {:error, :not_enough_gold}
       assert new_state.players[:player].bank_gold == 100
       assert new_state.players[:player].gold == 0
@@ -484,7 +484,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, new_state} = Bank.handle_bank_deposit_gold(state, :player, -100)
+      {:ok, new_state, result, _effects} = Bank.handle_bank_deposit_gold(state, :player, -100)
       assert result == {:error, :not_enough_gold}
       assert new_state.players[:player].gold == 1000
       assert new_state.players[:player].bank_gold == 0
@@ -505,7 +505,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _new_state} = Bank.handle_bank_deposit(state, :player, 1, -5, 0)
+      {:ok, _new_state, result, _effects} = Bank.handle_bank_deposit(state, :player, 1, -5, 0)
       assert result == {:error, :invalid_amount}
     end
 
@@ -523,7 +523,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _new_state} = Bank.handle_bank_extract_gold(state, :player, -100)
+      {:ok, _new_state, result, _effects} = Bank.handle_bank_extract_gold(state, :player, -100)
       assert result == {:error, :not_enough_gold}
     end
 
@@ -539,7 +539,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _new_state} = Bank.handle_bank_extract_item(state, :player, 1, -1, 0)
+      {:ok, _new_state, result, _effects} = Bank.handle_bank_extract_item(state, :player, 1, -1, 0)
       assert result == {:error, :invalid_amount}
     end
   end
@@ -559,7 +559,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _new_state} = Bank.handle_bank_deposit_gold(state, :player, 0)
+      {:ok, _new_state, result, _effects} = Bank.handle_bank_deposit_gold(state, :player, 0)
       assert result == {:error, :not_enough_gold}
     end
 
@@ -578,7 +578,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _new_state} = Bank.handle_bank_deposit(state, :player, 1, 0, 0)
+      {:ok, _new_state, result, _effects} = Bank.handle_bank_deposit(state, :player, 1, 0, 0)
       assert result == {:error, :invalid_amount}
     end
 
@@ -596,7 +596,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _new_state} = Bank.handle_bank_extract_gold(state, :player, 0)
+      {:ok, _new_state, result, _effects} = Bank.handle_bank_extract_gold(state, :player, 0)
       assert result == {:error, :not_enough_gold}
     end
 
@@ -612,7 +612,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{banker1: @banker_npc})
 
-      {:reply, result, _new_state} = Bank.handle_bank_extract_item(state, :player, 1, 0, 0)
+      {:ok, _new_state, result, _effects} = Bank.handle_bank_extract_item(state, :player, 1, 0, 0)
       assert result == {:error, :invalid_amount}
     end
   end
@@ -785,7 +785,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
           occupancy: %{{57, 50} => {:npc, :far_banker}}
         )
 
-      {:reply, result, _new_state} = Bank.handle_open_bank(state, :player, 57, 50)
+      {:ok, _new_state, result, _effects} = Bank.handle_open_bank(state, :player, 57, 50)
 
       # GameData.get_npc(1) must return npc_type=4 for the banker check to pass
       # If the NPC type check passes, it should fail with :too_far
@@ -805,7 +805,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
           occupancy: %{{51, 50} => {:npc, :banker1}}
         )
 
-      {:reply, result, _new_state} = Bank.handle_open_bank(state, :player, 51, 50)
+      {:ok, _new_state, result, _effects} = Bank.handle_open_bank(state, :player, 51, 50)
       assert result == {:error, :dead}
     end
 
@@ -821,7 +821,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
           occupancy: %{{51, 50} => {:npc, :banker1}}
         )
 
-      {:reply, result, _new_state} = Bank.handle_open_bank(state, :player, 51, 50)
+      {:ok, _new_state, result, _effects} = Bank.handle_open_bank(state, :player, 51, 50)
       assert result == {:error, :already_trading}
     end
   end
