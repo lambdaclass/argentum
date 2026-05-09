@@ -15,21 +15,15 @@ defmodule Arena.BlindNoMoreDriftTest do
   No-op assertions cover the adversarial paths: clear-while-not-blind
   must NOT emit a `:blind_no_more` packet (matching the VB6 guard).
 
-  Migrated to `Arena.Test.Scenario` in slice 4b. The cura_ceguera
-  spell-clear paths drive `SpellEffects.apply_spell_status/6` through
-  `run_effects/2` and assert via `assert_effect`/`refute_effect` (the
-  spell handler emits effects via `Arena.Map.Effects`). The
-  tick-expiry paths still rely on `assert_receive`/`refute_receive`
-  because `StatusTicks.process_player_buffs/4` calls
-  `Helpers.send_to_session/3` directly — those packets land in the
-  test mailbox but are NOT yet on the effects contract. Migrating
-  buff-tick to the contract is slice 5.
+  Migrated to `Arena.Test.Scenario` in slice 4b. After the buff-tick
+  effects migration (slice 5), every path — spell-clear and tick-expiry
+  alike — emits via `Arena.Map.Effects`, so all assertions go through
+  `assert_effect` / `refute_effect`.
   """
   use ExUnit.Case, async: false
 
   alias Arena.Data.SpellDef
   alias Arena.Map.SpellEffects
-  alias AoProtocol.Server.Encoder
 
   import Arena.Test.Scenario
   import Arena.Test.Scenario.Assertions
@@ -59,19 +53,10 @@ defmodule Arena.BlindNoMoreDriftTest do
     :ok
   end
 
-  # The encoded eBlindNoMore packet — packet id 85, no payload.
-  @blind_no_more_packet Encoder.encode({:blind_no_more, %{}})
-
   # ── Tick-expiry path ─────────────────────────────────────────────────────
 
   describe "tick-expiry emits :blind_no_more" do
     test "expired :blind buff clears flag and emits packet" do
-      # Cast the synthetic ciega spell with a frozen clock, then advance
-      # past its `expires_at` and run a buff tick. NOTE:
-      # `StatusTicks.process_player_buffs/4` uses `Helpers.send_to_session/3`
-      # directly, so the :blind_no_more packet lands in the test mailbox
-      # but NOT in `scenario.effects`. We assert via `assert_receive`
-      # until the tick path is migrated to the effects contract (slice 5).
       now = 1_000_000
 
       s =
@@ -99,16 +84,11 @@ defmodule Arena.BlindNoMoreDriftTest do
       assert entity(s, :target).blind == true,
              "synthetic ciega spell must set blind: true"
 
-      # Drain the update_mana side-effect from the cast (it goes through
-      # `Effects.run/2` to the target session = test pid).
-      drain_mailbox()
-
       # apply_spell_status floors the duration to 3000ms; advance past it.
-      s = advance_clock(s, 5_000)
+      s = s |> advance_clock(5_000) |> clear_effects() |> tick(:buff)
 
-      _s = tick(s, :buff)
-
-      assert_receive {:send_raw, @blind_no_more_packet}, 200
+      refute entity(s, :target).blind, "tick must clear the blind flag"
+      assert_effect(s, :send, to: :target, packet: :blind_no_more)
     end
   end
 
@@ -186,20 +166,15 @@ defmodule Arena.BlindNoMoreDriftTest do
 
   describe "tick with no :blind buff emits no packet" do
     test "no :blind_no_more emitted when there's no :blind buff" do
-      # NOTE: tick path emits via `Helpers.send_to_session/3`; packets
-      # land in the test mailbox, not `scenario.effects`. Assertion stays
-      # on `refute_receive` until the tick is migrated to the contract.
       now = 1_000_000
 
       s =
         new()
         |> set_clock(now)
         |> with_player(:target, char_index: 1, x: 50, y: 50, blind: false, buffs: [])
+        |> tick(:buff)
 
-      drain_mailbox()
-      _s = tick(s, :buff)
-
-      refute_receive {:send_raw, @blind_no_more_packet}, 100
+      refute_effect(s, :send, to: :target, packet: :blind_no_more)
     end
   end
 

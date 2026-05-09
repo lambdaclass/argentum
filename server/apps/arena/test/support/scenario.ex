@@ -364,7 +364,7 @@ defmodule Arena.Test.Scenario do
   @spec tick(t, :regen | :buff | :npc_ai) :: t
   def tick(scenario, :regen) do
     drive_run(scenario, fn state ->
-      {Arena.Map.StatusTicks.process_regen_tick(state), []}
+      Arena.Map.StatusTicks.process_regen_tick(state)
     end)
   end
 
@@ -372,12 +372,10 @@ defmodule Arena.Test.Scenario do
     drive_run(scenario, fn state ->
       now = Arena.Clock.now_ms()
 
-      new_state =
-        Enum.reduce(state.players, state, fn {char_id, entity}, acc ->
-          Arena.Map.StatusTicks.process_player_buffs(acc, char_id, entity, now)
-        end)
-
-      {new_state, []}
+      Enum.reduce(state.players, {state, []}, fn {char_id, entity}, {acc, eacc} ->
+        {acc, effects} = Arena.Map.StatusTicks.process_player_buffs(acc, char_id, entity, now)
+        {acc, eacc ++ effects}
+      end)
     end)
   end
 

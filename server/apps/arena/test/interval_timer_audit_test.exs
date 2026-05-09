@@ -256,7 +256,7 @@ defmodule Arena.IntervalTimerAuditTest do
       entity = %PlayerEntity{char_id: 1, hp: 50, max_hp: 100, con: 18, hunger: 100, thirst: 100}
       state = make_regen_state(%{1 => entity})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[1]
 
       expected_hp = 50 + max(div(18, 30), 1)
@@ -268,7 +268,7 @@ defmodule Arena.IntervalTimerAuditTest do
       entity = %PlayerEntity{char_id: 2, hp: 50, max_hp: 100, con: 90, hunger: 100, thirst: 100}
       state = make_regen_state(%{2 => entity})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[2]
 
       expected_hp = 50 + max(div(90, 30), 1)
@@ -280,7 +280,7 @@ defmodule Arena.IntervalTimerAuditTest do
       entity = %PlayerEntity{char_id: 3, hp: 50, max_hp: 100, con: 18, hunger: 100, thirst: 100, resting: true}
       state = make_regen_state(%{3 => entity})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[3]
 
       # Resting gives rest regen (con/6) but NOT passive HP on top
@@ -297,7 +297,7 @@ defmodule Arena.IntervalTimerAuditTest do
       entity = %PlayerEntity{char_id: 4, mana: 50, max_mana: 100, int: 18, hunger: 100, thirst: 100}
       state = make_regen_state(%{4 => entity})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[4]
 
       expected_mana = 50 + max(div(18, 35), 1)
@@ -321,7 +321,7 @@ defmodule Arena.IntervalTimerAuditTest do
 
       state = make_regen_state(%{5 => entity})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[5]
 
       med_regen = max(div(18 * 50, 35), 1)
@@ -335,7 +335,7 @@ defmodule Arena.IntervalTimerAuditTest do
       entity = %PlayerEntity{char_id: 6, stamina: 50, max_stamina: 100, agi: 18, hunger: 100, thirst: 100}
       state = make_regen_state(%{6 => entity})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[6]
 
       expected_sta = 50 + max(div(18, 6), 1)
@@ -359,7 +359,7 @@ defmodule Arena.IntervalTimerAuditTest do
 
       state = make_regen_state(%{7 => entity})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[7]
 
       # Starving: no HP/mana regen, stamina drains by 1
@@ -383,7 +383,7 @@ defmodule Arena.IntervalTimerAuditTest do
 
       state = make_regen_state(%{8 => entity})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[8]
 
       assert player.hp <= 50, "HP should not regen when dehydrated"
@@ -395,7 +395,7 @@ defmodule Arena.IntervalTimerAuditTest do
       entity = %PlayerEntity{char_id: 9, hp: 99, max_hp: 100, con: 90, hunger: 100, thirst: 100}
       state = make_regen_state(%{9 => entity})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[9]
 
       assert player.hp == 100, "HP should cap at max_hp"
@@ -405,7 +405,7 @@ defmodule Arena.IntervalTimerAuditTest do
       entity = %PlayerEntity{char_id: 10, mana: 99, max_mana: 100, int: 90, hunger: 100, thirst: 100}
       state = make_regen_state(%{10 => entity})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[10]
 
       assert player.mana == 100, "mana should cap at max_mana"
@@ -415,7 +415,7 @@ defmodule Arena.IntervalTimerAuditTest do
       entity = %PlayerEntity{char_id: 11, stamina: 99, max_stamina: 100, agi: 90, hunger: 100, thirst: 100}
       state = make_regen_state(%{11 => entity})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[11]
 
       assert player.stamina == 100, "stamina should cap at max_stamina"
@@ -447,7 +447,7 @@ defmodule Arena.IntervalTimerAuditTest do
       # thirst counter at 53, next tick triggers drain
       state = make_drain_state(%{20 => entity}, thirst_counter: @thirst_drain_interval - 1)
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[20]
 
       assert player.thirst == 90, "thirst should drain by 10 at tick 54, got #{player.thirst}"
@@ -460,7 +460,7 @@ defmodule Arena.IntervalTimerAuditTest do
       # hunger counter at 59, next tick triggers drain
       state = make_drain_state(%{20 => entity}, hunger_counter: @hunger_drain_interval - 1)
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[20]
 
       assert player.hunger == 90, "hunger should drain by 10 at tick 60, got #{player.hunger}"
@@ -472,7 +472,7 @@ defmodule Arena.IntervalTimerAuditTest do
       entity = %PlayerEntity{char_id: 21, hunger: 100, thirst: 100}
       state = make_drain_state(%{21 => entity})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[21]
 
       assert player.hunger == 100, "hunger should not drain on tick 1"
@@ -485,7 +485,8 @@ defmodule Arena.IntervalTimerAuditTest do
       # 10 drain events * 54 ticks = 540 ticks to fully drain thirst
       final_state =
         Enum.reduce(1..540, make_drain_state(%{22 => entity}), fn _i, state ->
-          StatusTicks.process_regen_tick(state)
+          {state, _} = StatusTicks.process_regen_tick(state)
+          state
         end)
 
       player = final_state.players[22]
@@ -498,7 +499,8 @@ defmodule Arena.IntervalTimerAuditTest do
       # 10 drain events * 60 ticks = 600 ticks to fully drain hunger
       final_state =
         Enum.reduce(1..600, make_drain_state(%{22 => entity}), fn _i, state ->
-          StatusTicks.process_regen_tick(state)
+          {state, _} = StatusTicks.process_regen_tick(state)
+          state
         end)
 
       player = final_state.players[22]
@@ -511,7 +513,8 @@ defmodule Arena.IntervalTimerAuditTest do
       # After 540 ticks, thirst should be 0, but hunger still > 0
       final_state =
         Enum.reduce(1..540, make_drain_state(%{22 => entity}), fn _i, state ->
-          StatusTicks.process_regen_tick(state)
+          {state, _} = StatusTicks.process_regen_tick(state)
+          state
         end)
 
       player = final_state.players[22]
@@ -528,7 +531,7 @@ defmodule Arena.IntervalTimerAuditTest do
           hunger_counter: @hunger_drain_interval - 1
         )
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[23]
 
       assert player.hunger == 0, "hunger should clamp to 0"
@@ -540,7 +543,7 @@ defmodule Arena.IntervalTimerAuditTest do
 
       state = make_drain_state(%{24 => entity}, penalty_counter: 19)
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[24]
 
       assert player.penalty == 4, "penalty should decrement by 1 at 20th tick, got #{player.penalty}"
@@ -551,7 +554,7 @@ defmodule Arena.IntervalTimerAuditTest do
 
       state = make_drain_state(%{25 => entity})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[25]
 
       assert player.penalty == 5, "penalty should not decrement on tick 1"
@@ -724,7 +727,7 @@ defmodule Arena.IntervalTimerAuditTest do
           hunger_counter: 59
         )
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[40]
 
       assert player.hunger == 0, "hunger at 0 should stay 0"
@@ -743,7 +746,7 @@ defmodule Arena.IntervalTimerAuditTest do
       }
 
       state = make_edge_state(%{41 => entity})
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[41]
 
       # Stamina drains by 1 (from 1 to 0), then HP damage kicks in
@@ -763,7 +766,7 @@ defmodule Arena.IntervalTimerAuditTest do
       }
 
       state = make_edge_state(%{42 => entity})
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[42]
 
       # Single-source starvation: HP damage = 5 (not doubled)
@@ -782,7 +785,7 @@ defmodule Arena.IntervalTimerAuditTest do
       }
 
       state = make_edge_state(%{43 => entity})
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[43]
 
       # Both starving + dehydrated: damage = 5 * 2 = 10
@@ -808,7 +811,7 @@ defmodule Arena.IntervalTimerAuditTest do
         visibility_mode: :global
       }
 
-      new_state = StatusTicks.process_player_buffs(state, 44, entity, now)
+      {new_state, _effects} = StatusTicks.process_player_buffs(state, 44, entity, now)
       player = new_state.players[44]
 
       # Poison should have ticked (damage applied)
@@ -840,7 +843,7 @@ defmodule Arena.IntervalTimerAuditTest do
       }
 
       # Process at now, but next_tick is now+3600 — should NOT tick
-      new_state = StatusTicks.process_player_buffs(state, 45, entity, now)
+      {new_state, _effects} = StatusTicks.process_player_buffs(state, 45, entity, now)
       player = new_state.players[45]
 
       assert player.hp == 200, "poison should not tick before 3600ms, hp=#{player.hp}"
@@ -851,7 +854,7 @@ defmodule Arena.IntervalTimerAuditTest do
 
       state = make_edge_state(%{46 => entity}, penalty_counter: 19)
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[46]
 
       assert player.penalty == 0, "penalty at 0 should remain 0"
@@ -861,7 +864,7 @@ defmodule Arena.IntervalTimerAuditTest do
       entity = %PlayerEntity{char_id: 47, hp: 50, max_hp: 100, con: 0, hunger: 100, thirst: 100}
       state = make_edge_state(%{47 => entity})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[47]
 
       # passive HP regen = max(div(0, 30), 1) = 1
@@ -886,7 +889,7 @@ defmodule Arena.IntervalTimerAuditTest do
 
       state = make_edge_state(%{48 => entity})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[48]
 
       assert player.hp == 100, "HP should not exceed max"
@@ -904,7 +907,7 @@ defmodule Arena.IntervalTimerAuditTest do
           hunger_counter: 10
         )
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[49]
 
       assert player.thirst == 90, "thirst should drain independently"

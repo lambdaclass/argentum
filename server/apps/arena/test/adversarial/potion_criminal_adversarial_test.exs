@@ -209,7 +209,7 @@ defmodule Arena.Adversarial.PotionCriminalAdversarialTest do
       # tick once → expires
       state = map_state(players: %{1 => buffed}, sessions: %{1 => self()})
       now = System.monotonic_time(:millisecond)
-      state = StatusTicks.process_player_buffs(state, 1, state.players[1], now)
+      {state, _effects} = StatusTicks.process_player_buffs(state, 1, state.players[1], now)
 
       restored = state.players[1]
       assert restored.duracion_efecto == 0
@@ -238,8 +238,8 @@ defmodule Arena.Adversarial.PotionCriminalAdversarialTest do
       state = map_state(players: %{1 => entity}, sessions: %{1 => self()})
       now = System.monotonic_time(:millisecond)
 
-      state = StatusTicks.process_player_buffs(state, 1, state.players[1], now)
-      state = StatusTicks.process_player_buffs(state, 1, state.players[1], now)
+      {state, _effects} = StatusTicks.process_player_buffs(state, 1, state.players[1], now)
+      {state, _effects} = StatusTicks.process_player_buffs(state, 1, state.players[1], now)
 
       after_ticks = state.players[1]
 
@@ -270,7 +270,8 @@ defmodule Arena.Adversarial.PotionCriminalAdversarialTest do
 
       state =
         Enum.reduce(1..5, state, fn _i, s ->
-          StatusTicks.process_player_buffs(s, 1, s.players[1], now)
+          {s, _effects} = StatusTicks.process_player_buffs(s, 1, s.players[1], now)
+          s
         end)
 
       ent = state.players[1]

@@ -203,10 +203,16 @@ defmodule Arena.DumbNoMoreDriftTest do
 
       target_after_cast = state.players[:target]
 
-      _new_state =
+      {_new_state, effects} =
         StatusTicks.process_player_buffs(state, :target, target_after_cast, future)
 
-      assert_receive {:send_raw, @dumb_no_more_packet}, 200
+      dumb_no_more_packet = @dumb_no_more_packet
+
+      assert Enum.any?(effects, fn
+               {:send, :target, %{payload: ^dumb_no_more_packet}} -> true
+               _ -> false
+             end),
+             "tick-expiry must emit a dumb_no_more :send effect to the target"
     end
   end
 
@@ -298,12 +304,17 @@ defmodule Arena.DumbNoMoreDriftTest do
 
       state = make_state(%{target: target})
 
-      drain_mailbox()
       now = System.monotonic_time(:millisecond)
 
-      _new_state = StatusTicks.process_player_buffs(state, :target, target, now)
+      {_new_state, effects} = StatusTicks.process_player_buffs(state, :target, target, now)
 
-      refute_receive {:send_raw, @dumb_no_more_packet}, 100
+      dumb_no_more_packet = @dumb_no_more_packet
+
+      refute Enum.any?(effects, fn
+               {:send, :target, %{payload: ^dumb_no_more_packet}} -> true
+               _ -> false
+             end),
+             "tick on a non-dumb target must NOT emit a dumb_no_more :send effect"
     end
   end
 

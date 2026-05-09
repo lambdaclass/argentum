@@ -40,7 +40,7 @@ defmodule Arena.HungerThirstTest do
       entity = %PlayerEntity{char_id: 1, hunger: 50, thirst: 60}
       state = make_state(%{1 => entity})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[1]
 
       assert player.hunger == 40, "hunger should drain by 10, got #{player.hunger}"
@@ -51,7 +51,7 @@ defmodule Arena.HungerThirstTest do
       entity = %PlayerEntity{char_id: 1, hunger: 0, thirst: 0}
       state = make_state(%{1 => entity})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[1]
 
       assert player.hunger == 0
@@ -62,7 +62,7 @@ defmodule Arena.HungerThirstTest do
       entity = %PlayerEntity{char_id: 1, hunger: 50, thirst: 50, dead: true}
       state = make_state(%{1 => entity})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[1]
 
       assert player.hunger == 50, "dead players should not lose hunger"
@@ -74,7 +74,7 @@ defmodule Arena.HungerThirstTest do
       entity = %PlayerEntity{char_id: 1, hp: 100, max_hp: 100, hunger: 0, thirst: 50, stamina: 0}
       state = make_state(%{1 => entity})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[1]
 
       assert player.hp < 100, "starvation should deal damage, hp=#{player.hp}"
@@ -85,7 +85,7 @@ defmodule Arena.HungerThirstTest do
       entity = %PlayerEntity{char_id: 1, hp: 100, max_hp: 100, hunger: 50, thirst: 0, stamina: 0}
       state = make_state(%{1 => entity})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[1]
 
       assert player.hp < 100, "dehydration should deal damage, hp=#{player.hp}"
@@ -103,7 +103,7 @@ defmodule Arena.HungerThirstTest do
 
       state = make_state(%{1 => entity})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[1]
 
       # HP should not increase (starvation damage may reduce it further)
@@ -122,7 +122,7 @@ defmodule Arena.HungerThirstTest do
 
       state = make_state(%{1 => entity})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[1]
 
       assert player.mana <= 50, "meditating should not regen mana when dehydrated, mana=#{player.mana}"
@@ -133,7 +133,7 @@ defmodule Arena.HungerThirstTest do
       entity = %PlayerEntity{char_id: 1, hp: 1, max_hp: 100, hunger: 0, thirst: 50, stamina: 0}
       state = make_state(%{1 => entity})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       player = new_state.players[1]
 
       assert player.hp <= 0, "starvation should be able to kill"

@@ -973,17 +973,20 @@ defmodule Arena.Map.MapServer do
     start = System.monotonic_time()
     now = System.monotonic_time(:millisecond)
 
-    state =
-      Enum.reduce(state.players, state, fn {char_id, entity}, state ->
+    {state, effects} =
+      Enum.reduce(state.players, {state, []}, fn {char_id, entity}, {state, eacc} ->
         # Drift #18: strength/agility potions track expiry via duracion_efecto
         # on the entity itself, so process_player_buffs must run even when the
         # buffs list is empty to tick the potion timer.
         if entity.buffs == [] and Map.get(entity, :duracion_efecto, 0) == 0 do
-          state
+          {state, eacc}
         else
-          StatusTicks.process_player_buffs(state, char_id, entity, now)
+          {state, effects} = StatusTicks.process_player_buffs(state, char_id, entity, now)
+          {state, eacc ++ effects}
         end
       end)
+
+    Arena.Map.Effects.run(state, effects)
 
     duration = System.monotonic_time() - start
 
@@ -1001,7 +1004,8 @@ defmodule Arena.Map.MapServer do
   @impl true
   def handle_info(:regen_tick, state) do
     start = System.monotonic_time()
-    state = StatusTicks.process_regen_tick(state)
+    {state, effects} = StatusTicks.process_regen_tick(state)
+    Arena.Map.Effects.run(state, effects)
     duration = System.monotonic_time() - start
 
     :telemetry.execute([:arena, :map, :tick], %{duration: duration, queue_len: 0,

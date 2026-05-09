@@ -116,11 +116,11 @@ defmodule Arena.PotionDurationTest do
       state = map_state(players: %{1 => buffed})
       now = System.monotonic_time(:millisecond)
 
-      state = StatusTicks.process_player_buffs(state, 1, state.players[1], now)
+      {state, _effects} = StatusTicks.process_player_buffs(state, 1, state.players[1], now)
       assert state.players[1].duracion_efecto == 2
       assert state.players[1].tomo_pocion == true
 
-      state = StatusTicks.process_player_buffs(state, 1, state.players[1], now)
+      {state, _effects} = StatusTicks.process_player_buffs(state, 1, state.players[1], now)
       assert state.players[1].duracion_efecto == 1
       assert state.players[1].tomo_pocion == true
     end
@@ -136,7 +136,7 @@ defmodule Arena.PotionDurationTest do
       state = map_state(players: %{1 => buffed})
       now = System.monotonic_time(:millisecond)
 
-      state = StatusTicks.process_player_buffs(state, 1, state.players[1], now)
+      {state, _effects} = StatusTicks.process_player_buffs(state, 1, state.players[1], now)
 
       restored = state.players[1]
       assert restored.duracion_efecto == 0
@@ -154,7 +154,7 @@ defmodule Arena.PotionDurationTest do
 
       state = map_state(players: %{1 => buffed})
       now = System.monotonic_time(:millisecond)
-      state = StatusTicks.process_player_buffs(state, 1, state.players[1], now)
+      {state, _effects} = StatusTicks.process_player_buffs(state, 1, state.players[1], now)
       restored = state.players[1]
 
       assert restored.tomo_pocion == false

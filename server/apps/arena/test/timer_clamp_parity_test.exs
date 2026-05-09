@@ -272,7 +272,7 @@ defmodule Arena.TimerClampParityTest do
 
       state = map_state(players: %{1 => entity}, meta: %{safe_zone: false})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       assert new_state.players[1].hp == 50 + max(div(18, 30), 1)
     end
 
@@ -281,7 +281,7 @@ defmodule Arena.TimerClampParityTest do
 
       state = map_state(players: %{2 => entity}, meta: %{safe_zone: false})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       assert new_state.players[2].hp == 50 + max(div(18, 6), 1)
     end
 
@@ -290,7 +290,7 @@ defmodule Arena.TimerClampParityTest do
 
       state = map_state(players: %{3 => entity}, meta: %{safe_zone: false})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       assert new_state.players[3].mana == 50 + max(div(18, 35), 1)
     end
 
@@ -299,7 +299,7 @@ defmodule Arena.TimerClampParityTest do
 
       state = map_state(players: %{4 => entity}, meta: %{safe_zone: false})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       assert new_state.players[4].stamina == 50 + max(div(18, 6), 1)
     end
 
@@ -321,7 +321,7 @@ defmodule Arena.TimerClampParityTest do
 
       state = map_state(players: %{5 => entity}, meta: %{safe_zone: false})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       p = new_state.players[5]
       assert p.hp == 100
       assert p.mana == 100
@@ -343,7 +343,7 @@ defmodule Arena.TimerClampParityTest do
 
       state = map_state(players: %{6 => entity}, meta: %{safe_zone: false})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       p = new_state.players[6]
       assert p.hp <= 50
       assert p.mana <= 50
@@ -367,7 +367,7 @@ defmodule Arena.TimerClampParityTest do
         hunger_tick_counter: 59
       )
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       p = new_state.players[10]
       assert p.hunger == 90
       assert p.thirst == 90
@@ -378,7 +378,7 @@ defmodule Arena.TimerClampParityTest do
 
       state = map_state(players: %{11 => entity}, meta: %{safe_zone: false})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       p = new_state.players[11]
       assert p.hunger == 100
       assert p.thirst == 100
@@ -391,7 +391,11 @@ defmodule Arena.TimerClampParityTest do
 
       # 600 ticks: thirst drains 11 times (floor(600/54)=11 → 110 drained → clamped to 0)
       # hunger drains 10 times (floor(600/60)=10 → 100 drained → exactly 0)
-      final = Enum.reduce(1..600, init, fn _i, st -> StatusTicks.process_regen_tick(st) end)
+      final =
+        Enum.reduce(1..600, init, fn _i, st ->
+          {st, _} = StatusTicks.process_regen_tick(st)
+          st
+        end)
       p = final.players[12]
       assert p.hunger == 0
       assert p.thirst == 0
@@ -407,7 +411,7 @@ defmodule Arena.TimerClampParityTest do
         hunger_tick_counter: 59
       )
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       p = new_state.players[13]
       assert p.hunger == 0
       assert p.thirst == 0
@@ -428,7 +432,7 @@ defmodule Arena.TimerClampParityTest do
         penalty_tick_counter: 19
       )
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       assert new_state.players[20].penalty == 4
     end
 
@@ -437,7 +441,7 @@ defmodule Arena.TimerClampParityTest do
 
       state = map_state(players: %{21 => entity}, meta: %{safe_zone: false})
 
-      new_state = StatusTicks.process_regen_tick(state)
+      {new_state, _effects} = StatusTicks.process_regen_tick(state)
       assert new_state.players[21].penalty == 5
     end
   end

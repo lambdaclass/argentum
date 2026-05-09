@@ -413,7 +413,7 @@ defmodule Arena.InvisibilityEdgeCasesTest do
         })
 
       state = make_state(%{player: entity})
-      new_state = StatusTicks.process_player_buffs(state, :player, entity, now)
+      {new_state, _effects} = StatusTicks.process_player_buffs(state, :player, entity, now)
       updated = new_state.players[:player]
 
       assert updated.oculto == false
