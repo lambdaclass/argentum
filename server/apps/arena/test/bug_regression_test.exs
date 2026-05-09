@@ -507,7 +507,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, _new_state} = Faction.handle_faction_chat(state, :player, "test message")
+      {:ok, _new_state, _effects} = Faction.handle_faction_chat(state, :player, "test message")
 
       # Muted player should get a rejection message, not have their message broadcast
       # Check mailbox for what was sent to us (the session process)
@@ -524,7 +524,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, _new_state} = Faction.handle_faction_chat(state, :player, "test message")
+      {:ok, _new_state, _effects} = Faction.handle_faction_chat(state, :player, "test message")
 
       messages = flush_messages()
       refute Enum.any?(messages, fn
@@ -589,7 +589,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      assert {:noreply, _state} = Faction.handle_faction_chat(state, :player, "hello")
+      assert {:ok, _state, _effects} = Faction.handle_faction_chat(state, :player, "hello")
 
       # Should NOT receive a faction broadcast
       refute_receive {:send_raw, _}, 100
@@ -601,7 +601,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      assert {:noreply, _state} = Faction.handle_faction_chat(state, :player, "hello")
+      assert {:ok, _state, _effects} = Faction.handle_faction_chat(state, :player, "hello")
 
       # Should receive mute message, not a faction broadcast
       msgs = flush_messages([])
@@ -620,7 +620,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      assert {:noreply, _state} = Faction.handle_faction_chat(state, :player, "spam")
+      assert {:ok, _state, _effects} = Faction.handle_faction_chat(state, :player, "spam")
 
       # Should receive cooldown warning, not a faction broadcast containing the message
       msgs = flush_messages([])
@@ -714,7 +714,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{})
 
-      {:noreply, new_state} = Faction.handle_leave_faction(state, :player)
+      {:ok, new_state, _effects} = Faction.handle_leave_faction(state, :player)
       # Faction must NOT change — no enlistador nearby
       assert new_state.players[:player].faction == :royal_army
     end

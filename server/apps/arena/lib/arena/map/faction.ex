@@ -1,15 +1,29 @@
 defmodule Arena.Map.Faction do
-  @moduledoc "Faction system handlers (VB6: ModFacciones)."
+  @moduledoc """
+  Faction system handlers (VB6: ModFacciones).
 
-  alias Arena.Map.Helpers
+  Public top-level handlers follow the effects contract
+  `{:ok, state, [Effect.t()]}`. MapServer dispatches them via
+  `Arena.Map.Effects.run_handler/2` because none of the call sites
+  branch on a reply term. Internal helpers (`give_faction_rewards/6`)
+  return `{entity, state, effects}` so they compose without leaking
+  `{:send_raw, _}` envelopes.
+
+  Faction-wide chat (`handle_faction_chat/3`) broadcasts the message
+  to every same-faction player on this map via the standard
+  `Effects.send/2` lane. Cross-map fanout for faction members is
+  intentionally not handled here; it is the responsibility of
+  `AoSession.OnlineDirectory.broadcast_*` callers if that surface is
+  needed in the future.
+  """
+
+  alias Arena.Map.{Effects, Helpers}
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
   @npc_type_enlistador 5
   # VB6 ModFacciones.bas:31 — Public Const MAX_FACTION_ENLISTMENTS = 0
   @max_faction_enlistments 0
-
-  defp msg(state, char_id, message), do: Helpers.msg(state, char_id, message)
 
   @doc """
   Map a NPC's `.faccion` byte to the faction atom used on player entities.
@@ -32,43 +46,46 @@ defmodule Arena.Map.Faction do
 
     cond do
       entity.dead ->
-        msg(state, char_id, "Estas muerto!")
-        {:noreply, state}
+        {:ok, state, [console_effect(char_id, "Estas muerto!")]}
 
       npc_faction == :none ->
-        msg(state, char_id, "#{npc_def.name} no puede enlistarte.")
-        {:noreply, state}
+        {:ok, state, [console_effect(char_id, "#{npc_def.name} no puede enlistarte.")]}
 
       entity.faction == npc_faction ->
         handle_faction_rank_up(state, char_id, entity, npc_faction)
 
       entity.faction != :none ->
-        msg(state, char_id, "Ya perteneces a una faccion. Usa /RENUNCIAR primero.")
-        {:noreply, state}
+        {:ok, state,
+         [console_effect(char_id, "Ya perteneces a una faccion. Usa /RENUNCIAR primero.")]}
 
       # VB6 ModFacciones.bas:63-66,191-194 reject when Reenlistadas > 0
       # (MAX_FACTION_ENLISTMENTS = 0).
       entity.faction_reenlistadas > @max_faction_enlistments ->
-        msg(state, char_id, "No puedes volver a enlistarte en una faccion.")
-        {:noreply, state}
+        {:ok, state,
+         [console_effect(char_id, "No puedes volver a enlistarte en una faccion.")]}
 
       npc_faction == :royal_army and entity.criminal ->
-        msg(state, char_id, "Los criminales no pueden enlistarse en la Armada Real.")
-        {:noreply, state}
+        {:ok, state,
+         [console_effect(char_id, "Los criminales no pueden enlistarse en la Armada Real.")]}
 
       npc_faction == :royal_army and entity.citizens_killed > 0 ->
-        msg(state, char_id, "Has asesinado ciudadanos inocentes. No puedes enlistarte en la Armada Real.")
-        {:noreply, state}
+        {:ok, state,
+         [
+           console_effect(
+             char_id,
+             "Has asesinado ciudadanos inocentes. No puedes enlistarte en la Armada Real."
+           )
+         ]}
 
       npc_faction == :royal_army and entity.class == :thief ->
-        msg(state, char_id, "No hay lugar para escoria en el Ejército Real.")
-        {:noreply, state}
+        {:ok, state,
+         [console_effect(char_id, "No hay lugar para escoria en el Ejército Real.")]}
 
       # VB6 ModFacciones.bas:183-186 — Chaos rejects Ciudadanos; only
       # Criminals (and prior council members) may enlist.
       npc_faction == :chaos_legion and not entity.criminal ->
-        msg(state, char_id, "Tu no eres bienvenido aqui asqueroso Ciudadano.")
-        {:noreply, state}
+        {:ok, state,
+         [console_effect(char_id, "Tu no eres bienvenido aqui asqueroso Ciudadano.")]}
 
       true ->
         ranks = GameData.faction_ranks(npc_faction)
@@ -76,20 +93,32 @@ defmodule Arena.Map.Faction do
 
         cond do
           rank1 != nil and entity.level < rank1.required_level ->
-            msg(state, char_id, "Necesitas nivel #{rank1.required_level} para enlistarte.")
-            {:noreply, state}
+            {:ok, state,
+             [
+               console_effect(
+                 char_id,
+                 "Necesitas nivel #{rank1.required_level} para enlistarte."
+               )
+             ]}
 
           true ->
             entity = %{entity | faction: npc_faction}
             entity = assign_rank(entity, npc_faction, 1)
-            {entity, state} = give_faction_rewards(entity, state, char_id, npc_faction, 0, 1)
+            {entity, state, reward_effects} =
+              give_faction_rewards(entity, state, char_id, npc_faction, 0, 1)
+
             players = Map.put(state.players, char_id, entity)
+            new_state = %{state | players: players}
 
             AoSession.OnlineDirectory.update_faction(char_id, npc_faction)
 
             faction_name = faction_display_name(npc_faction)
-            msg(%{state | players: players}, char_id, "Te has enlistado en #{faction_name}.")
-            {:noreply, %{state | players: players}}
+
+            effects =
+              reward_effects ++
+                [console_effect(char_id, "Te has enlistado en #{faction_name}.")]
+
+            {:ok, new_state, effects}
         end
     end
   end
@@ -109,27 +138,50 @@ defmodule Arena.Map.Faction do
 
     cond do
       next_rank_def == nil ->
-        msg(state, char_id, "Ya tienes el rango maximo.")
-        {:noreply, state}
+        {:ok, state, [console_effect(char_id, "Ya tienes el rango maximo.")]}
 
       entity.level < next_rank_def.required_level ->
         needed = next_rank_def.required_level - entity.level
-        msg(state, char_id, "Te faltan #{needed} niveles para poder recibir la proxima recompensa.")
-        {:noreply, state}
+
+        {:ok, state,
+         [
+           console_effect(
+             char_id,
+             "Te faltan #{needed} niveles para poder recibir la proxima recompensa."
+           )
+         ]}
 
       entity.faction_score < next_rank_def.required_score ->
         needed = next_rank_def.required_score - entity.faction_score
-        msg(state, char_id, "Te faltan #{needed} puntos de faccion para subir de rango.")
-        {:noreply, state}
+
+        {:ok, state,
+         [
+           console_effect(
+             char_id,
+             "Te faltan #{needed} puntos de faccion para subir de rango."
+           )
+         ]}
 
       true ->
         new_rank = next_rank_def.rank
         entity = assign_rank(entity, faction, new_rank)
-        {entity, state} = give_faction_rewards(entity, state, char_id, faction, current_rank, new_rank)
-        players = Map.put(state.players, char_id, entity)
 
-        msg(%{state | players: players}, char_id, "Has ascendido al rango #{new_rank}: #{next_rank_def.title}!")
-        {:noreply, %{state | players: players}}
+        {entity, state, reward_effects} =
+          give_faction_rewards(entity, state, char_id, faction, current_rank, new_rank)
+
+        players = Map.put(state.players, char_id, entity)
+        new_state = %{state | players: players}
+
+        effects =
+          reward_effects ++
+            [
+              console_effect(
+                char_id,
+                "Has ascendido al rango #{new_rank}: #{next_rank_def.title}!"
+              )
+            ]
+
+        {:ok, new_state, effects}
     end
   end
 
@@ -141,6 +193,9 @@ defmodule Arena.Map.Faction do
 
   # Give faction rank rewards (items) for all ranks between old_rank and new_rank.
   #
+  # Returns `{entity, state, effects}` so callers can splice the inventory
+  # slot updates and console messages into their own effect list.
+  #
   # VB6: ModFacciones.bas:299 — DarRecompensas
   defp give_faction_rewards(entity, state, char_id, faction, old_rank, new_rank) do
     rewards = GameData.faction_rewards(faction)
@@ -148,22 +203,26 @@ defmodule Arena.Map.Faction do
     rewards_to_give =
       Enum.filter(rewards, fn r -> r.rank > old_rank and r.rank <= new_rank end)
 
-    Enum.reduce(rewards_to_give, {entity, state}, fn reward, {ent, st} ->
+    Enum.reduce(rewards_to_give, {entity, state, []}, fn reward, {ent, st, eff} ->
       item_def = GameData.get_item(reward.obj_index)
 
       if item_def == nil do
-        {ent, st}
+        {ent, st, eff}
       else
         case Arena.Inventory.add_item(ent.inventory, reward.obj_index, 1) do
           {:ok, new_inv, slot} ->
             ent = %{ent | inventory: new_inv}
-            Helpers.send_inventory_slot(st.sessions, char_id, new_inv, slot)
-            msg(st, char_id, "Has recibido #{item_def.name}.")
-            {ent, st}
+
+            slot_effect =
+              Effects.send(char_id, inventory_slot_packet(new_inv, slot))
+
+            ack_effect = console_effect(char_id, "Has recibido #{item_def.name}.")
+
+            {ent, st, eff ++ [slot_effect, ack_effect]}
 
           _ ->
-            msg(st, char_id, "No tienes espacio para #{item_def.name}.")
-            {ent, st}
+            no_space = console_effect(char_id, "No tienes espacio para #{item_def.name}.")
+            {ent, st, eff ++ [no_space]}
         end
       end
     end)
@@ -185,12 +244,17 @@ defmodule Arena.Map.Faction do
             handle_enlistador_click(state, char_id, entity, npc_def)
 
           :not_found ->
-            msg(state, char_id, "Necesitas estar cerca de un enlistador para enlistarte.")
-            {:noreply, state}
+            {:ok, state,
+             [
+               console_effect(
+                 char_id,
+                 "Necesitas estar cerca de un enlistador para enlistarte."
+               )
+             ]}
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
@@ -230,40 +294,61 @@ defmodule Arena.Map.Faction do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
         if entity.faction == :none do
-          msg(state, char_id, "No perteneces a ninguna faccion.")
-          {:noreply, state}
+          {:ok, state, [console_effect(char_id, "No perteneces a ninguna faccion.")]}
         else
           case find_nearby_enlistador(state, entity, entity.faction) do
             :not_found ->
-              msg(state, char_id, "Necesitas estar cerca de un enlistador de tu faccion.")
-              {:noreply, state}
+              {:ok, state,
+               [
+                 console_effect(
+                   char_id,
+                   "Necesitas estar cerca de un enlistador de tu faccion."
+                 )
+               ]}
 
             {:ok, _npc, _npc_def} ->
               if blocked_by_aligned_guild?(char_id) do
-                msg(state, char_id, "No puedes renunciar a tu faccion mientras pertenezcas a un clan alineado.")
-                {:noreply, state}
+                {:ok, state,
+                 [
+                   console_effect(
+                     char_id,
+                     "No puedes renunciar a tu faccion mientras pertenezcas a un clan alineado."
+                   )
+                 ]}
               else
                 entity = strip_faction_items(entity)
-                entity = %{entity | faction: :none, faction_reenlistadas: entity.faction_reenlistadas + 1}
+
+                entity = %{
+                  entity
+                  | faction: :none,
+                    faction_reenlistadas: entity.faction_reenlistadas + 1
+                }
+
                 players = Map.put(state.players, char_id, entity)
 
                 AoSession.OnlineDirectory.update_faction(char_id, :none)
 
-                Enum.each(0..23, fn slot ->
-                  Helpers.send_inventory_slot(state.sessions, char_id, entity.inventory, slot)
-                end)
+                slot_effects =
+                  Enum.map(0..23, fn slot ->
+                    Effects.send(char_id, inventory_slot_packet(entity.inventory, slot))
+                  end)
 
-                state = %{state | players: players}
-                Helpers.broadcast_character_change(state, entity)
+                new_state = %{state | players: players}
 
-                msg(state, char_id, "Has renunciado a tu faccion.")
-                {:noreply, state}
+                effects =
+                  slot_effects ++
+                    [
+                      Effects.broadcast_character_change(entity),
+                      console_effect(char_id, "Has renunciado a tu faccion.")
+                    ]
+
+                {:ok, new_state, effects}
               end
           end
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
@@ -366,6 +451,10 @@ defmodule Arena.Map.Faction do
   @doc """
   Handle faction-wide chat message broadcast.
 
+  Successful broadcast fans an `Effects.send/2` to every same-faction
+  player on the map (including the sender, matching VB6's behaviour
+  where the sender sees their own message in the faction channel).
+
   VB6: Protocol.bas:5211 — HandleFactionMessage
   """
   def handle_faction_chat(state, char_id, message) do
@@ -376,25 +465,22 @@ defmodule Arena.Map.Faction do
 
         cond do
           entity.dead ->
-            {:noreply, state}
+            {:ok, state, []}
 
           entity.muted_until > 0 and wall_now < entity.muted_until ->
-            msg(state, char_id, "Estás silenciado.")
-            {:noreply, state}
+            {:ok, state, [console_effect(char_id, "Estás silenciado.")]}
 
           entity.faction == :none ->
-            msg(state, char_id, "No perteneces a ninguna faccion.")
-            {:noreply, state}
+            {:ok, state, [console_effect(char_id, "No perteneces a ninguna faccion.")]}
 
           now - entity.last_chat_at < chat_cooldown_ms() ->
-            msg(state, char_id, "Estás hablando demasiado rápido.")
-            {:noreply, state}
+            {:ok, state, [console_effect(char_id, "Estás hablando demasiado rápido.")]}
 
           true ->
             {faction_label, font_index} = faction_chat_style(entity.faction)
             chat_msg = "#{entity.name}: #{message}"
 
-            raw =
+            packet =
               Encoder.encode(
                 {:console_faction_message,
                  %{
@@ -404,17 +490,18 @@ defmodule Arena.Map.Faction do
                  }}
               )
 
-            for {_cid, other} <- state.players, other.faction == entity.faction do
-              Helpers.send_to_session(state.sessions, other.char_id, {:send_raw, raw})
-            end
+            broadcast_effects =
+              for {cid, other} <- state.players, other.faction == entity.faction do
+                Effects.send(cid, packet)
+              end
 
             entity = %{entity | last_chat_at: now}
             players = Map.put(state.players, char_id, entity)
-            {:noreply, %{state | players: players}}
+            {:ok, %{state | players: players}, broadcast_effects}
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
@@ -427,4 +514,35 @@ defmodule Arena.Map.Faction do
   defp faction_display_name(:royal_army), do: "Armada Real"
   defp faction_display_name(:chaos_legion), do: "Legion del Caos"
   defp faction_display_name(_), do: "Ninguna"
+
+  defp console_effect(char_id, message) do
+    Effects.send(char_id, Encoder.encode({:console_msg, %{message: message, font_index: 0}}))
+  end
+
+  # Mirror of `Helpers.send_inventory_slot/4` packet construction (sans
+  # transmission). Inlined here so reward / strip-items effects can be
+  # constructed without going through the legacy `{:send_raw, _}` shim.
+  defp inventory_slot_packet(inventory, slot) do
+    case Enum.at(inventory, slot) do
+      nil ->
+        Encoder.encode({:change_inventory_slot, %{slot: slot + 1, obj_index: 0, amount: 0}})
+
+      item ->
+        item_def = GameData.get_item(item.item_id)
+        valor = if item_def, do: item_def.valor, else: 0
+        instance_tags = Map.get(item, :elemental_tags, 0)
+
+        Encoder.encode(
+          {:change_inventory_slot,
+           %{
+             slot: slot + 1,
+             obj_index: item.item_id,
+             amount: item.amount,
+             equipped: item.equipped,
+             valor: valor / 1,
+             elemental_tags: instance_tags
+           }}
+        )
+    end
+  end
 end

@@ -289,7 +289,7 @@ defmodule Arena.ServiceWindowsParityTest do
         npcs_live: %{1001 => npc_live}
       )
 
-      {:noreply, new_state} = Faction.handle_enlistador_click(state, 1, entity, npc_def)
+      {:ok, new_state, _effects} = Faction.handle_enlistador_click(state, 1, entity, npc_def)
       drain_mailbox()
 
       updated = new_state.players[1]

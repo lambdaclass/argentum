@@ -1362,7 +1362,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Faction.handle_leave_faction(state, :player)
+      {:ok, new_state, _effects} = Faction.handle_leave_faction(state, :player)
       assert new_state.players[:player].faction == :none
       assert new_state.players[:player].faction_reenlistadas == 0
     end
@@ -1378,7 +1378,7 @@ defmodule Arena.EconomySecurityTest do
       state = make_map_state(%{player: entity}, sessions: sessions,
                              npcs_live: %{enl1: enlistador})
 
-      {:noreply, new_state} = Faction.handle_leave_faction(state, :player)
+      {:ok, new_state, _effects} = Faction.handle_leave_faction(state, :player)
       # Without a real enlistador NPC def in GameData, this may be rejected.
       # That's correct — the enlistador check is the fix.
       p = new_state.players[:player]
@@ -1391,7 +1391,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, state2} = Faction.handle_leave_faction(state, :player)
+      {:ok, state2, _effects} = Faction.handle_leave_faction(state, :player)
       # No enlistador → faction unchanged
       assert state2.players[:player].faction == :chaos_legion
       assert state2.players[:player].faction_reenlistadas == 0
@@ -1399,7 +1399,7 @@ defmodule Arena.EconomySecurityTest do
 
     test "leave faction for unknown player is a no-op" do
       state = make_map_state(%{})
-      {:noreply, new_state} = Faction.handle_leave_faction(state, :ghost)
+      {:ok, new_state, _effects} = Faction.handle_leave_faction(state, :ghost)
       assert new_state == state
     end
   end
@@ -1410,13 +1410,13 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, _state} = Faction.handle_faction_chat(state, :player, "test message")
+      {:ok, _state, _effects} = Faction.handle_faction_chat(state, :player, "test message")
       # Should receive error message, not faction broadcast
     end
 
     test "faction chat for unknown player is a no-op" do
       state = make_map_state(%{})
-      {:noreply, new_state} = Faction.handle_faction_chat(state, :ghost, "hello")
+      {:ok, new_state, _effects} = Faction.handle_faction_chat(state, :ghost, "hello")
       assert new_state == state
     end
   end

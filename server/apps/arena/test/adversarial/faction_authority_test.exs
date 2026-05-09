@@ -178,7 +178,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
 
       # Click on royal army enlistador while already in royal army
       # Should attempt rank up, not re-enlist
-      {:noreply, new_state} = Faction.handle_enlistador_click(state, :player, entity, royal_enlistador_npc_def())
+      {:ok, new_state, _effects} = Faction.handle_enlistador_click(state, :player, entity, royal_enlistador_npc_def())
 
       # Faction should remain unchanged (rank up logic handles this path)
       assert new_state.players[:player].faction == :royal_army
@@ -190,7 +190,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       state = make_map_state(%{player: entity}, sessions: sessions)
 
       # Try to enlist in chaos while already in royal army
-      {:noreply, new_state} = Faction.handle_enlistador_click(state, :player, entity, chaos_enlistador_npc_def())
+      {:ok, new_state, _effects} = Faction.handle_enlistador_click(state, :player, entity, chaos_enlistador_npc_def())
 
       # Must remain in royal army — cannot switch without /RENUNCIAR
       assert new_state.players[:player].faction == :royal_army
@@ -201,7 +201,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Faction.handle_enlist_faction(state, :player, :royal_army)
+      {:ok, new_state, _effects} = Faction.handle_enlist_faction(state, :player, :royal_army)
 
       # No enlistador nearby → rejected; faction unchanged
       assert new_state.players[:player].faction == :chaos_legion
@@ -218,7 +218,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Faction.handle_enlistador_click(state, :player, entity, royal_enlistador_npc_def())
+      {:ok, new_state, _effects} = Faction.handle_enlistador_click(state, :player, entity, royal_enlistador_npc_def())
 
       # Dead players must not be able to enlist
       assert new_state.players[:player].faction == :none
@@ -229,7 +229,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Faction.handle_enlist_faction(state, :player, :royal_army)
+      {:ok, new_state, _effects} = Faction.handle_enlist_faction(state, :player, :royal_army)
 
       assert new_state.players[:player].faction == :none
     end
@@ -245,7 +245,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Faction.handle_leave_faction(state, :player)
+      {:ok, new_state, _effects} = Faction.handle_leave_faction(state, :player)
 
       assert new_state.players[:player].faction == :none
       assert new_state.players[:player].faction_reenlistadas == 0
@@ -254,7 +254,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
     test "leave for nonexistent player is a no-op" do
       state = make_map_state(%{})
 
-      {:noreply, new_state} = Faction.handle_leave_faction(state, :ghost)
+      {:ok, new_state, _effects} = Faction.handle_leave_faction(state, :ghost)
 
       assert new_state == state
     end
@@ -271,7 +271,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Faction.handle_leave_faction(state, :player)
+      {:ok, new_state, _effects} = Faction.handle_leave_faction(state, :player)
 
       # Without a nearby enlistador, faction must remain unchanged
       assert new_state.players[:player].faction == :royal_army
@@ -283,7 +283,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Faction.handle_leave_faction(state, :player)
+      {:ok, new_state, _effects} = Faction.handle_leave_faction(state, :player)
 
       assert new_state.players[:player].faction == :chaos_legion
       assert new_state.players[:player].faction_reenlistadas == 1
@@ -300,7 +300,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Faction.handle_enlist_faction(state, :player, :royal_army)
+      {:ok, new_state, _effects} = Faction.handle_enlist_faction(state, :player, :royal_army)
 
       assert new_state.players[:player].faction == :none
     end
@@ -312,7 +312,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{far_enl: far_npc})
 
-      {:noreply, new_state} = Faction.handle_enlist_faction(state, :player, :royal_army)
+      {:ok, new_state, _effects} = Faction.handle_enlist_faction(state, :player, :royal_army)
 
       # Too far from enlistador — must remain factionless
       assert new_state.players[:player].faction == :none
@@ -329,7 +329,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Faction.handle_faction_chat(state, :player, "hello faction")
+      {:ok, new_state, _effects} = Faction.handle_faction_chat(state, :player, "hello faction")
 
       # State should not change (no last_chat_at update since message was rejected)
       assert new_state.players[:player].faction == :none
@@ -340,7 +340,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Faction.handle_faction_chat(state, :player, "hello from grave")
+      {:ok, new_state, _effects} = Faction.handle_faction_chat(state, :player, "hello from grave")
 
       # Dead players are silently rejected — last_chat_at should not update
       assert new_state.players[:player].last_chat_at == entity.last_chat_at
@@ -349,7 +349,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
     test "faction chat for nonexistent player is a no-op" do
       state = make_map_state(%{})
 
-      {:noreply, new_state} = Faction.handle_faction_chat(state, :ghost, "hello")
+      {:ok, new_state, _effects} = Faction.handle_faction_chat(state, :ghost, "hello")
 
       assert new_state == state
     end
@@ -361,7 +361,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Faction.handle_faction_chat(state, :player, "trying to speak")
+      {:ok, new_state, _effects} = Faction.handle_faction_chat(state, :player, "trying to speak")
 
       # Muted — last_chat_at should not update
       assert new_state.players[:player].last_chat_at == entity.last_chat_at
@@ -379,7 +379,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Faction.handle_enlistador_click(state, :player, entity, npc_def)
+      {:ok, new_state, _effects} = Faction.handle_enlistador_click(state, :player, entity, npc_def)
 
       assert new_state.players[:player].faction == :none
     end
@@ -390,7 +390,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Faction.handle_enlistador_click(state, :player, entity, npc_def)
+      {:ok, new_state, _effects} = Faction.handle_enlistador_click(state, :player, entity, npc_def)
 
       assert new_state.players[:player].faction == :none
     end
@@ -417,7 +417,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
           # Good — invalid faction is not accepted
           :ok
 
-        {:noreply, new_state} ->
+        {:ok, new_state, _effects} ->
           # Also acceptable if it's a no-op
           assert new_state.players[:player].faction == :none
       end
@@ -434,7 +434,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Faction.handle_enlistador_click(state, :player, entity, royal_enlistador_npc_def())
+      {:ok, new_state, _effects} = Faction.handle_enlistador_click(state, :player, entity, royal_enlistador_npc_def())
 
       assert new_state.players[:player].faction == :none
     end
@@ -444,7 +444,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Faction.handle_enlistador_click(state, :player, entity, royal_enlistador_npc_def())
+      {:ok, new_state, _effects} = Faction.handle_enlistador_click(state, :player, entity, royal_enlistador_npc_def())
 
       assert new_state.players[:player].faction == :none
     end
@@ -454,7 +454,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Faction.handle_enlistador_click(state, :player, entity, royal_enlistador_npc_def())
+      {:ok, new_state, _effects} = Faction.handle_enlistador_click(state, :player, entity, royal_enlistador_npc_def())
 
       assert new_state.players[:player].faction == :none
     end
@@ -466,7 +466,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Faction.handle_enlistador_click(state, :player, entity, royal_enlistador_npc_def())
+      {:ok, new_state, _effects} = Faction.handle_enlistador_click(state, :player, entity, royal_enlistador_npc_def())
 
       assert new_state.players[:player].faction == :royal_army
     end
@@ -476,7 +476,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Faction.handle_enlistador_click(state, :player, entity, royal_enlistador_npc_def())
+      {:ok, new_state, _effects} = Faction.handle_enlistador_click(state, :player, entity, royal_enlistador_npc_def())
 
       assert new_state.players[:player].faction == :royal_army
     end
@@ -486,7 +486,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Faction.handle_enlistador_click(state, :player, entity, royal_enlistador_npc_def())
+      {:ok, new_state, _effects} = Faction.handle_enlistador_click(state, :player, entity, royal_enlistador_npc_def())
 
       assert new_state.players[:player].faction == :royal_army
     end
@@ -499,7 +499,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Faction.handle_enlistador_click(state, :player, entity, royal_enlistador_npc_def())
+      {:ok, new_state, _effects} = Faction.handle_enlistador_click(state, :player, entity, royal_enlistador_npc_def())
 
       assert new_state.players[:player].faction == :none
     end
@@ -511,7 +511,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} =
+      {:ok, new_state, _effects} =
         Faction.handle_enlistador_click(state, :player, entity, chaos_enlistador_npc_def())
 
       assert new_state.players[:player].faction == :none
@@ -525,7 +525,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} =
+      {:ok, new_state, _effects} =
         Faction.handle_enlistador_click(state, :player, entity, chaos_enlistador_npc_def())
 
       assert new_state.players[:player].faction == :none
@@ -536,7 +536,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} =
+      {:ok, new_state, _effects} =
         Faction.handle_enlistador_click(state, :player, entity, chaos_enlistador_npc_def())
 
       assert new_state.players[:player].faction == :chaos_legion
@@ -582,7 +582,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{chaos_enl: chaos_npc})
 
-      {:noreply, new_state} = Faction.handle_leave_faction(state, :player)
+      {:ok, new_state, _effects} = Faction.handle_leave_faction(state, :player)
 
       # Must NOT leave — the nearby enlistador belongs to the wrong faction
       assert new_state.players[:player].faction == :royal_army
@@ -596,7 +596,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{royal_enl: royal_npc})
 
-      {:noreply, new_state} = Faction.handle_leave_faction(state, :player)
+      {:ok, new_state, _effects} = Faction.handle_leave_faction(state, :player)
 
       # Must NOT leave — the nearby enlistador belongs to the wrong faction
       assert new_state.players[:player].faction == :chaos_legion
@@ -610,7 +610,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{royal_enl: royal_npc})
 
-      {:noreply, new_state} = Faction.handle_leave_faction(state, :player)
+      {:ok, new_state, _effects} = Faction.handle_leave_faction(state, :player)
 
       # SHOULD leave successfully at own faction's enlistador
       assert new_state.players[:player].faction == :none
@@ -691,7 +691,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       :ets.insert(:ao_guilds, {{:guild, 999}, armada_guild})
       :ets.insert(:ao_guilds, {{:member, :player}, 999})
 
-      {:noreply, new_state} = Faction.handle_leave_faction(state, :player)
+      {:ok, new_state, _effects} = Faction.handle_leave_faction(state, :player)
 
       # Must NOT leave — leaving would make alignment ciudadana, incompatible with armada guild
       assert new_state.players[:player].faction == :royal_army
@@ -723,7 +723,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       :ets.insert(:ao_guilds, {{:guild, 999}, caotica_guild})
       :ets.insert(:ao_guilds, {{:member, :player}, 999})
 
-      {:noreply, new_state} = Faction.handle_leave_faction(state, :player)
+      {:ok, new_state, _effects} = Faction.handle_leave_faction(state, :player)
 
       # Must NOT leave — leaving would make alignment ciudadana, incompatible with caotica guild
       assert new_state.players[:player].faction == :chaos_legion
@@ -756,7 +756,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
       :ets.insert(:ao_guilds, {{:guild, 999}, neutral_guild})
       :ets.insert(:ao_guilds, {{:member, :player}, 999})
 
-      {:noreply, new_state} = Faction.handle_leave_faction(state, :player)
+      {:ok, new_state, _effects} = Faction.handle_leave_faction(state, :player)
 
       # SHOULD leave — neutral guilds accept any alignment
       assert new_state.players[:player].faction == :none
@@ -772,7 +772,7 @@ defmodule Arena.Adversarial.FactionAuthorityTest do
 
       # No guild entries in ETS — player is not in a guild
 
-      {:noreply, new_state} = Faction.handle_leave_faction(state, :player)
+      {:ok, new_state, _effects} = Faction.handle_leave_faction(state, :player)
 
       # SHOULD leave — no guild restriction
       assert new_state.players[:player].faction == :none

@@ -12,7 +12,7 @@ defmodule Arena.RuntimeSettingsIntegrationTest do
 
   alias Arena.Data.GameData
   alias AoEntities.PlayerEntity
-  alias Arena.Map.{Chat, CombatHandlers, Faction, InventoryHandlers, MapServer, Movement}
+  alias Arena.Map.{Chat, CombatHandlers, Effects, Faction, InventoryHandlers, MapServer, Movement}
 
   setup do
     case Arena.Settings.start_link() do
@@ -161,13 +161,15 @@ defmodule Arena.RuntimeSettingsIntegrationTest do
           sessions: %{sender.char_id => sender_pid, ally.char_id => ally_pid}
         )
 
-      {:noreply, state} = Faction.handle_faction_chat(state, sender.char_id, "primero")
-      {:noreply, state} = Faction.handle_faction_chat(state, sender.char_id, "segundo")
+      {:ok, state, eff1} = Faction.handle_faction_chat(state, sender.char_id, "primero")
+      Effects.run(state, eff1)
+      {:ok, state, eff2} = Faction.handle_faction_chat(state, sender.char_id, "segundo")
+      Effects.run(state, eff2)
 
       messages = collect_session_messages(100)
 
       ally_msgs =
-        for {:session, :ally, {:send_raw, raw}} <- messages, do: decode_faction_message(raw)
+        for {:session, :ally, {:egress, %{payload: raw}}} <- messages, do: decode_faction_message(raw)
 
       assert Enum.map(ally_msgs, & &1.message) == ["Tester: primero", "Tester: segundo"]
       assert Enum.all?(ally_msgs, &(&1.label == "MENSAJE_ARMADA"))

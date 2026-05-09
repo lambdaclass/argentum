@@ -924,18 +924,10 @@ defmodule Arena.Map.Social do
               true ->
                 # VB6: HandleReward — check faction_score & level vs rank
                 # requirements, then award rank-up + items for any newly-
-                # qualified rank.
-                #
-                # Faction.handle_faction_rank_up still uses the legacy
-                # `{:noreply, state}` contract. Until it migrates we adapt
-                # here: run it for its state mutation + side effects, then
-                # surface the post-state with no further effects (the
-                # rank-up packets and console messages already fired
-                # through the legacy shim from inside handle_faction_rank_up).
-                {:noreply, new_state} =
-                  Faction.handle_faction_rank_up(state, char_id, entity, entity.faction)
-
-                {:ok, new_state, []}
+                # qualified rank. Faction is on the effects contract: it
+                # returns `{:ok, state, effects}` and we surface those
+                # effects directly to the runner.
+                Faction.handle_faction_rank_up(state, char_id, entity, entity.faction)
             end
 
           {:error, _reason} ->

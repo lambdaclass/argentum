@@ -790,11 +790,16 @@ defmodule Arena.Map.MapServer do
   def handle_cast({:double_click, char_id, x, y}, state),
     do: Effects.run_handler(state, fn s -> NpcInteraction.handle_double_click(s, char_id, x, y) end)
   @impl true
-  def handle_cast({:enlist_faction, char_id, faction}, state), do: Faction.handle_enlist_faction(state, char_id, faction)
+  def handle_cast({:enlist_faction, char_id, faction}, state),
+    do: Effects.run_handler(state, fn s -> Faction.handle_enlist_faction(s, char_id, faction) end)
+
   @impl true
-  def handle_cast({:leave_faction, char_id}, state), do: Faction.handle_leave_faction(state, char_id)
+  def handle_cast({:leave_faction, char_id}, state),
+    do: Effects.run_handler(state, fn s -> Faction.handle_leave_faction(s, char_id) end)
+
   @impl true
-  def handle_cast({:faction_chat, char_id, message}, state), do: Faction.handle_faction_chat(state, char_id, message)
+  def handle_cast({:faction_chat, char_id, message}, state),
+    do: Effects.run_handler(state, fn s -> Faction.handle_faction_chat(s, char_id, message) end)
   @impl true
   def handle_cast({:pet_stand, char_id, pet_id}, state), do: Pets.handle_pet_stand(state, char_id, pet_id)
   @impl true

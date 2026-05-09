@@ -58,7 +58,6 @@ are the next migration targets.
 - `arena/lib/arena/map/chat.ex`
 - `arena/lib/arena/map/commerce.ex`
 - `arena/lib/arena/map/crafting.ex`
-- `arena/lib/arena/map/faction.ex`
 - `arena/lib/arena/map/gm/char_edit.ex`
 - `arena/lib/arena/map/gm/events.ex`
 - `arena/lib/arena/map/gm/moderation.ex`
@@ -98,4 +97,5 @@ module here:
 - `arena/lib/arena/map/bank.ex`
 - `arena/lib/arena/map/banking.ex`
 - `arena/lib/arena/map/trade.ex`
+- `arena/lib/arena/map/faction.ex`
 - `arena/lib/arena/npc_ai.ex`

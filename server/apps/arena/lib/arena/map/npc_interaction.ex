@@ -156,9 +156,7 @@ defmodule Arena.Map.NpcInteraction do
               {:ok, state, effects}
 
             npc_def.npc_type == @npc_type_enlistador ->
-              bridge_legacy(state, fn ->
-                Faction.handle_enlistador_click(state, char_id, entity, npc_def)
-              end)
+              Faction.handle_enlistador_click(state, char_id, entity, npc_def)
 
             npc_def.npc_type == @npc_type_banquero ->
               # Bank.handle_open_bank/4 returns `{:ok, state, reply, effects}`
