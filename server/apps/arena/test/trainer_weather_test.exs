@@ -41,7 +41,7 @@ defmodule Arena.TrainerWeatherTest do
       )
 
       # skill_index 5 = :short_weapons in @skill_order
-      {:noreply, new_state} = NpcInteraction.handle_train_skill(state, 1, 5)
+      {:ok, new_state, _effects} = NpcInteraction.handle_train_skill(state, 1, 5)
       player = new_state.players[1]
 
       # Skill points should NOT be spent — no trainer nearby
@@ -70,7 +70,7 @@ defmodule Arena.TrainerWeatherTest do
       # We need a trainer NPC def with npc_type 3 in GameData.
       # Since GameData may not have NPC 100, we test the rejection case
       # (no valid trainer) and confirm the gating exists.
-      {:noreply, new_state} = NpcInteraction.handle_train_skill(state, 1, 5)
+      {:ok, new_state, _effects} = NpcInteraction.handle_train_skill(state, 1, 5)
       player = new_state.players[1]
 
       # Without a real NPC def for id 100 in GameData, training should still fail

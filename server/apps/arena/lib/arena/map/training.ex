@@ -1,7 +1,19 @@
 defmodule Arena.Map.Training do
-  @moduledoc "NPC trainer interaction handlers (skill training, creature training)."
+  @moduledoc """
+  NPC trainer interaction handlers (skill training, creature training).
 
-  alias Arena.Map.Helpers
+  All public handlers return `{:ok, state, [Effect.t()]}` per the
+  map-layer effects contract. MapServer dispatches them through
+  `Arena.Map.Effects.run_handler/2` so side effects flow through the
+  egress queue rather than the legacy `{:send_raw, _}` shim.
+
+  The crafting fall-through (`handle_train_skill` -> `Crafting.handle_work`
+  for crafting skills with no trainer nearby) bridges Crafting's still-legacy
+  `{:noreply, state}` shape via `bridge_legacy/2`. Once Crafting migrates,
+  the bridge collapses to a direct delegation.
+  """
+
+  alias Arena.Map.{Effects, Helpers}
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
@@ -19,8 +31,6 @@ defmodule Arena.Map.Training do
   # VB6 constants
   @max_trainer_creatures 7
 
-  defp msg(state, char_id, message), do: Helpers.msg(state, char_id, message)
-
   def handle_train_skill(state, char_id, skill_index) do
     case Map.fetch(state.players, char_id) do
       {:ok, entity} ->
@@ -36,51 +46,27 @@ defmodule Arena.Map.Training do
 
         cond do
           skill_atom == nil ->
-            {:noreply, state}
+            {:ok, state, []}
 
           near_trainer and not trainer_accepts_skill?(trainer_npc_def, skill_atom) ->
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw,
-               Encoder.encode({:console_msg, %{message: "Este entrenador no enseña esa habilidad.", font_index: 0}})}
-            )
-
-            {:noreply, state}
+            {:ok, state,
+             [Effects.send(char_id, console("Este entrenador no enseña esa habilidad."))]}
 
           near_trainer and entity.skill_points <= 0 ->
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw,
-               Encoder.encode({:console_msg, %{message: "No tienes puntos de skill disponibles.", font_index: 0}})}
-            )
-
-            {:noreply, state}
+            {:ok, state,
+             [Effects.send(char_id, console("No tienes puntos de skill disponibles."))]}
 
           near_trainer and Map.get(entity.skills, skill_atom, 0) >= 100 ->
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw,
-               Encoder.encode({:console_msg, %{message: "Ya tienes el maximo en esa habilidad.", font_index: 0}})}
-            )
-
-            {:noreply, state}
+            {:ok, state,
+             [Effects.send(char_id, console("Ya tienes el maximo en esa habilidad."))]}
 
           near_trainer ->
             current = Map.get(entity.skills, skill_atom, 0)
             cost = max(current * 10, 10)
 
             if entity.gold < cost do
-              Helpers.send_to_session(
-                state.sessions,
-                char_id,
-                {:send_raw,
-                 Encoder.encode({:console_msg, %{message: "No tienes suficiente oro. Costo: #{cost}", font_index: 0}})}
-              )
-
-              {:noreply, state}
+              {:ok, state,
+               [Effects.send(char_id, console("No tienes suficiente oro. Costo: #{cost}"))]}
             else
               entity = %{
                 entity
@@ -92,49 +78,36 @@ defmodule Arena.Map.Training do
               players = Map.put(state.players, char_id, entity)
               state = %{state | players: players}
 
-              Helpers.send_to_session(
-                state.sessions,
-                char_id,
-                {:send_raw, Encoder.encode({:send_skills, %{skills: entity.skills}})}
-              )
+              effects = [
+                Effects.send(char_id, Encoder.encode({:send_skills, %{skills: entity.skills}})),
+                Effects.send(char_id, Encoder.encode({:update_gold, %{gold: entity.gold}})),
+                Effects.send(
+                  char_id,
+                  console(
+                    "Has entrenado! Costo: #{cost} oro. Skill points restantes: #{entity.skill_points}"
+                  )
+                )
+              ]
 
-              Helpers.send_to_session(
-                state.sessions,
-                char_id,
-                {:send_raw, Encoder.encode({:update_gold, %{gold: entity.gold}})}
-              )
-
-              Helpers.send_to_session(
-                state.sessions,
-                char_id,
-                {:send_raw,
-                 Encoder.encode(
-                   {:console_msg,
-                    %{
-                      message: "Has entrenado! Costo: #{cost} oro. Skill points restantes: #{entity.skill_points}",
-                      font_index: 0
-                    }}
-                 )}
-              )
-
-              {:noreply, state}
+              {:ok, state, effects}
             end
 
           skill_atom in @crafting_skills ->
-            Arena.Map.Crafting.handle_work(state, char_id, skill_atom)
+            # Crafting.handle_work/3 still returns `{:noreply, state}` and emits
+            # its own `{:send_raw, _}` packets through Helpers. We bridge by
+            # accepting the new state and surfacing an empty effects list — the
+            # legacy side channel has already fired by the time we return.
+            # Once Crafting migrates, this collapses into a direct delegation.
+            bridge_legacy(state, fn ->
+              Arena.Map.Crafting.handle_work(state, char_id, skill_atom)
+            end)
 
           true ->
-            Helpers.send_to_session(
-              state.sessions,
-              char_id,
-              {:send_raw, Encoder.encode({:console_msg, %{message: "No hay un entrenador cerca.", font_index: 0}})}
-            )
-
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("No hay un entrenador cerca."))]}
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
@@ -149,19 +122,20 @@ defmodule Arena.Map.Training do
             :not_found -> nil
           end
 
-        if trainer != nil and trainer.creatures != [] do
-          raw =
-            Encoder.encode({:trainer_creature_list, %{creature_names: trainer.creatures}})
+        effects =
+          if trainer != nil and trainer.creatures != [] do
+            raw =
+              Encoder.encode({:trainer_creature_list, %{creature_names: trainer.creatures}})
 
-          Helpers.send_to_session(state.sessions, char_id, {:send_raw, raw})
-        else
-          msg(state, char_id, "No hay criaturas disponibles para entrenar.")
-        end
+            [Effects.send(char_id, raw)]
+          else
+            [Effects.send(char_id, console("No hay criaturas disponibles para entrenar."))]
+          end
 
-        {:noreply, state}
+        {:ok, state, effects}
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
@@ -188,20 +162,19 @@ defmodule Arena.Map.Training do
 
         cond do
           instance_id == nil or npc_type != @npc_type_entrenador ->
-            msg(state, char_id, "Primero selecciona un entrenador.")
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("Primero selecciona un entrenador."))]}
 
           true ->
             case Map.get(state.npcs_live, instance_id) do
               nil ->
-                msg(state, char_id, "El entrenador no esta disponible.")
-                {:noreply, state}
+                {:ok, state,
+                 [Effects.send(char_id, console("El entrenador no esta disponible."))]}
 
               trainer_npc ->
                 # Check distance (VB6 uses implicit proximity from double-click, range 10)
                 if abs(trainer_npc.x - entity.x) > 10 or abs(trainer_npc.y - entity.y) > 10 do
-                  msg(state, char_id, "Estas demasiado lejos del entrenador.")
-                  {:noreply, state}
+                  {:ok, state,
+                   [Effects.send(char_id, console("Estas demasiado lejos del entrenador."))]}
                 else
                   do_train_creature(state, char_id, entity, trainer_npc, pet_index)
                 end
@@ -209,7 +182,7 @@ defmodule Arena.Map.Training do
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
@@ -218,12 +191,10 @@ defmodule Arena.Map.Training do
 
     cond do
       trainer_npc_def == nil ->
-        msg(state, char_id, "Entrenador no reconocido.")
-        {:noreply, state}
+        {:ok, state, [Effects.send(char_id, console("Entrenador no reconocido."))]}
 
       trainer_npc_def.npc_type != @npc_type_entrenador ->
-        msg(state, char_id, "Ese NPC no es un entrenador.")
-        {:noreply, state}
+        {:ok, state, [Effects.send(char_id, console("Ese NPC no es un entrenador."))]}
 
       true ->
         creatures = trainer_npc_def.creatures
@@ -239,13 +210,12 @@ defmodule Arena.Map.Training do
         cond do
           # VB6: PetIndex > 0 And PetIndex < NroCriaturas + 1
           pet_index < 1 or pet_index > length(creatures) ->
-            msg(state, char_id, "Indice de criatura invalido.")
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("Indice de criatura invalido."))]}
 
           # VB6: Mascotas < MAXMASCOTASENTRENADOR
           trainer_spawned_count >= @max_trainer_creatures ->
-            msg(state, char_id, "El entrenador no puede invocar mas criaturas.")
-            {:noreply, state}
+            {:ok, state,
+             [Effects.send(char_id, console("El entrenador no puede invocar mas criaturas."))]}
 
           true ->
             # creatures list stores NPC IDs as strings (parsed from CI1..CI5 in npcs.dat)
@@ -256,8 +226,7 @@ defmodule Arena.Map.Training do
                 creature_def = GameData.get_npc(creature_npc_id)
 
                 if creature_def == nil do
-                  msg(state, char_id, "Criatura no encontrada.")
-                  {:noreply, state}
+                  {:ok, state, [Effects.send(char_id, console("Criatura no encontrada."))]}
                 else
                   spawn_trainer_creature(
                     state,
@@ -269,8 +238,7 @@ defmodule Arena.Map.Training do
                 end
 
               :error ->
-                msg(state, char_id, "Criatura no encontrada.")
-                {:noreply, state}
+                {:ok, state, [Effects.send(char_id, console("Criatura no encontrada."))]}
             end
         end
     end
@@ -304,15 +272,36 @@ defmodule Arena.Map.Training do
         players: Map.put(state.players, char_id, player)
     }
 
-    # Broadcast NPC creation to nearby players
+    # Broadcast NPC creation to nearby players. The newly spawned NPC sits
+    # on (tx, ty), so `broadcast_visible_all` fans the character_create
+    # packet to every visible session including the summoner.
     raw = Encoder.encode(Helpers.npc_create_packet(npc_entity, creature_def))
 
-    Arena.Map.Visibility.broadcast_visible_all(state, tx, ty, fn pid ->
-      send(pid, {:send_raw, raw})
-    end)
-
     creature_name = creature_def.name || "la criatura"
-    msg(state, char_id, "El entrenador ha invocado a #{creature_name}.")
-    {:noreply, state}
+
+    effects = [
+      Effects.broadcast_visible_all(tx, ty, raw),
+      Effects.send(char_id, console("El entrenador ha invocado a #{creature_name}."))
+    ]
+
+    {:ok, state, effects}
+  end
+
+  # Adapter for legacy sub-handlers (currently `Crafting.handle_work/3`)
+  # that still return GenServer-flavoured `{:noreply, state}` and emit
+  # their packets through the legacy `{:send_raw, _}` shim. We accept the
+  # new state and surface zero effects — the legacy side channel has
+  # already fired by the time control returns.
+  defp bridge_legacy(default_state, fun) do
+    case fun.() do
+      {:reply, _result, new_state} -> {:ok, new_state, []}
+      {:noreply, new_state} -> {:ok, new_state, []}
+      {:ok, new_state, effects} -> {:ok, new_state, effects}
+      _ -> {:ok, default_state, []}
+    end
+  end
+
+  defp console(message) do
+    Encoder.encode({:console_msg, %{message: message, font_index: 0}})
   end
 end

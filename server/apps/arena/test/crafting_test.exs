@@ -502,7 +502,7 @@ defmodule Arena.CraftingTest do
       state = make_state(%{1 => entity})
 
       # skill_index 18 = :mining
-      {:noreply, new_state} = Arena.Map.NpcInteraction.handle_train_skill(state, 1, 18)
+      {:ok, new_state, _effects} = Arena.Map.NpcInteraction.handle_train_skill(state, 1, 18)
 
       # Should NOT spend skill points (no trainer), but should attempt crafting
       # Mining without pickaxe will fail with "Necesitas la herramienta adecuada"
@@ -521,7 +521,7 @@ defmodule Arena.CraftingTest do
       state = make_state(%{1 => entity})
 
       # skill_index 3 = :combat_weapons (not a crafting skill)
-      {:noreply, new_state} = Arena.Map.NpcInteraction.handle_train_skill(state, 1, 3)
+      {:ok, new_state, _effects} = Arena.Map.NpcInteraction.handle_train_skill(state, 1, 3)
       # Should NOT spend skill points
       assert new_state.players[1].skill_points == 5
     end

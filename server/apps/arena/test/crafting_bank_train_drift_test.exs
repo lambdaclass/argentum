@@ -257,7 +257,7 @@ defmodule Arena.CraftingBankTrainDriftTest do
       assert function_exported?(NpcInteraction, :handle_train_creature, 3),
              "NpcInteraction.handle_train_creature/3 must exist"
 
-      {:noreply, new_state} = NpcInteraction.handle_train_creature(state, 1, %{pet_index: 1})
+      {:ok, new_state, _effects} = NpcInteraction.handle_train_creature(state, 1, %{pet_index: 1})
 
       # Verify the function processes without crashing
       assert is_map(new_state)
@@ -290,7 +290,7 @@ defmodule Arena.CraftingBankTrainDriftTest do
         )
 
       # Pet index 0 is invalid (VB6: PetIndex > 0)
-      {:noreply, new_state} = NpcInteraction.handle_train_creature(state, 1, %{pet_index: 0})
+      {:ok, new_state, _effects} = NpcInteraction.handle_train_creature(state, 1, %{pet_index: 0})
       # State should be unchanged (no pet spawned)
       assert new_state.npcs_live == state.npcs_live
     end
@@ -312,7 +312,7 @@ defmodule Arena.CraftingBankTrainDriftTest do
           npcs_live: %{}
         )
 
-      {:noreply, new_state} = NpcInteraction.handle_train_creature(state, 1, %{pet_index: 1})
+      {:ok, new_state, _effects} = NpcInteraction.handle_train_creature(state, 1, %{pet_index: 1})
       assert new_state.npcs_live == state.npcs_live
     end
   end

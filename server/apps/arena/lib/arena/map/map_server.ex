@@ -777,7 +777,7 @@ defmodule Arena.Map.MapServer do
     do: Effects.run_handler(state, fn s -> Social.handle_request_atributes(s, char_id) end)
   @impl true
   def handle_cast({:train_skill, char_id, skill_index}, state),
-    do: Training.handle_train_skill(state, char_id, skill_index)
+    do: Effects.run_handler(state, fn s -> Training.handle_train_skill(s, char_id, skill_index) end)
 
   @impl true
   def handle_cast({:craft_item, char_id, skill_atom, item_id, amount, target_x, target_y}, state),
@@ -898,10 +898,11 @@ defmodule Arena.Map.MapServer do
   def handle_cast({:divorce, char_id}, state),
     do: Effects.run_handler(state, fn s -> Social.handle_divorce(s, char_id) end)
 
-  def handle_cast({:train_list, char_id}, state), do: Training.handle_train_list(state, char_id)
+  def handle_cast({:train_list, char_id}, state),
+    do: Effects.run_handler(state, fn s -> Training.handle_train_list(s, char_id) end)
 
   def handle_cast({:train_creature, char_id, payload}, state),
-    do: Training.handle_train_creature(state, char_id, payload)
+    do: Effects.run_handler(state, fn s -> Training.handle_train_creature(s, char_id, payload) end)
 
   def handle_cast({:bank_gold_transfer, char_id, target_name, amount}, state),
     do:

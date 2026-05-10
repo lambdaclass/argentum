@@ -253,7 +253,7 @@ defmodule Arena.BankMiscDriftTest do
       assert :not_found =
                Helpers.resolve_selected_npc(state, entity, [@npc_type_entrenador], 10)
 
-      {:noreply, _state} = NpcInteraction.handle_train_list(state, :player)
+      {:ok, _state, _effects} = NpcInteraction.handle_train_list(state, :player)
     end
 
     test "trainer at distance 6 should produce a creature list (VB6 allows <= 10)" do
@@ -271,7 +271,7 @@ defmodule Arena.BankMiscDriftTest do
         })
       state = make_map_state(entity, npcs_live: %{trainer_1: trainer})
 
-      {:noreply, _state} = NpcInteraction.handle_train_list(state, :player)
+      {:ok, _state, _effects} = NpcInteraction.handle_train_list(state, :player)
 
       # If trainer was found and has creatures, we get a trainer_creature_list packet.
       # If trainer was found but has no creatures, we get nothing (still valid — trainer was found).
@@ -313,7 +313,7 @@ defmodule Arena.BankMiscDriftTest do
              "Selected trainer at distance 10 should be found with VB6 Distancia <= 10"
 
       # Now verify the actual function also finds it by calling it
-      {:noreply, _state} = NpcInteraction.handle_train_list(state, :player)
+      {:ok, _state, _effects} = NpcInteraction.handle_train_list(state, :player)
     end
   end
 end
