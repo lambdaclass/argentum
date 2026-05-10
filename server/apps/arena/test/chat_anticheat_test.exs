@@ -5,7 +5,7 @@ defmodule Arena.ChatAnticheatTest do
   import Arena.Test.MapStateFactory
 
   alias AoEntities.PlayerEntity
-  alias Arena.Map.Chat
+  alias Arena.Map.{Chat, Effects}
 
   setup do
     case Arena.Settings.start_link() do
@@ -110,11 +110,12 @@ defmodule Arena.ChatAnticheatTest do
           sessions: %{sender.char_id => sender_pid, near.char_id => near_pid}
         )
 
-      {:noreply, new_state} = Chat.handle_chat(state, sender.char_id, "Hello!")
+      {:ok, new_state, effects} = Chat.handle_chat(state, sender.char_id, "Hello!")
+      Effects.run(new_state, effects)
 
       assert new_state == state
 
-      assert_receive {:session, :sender, {:send_raw, raw}}
+      assert_receive {:session, :sender, {:egress, %{payload: raw}}}
       assert decode_console_msg(raw).message == "Estás silenciado."
       refute_receive {:session, :near, _}, 50
     end
@@ -132,11 +133,12 @@ defmodule Arena.ChatAnticheatTest do
           sessions: %{sender.char_id => sender_pid, near.char_id => near_pid}
         )
 
-      {:noreply, new_state} = Chat.handle_yell(state, sender.char_id, "Help!")
+      {:ok, new_state, effects} = Chat.handle_yell(state, sender.char_id, "Help!")
+      Effects.run(new_state, effects)
 
       assert new_state == state
 
-      assert_receive {:session, :sender, {:send_raw, raw}}
+      assert_receive {:session, :sender, {:egress, %{payload: raw}}}
       assert decode_console_msg(raw).message == "Estas muerto."
       refute_receive {:session, :near, _}, 50
     end
@@ -165,12 +167,13 @@ defmodule Arena.ChatAnticheatTest do
       message = "sos un pelotudo"
       filtered = Arena.ChatFilter.filter(message)
 
-      {:noreply, new_state} = Chat.handle_chat(state, sender.char_id, message)
+      {:ok, new_state, effects} = Chat.handle_chat(state, sender.char_id, message)
+      Effects.run(new_state, effects)
 
       assert new_state.players[sender.char_id].last_chat_at > sender.last_chat_at
 
-      assert_receive {:session, :sender, {:send_raw, sender_raw}}
-      assert_receive {:session, :near, {:send_raw, near_raw}}
+      assert_receive {:session, :sender, {:egress, %{payload: sender_raw}}}
+      assert_receive {:session, :near, {:egress, %{payload: near_raw}}}
       refute_receive {:session, :far, _}, 50
 
       sender_packet = decode_chat_over_head(sender_raw)
@@ -198,10 +201,11 @@ defmodule Arena.ChatAnticheatTest do
       message = "pelotudo"
       filtered = Arena.ChatFilter.filter(message)
 
-      {:noreply, _state} = Chat.handle_yell(state, sender.char_id, message)
+      {:ok, new_state, effects} = Chat.handle_yell(state, sender.char_id, message)
+      Effects.run(new_state, effects)
 
-      assert_receive {:session, :sender, {:send_raw, sender_raw}}
-      assert_receive {:session, :near, {:send_raw, near_raw}}
+      assert_receive {:session, :sender, {:egress, %{payload: sender_raw}}}
+      assert_receive {:session, :near, {:egress, %{payload: near_raw}}}
 
       assert decode_chat_over_head(sender_raw).message == filtered
       assert decode_chat_over_head(near_raw).message == filtered
@@ -223,14 +227,18 @@ defmodule Arena.ChatAnticheatTest do
           sessions: %{sender.char_id => sender_pid, near.char_id => near_pid}
         )
 
-      {:noreply, state} = Chat.handle_chat(state, sender.char_id, "Chat attempt")
-      {:noreply, state} = Chat.handle_yell(state, sender.char_id, "Yell attempt")
-      {:noreply, state} = Chat.handle_chat(state, sender.char_id, "Chat again")
+      {:ok, state, eff1} = Chat.handle_chat(state, sender.char_id, "Chat attempt")
+      Effects.run(state, eff1)
+      {:ok, state, eff2} = Chat.handle_yell(state, sender.char_id, "Yell attempt")
+      Effects.run(state, eff2)
+      {:ok, state, eff3} = Chat.handle_chat(state, sender.char_id, "Chat again")
+      Effects.run(state, eff3)
 
       messages = collect_session_messages(100)
 
       sender_console_messages =
-        for {:session, :sender, {:send_raw, raw}} <- messages, do: decode_console_msg(raw).message
+        for {:session, :sender, {:egress, %{payload: raw}}} <- messages,
+            do: decode_console_msg(raw).message
 
       near_messages = for {:session, :near, _msg} <- messages, do: :near
 
@@ -254,16 +262,20 @@ defmodule Arena.ChatAnticheatTest do
           sessions: %{sender.char_id => sender_pid, near.char_id => near_pid}
         )
 
-      {:noreply, state} = Chat.handle_chat(state, sender.char_id, "first")
-      {:noreply, _state} = Chat.handle_chat(state, sender.char_id, "second")
+      {:ok, state, eff1} = Chat.handle_chat(state, sender.char_id, "first")
+      Effects.run(state, eff1)
+      {:ok, new_state, eff2} = Chat.handle_chat(state, sender.char_id, "second")
+      Effects.run(new_state, eff2)
 
       messages = collect_session_messages(100)
 
       sender_chat_messages =
-        for {:session, :sender, {:send_raw, raw}} <- messages, do: decode_chat_over_head(raw).message
+        for {:session, :sender, {:egress, %{payload: raw}}} <- messages,
+            do: decode_chat_over_head(raw).message
 
       near_chat_messages =
-        for {:session, :near, {:send_raw, raw}} <- messages, do: decode_chat_over_head(raw).message
+        for {:session, :near, {:egress, %{payload: raw}}} <- messages,
+            do: decode_chat_over_head(raw).message
 
       assert sender_chat_messages == ["first", "second"]
       assert near_chat_messages == ["first", "second"]
@@ -274,7 +286,8 @@ defmodule Arena.ChatAnticheatTest do
     test "nonexistent player is a clean no-op with no packets" do
       state = make_state(%{}, sessions: %{ghost: start_session(:ghost)})
 
-      {:noreply, new_state} = Chat.handle_yell(state, :ghost, "Hello!")
+      {:ok, new_state, effects} = Chat.handle_yell(state, :ghost, "Hello!")
+      Effects.run(new_state, effects)
 
       assert new_state == state
       refute_receive {:session, :ghost, _}, 50

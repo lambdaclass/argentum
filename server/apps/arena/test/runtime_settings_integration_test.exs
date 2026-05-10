@@ -130,16 +130,18 @@ defmodule Arena.RuntimeSettingsIntegrationTest do
           visibility_mode: :aoi_scan
         )
 
-      {:noreply, state} = Chat.handle_chat(state, sender.char_id, "first")
-      {:noreply, state} = Chat.handle_chat(state, sender.char_id, "second")
+      {:ok, state, eff1} = Chat.handle_chat(state, sender.char_id, "first")
+      Effects.run(state, eff1)
+      {:ok, state, eff2} = Chat.handle_chat(state, sender.char_id, "second")
+      Effects.run(state, eff2)
 
       messages = collect_session_messages(100)
 
       sender_msgs =
-        for {:session, :sender, {:send_raw, raw}} <- messages, do: decode_chat_over_head(raw)
+        for {:session, :sender, {:egress, %{payload: raw}}} <- messages, do: decode_chat_over_head(raw)
 
       near_msgs =
-        for {:session, :near, {:send_raw, raw}} <- messages, do: decode_chat_over_head(raw)
+        for {:session, :near, {:egress, %{payload: raw}}} <- messages, do: decode_chat_over_head(raw)
 
       assert Enum.map(sender_msgs, & &1.message) == ["first", "second"]
       assert Enum.map(near_msgs, & &1.message) == ["first", "second"]

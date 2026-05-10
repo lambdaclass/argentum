@@ -494,7 +494,7 @@ defmodule Arena.Adversarial.DuelCouncilAdversarialTest do
 
       state = base_state(sender, %{royal_mate: royal_mate})
 
-      {:noreply, _} = Chat.handle_chat(state, :sender, "/RMSG unauthorised")
+      {:ok, _, _effects} = Chat.handle_chat(state, :sender, "/RMSG unauthorised")
 
       messages = collect_console_messages(self())
 
@@ -522,7 +522,7 @@ defmodule Arena.Adversarial.DuelCouncilAdversarialTest do
 
       state = base_state(sender, %{chaos_mate: chaos_mate})
 
-      {:noreply, _} = Chat.handle_chat(state, :sender, "/CMSG infiltration attempt")
+      {:ok, _, _effects} = Chat.handle_chat(state, :sender, "/CMSG infiltration attempt")
 
       messages = collect_console_messages(self())
 
@@ -548,7 +548,7 @@ defmodule Arena.Adversarial.DuelCouncilAdversarialTest do
 
       state = base_state(sender, %{royal_mate: royal_mate})
 
-      {:noreply, _} = Chat.handle_chat(state, :sender, "/RMSG trolling")
+      {:ok, _, _effects} = Chat.handle_chat(state, :sender, "/RMSG trolling")
 
       messages = collect_console_messages(self())
 
@@ -572,7 +572,7 @@ defmodule Arena.Adversarial.DuelCouncilAdversarialTest do
 
       state = base_state(sender, %{royal_mate: royal_mate})
 
-      {:noreply, _} = Chat.handle_chat(state, :sender, "/RMSG both roles active")
+      {:ok, _, _effects} = Chat.handle_chat(state, :sender, "/RMSG both roles active")
 
       messages = collect_console_messages(self())
 
@@ -606,7 +606,7 @@ defmodule Arena.Adversarial.DuelCouncilAdversarialTest do
           e -> {:raised, e}
         end
 
-      assert {:noreply, _} = result
+      assert {:ok, _, _} = result
     end
 
     test "missing :council flag in entity is treated as not-council" do
@@ -628,7 +628,7 @@ defmodule Arena.Adversarial.DuelCouncilAdversarialTest do
 
       state = base_state(sender, %{royal_mate: royal_mate})
 
-      {:noreply, _} = Chat.handle_chat(state, :sender, "/RMSG missing council key")
+      {:ok, _, _effects} = Chat.handle_chat(state, :sender, "/RMSG missing council key")
 
       messages = collect_console_messages(self())
 
@@ -667,7 +667,7 @@ defmodule Arena.Adversarial.DuelCouncilAdversarialTest do
 
       state = base_state(sender, %{royal_mate: royal_mate})
 
-      {:noreply, _} = Chat.handle_chat(state, :sender, "/rmsg lowercase works")
+      {:ok, _, _effects} = Chat.handle_chat(state, :sender, "/rmsg lowercase works")
 
       messages = collect_console_messages(self())
 
@@ -690,7 +690,7 @@ defmodule Arena.Adversarial.DuelCouncilAdversarialTest do
 
       state = base_state(sender, %{royal_mate: royal_mate})
 
-      {:noreply, _} = Chat.handle_chat(state, :sender, "/RmSg mixed case works")
+      {:ok, _, _effects} = Chat.handle_chat(state, :sender, "/RmSg mixed case works")
 
       messages = collect_console_messages(self())
 

@@ -172,7 +172,7 @@ defmodule Arena.GmCommandsParityTest do
       t2 = target_player(3, "Bob", %{char_index: 3})
       state = make_map_state(%{1 => gm, 2 => t1, 3 => t2}, sessions: %{1 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/ONLINE")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/ONLINE")
 
       # Should receive a console message with the online count
       assert_receive {:send_raw, _}, 200
@@ -182,7 +182,7 @@ defmodule Arena.GmCommandsParityTest do
       gm = make_entity(%{name: "ConsGM", char_id: 1, char_index: 1, gm: true, gm_level: :consejero})
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/ONLINE")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/ONLINE")
 
       # Consejero should be able to use /ONLINE (inspection-tier command)
       assert_receive {:send_raw, _}, 200
@@ -198,7 +198,7 @@ defmodule Arena.GmCommandsParityTest do
       gm = admin_gm()
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/RAIN")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/RAIN")
 
       assert new_state.meta.rain == true, "rain should be toggled on"
     end
@@ -208,7 +208,7 @@ defmodule Arena.GmCommandsParityTest do
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
       state = %{state | meta: %{state.meta | rain: true}}
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/RAIN")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/RAIN")
 
       assert new_state.meta.rain == false, "rain should be toggled off"
     end
@@ -233,7 +233,7 @@ defmodule Arena.GmCommandsParityTest do
           sessions: %{1 => self(), 2 => alice_pid, 3 => bob_pid}
         )
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/KICKALLCHARS")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/KICKALLCHARS")
 
       # The GM should receive a confirmation console message
       assert_receive {:send_raw, _}, 200
@@ -246,7 +246,7 @@ defmodule Arena.GmCommandsParityTest do
       gm = make_entity(%{name: "DiosGM", char_id: 1, char_index: 1, gm: true, gm_level: :dios})
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/KICKALLCHARS")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/KICKALLCHARS")
 
       # Should be rejected — dios cannot use admin-only commands
       assert new_state == state
@@ -263,7 +263,7 @@ defmodule Arena.GmCommandsParityTest do
       target = target_player(2, "Target", %{body_id: 1, base_body_id: 1})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/SETBODY Target 210")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/SETBODY Target 210")
 
       updated = new_state.players[2]
       assert updated.body_id == 210, "body_id should be set to 210, got #{updated.body_id}"
@@ -273,7 +273,7 @@ defmodule Arena.GmCommandsParityTest do
       gm = admin_gm()
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/SETBODY Nobody 210")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SETBODY Nobody 210")
 
       assert_receive {:send_raw, _}, 200
     end
@@ -283,7 +283,7 @@ defmodule Arena.GmCommandsParityTest do
       target = target_player()
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/SETBODY Target abc")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SETBODY Target abc")
 
       assert_receive {:send_raw, _}, 200
     end
@@ -299,7 +299,7 @@ defmodule Arena.GmCommandsParityTest do
       target = target_player(2, "Target", %{head_id: 1})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/SETHEAD Target 45")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/SETHEAD Target 45")
 
       updated = new_state.players[2]
       assert updated.head_id == 45, "head_id should be set to 45, got #{updated.head_id}"
@@ -309,7 +309,7 @@ defmodule Arena.GmCommandsParityTest do
       gm = admin_gm()
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/SETHEAD Nobody 45")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SETHEAD Nobody 45")
 
       assert_receive {:send_raw, _}, 200
     end
@@ -325,7 +325,7 @@ defmodule Arena.GmCommandsParityTest do
       target = target_player(2, "Target", %{body_id: 1, base_body_id: 1})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/SETSKIN Target 300")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/SETSKIN Target 300")
 
       updated = new_state.players[2]
       assert updated.body_id == 300, "body_id should be set to 300 via /SETSKIN, got #{updated.body_id}"
@@ -342,7 +342,7 @@ defmodule Arena.GmCommandsParityTest do
       target = target_player(2, "Target", %{gold: 100})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/SETGOLD Target 5000")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/SETGOLD Target 5000")
 
       updated = new_state.players[2]
       assert updated.gold == 5000, "gold should be set to 5000, got #{updated.gold}"
@@ -353,7 +353,7 @@ defmodule Arena.GmCommandsParityTest do
       target = target_player(2, "Target", %{gold: 100})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/SETGOLD Target -500")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/SETGOLD Target -500")
 
       updated = new_state.players[2]
       assert updated.gold == 0, "gold should be clamped to 0, got #{updated.gold}"
@@ -363,7 +363,7 @@ defmodule Arena.GmCommandsParityTest do
       gm = admin_gm()
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/SETGOLD Nobody 5000")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SETGOLD Nobody 5000")
 
       assert_receive {:send_raw, _}, 200
     end
@@ -379,7 +379,7 @@ defmodule Arena.GmCommandsParityTest do
       target = target_player(2, "Target", %{level: 10})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/SETLEVEL Target 40")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/SETLEVEL Target 40")
 
       updated = new_state.players[2]
       assert updated.level == 40, "level should be set to 40, got #{updated.level}"
@@ -390,7 +390,7 @@ defmodule Arena.GmCommandsParityTest do
       target = target_player(2, "Target", %{level: 10})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/SETLEVEL Target 999")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/SETLEVEL Target 999")
 
       updated = new_state.players[2]
       assert updated.level == 50, "level should be clamped to 50, got #{updated.level}"
@@ -400,7 +400,7 @@ defmodule Arena.GmCommandsParityTest do
       gm = admin_gm()
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/SETLEVEL Nobody 25")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SETLEVEL Nobody 25")
 
       assert_receive {:send_raw, _}, 200
     end
@@ -416,7 +416,7 @@ defmodule Arena.GmCommandsParityTest do
       target = target_player(2, "Target", %{skills: %{magic: 50, combat: 30}})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/SETSKILL Target magic 100")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/SETSKILL Target magic 100")
 
       updated = new_state.players[2]
       assert updated.skills[:magic] == 100, "magic skill should be set to 100"
@@ -427,7 +427,7 @@ defmodule Arena.GmCommandsParityTest do
       target = target_player(2, "Target", %{skills: %{magic: 50}})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/SETSKILL Target magic 200")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/SETSKILL Target magic 200")
 
       updated = new_state.players[2]
       assert updated.skills[:magic] == 100, "skill should be clamped to 100"
@@ -437,7 +437,7 @@ defmodule Arena.GmCommandsParityTest do
       gm = admin_gm()
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/SETSKILL Nobody magic 100")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SETSKILL Nobody magic 100")
 
       assert_receive {:send_raw, _}, 200
     end
@@ -453,7 +453,7 @@ defmodule Arena.GmCommandsParityTest do
       target = target_player(2, "Target", %{x: 42, y: 73})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/WHERECHAR Target")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/WHERECHAR Target")
 
       assert_receive {:send_raw, _}, 200
     end
@@ -462,7 +462,7 @@ defmodule Arena.GmCommandsParityTest do
       gm = admin_gm()
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/WHERECHAR Nobody")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/WHERECHAR Nobody")
 
       assert_receive {:send_raw, _}, 200
     end
@@ -478,7 +478,7 @@ defmodule Arena.GmCommandsParityTest do
       target = target_player(2, "Target", %{account_id: "acc_42"})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/IPCHAR Target")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/IPCHAR Target")
 
       assert_receive {:send_raw, _}, 200
     end
@@ -487,7 +487,7 @@ defmodule Arena.GmCommandsParityTest do
       gm = admin_gm()
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/IPCHAR Nobody")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/IPCHAR Nobody")
 
       assert_receive {:send_raw, _}, 200
     end
@@ -502,7 +502,7 @@ defmodule Arena.GmCommandsParityTest do
       gm = admin_gm()
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/SYSTEMINFO")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SYSTEMINFO")
 
       assert_receive {:send_raw, _}, 200
     end
@@ -518,7 +518,7 @@ defmodule Arena.GmCommandsParityTest do
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
       # /UNBAN is routed as an alias for /UNBANCUENTA
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/UNBAN SomeName")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/UNBAN SomeName")
 
       assert_receive {:send_raw, _}, 200
     end
@@ -534,7 +534,7 @@ defmodule Arena.GmCommandsParityTest do
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
       # Should route to the spawn NPC handler (may fail with "NPC not found" but won't crash)
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/SPAWN 1")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SPAWN 1")
 
       assert_receive {:send_raw, _}, 200
     end

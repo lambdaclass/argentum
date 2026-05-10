@@ -70,6 +70,23 @@ defmodule Arena.Map.Effects do
   end
 
   @doc """
+  Broadcast `packet` to every player within a custom (`range_x`, `range_y`)
+  rectangle around (x, y), including the origin. Used for yell, which has
+  a wider radius than the standard AoI.
+  """
+  @spec broadcast_range(
+          pos_integer(),
+          pos_integer(),
+          pos_integer(),
+          pos_integer(),
+          binary(),
+          keyword()
+        ) :: Arena.Map.Effect.t()
+  def broadcast_range(x, y, range_x, range_y, packet, opts \\ []) when is_binary(packet) do
+    {:broadcast_range, x, y, range_x, range_y, build_envelope(packet, opts)}
+  end
+
+  @doc """
   Broadcast `packet` to every player whose AoI covers (x, y), skipping
   `exclude_char_id`. Used for animation packets (e.g. `char_swing`,
   `blocked_with_shield_other`) where the originating client renders the
@@ -236,6 +253,12 @@ defmodule Arena.Map.Effects do
 
   defp dispatch(state, {:broadcast_visible_all, x, y, outbound}) do
     Visibility.broadcast_visible_all(state, x, y, fn pid ->
+      AoSession.Egress.enqueue(pid, outbound)
+    end)
+  end
+
+  defp dispatch(state, {:broadcast_range, x, y, range_x, range_y, outbound}) do
+    Visibility.broadcast_range(state, x, y, range_x, range_y, fn pid ->
       AoSession.Egress.enqueue(pid, outbound)
     end)
   end

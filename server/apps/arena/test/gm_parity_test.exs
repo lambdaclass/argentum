@@ -172,7 +172,7 @@ defmodule Arena.GmParityTest do
       target = make_entity(%{name: "Victim", char_id: 2, char_index: 2, gm: false, gm_level: nil})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/INFO Victim")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/INFO Victim")
     end
 
     test "consejero cannot use /KICK (moderation)" do
@@ -180,7 +180,7 @@ defmodule Arena.GmParityTest do
       target = make_entity(%{name: "Victim", char_id: 2, char_index: 2, gm: false, gm_level: nil})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/KICK Victim")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/KICK Victim")
 
       # Target should still be in the map — the command should have been rejected
       assert Map.has_key?(new_state.players, 2)
@@ -193,7 +193,7 @@ defmodule Arena.GmParityTest do
       target = make_entity(%{name: "Victim", char_id: 2, char_index: 2, gm: false, gm_level: nil, x: 80, y: 80})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/GOTO Victim")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/GOTO Victim")
 
       # State should be unchanged — command rejected
       assert new_state == state
@@ -204,7 +204,7 @@ defmodule Arena.GmParityTest do
       target = make_entity(%{name: "Victim", char_id: 2, char_index: 2, gm: false, gm_level: nil})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/GIVEITEM Victim 100 1")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/GIVEITEM Victim 100 1")
 
       # State should be unchanged — command rejected
       assert new_state == state
@@ -217,7 +217,7 @@ defmodule Arena.GmParityTest do
       target = make_entity(%{name: "Victim", char_id: 2, char_index: 2, gm: false, gm_level: nil})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/KICK Victim")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/KICK Victim")
       # Should not be rejected — command goes through
     end
 
@@ -226,7 +226,7 @@ defmodule Arena.GmParityTest do
       target = make_entity(%{name: "Victim", char_id: 2, char_index: 2, gm: false, gm_level: nil})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/INFO Victim")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/INFO Victim")
     end
 
     test "semi_dios cannot use /GIVEITEM (char_edit)" do
@@ -234,7 +234,7 @@ defmodule Arena.GmParityTest do
       target = make_entity(%{name: "Victim", char_id: 2, char_index: 2, gm: false, gm_level: nil})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/GIVEITEM Victim 100 1")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/GIVEITEM Victim 100 1")
 
       # State should be unchanged — command rejected
       assert new_state == state
@@ -244,7 +244,7 @@ defmodule Arena.GmParityTest do
       gm = make_entity(%{name: "SemiGM", char_id: 1, char_index: 1, gm: true, gm_level: :semi_dios})
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/CLEANWORLD")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/CLEANWORLD")
 
       # State should be unchanged — command rejected
       assert new_state == state
@@ -257,7 +257,7 @@ defmodule Arena.GmParityTest do
       target = make_entity(%{name: "Victim", char_id: 2, char_index: 2, gm: false, gm_level: nil, dead: true, hp: 0})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/REVIVE Victim")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/REVIVE Victim")
 
       revived = new_state.players[2]
       assert revived.dead == false
@@ -269,14 +269,14 @@ defmodule Arena.GmParityTest do
       target = make_entity(%{name: "Victim", char_id: 2, char_index: 2, gm: false, gm_level: nil})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/KICK Victim")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/KICK Victim")
     end
 
     test "dios cannot use /CLEANWORLD (admin-only)" do
       gm = make_entity(%{name: "DiosGM", char_id: 1, char_index: 1, gm: true, gm_level: :dios})
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/CLEANWORLD")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/CLEANWORLD")
 
       # State should be unchanged — command rejected
       assert new_state == state
@@ -289,7 +289,7 @@ defmodule Arena.GmParityTest do
       target = make_entity(%{name: "Victim", char_id: 2, char_index: 2, gm: false, gm_level: nil})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/MUTE Victim 5")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/MUTE Victim 5")
 
       # Mute should have been applied (state changed)
       updated = new_state.players[2]
@@ -301,7 +301,7 @@ defmodule Arena.GmParityTest do
       target = make_entity(%{name: "Victim", char_id: 2, char_index: 2, gm: false, gm_level: nil})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/KICK Victim")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/KICK Victim")
     end
 
     test "admin can use /INFO" do
@@ -309,7 +309,7 @@ defmodule Arena.GmParityTest do
       target = make_entity(%{name: "Victim", char_id: 2, char_index: 2, gm: false, gm_level: nil})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/INFO Victim")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/INFO Victim")
     end
   end
 
@@ -360,7 +360,7 @@ defmodule Arena.GmParityTest do
       target = make_entity(%{name: "Target", char_id: 2, char_index: 2, gm: false, gm_level: nil, x: 80, y: 80})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/SUMMON Target")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SUMMON Target")
 
       # The summon should send a transfer message to the target's session
       # (teleporting them to the GM's location)
@@ -371,7 +371,7 @@ defmodule Arena.GmParityTest do
       gm = make_entity(%{name: "GM", char_id: 1, char_index: 1, gm: true, gm_level: :admin})
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/SUMMON Nobody")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SUMMON Nobody")
     end
   end
 
@@ -385,7 +385,7 @@ defmodule Arena.GmParityTest do
       target = make_entity(%{name: "Prisoner", char_id: 2, char_index: 2, gm: false, gm_level: nil, penalty: 30})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/UNJAIL Prisoner")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/UNJAIL Prisoner")
 
       updated = new_state.players[2]
       assert updated.penalty == 0, "penalty should be cleared to 0, got #{updated.penalty}"
@@ -395,7 +395,7 @@ defmodule Arena.GmParityTest do
       gm = make_entity(%{name: "GM", char_id: 1, char_index: 1, gm: true, gm_level: :admin})
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/UNJAIL Nobody")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/UNJAIL Nobody")
     end
   end
 
@@ -409,7 +409,7 @@ defmodule Arena.GmParityTest do
       target = make_entity(%{name: "Sailor", char_id: 2, char_index: 2, gm: false, gm_level: nil, navigating: false})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/NAVIGANDO Sailor")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/NAVIGANDO Sailor")
 
       updated = new_state.players[2]
       assert updated.navigating == true, "navigating should be toggled to true"
@@ -420,7 +420,7 @@ defmodule Arena.GmParityTest do
       target = make_entity(%{name: "Sailor", char_id: 2, char_index: 2, gm: false, gm_level: nil, navigating: true})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/NAVIGANDO Sailor")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/NAVIGANDO Sailor")
 
       updated = new_state.players[2]
       assert updated.navigating == false, "navigating should be toggled to false"
@@ -430,7 +430,7 @@ defmodule Arena.GmParityTest do
       gm = make_entity(%{name: "GM", char_id: 1, char_index: 1, gm: true, gm_level: :admin})
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/NAVIGANDO Nobody")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/NAVIGANDO Nobody")
     end
   end
 
@@ -444,7 +444,7 @@ defmodule Arena.GmParityTest do
       target = make_entity(%{name: "Criminal", char_id: 2, char_index: 2, gm: false, gm_level: nil, criminal: true})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/RMCRIMINAL Criminal")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/RMCRIMINAL Criminal")
 
       updated = new_state.players[2]
       assert updated.criminal == false, "criminal should be set to false"
@@ -454,7 +454,7 @@ defmodule Arena.GmParityTest do
       gm = make_entity(%{name: "GM", char_id: 1, char_index: 1, gm: true, gm_level: :admin})
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/RMCRIMINAL Nobody")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/RMCRIMINAL Nobody")
     end
   end
 
@@ -464,7 +464,7 @@ defmodule Arena.GmParityTest do
       target = make_entity(%{name: "Citizen", char_id: 2, char_index: 2, gm: false, gm_level: nil, criminal: false})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, new_state} = Chat.handle_chat(state, 1, "/RMCITIZEN Citizen")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, 1, "/RMCITIZEN Citizen")
 
       updated = new_state.players[2]
       assert updated.criminal == true, "criminal should be set to true"
@@ -474,7 +474,7 @@ defmodule Arena.GmParityTest do
       gm = make_entity(%{name: "GM", char_id: 1, char_index: 1, gm: true, gm_level: :admin})
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:noreply, _state} = Chat.handle_chat(state, 1, "/RMCITIZEN Nobody")
+      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/RMCITIZEN Nobody")
     end
   end
 end

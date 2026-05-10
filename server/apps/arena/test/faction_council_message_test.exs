@@ -210,7 +210,7 @@ defmodule Arena.FactionCouncilMessageTest do
           meta: %{rain: false, sin_invi_ocul: false}
         )
 
-      {:noreply, _new_state} =
+      {:ok, _new_state, _effects} =
         Chat.handle_chat(state, :sender, "/RMSG Por el rey!")
 
       # The sender's own pid should NOT receive any [Armada Real] broadcast
@@ -257,7 +257,7 @@ defmodule Arena.FactionCouncilMessageTest do
           meta: %{rain: false, sin_invi_ocul: false}
         )
 
-      {:noreply, _new_state} =
+      {:ok, _new_state, _effects} =
         Chat.handle_chat(state, :sender, "/CMSG Glory to chaos!")
 
       messages = collect_console_messages(self())
@@ -318,7 +318,7 @@ defmodule Arena.FactionCouncilMessageTest do
           meta: %{rain: false, sin_invi_ocul: false}
         )
 
-      {:noreply, _new_state} =
+      {:ok, _new_state, _effects} =
         Chat.handle_chat(state, :sender, "/CMSG Por el caos!")
 
       messages = collect_console_messages(self())
@@ -362,7 +362,7 @@ defmodule Arena.FactionCouncilMessageTest do
           meta: %{rain: false, sin_invi_ocul: false}
         )
 
-      {:noreply, _new_state} =
+      {:ok, _new_state, _effects} =
         Chat.handle_chat(state, :sender, "/RMSG unauthorised broadcast")
 
       messages = collect_console_messages(self())
@@ -403,7 +403,7 @@ defmodule Arena.FactionCouncilMessageTest do
           meta: %{rain: false, sin_invi_ocul: false}
         )
 
-      {:noreply, _new_state} =
+      {:ok, _new_state, _effects} =
         Chat.handle_chat(state, :sender, "/CMSG unauthorised chaos broadcast")
 
       messages = collect_console_messages(self())
@@ -446,7 +446,7 @@ defmodule Arena.FactionCouncilMessageTest do
           meta: %{rain: false, sin_invi_ocul: false}
         )
 
-      {:noreply, _} = Chat.handle_chat(state, :sender, "/RMSG gm broadcast")
+      {:ok, _, _effects} = Chat.handle_chat(state, :sender, "/RMSG gm broadcast")
 
       messages = collect_console_messages(self())
 

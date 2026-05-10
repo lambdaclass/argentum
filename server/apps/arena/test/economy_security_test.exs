@@ -9,7 +9,7 @@ defmodule Arena.EconomySecurityTest do
   use ExUnit.Case, async: true
 
   alias Arena.Data.GameData
-  alias Arena.Map.{Chat, Commerce, Bank, Faction, Movement, NpcInteraction, Social}
+  alias Arena.Map.{Chat, Commerce, Bank, Effects, Faction, Movement, NpcInteraction, Social}
 
   import Arena.Test.MapStateFactory
 
@@ -532,11 +532,12 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :player, "I should be muted")
+      {:ok, new_state, effects} = Chat.handle_chat(state, :player, "I should be muted")
+      Effects.run(new_state, effects)
       # State should not change (no last_chat_at update)
       assert new_state.players[:player].last_chat_at == entity.last_chat_at
-      # Player should receive the "silenciado" message
-      assert_receive {:send_raw, _}
+      # Player should receive the "silenciado" message via the egress envelope.
+      assert_receive {:egress, _}
     end
 
     test "unmuted player (muted_until=0) can send chat messages" do
@@ -544,7 +545,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :player, "Hello!")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :player, "Hello!")
       # last_chat_at should be updated
       assert new_state.players[:player].last_chat_at > entity.last_chat_at
     end
@@ -556,7 +557,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :player, "I can talk again!")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :player, "I can talk again!")
       assert new_state.players[:player].last_chat_at > entity.last_chat_at
     end
   end
@@ -569,10 +570,11 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :player, "Second message too fast")
+      {:ok, new_state, effects} = Chat.handle_chat(state, :player, "Second message too fast")
+      Effects.run(new_state, effects)
       # last_chat_at should NOT be updated (message was rate-limited)
       assert new_state.players[:player].last_chat_at == entity.last_chat_at
-      assert_receive {:send_raw, _}
+      assert_receive {:egress, _}
     end
 
     test "sending message after cooldown is allowed" do
@@ -582,7 +584,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :player, "This should work")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :player, "This should work")
       assert new_state.players[:player].last_chat_at > entity.last_chat_at
     end
   end
@@ -590,7 +592,7 @@ defmodule Arena.EconomySecurityTest do
   describe "chat for non-existent player" do
     test "chat for unknown char_id is silently ignored" do
       state = make_map_state(%{})
-      {:noreply, new_state} = Chat.handle_chat(state, :unknown, "Hello")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :unknown, "Hello")
       assert new_state == state
     end
   end

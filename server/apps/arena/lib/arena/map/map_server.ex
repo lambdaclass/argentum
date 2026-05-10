@@ -737,11 +737,13 @@ defmodule Arena.Map.MapServer do
     do: Movement.handle_change_heading(state, char_id, heading)
 
   @impl true
-  def handle_cast({:chat, char_id, message}, state), do: Chat.handle_chat(state, char_id, message)
+  def handle_cast({:chat, char_id, message}, state),
+    do: Effects.run_handler(state, fn s -> Chat.handle_chat(s, char_id, message) end)
   @impl true
   def handle_cast({:gm_rain_toggle, char_id}, state), do: GmCommands.handle_gm_rain_toggle(state, char_id)
   @impl true
-  def handle_cast({:yell, char_id, message}, state), do: Chat.handle_yell(state, char_id, message)
+  def handle_cast({:yell, char_id, message}, state),
+    do: Effects.run_handler(state, fn s -> Chat.handle_yell(s, char_id, message) end)
   @impl true
   def handle_cast({:rest, char_id}, state),
     do: Effects.run_handler(state, fn s -> Healing.handle_rest(s, char_id) end)
