@@ -1046,7 +1046,7 @@ defmodule Arena.GmAdversarialTest do
       state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
 
       {:ok, _new_state, _effects} = Chat.handle_chat(state, :gm_player, "/GIVEITEM Victim abc xyz")
-      assert_receive {:send_raw, _raw}
+      assert_receive {:egress, _raw}
     end
 
     test "/EDITCHAR with invalid option returns usage" do
@@ -1056,7 +1056,7 @@ defmodule Arena.GmAdversarialTest do
       state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
 
       {:ok, _new_state, _effects} = Chat.handle_chat(state, :gm_player, "/EDITCHAR Victim 99 abc")
-      assert_receive {:send_raw, _raw}
+      assert_receive {:egress, _raw}
     end
 
     test "/BAN with non-numeric days returns usage" do
@@ -1122,7 +1122,7 @@ defmodule Arena.GmAdversarialTest do
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
       {:ok, _new_state, _effects} = Chat.handle_chat(state, :gm_player, "/REVIVE GhostPlayer")
-      assert_receive {:send_raw, _raw}
+      assert_receive {:egress, _raw}
     end
 
     test "/UNMUTE targeting non-existent player returns not found" do
@@ -1203,7 +1203,7 @@ defmodule Arena.GmAdversarialTest do
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
       {:ok, _new_state, _effects} = Chat.handle_chat(state, :gm_player, "/ALTERNAME GhostPlayer NewName")
-      assert_receive {:send_raw, _raw}
+      assert_receive {:egress, _raw}
     end
   end
 

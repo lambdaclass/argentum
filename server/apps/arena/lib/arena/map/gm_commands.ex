@@ -1,7 +1,7 @@
 defmodule Arena.Map.GmCommands do
   @moduledoc "GM command parser/router. Dispatches to family modules."
 
-  alias Arena.Map.Helpers
+  alias Arena.Map.{Effects, Helpers}
   alias AoProtocol.Server.Encoder
 
   alias Arena.Map.Gm.{
@@ -320,58 +320,90 @@ defmodule Arena.Map.GmCommands do
         target_name = Enum.at(parts, 1)
         Moderation.gm_rm_citizen(state, char_id, target_name)
 
-      # CharEdit
+      # CharEdit (effects contract — wrapped via Effects.run_handler/2)
       ["/GIVEITEM", _name, item_str, amount_str] ->
         target_name = Enum.at(parts, 1)
-        CharEdit.gm_give_item(state, char_id, target_name, item_str, amount_str)
+
+        Effects.run_handler(state, fn s ->
+          CharEdit.gm_give_item(s, char_id, target_name, item_str, amount_str)
+        end)
 
       ["/EDITCHAR", _name, option_str, arg1] ->
         target_name = Enum.at(parts, 1)
-        CharEdit.gm_edit_char(state, char_id, target_name, option_str, arg1)
+
+        Effects.run_handler(state, fn s ->
+          CharEdit.gm_edit_char(s, char_id, target_name, option_str, arg1)
+        end)
 
       ["/ALTERNAME", _old, _new] ->
         old_name = Enum.at(parts, 1)
         new_name = Enum.at(parts, 2)
-        CharEdit.gm_alter_name(state, char_id, old_name, new_name)
+
+        Effects.run_handler(state, fn s ->
+          CharEdit.gm_alter_name(s, char_id, old_name, new_name)
+        end)
 
       ["/REVIVE", _name_upper] ->
         target_name = Enum.at(parts, 1)
-        CharEdit.gm_revive(state, char_id, target_name)
+        Effects.run_handler(state, fn s -> CharEdit.gm_revive(s, char_id, target_name) end)
 
       ["/SHOWNAME"] ->
-        CharEdit.gm_show_name(state, char_id, entity)
+        Effects.run_handler(state, fn s -> CharEdit.gm_show_name(s, char_id, entity) end)
 
       ["/SETDESC" | _rest] ->
         desc = String.trim_leading(String.trim(message), "/SETDESC ")
-        CharEdit.gm_set_description(state, char_id, entity, desc)
+
+        Effects.run_handler(state, fn s ->
+          CharEdit.gm_set_description(s, char_id, entity, desc)
+        end)
 
       ["/SETSPEED", speed_str] ->
-        CharEdit.gm_set_speed(state, char_id, entity, speed_str)
+        Effects.run_handler(state, fn s ->
+          CharEdit.gm_set_speed(s, char_id, entity, speed_str)
+        end)
 
       ["/SETBODY", _name, body_str] ->
         target_name = Enum.at(parts, 1)
-        CharEdit.gm_set_body(state, char_id, target_name, body_str)
+
+        Effects.run_handler(state, fn s ->
+          CharEdit.gm_set_body(s, char_id, target_name, body_str)
+        end)
 
       ["/SETHEAD", _name, head_str] ->
         target_name = Enum.at(parts, 1)
-        CharEdit.gm_set_head(state, char_id, target_name, head_str)
+
+        Effects.run_handler(state, fn s ->
+          CharEdit.gm_set_head(s, char_id, target_name, head_str)
+        end)
 
       ["/SETSKIN", _name, body_str] ->
         target_name = Enum.at(parts, 1)
-        CharEdit.gm_set_body(state, char_id, target_name, body_str)
+
+        Effects.run_handler(state, fn s ->
+          CharEdit.gm_set_body(s, char_id, target_name, body_str)
+        end)
 
       ["/SETGOLD", _name, gold_str] ->
         target_name = Enum.at(parts, 1)
-        CharEdit.gm_set_gold(state, char_id, target_name, gold_str)
+
+        Effects.run_handler(state, fn s ->
+          CharEdit.gm_set_gold(s, char_id, target_name, gold_str)
+        end)
 
       ["/SETLEVEL", _name, level_str] ->
         target_name = Enum.at(parts, 1)
-        CharEdit.gm_set_level(state, char_id, target_name, level_str)
+
+        Effects.run_handler(state, fn s ->
+          CharEdit.gm_set_level(s, char_id, target_name, level_str)
+        end)
 
       ["/SETSKILL", _name, _skill_str, value_str] ->
         target_name = Enum.at(parts, 1)
         skill_name = Enum.at(parts, 2)
-        CharEdit.gm_set_skill(state, char_id, target_name, skill_name, value_str)
+
+        Effects.run_handler(state, fn s ->
+          CharEdit.gm_set_skill(s, char_id, target_name, skill_name, value_str)
+        end)
 
       # Events
       ["/SPAWNNPC", npc_id_str] ->

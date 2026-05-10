@@ -43,6 +43,7 @@ defmodule Arena.EffectsSendRawGuardTest do
     "lib/arena/map/quest_handlers.ex",
     "lib/arena/map/training.ex",
     "lib/arena/map/crafting.ex",
+    "lib/arena/map/gm/char_edit.ex",
     "lib/arena/npc_ai.ex"
   ]
 

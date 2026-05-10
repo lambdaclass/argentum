@@ -275,7 +275,7 @@ defmodule Arena.GmCommandsParityTest do
 
       {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SETBODY Nobody 210")
 
-      assert_receive {:send_raw, _}, 200
+      assert_receive {:egress, _}, 200
     end
 
     test "returns usage for invalid body_id" do
@@ -285,7 +285,7 @@ defmodule Arena.GmCommandsParityTest do
 
       {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SETBODY Target abc")
 
-      assert_receive {:send_raw, _}, 200
+      assert_receive {:egress, _}, 200
     end
   end
 
@@ -311,7 +311,7 @@ defmodule Arena.GmCommandsParityTest do
 
       {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SETHEAD Nobody 45")
 
-      assert_receive {:send_raw, _}, 200
+      assert_receive {:egress, _}, 200
     end
   end
 
@@ -365,7 +365,7 @@ defmodule Arena.GmCommandsParityTest do
 
       {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SETGOLD Nobody 5000")
 
-      assert_receive {:send_raw, _}, 200
+      assert_receive {:egress, _}, 200
     end
   end
 
@@ -402,7 +402,7 @@ defmodule Arena.GmCommandsParityTest do
 
       {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SETLEVEL Nobody 25")
 
-      assert_receive {:send_raw, _}, 200
+      assert_receive {:egress, _}, 200
     end
   end
 
@@ -439,7 +439,7 @@ defmodule Arena.GmCommandsParityTest do
 
       {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SETSKILL Nobody magic 100")
 
-      assert_receive {:send_raw, _}, 200
+      assert_receive {:egress, _}, 200
     end
   end
 
