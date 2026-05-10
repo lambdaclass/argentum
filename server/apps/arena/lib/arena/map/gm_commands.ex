@@ -124,62 +124,79 @@ defmodule Arena.Map.GmCommands do
 
       # World
       ["/SPAWNITEM", item_str, amount_str] ->
-        World.gm_spawn_item(state, char_id, entity, item_str, amount_str)
+        Effects.run_handler(state, fn s ->
+          World.gm_spawn_item(s, char_id, entity, item_str, amount_str)
+        end)
 
       ["/SPAWNITEM", item_str] ->
-        World.gm_spawn_item(state, char_id, entity, item_str, "1")
+        Effects.run_handler(state, fn s ->
+          World.gm_spawn_item(s, char_id, entity, item_str, "1")
+        end)
 
       ["/RAIN"] ->
-        World.gm_rain_toggle(state, char_id)
+        Effects.run_handler(state, fn s -> World.gm_rain_toggle(s, char_id) end)
 
       ["/INVISIBLE"] ->
-        World.gm_invisible(state, char_id, entity)
+        Effects.run_handler(state, fn s -> World.gm_invisible(s, char_id, entity) end)
 
       ["/NIEVE"] ->
-        World.gm_toggle_weather(state, char_id, :snow)
+        Effects.run_handler(state, fn s -> World.gm_toggle_weather(s, char_id, :snow) end)
 
       ["/NIEBLA"] ->
-        World.gm_toggle_weather(state, char_id, :fog)
+        Effects.run_handler(state, fn s -> World.gm_toggle_weather(s, char_id, :fog) end)
 
       ["/MAPPK", flag] ->
-        World.gm_change_map_flag(state, char_id, :pk, flag)
+        Effects.run_handler(state, fn s -> World.gm_change_map_flag(s, char_id, :pk, flag) end)
 
       ["/MAPNOMAGIC", flag] ->
-        World.gm_change_map_flag(state, char_id, :no_magic, flag)
+        Effects.run_handler(state, fn s ->
+          World.gm_change_map_flag(s, char_id, :no_magic, flag)
+        end)
 
       ["/MAPNOINVI", flag] ->
-        World.gm_change_map_flag(state, char_id, :no_invi, flag)
+        Effects.run_handler(state, fn s ->
+          World.gm_change_map_flag(s, char_id, :no_invi, flag)
+        end)
 
       ["/MAPNORESU", flag] ->
-        World.gm_change_map_flag(state, char_id, :no_resu, flag)
+        Effects.run_handler(state, fn s ->
+          World.gm_change_map_flag(s, char_id, :no_resu, flag)
+        end)
 
       ["/TILEBLOCK"] ->
-        World.gm_tile_block_toggle(state, char_id, entity)
+        Effects.run_handler(state, fn s -> World.gm_tile_block_toggle(s, char_id, entity) end)
 
       ["/SETTRIGGER", trigger_str] ->
-        World.gm_set_trigger(state, char_id, entity, trigger_str)
+        Effects.run_handler(state, fn s ->
+          World.gm_set_trigger(s, char_id, entity, trigger_str)
+        end)
 
       ["/ASKTRIGGER"] ->
-        World.gm_ask_trigger(state, char_id, entity)
+        Effects.run_handler(state, fn s -> World.gm_ask_trigger(s, char_id, entity) end)
 
       ["/FORCEMIDIMAP", midi_str, map_str] ->
-        World.gm_force_midi_map(state, char_id, midi_str, map_str)
+        Effects.run_handler(state, fn s ->
+          World.gm_force_midi_map(s, char_id, midi_str, map_str)
+        end)
 
       ["/FORCEWAVEMAP", wave_str, x_str, y_str | _rest] ->
         map_str = Enum.at(upper_parts, 4, "0")
-        World.gm_force_wave_map(state, char_id, wave_str, x_str, y_str, map_str)
+
+        Effects.run_handler(state, fn s ->
+          World.gm_force_wave_map(s, char_id, wave_str, x_str, y_str, map_str)
+        end)
 
       ["/ITEMSFLOOR"] ->
-        World.gm_items_in_floor(state, char_id)
+        Effects.run_handler(state, fn s -> World.gm_items_in_floor(s, char_id) end)
 
       ["/DESTROYITEMS"] ->
-        World.gm_destroy_items(state, char_id, entity)
+        Effects.run_handler(state, fn s -> World.gm_destroy_items(s, char_id, entity) end)
 
       ["/DESTROYALLAREA"] ->
-        World.gm_destroy_all_area(state, char_id, entity)
+        Effects.run_handler(state, fn s -> World.gm_destroy_all_area(s, char_id, entity) end)
 
       ["/CLEANWORLD"] ->
-        World.gm_clean_world(state, char_id)
+        Effects.run_handler(state, fn s -> World.gm_clean_world(s, char_id) end)
 
       # Inspection
       ["/INFO", _name_upper] ->

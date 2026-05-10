@@ -55,7 +55,6 @@ GenServer `{:noreply, state}` / `{:reply, _, state}` contract. They
 emit `{:send_raw, _}` directly through `Helpers.send_to_session/3` and
 are the next migration targets.
 
-- `arena/lib/arena/map/gm/world.ex`
 - `arena/lib/arena/map/gm_commands.ex`
 
 `arena/lib/arena/map/map_server.ex` and `arena/lib/arena/map/helpers.ex`
@@ -98,4 +97,5 @@ module here:
 - `arena/lib/arena/map/gm/char_edit.ex`
 - `arena/lib/arena/map/gm/events.ex`
 - `arena/lib/arena/map/gm/moderation.ex`
+- `arena/lib/arena/map/gm/world.ex`
 - `arena/lib/arena/npc_ai.ex`
