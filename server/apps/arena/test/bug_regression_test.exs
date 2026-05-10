@@ -324,7 +324,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, new_state} = Commerce.handle_commerce_buy(state, :player, 1, 0)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_buy(state, :player, 1, 0)
       # Must be rejected — gold must not change
       assert result != :ok or new_state.players[:player].gold == 1000
     end
@@ -334,7 +334,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, new_state} = Commerce.handle_commerce_buy(state, :player, 1, -10)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_buy(state, :player, 1, -10)
       # Must be rejected — gold must NOT increase
       assert result != :ok or new_state.players[:player].gold <= 1000
     end
@@ -354,7 +354,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 0, 1)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 0, 1)
       # Must NOT sell the item from slot 23 — slot 0 is invalid
       assert result == {:error, :invalid_slot} or
              Enum.at(new_state.players[:player].inventory, 23) != nil
@@ -366,7 +366,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, -1, 1)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, -1, 1)
       assert result == {:error, :invalid_slot} or
              Enum.at(new_state.players[:player].inventory, 23) != nil
     end
@@ -488,7 +488,7 @@ defmodule Arena.BugRegressionTest do
       state = make_map_state(%{alice: entity_a, bob: entity_b}, sessions: sessions,
                              occupancy: %{{90, 90} => {:player, :bob}})
 
-      {:reply, result, new_state} = Commerce.handle_open_commerce(state, :alice, 90, 90)
+      {:ok, new_state, result, _effects} = Commerce.handle_open_commerce(state, :alice, 90, 90)
       # Must be rejected — too far for trade
       assert result == {:error, :too_far} or new_state.players[:alice].trade_request_target == nil
     end
@@ -547,7 +547,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 0)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 0)
       assert result == {:error, :invalid_amount} or
              Enum.at(new_state.players[:player].inventory, 0).amount == 5
     end
@@ -558,7 +558,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, -5)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, -5)
       assert result == {:error, :invalid_amount} or
              Enum.at(new_state.players[:player].inventory, 0).amount == 5
     end
@@ -733,7 +733,7 @@ defmodule Arena.BugRegressionTest do
       state = make_map_state(%{alice: entity_a, bob: entity_b}, sessions: sessions,
                              occupancy: %{{51, 50} => {:player, :bob}})
 
-      {:reply, result, new_state} = Commerce.handle_open_commerce(state, :alice, 51, 50)
+      {:ok, new_state, result, _effects} = Commerce.handle_open_commerce(state, :alice, 51, 50)
       assert result == {:error, :dead} or new_state.players[:alice].trade_request_target == nil
     end
 
@@ -744,7 +744,7 @@ defmodule Arena.BugRegressionTest do
       state = make_map_state(%{alice: entity_a, bob: entity_b}, sessions: sessions,
                              occupancy: %{{51, 50} => {:player, :bob}})
 
-      {:reply, result, new_state} = Commerce.handle_open_commerce(state, :alice, 51, 50)
+      {:ok, new_state, result, _effects} = Commerce.handle_open_commerce(state, :alice, 51, 50)
       assert result != :ok or new_state.players[:alice].trade_request_target == nil
     end
 
@@ -756,7 +756,7 @@ defmodule Arena.BugRegressionTest do
       state = make_map_state(%{alice: entity_a, bob: entity_b}, sessions: sessions,
                              occupancy: %{{51, 50} => {:player, :bob}})
 
-      {:reply, result, _state} = Commerce.handle_open_commerce(state, :alice, 51, 50)
+      {:ok, _state, result, _effects} = Commerce.handle_open_commerce(state, :alice, 51, 50)
       assert result == {:error, :already_trading}
     end
   end
@@ -794,7 +794,7 @@ defmodule Arena.BugRegressionTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 50)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 50)
       # Gold items must not be sold
       assert result != :ok or Enum.at(new_state.players[:player].inventory, 0).amount == 100
     end

@@ -291,14 +291,18 @@ defmodule Arena.WalkAwayParityTest do
           }
         )
 
-      {:ok, new_state, _effects} = NpcInteraction.handle_double_click(state, :player, 50, 50)
+      {:ok, new_state, effects} = NpcInteraction.handle_double_click(state, :player, 50, 50)
 
       updated = new_state.players[:player]
       assert updated.commerce_npc_id == merchant.npc_id
       assert updated.commerce_npc_instance_id == :merch_1
 
-      # Should have received commerce_init packet
-      assert_received {:send_raw, _commerce_init}
+      # Effects-contract: should have produced a commerce_init send effect
+      assert Enum.any?(effects, fn
+               {:send, :player, _outbound} -> true
+               _ -> false
+             end),
+             "Expected at least one commerce send-effect for the player"
     end
   end
 end

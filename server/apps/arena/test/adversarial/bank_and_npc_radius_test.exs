@@ -646,7 +646,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
         )
 
       # commerce_buy only checks commerce_npc_id and npc_def from GameData, not runtime proximity
-      {:reply, result, _new_state} = Commerce.handle_commerce_buy(state, :player, 1, 1)
+      {:ok, _new_state, result, _effects} = Commerce.handle_commerce_buy(state, :player, 1, 1)
 
       # If this returns :ok, it means there is NO runtime distance re-check for commerce buy.
       # If proximity validation is added, change this assertion to {:error, :too_far}.
@@ -677,7 +677,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
           npcs_live: %{merchant1: @merchant_npc}
         )
 
-      {:reply, result, _new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+      {:ok, _new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
       # merchant_still_valid? rejects because player at (90,90) is far from NPC at (51,50)
       assert result in [:ok, {:error, :no_commerce}, {:error, :too_far}, {:error, :merchant_gone}]
@@ -700,7 +700,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
         sessions = %{player: self()}
         state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{far_merchant: far_npc})
 
-        {:reply, result, _new_state} = Commerce.open_npc_commerce(state, :player, entity, far_npc)
+        {:ok, _new_state, result, _effects} = Commerce.open_npc_commerce(state, :player, entity, far_npc)
         assert result == {:error, :too_far}
       else
         # No merchant NPC in GameData — skip gracefully
@@ -726,7 +726,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
             npcs_live: %{boundary_merchant: boundary_npc}
           )
 
-        {:reply, result, _new_state} = Commerce.open_npc_commerce(state, :player, entity, boundary_npc)
+        {:ok, _new_state, result, _effects} = Commerce.open_npc_commerce(state, :player, entity, boundary_npc)
 
         # At distance=3 it should NOT fail with :too_far
         assert result != {:error, :too_far}
@@ -742,7 +742,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, _new_state} = Commerce.open_npc_commerce(state, :player, entity, nil)
+      {:ok, _new_state, result, _effects} = Commerce.open_npc_commerce(state, :player, entity, nil)
       assert result == {:error, :no_npc}
     end
 
@@ -760,7 +760,7 @@ defmodule Arena.Adversarial.BankAndNpcRadiusTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, _new_state} = Commerce.handle_commerce_buy(state, :player, 1, 1)
+      {:ok, _new_state, result, _effects} = Commerce.handle_commerce_buy(state, :player, 1, 1)
       assert result == {:error, :no_commerce}
     end
   end

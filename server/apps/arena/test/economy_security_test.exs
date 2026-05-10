@@ -159,7 +159,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, _state} = Commerce.handle_commerce_buy(state, :player, 1, 1)
+      {:ok, _state, result, _effects} = Commerce.handle_commerce_buy(state, :player, 1, 1)
       assert result == {:error, :no_commerce}
     end
   end
@@ -171,7 +171,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, _state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+      {:ok, _state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
       assert result == {:error, :no_commerce}
     end
   end
@@ -182,7 +182,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, _state} = Commerce.handle_commerce_buy(state, :player, 1, 1)
+      {:ok, _state, result, _effects} = Commerce.handle_commerce_buy(state, :player, 1, 1)
       assert result == {:error, :dead}
     end
   end
@@ -193,7 +193,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, _state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+      {:ok, _state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
       assert result == {:error, :dead}
     end
   end
@@ -205,7 +205,7 @@ defmodule Arena.EconomySecurityTest do
       state = make_map_state(%{player: entity}, sessions: sessions, npcs_live: %{merchant1: @merchant_npc})
 
       # Slot 5 is empty (nil)
-      {:reply, result, _state} = Commerce.handle_commerce_sell(state, :player, 5, 1)
+      {:ok, _state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 5, 1)
       assert result == {:error, :empty_slot}
     end
   end
@@ -221,7 +221,7 @@ defmodule Arena.EconomySecurityTest do
 
       # slot=0 → inv_idx = -1 → reads last slot (index 23)
       # If the handler doesn't guard slot > 0, this will find the item
-      {:reply, result, _new_state} = Commerce.handle_commerce_sell(state, :player, 0, 1)
+      {:ok, _new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 0, 1)
       # This SHOULD fail with :empty_slot or :invalid_slot, but due to the off-by-one
       # it will succeed (:ok) or fail on item_def lookup
       # Either way it should not crash
@@ -232,13 +232,13 @@ defmodule Arena.EconomySecurityTest do
   describe "commerce for non-existent player" do
     test "commerce_buy for unknown char returns :not_on_map" do
       state = make_map_state(%{})
-      {:reply, result, _state} = Commerce.handle_commerce_buy(state, :unknown, 1, 1)
+      {:ok, _state, result, _effects} = Commerce.handle_commerce_buy(state, :unknown, 1, 1)
       assert result == {:error, :not_on_map}
     end
 
     test "commerce_sell for unknown char returns :not_on_map" do
       state = make_map_state(%{})
-      {:reply, result, _state} = Commerce.handle_commerce_sell(state, :unknown, 1, 1)
+      {:ok, _state, result, _effects} = Commerce.handle_commerce_sell(state, :unknown, 1, 1)
       assert result == {:error, :not_on_map}
     end
   end
@@ -249,7 +249,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, _state} = Commerce.handle_open_commerce(state, :player, nil, nil)
+      {:ok, _state, result, _effects} = Commerce.handle_open_commerce(state, :player, nil, nil)
       assert result == {:error, :no_target}
     end
 
@@ -258,7 +258,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, _state} = Commerce.handle_open_commerce(state, :player, 50, 50)
+      {:ok, _state, result, _effects} = Commerce.handle_open_commerce(state, :player, 50, 50)
       assert result == {:error, :dead}
     end
 
@@ -267,7 +267,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, _state} = Commerce.handle_open_commerce(state, :player, 55, 55)
+      {:ok, _state, result, _effects} = Commerce.handle_open_commerce(state, :player, 55, 55)
       assert result == {:error, :no_target}
     end
   end
@@ -611,7 +611,7 @@ defmodule Arena.EconomySecurityTest do
         occupancy: %{{50, 50} => {:player, :player}}
       )
 
-      {:reply, result, _state} = Commerce.handle_open_commerce(state, :player, 50, 50)
+      {:ok, _state, result, _effects} = Commerce.handle_open_commerce(state, :player, 50, 50)
       # Targeting self should not start a trade (guard: target_id != char_id)
       assert result == {:error, :no_target}
     end
@@ -671,7 +671,7 @@ defmodule Arena.EconomySecurityTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:reply, result, new_state} = Commerce.handle_commerce_end(state, :player)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_end(state, :player)
       assert result == :ok
       assert new_state.players[:player].commerce_npc_id == nil
     end
@@ -1614,10 +1614,10 @@ defmodule Arena.EconomySecurityTest do
       state = make_map_state(%{player: entity}, sessions: sessions)
 
       # First buy — we can only test the guard path since we don't have real NPC shop data
-      {:reply, result1, state2} = Commerce.handle_commerce_buy(state, :player, 1, 1)
+      {:ok, state2, result1, _effects1} = Commerce.handle_commerce_buy(state, :player, 1, 1)
       # Without real NPC data, this will fail at shop lookup, but the important thing is
       # sequential calls don't corrupt state
-      {:reply, _result2, _state3} = Commerce.handle_commerce_buy(state2, :player, 1, 1)
+      {:ok, _state3, _result2, _effects2} = Commerce.handle_commerce_buy(state2, :player, 1, 1)
 
       # Document: GenServer serialization prevents race conditions at this layer
       assert result1 in [:ok, {:error, :no_commerce}, {:error, :empty_shop_slot}, {:error, :not_enough_gold}, {:error, :inventory_full}]

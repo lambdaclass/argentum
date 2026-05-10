@@ -76,7 +76,7 @@ defmodule Arena.Adversarial.MerchantSessionAuthorityTest do
       entity = make_entity(%{commerce_npc_id: merchant_id, gold: 50_000})
       state = make_map_state(entity)
 
-      {:reply, result, _new_state} = Commerce.handle_commerce_buy(state, :player, 1, 1)
+      {:ok, _new_state, result, _effects} = Commerce.handle_commerce_buy(state, :player, 1, 1)
 
       assert result in [{:error, :merchant_gone}, {:error, :too_far}, {:error, :no_commerce}]
     end
@@ -95,7 +95,7 @@ defmodule Arena.Adversarial.MerchantSessionAuthorityTest do
       })
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, result, _new_state} = Commerce.handle_commerce_buy(state, :player, 1, 1)
+      {:ok, _new_state, result, _effects} = Commerce.handle_commerce_buy(state, :player, 1, 1)
 
       assert result in [{:error, :too_far}, {:error, :merchant_gone}, {:error, :no_commerce}]
     end
@@ -117,7 +117,7 @@ defmodule Arena.Adversarial.MerchantSessionAuthorityTest do
 
       state = make_map_state(entity, npcs_live: %{replacement: replacement_merchant})
 
-      {:reply, result, _new_state} = Commerce.handle_commerce_buy(state, :player, 1, 1)
+      {:ok, _new_state, result, _effects} = Commerce.handle_commerce_buy(state, :player, 1, 1)
 
       assert result in [{:error, :merchant_gone}, {:error, :too_far}, {:error, :no_commerce}]
     end
@@ -140,7 +140,7 @@ defmodule Arena.Adversarial.MerchantSessionAuthorityTest do
 
       state = make_map_state(entity)
 
-      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
       assert result in [{:error, :merchant_gone}, {:error, :too_far}, {:error, :no_commerce}]
       assert new_state.players[:player].gold == 100
@@ -167,7 +167,7 @@ defmodule Arena.Adversarial.MerchantSessionAuthorityTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
       assert result in [{:error, :too_far}, {:error, :merchant_gone}, {:error, :no_commerce}]
       assert new_state.players[:player].gold == 100
@@ -194,7 +194,7 @@ defmodule Arena.Adversarial.MerchantSessionAuthorityTest do
 
       state = make_map_state(entity, npcs_live: %{replacement: replacement_merchant})
 
-      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
       assert result in [{:error, :merchant_gone}, {:error, :too_far}, {:error, :no_commerce}]
       assert new_state.players[:player].gold == 100
@@ -228,7 +228,7 @@ defmodule Arena.Adversarial.MerchantSessionAuthorityTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
       assert result == {:error, :equipped_item}
       # Inventory and gold must remain unchanged

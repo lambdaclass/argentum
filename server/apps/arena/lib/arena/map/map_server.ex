@@ -584,18 +584,31 @@ defmodule Arena.Map.MapServer do
     do: Effects.run_handler_call(state, fn s -> Social.handle_safe_toggle(s, char_id) end)
   @impl true
   def handle_call({:open_commerce, char_id, tx, ty}, _from, state),
-    do: Commerce.handle_open_commerce(state, char_id, tx, ty)
+    do:
+      Effects.run_handler_call_reply(state, fn s ->
+        Commerce.handle_open_commerce(s, char_id, tx, ty)
+      end)
 
   @impl true
   def handle_call({:commerce_buy, char_id, slot, amount}, _from, state),
-    do: Commerce.handle_commerce_buy(state, char_id, slot, amount)
+    do:
+      Effects.run_handler_call_reply(state, fn s ->
+        Commerce.handle_commerce_buy(s, char_id, slot, amount)
+      end)
 
   @impl true
   def handle_call({:commerce_sell, char_id, slot, amount}, _from, state),
-    do: Commerce.handle_commerce_sell(state, char_id, slot, amount)
+    do:
+      Effects.run_handler_call_reply(state, fn s ->
+        Commerce.handle_commerce_sell(s, char_id, slot, amount)
+      end)
 
   @impl true
-  def handle_call({:commerce_end, char_id}, _from, state), do: Commerce.handle_commerce_end(state, char_id)
+  def handle_call({:commerce_end, char_id}, _from, state),
+    do:
+      Effects.run_handler_call_reply(state, fn s ->
+        Commerce.handle_commerce_end(s, char_id)
+      end)
   @impl true
   def handle_call({:open_bank, char_id, tx, ty}, _from, state),
     do:

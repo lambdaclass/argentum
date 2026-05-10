@@ -118,10 +118,10 @@ defmodule Arena.Map.NpcInteraction do
 
   @doc """
   Effects-contract dispatcher for an NPC double-click. Returns
-  `{:ok, state, effects}`; legacy sub-handlers (Commerce, Bank,
-  Faction.handle_enlistador_click) are bridged via `bridge_legacy/2`
-  since their internal side effects still go through the legacy
-  `{:send_raw, _}` shim and they return GenServer-flavoured shapes.
+  `{:ok, state, effects}`. Sub-handlers that return rich-reply shapes
+  (`Commerce.open_npc_commerce/4`, `Bank.handle_open_bank/4`) have their
+  reply discarded — the double-click path is a cast, so no caller is
+  waiting on `:ok` / `{:error, _}` here.
   """
   def handle_npc_double_click(state, char_id, entity, instance_id) do
     case Map.get(state.npcs_live, instance_id) do
@@ -139,7 +139,14 @@ defmodule Arena.Map.NpcInteraction do
 
           cond do
             npc_def.comercia ->
-              bridge_legacy(state, fn -> Commerce.open_npc_commerce(state, char_id, entity, npc) end)
+              # Commerce.open_npc_commerce/4 is on the rich-reply effects
+              # contract. The double-click path is a cast — we surface the
+              # effects but discard the reply (no caller is waiting on
+              # `:ok` / `{:error, _}` here).
+              {:ok, new_state, _reply, effects} =
+                Commerce.open_npc_commerce(state, char_id, entity, npc)
+
+              {:ok, new_state, effects}
 
             npc_def.npc_type in [@npc_type_revividor, @npc_type_resucitador_newbie] ->
               priest_msg =
@@ -213,21 +220,6 @@ defmodule Arena.Map.NpcInteraction do
               {:ok, state, [Effects.send(char_id, console("Ves a #{npc_def.name}."))]}
           end
         end
-    end
-  end
-
-  # Adapter for sub-handlers (Commerce, Bank, Faction.handle_enlistador_click)
-  # that still return GenServer-flavoured shapes
-  # (`{:reply, _, state}` / `{:noreply, state}`) and write their packets
-  # through the legacy `{:send_raw, _}` shim. We discard the reply, accept
-  # the new state, and surface zero effects — the legacy side channel has
-  # already fired by the time control returns. They migrate independently
-  # in their own modules' refactor lanes.
-  defp bridge_legacy(default_state, fun) do
-    case fun.() do
-      {:reply, _result, new_state} -> {:ok, new_state, []}
-      {:noreply, new_state} -> {:ok, new_state, []}
-      _ -> {:ok, default_state, []}
     end
   end
 

@@ -299,7 +299,7 @@ defmodule Arena.MerchantParityTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 3)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 3)
 
       assert result == {:error, :quest_item},
              "Expected sell to be rejected for quest objective item, got: #{inspect(result)}"
@@ -333,7 +333,7 @@ defmodule Arena.MerchantParityTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, result, _new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+      {:ok, _new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
       assert result == :ok,
              "Expected normal item sell to succeed, got: #{inspect(result)}"
@@ -365,7 +365,7 @@ defmodule Arena.MerchantParityTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
       assert result == {:error, :gm_cannot_sell},
              "Expected Consejero sell to be rejected, got: #{inspect(result)}"
@@ -397,7 +397,7 @@ defmodule Arena.MerchantParityTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
       assert result == {:error, :gm_cannot_sell},
              "Expected SemiDios sell to be rejected, got: #{inspect(result)}"
@@ -444,7 +444,7 @@ defmodule Arena.MerchantParityTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
       :ets.delete(:arena_game_data, {:item, custom_item_id})
 
@@ -487,7 +487,7 @@ defmodule Arena.MerchantParityTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, :ok, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+      {:ok, new_state, :ok, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
       :ets.delete(:arena_game_data, {:item, custom_item_id})
 
@@ -528,7 +528,7 @@ defmodule Arena.MerchantParityTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, :ok, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+      {:ok, new_state, :ok, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
       :ets.delete(:arena_game_data, {:item, custom_item_id})
 
@@ -572,7 +572,7 @@ defmodule Arena.MerchantParityTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
       :ets.delete(:arena_game_data, {:item, destruye_item_id})
 

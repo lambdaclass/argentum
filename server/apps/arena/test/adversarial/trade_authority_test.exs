@@ -182,11 +182,11 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       # The guard `target_id != char_id` should prevent self-trade.
       # If this passes through, it reveals a missing self-trade validation.
       case result do
-        {:reply, {:error, reason}, _state} ->
+        {:ok, _state, {:error, reason}, _effects} ->
           assert reason in [:no_target, :target_not_found, :self_trade],
                  "Self-trade should be rejected, got error: #{inspect(reason)}"
 
-        {:reply, :ok, new_state} ->
+        {:ok, new_state, :ok, _effects} ->
           # If it succeeds, the player must NOT be trading with themselves
           player = Map.get(new_state.players, 1001)
           refute player.trade_partner_id == 1001,
@@ -249,7 +249,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       })
 
       result = Commerce.handle_open_commerce(state, 1001, 52, 50)
-      assert {:reply, {:error, :already_trading}, _state} = result
+      assert {:ok, _state, {:error, :already_trading}, _effects} = result
     end
 
     test "target already in a trade rejects new trade request" do
@@ -285,7 +285,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       })
 
       result = Commerce.handle_open_commerce(state, 1001, 51, 50)
-      assert {:reply, {:error, :target_dead}, _state} = result
+      assert {:ok, _state, {:error, :target_dead}, _effects} = result
     end
 
     test "dead player cannot offer trade items" do
@@ -348,7 +348,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       })
 
       result = Commerce.handle_open_commerce(state, 1001, 54, 50)
-      assert {:reply, {:error, :too_far}, _state} = result
+      assert {:ok, _state, {:error, :too_far}, _effects} = result
     end
 
     test "cannot trade with player more than 3 tiles away in Y" do
@@ -362,7 +362,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       })
 
       result = Commerce.handle_open_commerce(state, 1001, 50, 54)
-      assert {:reply, {:error, :too_far}, _state} = result
+      assert {:ok, _state, {:error, :too_far}, _effects} = result
     end
 
     test "trade at exactly distance 3 is allowed" do
@@ -379,7 +379,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
 
       # Should succeed (first request) or at least not be :too_far
       case result do
-        {:reply, {:error, :too_far}, _} ->
+        {:ok, _state, {:error, :too_far}, _effects} ->
           flunk("Distance 3 should be within trade range")
 
         _ ->
@@ -540,11 +540,11 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       # Navigating players should not be able to trade.
       # If this succeeds, it reveals a missing combat/navigation check.
       case result do
-        {:reply, {:error, reason}, _state} ->
+        {:ok, _state, {:error, reason}, _effects} ->
           assert reason in [:navigating, :in_combat, :busy],
                  "Navigating player should be blocked from trading, got: #{inspect(reason)}"
 
-        {:reply, :ok, _state} ->
+        {:ok, _state, :ok, _effects} ->
           # NOTE: This may indicate a missing validation for navigating players
           # in the commerce/trade flow. The VB6 original blocks trades during navigation.
           flunk("MISSING VALIDATION: Navigating player was allowed to initiate trade")
@@ -564,11 +564,11 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       result = Commerce.handle_open_commerce(state, 1001, 51, 50)
 
       case result do
-        {:reply, {:error, reason}, _state} ->
+        {:ok, _state, {:error, reason}, _effects} ->
           assert reason in [:paralyzed, :in_combat, :busy],
                  "Paralyzed player should be blocked from trading, got: #{inspect(reason)}"
 
-        {:reply, :ok, _state} ->
+        {:ok, _state, :ok, _effects} ->
           flunk("MISSING VALIDATION: Paralyzed player was allowed to initiate trade")
       end
     end
@@ -586,11 +586,11 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       result = Commerce.handle_open_commerce(state, 1001, 51, 50)
 
       case result do
-        {:reply, {:error, reason}, _state} ->
+        {:ok, _state, {:error, reason}, _effects} ->
           assert reason in [:meditating, :busy],
                  "Meditating player should be blocked from trading, got: #{inspect(reason)}"
 
-        {:reply, :ok, _state} ->
+        {:ok, _state, :ok, _effects} ->
           flunk("MISSING VALIDATION: Meditating player was allowed to initiate trade")
       end
     end
@@ -755,7 +755,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
       )
 
       result = Commerce.handle_open_commerce(state, 1001, 51, 50)
-      assert {:reply, {:error, :safe_zone}, _state} = result
+      assert {:ok, _state, {:error, :safe_zone}, _effects} = result
     end
 
     test "player-to-player trade allowed when safe_zone is false" do
@@ -773,7 +773,7 @@ defmodule Arena.Adversarial.TradeAuthorityTest do
 
       result = Commerce.handle_open_commerce(state, 1001, 51, 50)
       # Should succeed (first request) — at least not be :safe_zone
-      refute match?({:reply, {:error, :safe_zone}, _}, result),
+      refute match?({:ok, _state, {:error, :safe_zone}, _effects}, result),
              "Trade should be allowed when safe_zone is false"
     end
   end

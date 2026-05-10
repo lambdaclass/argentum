@@ -448,7 +448,7 @@ defmodule Arena.Adversarial.GmPanelInventoryMerchantAdversarialTest do
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
       flush_mailbox()
-      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+      {:ok, new_state, result, effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
       :ets.delete(:arena_game_data, {:item, item_id})
 
@@ -460,7 +460,11 @@ defmodule Arena.Adversarial.GmPanelInventoryMerchantAdversarialTest do
       warning =
         Encoder.encode({:console_msg, %{message: "Lo siento, no puedo comprarte ese item.", font_index: 0}})
 
-      assert_receive {:send_raw, ^warning}
+      assert Enum.any?(effects, fn
+               {:send, :player, %{payload: ^warning}} -> true
+               _ -> false
+             end),
+             "Expected destruye console-msg effect for the player"
     end
 
     test "destruye + equipped rejects for equipped_item first (defense-in-depth ordering)" do
@@ -501,7 +505,7 @@ defmodule Arena.Adversarial.GmPanelInventoryMerchantAdversarialTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, result, _new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+      {:ok, _new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
       :ets.delete(:arena_game_data, {:item, item_id})
 
@@ -545,7 +549,7 @@ defmodule Arena.Adversarial.GmPanelInventoryMerchantAdversarialTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
       :ets.delete(:arena_game_data, {:item, item_id})
 
@@ -589,7 +593,7 @@ defmodule Arena.Adversarial.GmPanelInventoryMerchantAdversarialTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, result, _new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+      {:ok, _new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
       :ets.delete(:arena_game_data, {:item, item_id})
 
@@ -633,7 +637,7 @@ defmodule Arena.Adversarial.GmPanelInventoryMerchantAdversarialTest do
           })
 
         state = make_map_state(entity, npcs_live: %{merchant: merchant})
-        {:reply, result, _new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+        {:ok, _new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
         assert result == :ok,
                ":#{gm_level} should be allowed to sell (VB6 gates only Consejero|SemiDios), got #{inspect(result)}"
@@ -677,7 +681,7 @@ defmodule Arena.Adversarial.GmPanelInventoryMerchantAdversarialTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, :ok, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+      {:ok, new_state, :ok, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
       :ets.delete(:arena_game_data, {:item, item_id})
 
@@ -722,7 +726,7 @@ defmodule Arena.Adversarial.GmPanelInventoryMerchantAdversarialTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, :ok, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+      {:ok, new_state, :ok, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
       :ets.delete(:arena_game_data, {:item, item_id})
 
@@ -765,7 +769,7 @@ defmodule Arena.Adversarial.GmPanelInventoryMerchantAdversarialTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, :ok, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+      {:ok, new_state, :ok, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
       :ets.delete(:arena_game_data, {:item, item_id})
 
@@ -808,7 +812,7 @@ defmodule Arena.Adversarial.GmPanelInventoryMerchantAdversarialTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, :ok, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+      {:ok, new_state, :ok, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
       :ets.delete(:arena_game_data, {:item, item_id})
 
@@ -860,7 +864,7 @@ defmodule Arena.Adversarial.GmPanelInventoryMerchantAdversarialTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 1)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 1)
 
       :ets.delete(:arena_game_data, {:item, item_id})
 
@@ -910,7 +914,7 @@ defmodule Arena.Adversarial.GmPanelInventoryMerchantAdversarialTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 0)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 0)
 
       :ets.delete(:arena_game_data, {:item, item_id})
 
@@ -954,7 +958,7 @@ defmodule Arena.Adversarial.GmPanelInventoryMerchantAdversarialTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, -5)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, -5)
 
       :ets.delete(:arena_game_data, {:item, item_id})
 
@@ -997,7 +1001,7 @@ defmodule Arena.Adversarial.GmPanelInventoryMerchantAdversarialTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 1, 9_999)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 1, 9_999)
 
       :ets.delete(:arena_game_data, {:item, item_id})
 
@@ -1033,7 +1037,7 @@ defmodule Arena.Adversarial.GmPanelInventoryMerchantAdversarialTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, result, new_state} = Commerce.handle_commerce_buy(state, :player, 1, 1)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_buy(state, :player, 1, 1)
 
       assert result == :ok
       # Gold must be exactly zero (we had price, we paid price).
@@ -1060,7 +1064,7 @@ defmodule Arena.Adversarial.GmPanelInventoryMerchantAdversarialTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, result, new_state} = Commerce.handle_commerce_buy(state, :player, 1, 1)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_buy(state, :player, 1, 1)
 
       assert result == {:error, :not_enough_gold}
       assert new_state.players[:player].gold == price - 1
@@ -1081,7 +1085,7 @@ defmodule Arena.Adversarial.GmPanelInventoryMerchantAdversarialTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, result, _new_state} = Commerce.handle_commerce_buy(state, :player, 1, 0)
+      {:ok, _new_state, result, _effects} = Commerce.handle_commerce_buy(state, :player, 1, 0)
       assert result == {:error, :invalid_amount}
     end
 
@@ -1100,7 +1104,7 @@ defmodule Arena.Adversarial.GmPanelInventoryMerchantAdversarialTest do
 
       state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-      {:reply, result, new_state} = Commerce.handle_commerce_buy(state, :player, 1, -3)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_buy(state, :player, 1, -3)
       assert result == {:error, :invalid_amount}
       # Anti-dupe: gold untouched.
       assert new_state.players[:player].gold == 100_000
@@ -1151,7 +1155,7 @@ defmodule Arena.Adversarial.GmPanelInventoryMerchantAdversarialTest do
 
           state = make_map_state(entity, npcs_live: %{merchant: merchant})
 
-          {:reply, result, new_state} = Commerce.handle_commerce_buy(state, :player, slot_idx, 1)
+          {:ok, new_state, result, _effects} = Commerce.handle_commerce_buy(state, :player, slot_idx, 1)
 
           assert result == {:error, :inventory_full},
                  "expected inventory_full for non-stackable shop item #{inspect(shop_item)}, got #{inspect(result)}"
@@ -1181,7 +1185,7 @@ defmodule Arena.Adversarial.GmPanelInventoryMerchantAdversarialTest do
       # npcs_live has NO entry for :gone_instance — simulates death/despawn.
       state = make_map_state(entity, npcs_live: %{})
 
-      {:reply, result, new_state} = Commerce.handle_commerce_buy(state, :player, 1, 1)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_buy(state, :player, 1, 1)
 
       assert result in [{:error, :merchant_gone}, {:error, :too_far}, {:error, :no_commerce}]
       assert new_state.players[:player].gold == 1_000_000
@@ -1218,7 +1222,7 @@ defmodule Arena.Adversarial.GmPanelInventoryMerchantAdversarialTest do
 
       state = make_map_state(entity, npcs_live: %{})
 
-      {:reply, result, new_state} = Commerce.handle_commerce_sell(state, :player, 6, 1)
+      {:ok, new_state, result, _effects} = Commerce.handle_commerce_sell(state, :player, 6, 1)
 
       :ets.delete(:arena_game_data, {:item, item_id})
 

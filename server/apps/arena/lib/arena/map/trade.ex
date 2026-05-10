@@ -182,10 +182,10 @@ defmodule Arena.Map.Trade do
   @doc """
   Initiate or accept a trade request between `char_id` and `target_id`.
 
-  Returns `{:ok, state, reply, effects}` so the caller (currently
-  `Commerce.handle_open_commerce`, still on the legacy contract) can
-  surface `reply` to the GenServer client and run effects via
-  `Effects.run/2`.
+  Returns `{:ok, state, reply, effects}` so the caller (e.g.
+  `Commerce.handle_open_commerce`, also on the rich-reply effects
+  contract) can append the effects directly to its own list and surface
+  the reply to the GenServer client via `Effects.run_handler_call_reply/2`.
 
   Note: when both sides are ready, this also dispatches the in-band
   `:trade_started` session-state hint (sets `in_trade: true` on the
