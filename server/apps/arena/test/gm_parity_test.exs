@@ -336,7 +336,8 @@ defmodule Arena.GmParityTest do
 
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, new_state} = Moderation.gm_remove_punishment(state, 1, "Convict", "1", "pardoned")
+      {:ok, new_state, _effects} =
+        Moderation.gm_remove_punishment(state, 1, "Convict", "1", "pardoned")
 
       updated_target = new_state.players[2]
       assert updated_target.punishments == [], "punishment record should be removed"
@@ -346,7 +347,7 @@ defmodule Arena.GmParityTest do
       gm = make_entity(%{name: "GM", char_id: 1, char_index: 1, gm: true, gm_level: :admin})
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:noreply, _state} = Moderation.gm_remove_punishment(state, 1, "Nobody", "1", "test")
+      {:ok, _state, _effects} = Moderation.gm_remove_punishment(state, 1, "Nobody", "1", "test")
     end
   end
 

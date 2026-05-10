@@ -164,7 +164,7 @@ defmodule Arena.ServiceWindowsParityTest do
       players = %{1 => gm, 2 => target}
       state = build_state(players, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, new_state} = Moderation.gm_jail(state, 1, "Offender", 30)
+      {:ok, new_state, _effects} = Moderation.gm_jail(state, 1, "Offender", 30)
       drain_mailbox()
 
       updated_target = new_state.players[2]
@@ -186,10 +186,10 @@ defmodule Arena.ServiceWindowsParityTest do
       players = %{1 => gm, 2 => target}
       state = build_state(players, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, state2} = Moderation.gm_jail(state, 1, "Repeat", 10)
+      {:ok, state2, _eff1} = Moderation.gm_jail(state, 1, "Repeat", 10)
       drain_mailbox()
 
-      {:noreply, state3} = Moderation.gm_jail(state2, 1, "Repeat", 20)
+      {:ok, state3, _eff2} = Moderation.gm_jail(state2, 1, "Repeat", 20)
       drain_mailbox()
 
       updated_target = state3.players[2]
@@ -218,7 +218,9 @@ defmodule Arena.ServiceWindowsParityTest do
       players = %{1 => gm, 2 => target}
       state = build_state(players, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, new_state} = Moderation.gm_remove_punishment(state, 1, "Punished", "2", "")
+      {:ok, new_state, _effects} =
+        Moderation.gm_remove_punishment(state, 1, "Punished", "2", "")
+
       drain_mailbox()
 
       updated_target = new_state.players[2]
@@ -239,7 +241,8 @@ defmodule Arena.ServiceWindowsParityTest do
       players = %{1 => gm, 2 => target}
       state = build_state(players, sessions: %{1 => self(), 2 => self()})
 
-      {:noreply, _new_state} = Moderation.gm_remove_punishment(state, 1, "Clean", "5", "")
+      {:ok, _new_state, _effects} =
+        Moderation.gm_remove_punishment(state, 1, "Clean", "5", "")
     end
   end
 

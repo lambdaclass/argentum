@@ -235,8 +235,9 @@ defmodule Arena.GmCommandsParityTest do
 
       {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/KICKALLCHARS")
 
-      # The GM should receive a confirmation console message
-      assert_receive {:send_raw, _}, 200
+      # Moderation is on the effects contract; the GM confirmation
+      # flows through `Effects.send/2` and arrives as `{:egress, _}`.
+      assert_receive {:egress, _outbound}, 200
 
       Process.demonitor(alice_ref, [:flush])
       Process.demonitor(bob_ref, [:flush])
@@ -520,7 +521,7 @@ defmodule Arena.GmCommandsParityTest do
       # /UNBAN is routed as an alias for /UNBANCUENTA
       {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/UNBAN SomeName")
 
-      assert_receive {:send_raw, _}, 200
+      assert_receive {:egress, _outbound}, 200
     end
   end
 

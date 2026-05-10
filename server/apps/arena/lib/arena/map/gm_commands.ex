@@ -237,26 +237,31 @@ defmodule Arena.Map.GmCommands do
       ["/SPAWNLIST"] ->
         Inspection.gm_spawn_list(state, char_id)
 
-      # Moderation
+      # Moderation — handlers return `{:ok, state, [Effect.t()]}` and
+      # are dispatched through `Effects.run_handler/2` so packet
+      # emissions stay on the canonical effects pipeline.
       ["/KILL", _name_upper] ->
         target_name = Enum.at(parts, 1)
-        Moderation.gm_kill(state, char_id, target_name)
+        Effects.run_handler(state, fn s -> Moderation.gm_kill(s, char_id, target_name) end)
 
       ["/KICK", _name_upper] ->
         target_name = Enum.at(parts, 1)
-        Moderation.gm_kick(state, char_id, target_name)
+        Effects.run_handler(state, fn s -> Moderation.gm_kick(s, char_id, target_name) end)
 
       ["/BAN", _name_upper, days_str] ->
         target_name = Enum.at(parts, 1)
-        Moderation.gm_ban(state, char_id, target_name, days_str)
+        Effects.run_handler(state, fn s -> Moderation.gm_ban(s, char_id, target_name, days_str) end)
 
       ["/MUTE", _name_upper, minutes_str] ->
         target_name = Enum.at(parts, 1)
-        Moderation.gm_mute(state, char_id, target_name, minutes_str)
+
+        Effects.run_handler(state, fn s ->
+          Moderation.gm_mute(s, char_id, target_name, minutes_str)
+        end)
 
       ["/UNMUTE", _name_upper] ->
         target_name = Enum.at(parts, 1)
-        Moderation.gm_unmute(state, char_id, target_name)
+        Effects.run_handler(state, fn s -> Moderation.gm_unmute(s, char_id, target_name) end)
 
       ["/JAIL", _name_upper | _rest] ->
         target_name = Enum.at(parts, 1)
@@ -273,61 +278,84 @@ defmodule Arena.Map.GmCommands do
               end
           end
 
-        Moderation.gm_jail(state, char_id, target_name, minutes)
+        Effects.run_handler(state, fn s ->
+          Moderation.gm_jail(s, char_id, target_name, minutes)
+        end)
 
       ["/UNJAIL", _name_upper] ->
         target_name = Enum.at(parts, 1)
-        Moderation.gm_unjail(state, char_id, target_name)
+        Effects.run_handler(state, fn s -> Moderation.gm_unjail(s, char_id, target_name) end)
 
       ["/BANCUENTA", _name | _rest] ->
         target_name = Enum.at(parts, 1)
         reason = Enum.at(parts, 2, "Sin motivo")
-        Moderation.gm_ban_cuenta(state, char_id, target_name, reason)
+
+        Effects.run_handler(state, fn s ->
+          Moderation.gm_ban_cuenta(s, char_id, target_name, reason)
+        end)
 
       ["/UNBANCUENTA", _name] ->
         target_name = Enum.at(parts, 1)
-        Moderation.gm_unban_cuenta(state, char_id, target_name)
+
+        Effects.run_handler(state, fn s ->
+          Moderation.gm_unban_cuenta(s, char_id, target_name)
+        end)
 
       ["/BANTEMPORAL", _name, days_str | _rest] ->
         target_name = Enum.at(parts, 1)
         reason = Enum.at(parts, 3, "Sin motivo")
-        Moderation.gm_ban_temporal(state, char_id, target_name, days_str, reason)
+
+        Effects.run_handler(state, fn s ->
+          Moderation.gm_ban_temporal(s, char_id, target_name, days_str, reason)
+        end)
 
       ["/REMOVEPUNISHMENT", _name, num_str | _rest] ->
         target_name = Enum.at(parts, 1)
         text = Enum.at(parts, 3, "")
-        Moderation.gm_remove_punishment(state, char_id, target_name, num_str, text)
+
+        Effects.run_handler(state, fn s ->
+          Moderation.gm_remove_punishment(s, char_id, target_name, num_str, text)
+        end)
 
       ["/COUNCILKICK", _name] ->
         target_name = Enum.at(parts, 1)
-        Moderation.gm_council_kick(state, char_id, target_name)
+
+        Effects.run_handler(state, fn s ->
+          Moderation.gm_council_kick(s, char_id, target_name)
+        end)
 
       ["/ROYALKICK", _name] ->
         target_name = Enum.at(parts, 1)
-        Moderation.gm_faction_kick(state, char_id, target_name, :royal_army)
+
+        Effects.run_handler(state, fn s ->
+          Moderation.gm_faction_kick(s, char_id, target_name, :royal_army)
+        end)
 
       ["/CHAOSKICK", _name] ->
         target_name = Enum.at(parts, 1)
-        Moderation.gm_faction_kick(state, char_id, target_name, :chaos_legion)
+
+        Effects.run_handler(state, fn s ->
+          Moderation.gm_faction_kick(s, char_id, target_name, :chaos_legion)
+        end)
 
       ["/KICKALLCHARS"] ->
-        Moderation.gm_kick_all_chars(state, char_id)
+        Effects.run_handler(state, fn s -> Moderation.gm_kick_all_chars(s, char_id) end)
 
       ["/UNBAN", _name_upper] ->
         target_name = Enum.at(parts, 1)
-        Moderation.gm_unban(state, char_id, target_name)
+        Effects.run_handler(state, fn s -> Moderation.gm_unban(s, char_id, target_name) end)
 
       ["/NAVIGANDO", _name_upper] ->
         target_name = Enum.at(parts, 1)
-        Moderation.gm_navigando(state, char_id, target_name)
+        Effects.run_handler(state, fn s -> Moderation.gm_navigando(s, char_id, target_name) end)
 
       ["/RMCRIMINAL", _name_upper] ->
         target_name = Enum.at(parts, 1)
-        Moderation.gm_rm_criminal(state, char_id, target_name)
+        Effects.run_handler(state, fn s -> Moderation.gm_rm_criminal(s, char_id, target_name) end)
 
       ["/RMCITIZEN", _name_upper] ->
         target_name = Enum.at(parts, 1)
-        Moderation.gm_rm_citizen(state, char_id, target_name)
+        Effects.run_handler(state, fn s -> Moderation.gm_rm_citizen(s, char_id, target_name) end)
 
       # CharEdit (effects contract — wrapped via Effects.run_handler/2)
       ["/GIVEITEM", _name, item_str, amount_str] ->
