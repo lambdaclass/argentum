@@ -4,14 +4,9 @@ defmodule Arena.Map.Chat do
 
   Public top-level handlers follow the effects contract
   `{:ok, state, [Effect.t()]}`. MapServer dispatches them via
-  `Arena.Map.Effects.run_handler/2`.
-
-  GM slash commands still flow through the legacy `dispatch_gm_command/4`
-  surface (`Arena.Map.GmCommands` is not yet on the effects contract);
-  those calls run their own side effects inline and we forward the
-  resulting state with an empty effect list, so callers do not need to
-  know whether a chat message took the GM-command branch or the
-  chat-over-head branch.
+  `Arena.Map.Effects.run_handler/2`. GM slash commands route through
+  `Arena.Map.GmCommands.dispatch_gm_command/4`, which is also on the
+  contract and threads its effects straight back to the caller.
   """
 
   alias Arena.Clock
@@ -27,10 +22,10 @@ defmodule Arena.Map.Chat do
         if String.starts_with?(message, "/") do
           cond do
             entity.gm ->
-              bridge_gm_dispatch(state, char_id, entity, message)
+              Arena.Map.GmCommands.dispatch_gm_command(state, char_id, entity, message)
 
             council_faction_broadcast?(entity, message) ->
-              bridge_gm_dispatch(state, char_id, entity, message)
+              Arena.Map.GmCommands.dispatch_gm_command(state, char_id, entity, message)
 
             true ->
               {:ok, state, []}
@@ -145,17 +140,6 @@ defmodule Arena.Map.Chat do
 
   defp console_effect(char_id, message) do
     Effects.send(char_id, Encoder.encode({:console_msg, %{message: message, font_index: 0}}))
-  end
-
-  # Bridge into the still-legacy GmCommands surface. `dispatch_gm_command/4`
-  # returns `{:noreply, state}` and runs side effects inline through
-  # `Helpers.send_to_session/3`, so we surface a `{:ok, state, []}` to the
-  # caller — the effects already happened, and there is nothing left for
-  # the runner to do until GmCommands itself migrates.
-  defp bridge_gm_dispatch(state, char_id, entity, message) do
-    case Arena.Map.GmCommands.dispatch_gm_command(state, char_id, entity, message) do
-      {:noreply, new_state} -> {:ok, new_state, []}
-    end
   end
 
   # Drift #4 — VB6 Protocol.bas:5177-5209 allows council members to use

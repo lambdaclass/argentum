@@ -579,7 +579,7 @@ defmodule Arena.GmAdversarialTest do
       {:ok, _new_state, _effects} = Chat.handle_chat(state, :gm_player, "/NOSUCHCMD")
 
       # The GM receives a console message about the unknown command
-      assert_receive {:send_raw, _raw_bytes}
+      assert_receive {:egress, %{payload: _}}
     end
   end
 
@@ -758,7 +758,7 @@ defmodule Arena.GmAdversarialTest do
       {:ok, _new_state, _effects} = Chat.handle_chat(state, :gm_player, "/ASKTRIGGER")
 
       # GM should receive a message about the trigger value
-      assert_receive {:egress, _envelope}
+      assert_receive {:send_raw, _raw}
     end
   end
 
@@ -879,7 +879,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, _new_state, _effects} = Chat.handle_chat(state, :gm_player, "/FORCEMIDIMAP 5 1")
       # Receives MIDI packet + gm_console confirmation
-      assert_receive {:egress, _envelope}
+      assert_receive {:send_raw, _raw}
     end
   end
 
@@ -890,7 +890,7 @@ defmodule Arena.GmAdversarialTest do
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
       {:ok, _new_state, _effects} = Chat.handle_chat(state, :gm_player, "/FORCEWAVEMAP 3 50 50 1")
-      assert_receive {:egress, _envelope}
+      assert_receive {:send_raw, _raw}
     end
   end
 
@@ -901,7 +901,7 @@ defmodule Arena.GmAdversarialTest do
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
       {:ok, _new_state, _effects} = Chat.handle_chat(state, :gm_player, "/ITEMSFLOOR")
-      assert_receive {:egress, _envelope}
+      assert_receive {:send_raw, _raw}
     end
   end
 
@@ -980,7 +980,7 @@ defmodule Arena.GmAdversarialTest do
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
       {:ok, _new_state, _effects} = Chat.handle_chat(state, :gm_player, "/SPAWNITEM abc")
-      assert_receive {:egress, _envelope}
+      assert_receive {:send_raw, _raw}
     end
 
     test "/SPAWNITEM with zero amount returns usage" do
@@ -989,7 +989,7 @@ defmodule Arena.GmAdversarialTest do
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
       {:ok, _new_state, _effects} = Chat.handle_chat(state, :gm_player, "/SPAWNITEM 100 0")
-      assert_receive {:egress, _envelope}
+      assert_receive {:send_raw, _raw}
     end
 
     test "/SPAWNITEM with negative amount returns usage" do
@@ -998,7 +998,7 @@ defmodule Arena.GmAdversarialTest do
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
       {:ok, _new_state, _effects} = Chat.handle_chat(state, :gm_player, "/SPAWNITEM 100 -5")
-      assert_receive {:egress, _envelope}
+      assert_receive {:send_raw, _raw}
     end
 
     test "/FORCEMIDIMAP with non-numeric midi returns usage" do
@@ -1007,7 +1007,7 @@ defmodule Arena.GmAdversarialTest do
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
       {:ok, _new_state, _effects} = Chat.handle_chat(state, :gm_player, "/FORCEMIDIMAP abc def")
-      assert_receive {:egress, _envelope}
+      assert_receive {:send_raw, _raw}
     end
 
     test "/CHECKSLOT with non-numeric slot returns error" do
@@ -1885,9 +1885,9 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Arena.Map.GmCommands.handle_gm_rain_toggle(state, :player)
+      {:ok, new_state, effects} = Arena.Map.GmCommands.handle_gm_rain_toggle(state, :player)
       assert new_state.meta.rain == false
-      assert_receive {:send_raw, _}
+      assert Enum.any?(effects, &match?({:send, :player, _}, &1))
     end
 
     test "GM calling handle_gm_rain_toggle toggles rain" do
@@ -1895,14 +1895,18 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
-      {:noreply, new_state} = Arena.Map.GmCommands.handle_gm_rain_toggle(state, :gm_player)
+      {:ok, new_state, effects} = Arena.Map.GmCommands.handle_gm_rain_toggle(state, :gm_player)
       assert new_state.meta.rain == true
+      # Rain toggle is a map-global broadcast plus a private GM feedback console.
+      assert Enum.any?(effects, &match?({:broadcast_map, _}, &1))
+      assert Enum.any?(effects, &match?({:send, :gm_player, _}, &1))
     end
 
     test "unknown char_id calling handle_gm_rain_toggle is ignored" do
       state = make_map_state(%{})
-      {:noreply, new_state} = Arena.Map.GmCommands.handle_gm_rain_toggle(state, :unknown)
+      {:ok, new_state, effects} = Arena.Map.GmCommands.handle_gm_rain_toggle(state, :unknown)
       assert new_state == state
+      assert effects == []
     end
   end
 
@@ -2128,7 +2132,7 @@ defmodule Arena.GmAdversarialTest do
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
       {:ok, _new_state, _effects} = Chat.handle_chat(state, :gm_player, "/NONEXISTENTCOMMAND")
-      assert_receive {:send_raw, _}
+      assert_receive {:egress, %{payload: _}}
     end
   end
 end

@@ -55,7 +55,7 @@ GenServer `{:noreply, state}` / `{:reply, _, state}` contract. They
 emit `{:send_raw, _}` directly through `Helpers.send_to_session/3` and
 are the next migration targets.
 
-- `arena/lib/arena/map/gm_commands.ex`
+(All map handlers are now on the effects contract. The legacy `Arena.Map.Gm.{Inspection, Teleport, Permissions}` sub-handlers are reached only through `Arena.Map.GmCommands.dispatch_gm_command/4`'s `bridge_legacy/2` wrapper.)
 
 `arena/lib/arena/map/map_server.ex` and `arena/lib/arena/map/helpers.ex`
 also contain `{:send_raw, _}`. In MapServer the references are the
@@ -98,4 +98,5 @@ module here:
 - `arena/lib/arena/map/gm/events.ex`
 - `arena/lib/arena/map/gm/moderation.ex`
 - `arena/lib/arena/map/gm/world.ex`
+- `arena/lib/arena/map/gm_commands.ex`
 - `arena/lib/arena/npc_ai.ex`

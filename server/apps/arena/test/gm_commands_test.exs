@@ -166,13 +166,13 @@ defmodule Arena.GmCommandsTest do
 
       gm_rain =
         Enum.filter(all_msgs, fn
-          {:send_raw, <<59::little-16, _rest::binary>>} -> true
+          {:egress, %{payload: <<59::little-16, _rest::binary>>}} -> true
           _ -> false
         end)
 
       regular_rain =
         Enum.filter(all_msgs, fn
-          {:regular_msg, {:send_raw, <<59::little-16, _rest::binary>>}} -> true
+          {:regular_msg, {:egress, %{payload: <<59::little-16, _rest::binary>>}}} -> true
           _ -> false
         end)
 

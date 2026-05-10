@@ -47,6 +47,7 @@ defmodule Arena.EffectsSendRawGuardTest do
     "lib/arena/map/gm/events.ex",
     "lib/arena/map/gm/moderation.ex",
     "lib/arena/map/gm/world.ex",
+    "lib/arena/map/gm_commands.ex",
     "lib/arena/npc_ai.ex"
   ]
 
