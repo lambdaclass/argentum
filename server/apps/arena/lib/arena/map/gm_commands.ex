@@ -14,6 +14,15 @@ defmodule Arena.Map.GmCommands do
     World
   }
 
+  # Adapts an `{:ok, state, effects}` return from a migrated GM family
+  # handler (currently `Arena.Map.Gm.Events`) to the cast/`{:noreply,
+  # state}` contract this dispatcher still owes its callers. The effect
+  # list runs against the post-handler state via the canonical runner.
+  defp run_effects({:ok, state, effects}) do
+    Effects.run(state, effects)
+    {:noreply, state}
+  end
+
   # GM command dispatch (called by Chat module when message starts with "/")
   def dispatch_gm_command(state, char_id, entity, message) do
     # Drift #4 — VB6 Protocol.bas:5177-5209 allows Faccion.Status = consejo
@@ -407,73 +416,73 @@ defmodule Arena.Map.GmCommands do
 
       # Events
       ["/SPAWNNPC", npc_id_str] ->
-        Events.gm_spawn_npc(state, char_id, entity, npc_id_str)
+        run_effects(Events.gm_spawn_npc(state, char_id, entity, npc_id_str))
 
       ["/SPAWN", npc_id_str] ->
-        Events.gm_spawn_npc(state, char_id, entity, npc_id_str)
+        run_effects(Events.gm_spawn_npc(state, char_id, entity, npc_id_str))
 
       ["/SPAWNNPCR", npc_id_str] ->
-        Events.gm_spawn_npc_respawn(state, char_id, entity, npc_id_str)
+        run_effects(Events.gm_spawn_npc_respawn(state, char_id, entity, npc_id_str))
 
       ["/KILLNPC"] ->
-        Events.gm_kill_npc(state, char_id, entity)
+        run_effects(Events.gm_kill_npc(state, char_id, entity))
 
       ["/KILLNPCPERM"] ->
-        Events.gm_kill_npc_permanent(state, char_id, entity)
+        run_effects(Events.gm_kill_npc_permanent(state, char_id, entity))
 
       ["/MASSKILL"] ->
-        Events.gm_mass_kill_npcs(state, char_id, entity)
+        run_effects(Events.gm_mass_kill_npcs(state, char_id, entity))
 
       ["/RMSG" | _rest] ->
         msg_text = extract_command_body(message)
-        Events.gm_faction_message(state, char_id, :royal_army, msg_text)
+        run_effects(Events.gm_faction_message(state, char_id, :royal_army, msg_text))
 
       ["/CMSG" | _rest] ->
         msg_text = extract_command_body(message)
-        Events.gm_faction_message(state, char_id, :chaos_legion, msg_text)
+        run_effects(Events.gm_faction_message(state, char_id, :chaos_legion, msg_text))
 
       ["/TALKASNPC" | _rest] ->
         msg_text = extract_command_body(message)
-        Events.gm_talk_as_npc(state, char_id, entity, msg_text)
+        run_effects(Events.gm_talk_as_npc(state, char_id, entity, msg_text))
 
       ["/INVASION", map_str, npc_str, count_str] ->
-        Events.gm_invasion(state, char_id, entity, map_str, npc_str, count_str)
+        run_effects(Events.gm_invasion(state, char_id, entity, map_str, npc_str, count_str))
 
       ["/INVASION", "STOP", map_str] ->
-        Events.gm_invasion_stop(state, char_id, map_str)
+        run_effects(Events.gm_invasion_stop(state, char_id, map_str))
 
       ["/INVASION", "LIST"] ->
-        Events.gm_invasion_list(state, char_id)
+        run_effects(Events.gm_invasion_list(state, char_id))
 
       ["/TOURNAMENT", "START" | rest] ->
         max_str = List.first(rest) || "16"
-        Events.gm_tournament_start(state, char_id, entity, max_str)
+        run_effects(Events.gm_tournament_start(state, char_id, entity, max_str))
 
       ["/TOURNAMENT", "BEGIN"] ->
-        Events.gm_tournament_begin(state, char_id)
+        run_effects(Events.gm_tournament_begin(state, char_id))
 
       ["/TOURNAMENT", "CANCEL"] ->
-        Events.gm_tournament_cancel(state, char_id)
+        run_effects(Events.gm_tournament_cancel(state, char_id))
 
       ["/TOURNAMENT", "STATUS"] ->
-        Events.gm_tournament_status(state, char_id)
+        run_effects(Events.gm_tournament_status(state, char_id))
 
       ["/EVENT", "START", type_str, duration_str] ->
-        Events.gm_event_start(state, char_id, entity, type_str, duration_str)
+        run_effects(Events.gm_event_start(state, char_id, entity, type_str, duration_str))
 
       ["/EVENT", "STOP", type_str] ->
-        Events.gm_event_stop(state, char_id, type_str)
+        run_effects(Events.gm_event_stop(state, char_id, type_str))
 
       ["/EVENT", "LIST"] ->
-        Events.gm_event_list(state, char_id)
+        run_effects(Events.gm_event_list(state, char_id))
 
       ["/ROYALCOUNCIL", _name] ->
         target_name = Enum.at(parts, 1)
-        Events.gm_accept_council(state, char_id, target_name, :royal)
+        run_effects(Events.gm_accept_council(state, char_id, target_name, :royal))
 
       ["/CHAOSCOUNCIL", _name] ->
         target_name = Enum.at(parts, 1)
-        Events.gm_accept_council(state, char_id, target_name, :chaos)
+        run_effects(Events.gm_accept_council(state, char_id, target_name, :chaos))
 
       _ ->
         Helpers.gm_console(state, char_id, "Unknown GM command: #{message}")

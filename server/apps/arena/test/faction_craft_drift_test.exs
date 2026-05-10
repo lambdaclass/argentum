@@ -126,14 +126,24 @@ defmodule Arena.FactionCraftDriftTest do
       state = make_map_state(%{gm: gm, soldier: soldier}, sessions: sessions)
 
       log = capture_log(fn ->
-        Events.gm_faction_message(state, :gm, :chaos_legion, "Atacar!")
-      end)
+        {:ok, ^state, effects} = Events.gm_faction_message(state, :gm, :chaos_legion, "Atacar!")
 
-      # The broadcast should say [Legion del Caos], matching the canonical name
-      assert_receive {:send_raw, raw}
-      msg = :erlang.iolist_to_binary(raw)
-      assert msg =~ "Legion del Caos"
-      refute msg =~ "Legion Oscura"
+        # The broadcast should say [Legion del Caos], matching the canonical
+        # name. After the effects contract migration the broadcast lands as
+        # an `Effects.send/2` envelope to the soldier; inspect the payload
+        # directly without going through the runner.
+        broadcast =
+          Enum.find(effects, fn
+            {:send, :soldier, _outbound} -> true
+            _ -> false
+          end)
+
+        assert broadcast, "expected a soldier-targeted faction message effect"
+        {:send, :soldier, %{payload: raw}} = broadcast
+        msg = :erlang.iolist_to_binary(raw)
+        assert msg =~ "Legion del Caos"
+        refute msg =~ "Legion Oscura"
+      end)
 
       # The audit log should also use the canonical name
       assert log =~ "Legion del Caos"
@@ -146,12 +156,19 @@ defmodule Arena.FactionCraftDriftTest do
       state = make_map_state(%{gm: gm, soldier: soldier}, sessions: sessions)
 
       log = capture_log(fn ->
-        Events.gm_faction_message(state, :gm, :royal_army, "Defend!")
-      end)
+        {:ok, ^state, effects} = Events.gm_faction_message(state, :gm, :royal_army, "Defend!")
 
-      assert_receive {:send_raw, raw}
-      msg = :erlang.iolist_to_binary(raw)
-      assert msg =~ "Armada Real"
+        broadcast =
+          Enum.find(effects, fn
+            {:send, :soldier, _outbound} -> true
+            _ -> false
+          end)
+
+        assert broadcast, "expected a soldier-targeted faction message effect"
+        {:send, :soldier, %{payload: raw}} = broadcast
+        msg = :erlang.iolist_to_binary(raw)
+        assert msg =~ "Armada Real"
+      end)
 
       assert log =~ "Armada Real"
     end

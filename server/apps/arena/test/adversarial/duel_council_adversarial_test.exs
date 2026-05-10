@@ -146,7 +146,15 @@ defmodule Arena.Adversarial.DuelCouncilAdversarialTest do
 
   defp collect_console_messages(_pid, timeout \\ 50) do
     receive do
-      {:send_raw, bin} -> [bin | collect_console_messages(self(), timeout)]
+      {:send_raw, bin} ->
+        [bin | collect_console_messages(self(), timeout)]
+
+      # Effects-contract producers (Gm.Events faction broadcasts) route
+      # through `AoSession.Egress.enqueue/2`, which lands as
+      # `{:egress, %Outbound{payload: <<...>>}}` rather than the legacy
+      # `{:send_raw, _}` shim.
+      {:egress, %{payload: bin}} ->
+        [bin | collect_console_messages(self(), timeout)]
     after
       timeout -> []
     end
@@ -154,12 +162,12 @@ defmodule Arena.Adversarial.DuelCouncilAdversarialTest do
 
   defp contains_faction_broadcast?(bins, label, message) do
     needle = "[#{label}] #{message}"
-    Enum.any?(bins, fn bin -> String.contains?(bin, needle) end)
+    Enum.any?(bins, fn bin -> String.contains?(IO.iodata_to_binary(bin), needle) end)
   end
 
   defp contains_label?(bins, label) do
     needle = "[#{label}]"
-    Enum.any?(bins, fn bin -> String.contains?(bin, needle) end)
+    Enum.any?(bins, fn bin -> String.contains?(IO.iodata_to_binary(bin), needle) end)
   end
 
   # ══════════════════════════════════════════════════════════════════════════

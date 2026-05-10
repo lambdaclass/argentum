@@ -138,6 +138,12 @@ defmodule Arena.FactionCouncilMessageTest do
     receive do
       {:send_raw, bin} ->
         [bin | collect_console_messages(pid, timeout)]
+
+      # GM faction-message broadcasts now flow through the effects runner,
+      # which routes via `AoSession.Egress.enqueue/2` and lands as
+      # `{:egress, %Outbound{payload: <<...>>}}` in the test pid mailbox.
+      {:egress, %{payload: bin}} ->
+        [bin | collect_console_messages(pid, timeout)]
     after
       timeout -> []
     end
@@ -145,7 +151,7 @@ defmodule Arena.FactionCouncilMessageTest do
 
   defp contains_faction_broadcast?(bins, label, message) do
     needle = "[#{label}] #{message}"
-    Enum.any?(bins, fn bin -> String.contains?(bin, needle) end)
+    Enum.any?(bins, fn bin -> String.contains?(IO.iodata_to_binary(bin), needle) end)
   end
 
   describe "Royal Council member /RMSG (drift #4)" do

@@ -536,7 +536,7 @@ defmodule Arena.GmCommandsParityTest do
       # Should route to the spawn NPC handler (may fail with "NPC not found" but won't crash)
       {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SPAWN 1")
 
-      assert_receive {:send_raw, _}, 200
+      assert_receive {:egress, _}, 200
     end
   end
 

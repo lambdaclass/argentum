@@ -1,19 +1,38 @@
 defmodule Arena.Map.Gm.Events do
-  @moduledoc "GM event commands: NPC spawning, invasions, tournaments, events, faction messages, etc."
+  @moduledoc """
+  GM event commands: NPC spawning, invasions, tournaments, events,
+  faction messages, etc.
+
+  All public handlers return `{:ok, state, [Arena.Map.Effect.t()]}`.
+  The `Arena.Map.GmCommands` dispatcher runs the effect list against
+  the post-handler state and adapts the return to the cast/`{:noreply,
+  state}` contract that `Arena.Map.MapServer` still uses for chat-driven
+  GM commands.
+
+  NpcDeath bridges (gm_kill_npc, gm_kill_npc_permanent, gm_mass_kill_npcs)
+  no longer call `Arena.Map.Effects.run/2` inline; the effects produced by
+  `Arena.Map.NpcDeath.resolve_npc_death/4` are appended to the returned
+  effect list so the runner is the single dispatch site.
+  """
 
   alias Arena.AuditLog
-  alias Arena.Map.{Helpers, Visibility}
+  alias Arena.Map.{Effects, Helpers}
   alias Arena.Entity.NpcEntity
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
+
+  defp console(message) do
+    Encoder.encode({:console_msg, %{message: message, font_index: 0}})
+  end
+
+  defp gm_console_effect(char_id, message), do: Effects.send(char_id, console(message))
 
   def gm_spawn_npc(state, char_id, entity, npc_id_str) do
     case Integer.parse(npc_id_str) do
       {npc_id, ""} ->
         case GameData.get_npc(npc_id) do
           nil ->
-            Helpers.gm_console(state, char_id, "NPC #{npc_id} not found in data.")
-            {:noreply, state}
+            {:ok, state, [gm_console_effect(char_id, "NPC #{npc_id} not found in data.")]}
 
           npc_def ->
             {tx, ty} = Helpers.facing_tile(entity.x, entity.y, entity.heading)
@@ -37,24 +56,32 @@ defmodule Arena.Map.Gm.Events do
                   next_char_index: instance_id + 1
               }
 
-              raw = Encoder.encode(Helpers.npc_create_packet(npc_entity, npc_def))
-
-              Visibility.broadcast_visible_all(state, tx, ty, fn pid ->
-                send(pid, {:send_raw, raw})
-              end)
+              create_packet = Encoder.encode(Helpers.npc_create_packet(npc_entity, npc_def))
 
               AuditLog.log_gm_action(char_id, "spawn_npc", "#{npc_def.name} at (#{tx},#{ty})")
-              Helpers.gm_console(state, char_id, "Spawned NPC #{npc_def.name} (id #{npc_id}) at (#{tx}, #{ty}).")
-              {:noreply, state}
+
+              effects = [
+                Effects.broadcast_visible_all(tx, ty, create_packet),
+                gm_console_effect(
+                  char_id,
+                  "Spawned NPC #{npc_def.name} (id #{npc_id}) at (#{tx}, #{ty})."
+                )
+              ]
+
+              {:ok, state, effects}
             else
-              Helpers.gm_console(state, char_id, "Cannot spawn NPC: facing tile (#{tx}, #{ty}) is blocked or occupied.")
-              {:noreply, state}
+              {:ok, state,
+               [
+                 gm_console_effect(
+                   char_id,
+                   "Cannot spawn NPC: facing tile (#{tx}, #{ty}) is blocked or occupied."
+                 )
+               ]}
             end
         end
 
       _ ->
-        Helpers.gm_console(state, char_id, "Usage: /SPAWNNPC npc_id")
-        {:noreply, state}
+        {:ok, state, [gm_console_effect(char_id, "Usage: /SPAWNNPC npc_id")]}
     end
   end
 
@@ -69,28 +96,26 @@ defmodule Arena.Map.Gm.Events do
       {:npc, instance_id} ->
         case Map.get(state.npcs_live, instance_id) do
           nil ->
-            Helpers.gm_console(state, char_id, "No NPC found at facing tile.")
-            {:noreply, state}
+            {:ok, state, [gm_console_effect(char_id, "No NPC found at facing tile.")]}
 
           npc ->
             npc_def = GameData.get_npc(npc.npc_id)
             npc_name = if npc_def, do: npc_def.name, else: "NPC #{npc.npc_id}"
 
-            # Bridge: GM handlers still return `{:noreply, state}`; NpcDeath
-            # returns canonical map effects which we run inline until the GM
-            # surface is migrated to `{:ok, state, effects}`.
-            {nil, state, effects} =
+            {nil, state, death_effects} =
               Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :gm)
 
-            Arena.Map.Effects.run(state, effects)
             AuditLog.log_gm_action(char_id, "kill_npc", npc_name)
-            Helpers.gm_console(state, char_id, "Killed NPC #{npc_name} (respawn enabled).")
-            {:noreply, state}
+
+            effects =
+              death_effects ++
+                [gm_console_effect(char_id, "Killed NPC #{npc_name} (respawn enabled).")]
+
+            {:ok, state, effects}
         end
 
       _ ->
-        Helpers.gm_console(state, char_id, "No NPC at facing tile (#{tx}, #{ty}).")
-        {:noreply, state}
+        {:ok, state, [gm_console_effect(char_id, "No NPC at facing tile (#{tx}, #{ty}).")]}
     end
   end
 
@@ -101,26 +126,29 @@ defmodule Arena.Map.Gm.Events do
       {:npc, instance_id} ->
         case Map.get(state.npcs_live, instance_id) do
           nil ->
-            Helpers.gm_console(state, char_id, "No NPC found at facing tile.")
-            {:noreply, state}
+            {:ok, state, [gm_console_effect(char_id, "No NPC found at facing tile.")]}
 
           npc ->
             npc_def = GameData.get_npc(npc.npc_id)
             npc_name = if npc_def, do: npc_def.name, else: "NPC #{npc.npc_id}"
 
-            # Bridge — see gm_kill_npc above. Same legacy contract.
-            {nil, state, effects} =
-              Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc, source: :gm, permanent: true)
+            {nil, state, death_effects} =
+              Arena.Map.NpcDeath.resolve_npc_death(state, instance_id, npc,
+                source: :gm,
+                permanent: true
+              )
 
-            Arena.Map.Effects.run(state, effects)
             AuditLog.log_gm_action(char_id, "kill_npc_permanent", npc_name)
-            Helpers.gm_console(state, char_id, "Killed NPC #{npc_name} permanently (no respawn).")
-            {:noreply, state}
+
+            effects =
+              death_effects ++
+                [gm_console_effect(char_id, "Killed NPC #{npc_name} permanently (no respawn).")]
+
+            {:ok, state, effects}
         end
 
       _ ->
-        Helpers.gm_console(state, char_id, "No NPC at facing tile (#{tx}, #{ty}).")
-        {:noreply, state}
+        {:ok, state, [gm_console_effect(char_id, "No NPC at facing tile (#{tx}, #{ty}).")]}
     end
   end
 
@@ -128,24 +156,26 @@ defmodule Arena.Map.Gm.Events do
     aoi_x = Helpers.aoi_range_x()
     aoi_y = Helpers.aoi_range_y()
 
-    {killed, state} =
-      Enum.reduce(state.npcs_live, {0, state}, fn {inst_id, npc}, {count, st} ->
+    {killed, state, death_effects} =
+      Enum.reduce(state.npcs_live, {0, state, []}, fn {inst_id, npc}, {count, st, eacc} ->
         if npc.alive and abs(npc.x - entity.x) <= aoi_x and abs(npc.y - entity.y) <= aoi_y do
-          # Bridge — see gm_kill_npc. Effects accumulate per-NPC and are
-          # dispatched inline until the GM surface is migrated.
-          {nil, st, effects} =
-            Arena.Map.NpcDeath.resolve_npc_death(st, inst_id, npc, source: :gm, permanent: true)
+          {nil, st, effs} =
+            Arena.Map.NpcDeath.resolve_npc_death(st, inst_id, npc,
+              source: :gm,
+              permanent: true
+            )
 
-          Arena.Map.Effects.run(st, effects)
-          {count + 1, st}
+          {count + 1, st, eacc ++ effs}
         else
-          {count, st}
+          {count, st, eacc}
         end
       end)
 
     AuditLog.log_gm_action(char_id, "mass_kill_npcs", "#{killed} NPCs")
-    Helpers.gm_console(state, char_id, "Killed #{killed} NPCs nearby.")
-    {:noreply, state}
+
+    effects = death_effects ++ [gm_console_effect(char_id, "Killed #{killed} NPCs nearby.")]
+
+    {:ok, state, effects}
   end
 
   def gm_invasion(state, char_id, entity, map_str, npc_str, count_str) do
@@ -153,182 +183,204 @@ defmodule Arena.Map.Gm.Events do
          {npc_id, ""} <- Integer.parse(npc_str),
          {count, ""} <- Integer.parse(count_str),
          true <- count > 0 and count <= 200 do
-      case Arena.Events.InvasionServer.start_invasion(map_id, npc_id, count, entity.name) do
-        {:ok, spawned} ->
-          AuditLog.log_gm_action(char_id, "invasion", "map #{map_id} npc #{npc_id} count #{count}")
-          Helpers.gm_console(state, char_id, "Invasion started: #{spawned} NPCs spawned on map #{map_id}.")
+      msg =
+        case Arena.Events.InvasionServer.start_invasion(map_id, npc_id, count, entity.name) do
+          {:ok, spawned} ->
+            AuditLog.log_gm_action(char_id, "invasion", "map #{map_id} npc #{npc_id} count #{count}")
+            "Invasion started: #{spawned} NPCs spawned on map #{map_id}."
 
-        {:error, :invasion_already_active} ->
-          Helpers.gm_console(state, char_id, "An invasion is already active on map #{map_id}.")
+          {:error, :invasion_already_active} ->
+            "An invasion is already active on map #{map_id}."
 
-        {:error, :npc_not_found} ->
-          Helpers.gm_console(state, char_id, "NPC #{npc_id} not found.")
+          {:error, :npc_not_found} ->
+            "NPC #{npc_id} not found."
 
-        {:error, :no_npcs_spawned} ->
-          Helpers.gm_console(state, char_id, "Could not spawn any NPCs (no walkable tiles found).")
+          {:error, :no_npcs_spawned} ->
+            "Could not spawn any NPCs (no walkable tiles found)."
 
-        {:error, reason} ->
-          Helpers.gm_console(state, char_id, "Invasion failed: #{inspect(reason)}")
-      end
+          {:error, reason} ->
+            "Invasion failed: #{inspect(reason)}"
+        end
+
+      {:ok, state, [gm_console_effect(char_id, msg)]}
     else
-      _ -> Helpers.gm_console(state, char_id, "Usage: /INVASION map_id npc_id count (max 200)")
+      _ ->
+        {:ok, state,
+         [gm_console_effect(char_id, "Usage: /INVASION map_id npc_id count (max 200)")]}
     end
-
-    {:noreply, state}
   end
 
   def gm_invasion_stop(state, char_id, map_str) do
-    case Integer.parse(map_str) do
-      {map_id, ""} ->
-        case Arena.Events.InvasionServer.stop_invasion(map_id) do
-          :ok ->
-            AuditLog.log_gm_action(char_id, "invasion_stop", "map #{map_id}")
-            Helpers.gm_console(state, char_id, "Invasion on map #{map_id} stopped.")
+    msg =
+      case Integer.parse(map_str) do
+        {map_id, ""} ->
+          case Arena.Events.InvasionServer.stop_invasion(map_id) do
+            :ok ->
+              AuditLog.log_gm_action(char_id, "invasion_stop", "map #{map_id}")
+              "Invasion on map #{map_id} stopped."
 
-          {:error, :no_invasion} ->
-            Helpers.gm_console(state, char_id, "No active invasion on map #{map_id}.")
-        end
+            {:error, :no_invasion} ->
+              "No active invasion on map #{map_id}."
+          end
 
-      _ ->
-        Helpers.gm_console(state, char_id, "Usage: /INVASION STOP map_id")
-    end
+        _ ->
+          "Usage: /INVASION STOP map_id"
+      end
 
-    {:noreply, state}
+    {:ok, state, [gm_console_effect(char_id, msg)]}
   end
 
   def gm_invasion_list(state, char_id) do
-    case Arena.Events.InvasionServer.list_invasions() do
-      {:ok, invasions} when map_size(invasions) == 0 ->
-        Helpers.gm_console(state, char_id, "No active invasions.")
+    effects =
+      case Arena.Events.InvasionServer.list_invasions() do
+        {:ok, invasions} when map_size(invasions) == 0 ->
+          [gm_console_effect(char_id, "No active invasions.")]
 
-      {:ok, invasions} ->
-        Enum.each(invasions, fn {map_id, inv} ->
-          Helpers.gm_console(state, char_id, "Map #{map_id}: NPC #{inv.npc_id}, #{inv.kills}/#{inv.total_count} killed")
-        end)
-    end
+        {:ok, invasions} ->
+          for {map_id, inv} <- invasions do
+            gm_console_effect(
+              char_id,
+              "Map #{map_id}: NPC #{inv.npc_id}, #{inv.kills}/#{inv.total_count} killed"
+            )
+          end
+      end
 
-    {:noreply, state}
+    {:ok, state, effects}
   end
 
   def gm_tournament_start(state, char_id, entity, max_str) do
-    max_players = case Integer.parse(max_str) do
-      {n, _} when n > 1 -> n
-      _ -> 16
-    end
+    max_players =
+      case Integer.parse(max_str) do
+        {n, _} when n > 1 -> n
+        _ -> 16
+      end
 
-    case Arena.Events.TournamentServer.start_tournament(max_players, entity.name) do
-      :ok ->
-        AuditLog.log_gm_action(char_id, "tournament_start", "max #{max_players}")
-        Helpers.gm_console(state, char_id, "Tournament started (max #{max_players} players).")
+    msg =
+      case Arena.Events.TournamentServer.start_tournament(max_players, entity.name) do
+        :ok ->
+          AuditLog.log_gm_action(char_id, "tournament_start", "max #{max_players}")
+          "Tournament started (max #{max_players} players)."
 
-      {:error, :tournament_already_active} ->
-        Helpers.gm_console(state, char_id, "A tournament is already active.")
-    end
+        {:error, :tournament_already_active} ->
+          "A tournament is already active."
+      end
 
-    {:noreply, state}
+    {:ok, state, [gm_console_effect(char_id, msg)]}
   end
 
   def gm_tournament_begin(state, char_id) do
-    case Arena.Events.TournamentServer.begin_matches() do
-      :ok ->
-        AuditLog.log_gm_action(char_id, "tournament_begin", "")
-        Helpers.gm_console(state, char_id, "Tournament matches started.")
+    msg =
+      case Arena.Events.TournamentServer.begin_matches() do
+        :ok ->
+          AuditLog.log_gm_action(char_id, "tournament_begin", "")
+          "Tournament matches started."
 
-      {:error, :not_enough_players} ->
-        Helpers.gm_console(state, char_id, "Not enough players to start.")
+        {:error, :not_enough_players} ->
+          "Not enough players to start."
 
-      {:error, reason} ->
-        Helpers.gm_console(state, char_id, "Error: #{inspect(reason)}")
-    end
+        {:error, reason} ->
+          "Error: #{inspect(reason)}"
+      end
 
-    {:noreply, state}
+    {:ok, state, [gm_console_effect(char_id, msg)]}
   end
 
   def gm_tournament_cancel(state, char_id) do
-    case Arena.Events.TournamentServer.cancel() do
-      :ok ->
-        AuditLog.log_gm_action(char_id, "tournament_cancel", "")
-        Helpers.gm_console(state, char_id, "Tournament cancelled.")
+    msg =
+      case Arena.Events.TournamentServer.cancel() do
+        :ok ->
+          AuditLog.log_gm_action(char_id, "tournament_cancel", "")
+          "Tournament cancelled."
 
-      {:error, :no_tournament} ->
-        Helpers.gm_console(state, char_id, "No active tournament.")
-    end
+        {:error, :no_tournament} ->
+          "No active tournament."
+      end
 
-    {:noreply, state}
+    {:ok, state, [gm_console_effect(char_id, msg)]}
   end
 
   def gm_tournament_status(state, char_id) do
-    case Arena.Events.TournamentServer.get_state() do
-      nil ->
-        Helpers.gm_console(state, char_id, "No active tournament.")
+    msg =
+      case Arena.Events.TournamentServer.get_state() do
+        nil ->
+          "No active tournament."
 
-      t ->
-        participants = length(t.participants)
-        Helpers.gm_console(state, char_id, "Tournament: phase=#{t.phase}, participants=#{participants}, round=#{t.current_round}")
-    end
+        t ->
+          participants = length(t.participants)
+          "Tournament: phase=#{t.phase}, participants=#{participants}, round=#{t.current_round}"
+      end
 
-    {:noreply, state}
+    {:ok, state, [gm_console_effect(char_id, msg)]}
   end
 
   def gm_event_start(state, char_id, entity, type_str, duration_str) do
-    type = case String.downcase(type_str) do
-      "xp_bonus" -> :xp_bonus
-      "gold_bonus" -> :gold_bonus
-      "drop_bonus" -> :drop_bonus
-      _ -> :custom
-    end
+    type =
+      case String.downcase(type_str) do
+        "xp_bonus" -> :xp_bonus
+        "gold_bonus" -> :gold_bonus
+        "drop_bonus" -> :drop_bonus
+        _ -> :custom
+      end
 
-    case Integer.parse(duration_str) do
-      {minutes, _} when minutes > 0 ->
-        case Arena.Events.EventManager.start_event(type, minutes, entity.name) do
-          :ok ->
-            AuditLog.log_gm_action(char_id, "event_start", "#{type} #{minutes}m")
-            Helpers.gm_console(state, char_id, "Event #{type} started for #{minutes} minutes.")
+    msg =
+      case Integer.parse(duration_str) do
+        {minutes, _} when minutes > 0 ->
+          case Arena.Events.EventManager.start_event(type, minutes, entity.name) do
+            :ok ->
+              AuditLog.log_gm_action(char_id, "event_start", "#{type} #{minutes}m")
+              "Event #{type} started for #{minutes} minutes."
 
-          {:error, :event_already_active} ->
-            Helpers.gm_console(state, char_id, "Event #{type} already active.")
-        end
+            {:error, :event_already_active} ->
+              "Event #{type} already active."
+          end
 
-      _ ->
-        Helpers.gm_console(state, char_id, "Usage: /EVENT START type duration_minutes")
-    end
+        _ ->
+          "Usage: /EVENT START type duration_minutes"
+      end
 
-    {:noreply, state}
+    {:ok, state, [gm_console_effect(char_id, msg)]}
   end
 
   def gm_event_stop(state, char_id, type_str) do
-    type = case String.downcase(type_str) do
-      "xp_bonus" -> :xp_bonus
-      "gold_bonus" -> :gold_bonus
-      "drop_bonus" -> :drop_bonus
-      _ -> :custom
-    end
+    type =
+      case String.downcase(type_str) do
+        "xp_bonus" -> :xp_bonus
+        "gold_bonus" -> :gold_bonus
+        "drop_bonus" -> :drop_bonus
+        _ -> :custom
+      end
 
-    case Arena.Events.EventManager.stop_event(type) do
-      :ok ->
-        AuditLog.log_gm_action(char_id, "event_stop", "#{type}")
-        Helpers.gm_console(state, char_id, "Event #{type} stopped.")
+    msg =
+      case Arena.Events.EventManager.stop_event(type) do
+        :ok ->
+          AuditLog.log_gm_action(char_id, "event_stop", "#{type}")
+          "Event #{type} stopped."
 
-      {:error, :no_such_event} ->
-        Helpers.gm_console(state, char_id, "No active event of type #{type}.")
-    end
+        {:error, :no_such_event} ->
+          "No active event of type #{type}."
+      end
 
-    {:noreply, state}
+    {:ok, state, [gm_console_effect(char_id, msg)]}
   end
 
   def gm_event_list(state, char_id) do
-    case Arena.Events.EventManager.list_events() do
-      {:ok, []} ->
-        Helpers.gm_console(state, char_id, "No active events.")
+    effects =
+      case Arena.Events.EventManager.list_events() do
+        {:ok, []} ->
+          [gm_console_effect(char_id, "No active events.")]
 
-      {:ok, events} ->
-        Enum.each(events, fn ev ->
-          mins = div(ev.remaining_seconds, 60)
-          Helpers.gm_console(state, char_id, "#{ev.type}: #{ev.description} (#{mins}m remaining, #{ev.participants} participants)")
-        end)
-    end
+        {:ok, events} ->
+          for ev <- events do
+            mins = div(ev.remaining_seconds, 60)
 
-    {:noreply, state}
+            gm_console_effect(
+              char_id,
+              "#{ev.type}: #{ev.description} (#{mins}m remaining, #{ev.participants} participants)"
+            )
+          end
+      end
+
+    {:ok, state, effects}
   end
 
   def gm_faction_message(state, char_id, faction, message) do
@@ -338,20 +390,23 @@ defmodule Arena.Map.Gm.Events do
         :chaos_legion -> "Legion del Caos"
       end
 
-    raw =
+    packet =
       Encoder.encode(
         {:console_msg, %{message: "[#{faction_name}] #{message}", font_index: 0}}
       )
 
-    Enum.each(state.players, fn {pid, entity} ->
-      if entity.faction == faction do
-        Helpers.send_to_session(state.sessions, pid, {:send_raw, raw})
+    broadcast_effects =
+      for {pid, entity} <- state.players, entity.faction == faction do
+        Effects.send(pid, packet)
       end
-    end)
 
     AuditLog.log_gm_action(char_id, "faction_message", "#{faction_name}: #{message}")
-    Helpers.gm_console(state, char_id, "Faction message sent to #{faction_name}.")
-    {:noreply, state}
+
+    effects =
+      broadcast_effects ++
+        [gm_console_effect(char_id, "Faction message sent to #{faction_name}.")]
+
+    {:ok, state, effects}
   end
 
   def gm_talk_as_npc(state, char_id, entity, message) do
@@ -364,14 +419,13 @@ defmodule Arena.Map.Gm.Events do
 
     case nearest_npc do
       nil ->
-        Helpers.gm_console(state, char_id, "No NPCs nearby.")
-        {:noreply, state}
+        {:ok, state, [gm_console_effect(char_id, "No NPCs nearby.")]}
 
       {_npc_id, npc} ->
         npc_def = GameData.get_npc(npc.npc_id)
         npc_name = if npc_def, do: npc_def.name, else: "NPC"
 
-        chat_raw =
+        chat_packet =
           Encoder.encode(
             {:chat_over_head,
              %{
@@ -385,10 +439,14 @@ defmodule Arena.Map.Gm.Events do
              }}
           )
 
-        Visibility.broadcast_to_map(state, fn pid -> send(pid, {:send_raw, chat_raw}) end)
         AuditLog.log_gm_action(char_id, "talk_as_npc", message)
-        Helpers.gm_console(state, char_id, "#{npc_name} says: #{message}")
-        {:noreply, state}
+
+        effects = [
+          Effects.broadcast_map(chat_packet),
+          gm_console_effect(char_id, "#{npc_name} says: #{message}")
+        ]
+
+        {:ok, state, effects}
     end
   end
 
@@ -400,12 +458,11 @@ defmodule Arena.Map.Gm.Events do
         state = %{state | players: players}
         label = if council_type == :royal, do: "Royal", else: "Chaos"
         AuditLog.log_gm_action(char_id, "accept_council", "#{target_name} #{label}")
-        Helpers.gm_console(state, char_id, "#{target_name} added to #{label} Council.")
-        {:noreply, state}
+
+        {:ok, state, [gm_console_effect(char_id, "#{target_name} added to #{label} Council.")]}
 
       :not_found ->
-        Helpers.gm_console(state, char_id, "Player '#{target_name}' not found.")
-        {:noreply, state}
+        {:ok, state, [gm_console_effect(char_id, "Player '#{target_name}' not found.")]}
     end
   end
 end
