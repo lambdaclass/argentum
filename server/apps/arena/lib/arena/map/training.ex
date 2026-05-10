@@ -8,9 +8,8 @@ defmodule Arena.Map.Training do
   egress queue rather than the legacy `{:send_raw, _}` shim.
 
   The crafting fall-through (`handle_train_skill` -> `Crafting.handle_work`
-  for crafting skills with no trainer nearby) bridges Crafting's still-legacy
-  `{:noreply, state}` shape via `bridge_legacy/2`. Once Crafting migrates,
-  the bridge collapses to a direct delegation.
+  for crafting skills with no trainer nearby) is a direct delegation —
+  Crafting is also on the effects contract.
   """
 
   alias Arena.Map.{Effects, Helpers}
@@ -93,14 +92,7 @@ defmodule Arena.Map.Training do
             end
 
           skill_atom in @crafting_skills ->
-            # Crafting.handle_work/3 still returns `{:noreply, state}` and emits
-            # its own `{:send_raw, _}` packets through Helpers. We bridge by
-            # accepting the new state and surfacing an empty effects list — the
-            # legacy side channel has already fired by the time we return.
-            # Once Crafting migrates, this collapses into a direct delegation.
-            bridge_legacy(state, fn ->
-              Arena.Map.Crafting.handle_work(state, char_id, skill_atom)
-            end)
+            Arena.Map.Crafting.handle_work(state, char_id, skill_atom)
 
           true ->
             {:ok, state, [Effects.send(char_id, console("No hay un entrenador cerca."))]}
@@ -285,20 +277,6 @@ defmodule Arena.Map.Training do
     ]
 
     {:ok, state, effects}
-  end
-
-  # Adapter for legacy sub-handlers (currently `Crafting.handle_work/3`)
-  # that still return GenServer-flavoured `{:noreply, state}` and emit
-  # their packets through the legacy `{:send_raw, _}` shim. We accept the
-  # new state and surface zero effects — the legacy side channel has
-  # already fired by the time control returns.
-  defp bridge_legacy(default_state, fun) do
-    case fun.() do
-      {:reply, _result, new_state} -> {:ok, new_state, []}
-      {:noreply, new_state} -> {:ok, new_state, []}
-      {:ok, new_state, effects} -> {:ok, new_state, effects}
-      _ -> {:ok, default_state, []}
-    end
   end
 
   defp console(message) do

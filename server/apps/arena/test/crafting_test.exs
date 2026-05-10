@@ -415,7 +415,7 @@ defmodule Arena.CraftingTest do
       entity = %PlayerEntity{char_id: 1, dead: true, stamina: 100}
       state = make_state(%{1 => entity})
 
-      {:noreply, _state} = Crafting.handle_work(state, 1, :mining)
+      {:ok, _state, _effects} = Crafting.handle_work(state, 1, :mining)
       # Should not crash, dead player rejected
     end
 
@@ -423,7 +423,7 @@ defmodule Arena.CraftingTest do
       entity = %PlayerEntity{char_id: 1, stamina: 5, x: 50, y: 50}
       state = make_state(%{1 => entity})
 
-      {:noreply, new_state} = Crafting.handle_work(state, 1, :mining)
+      {:ok, new_state, _effects} = Crafting.handle_work(state, 1, :mining)
       # Stamina should not be consumed
       assert new_state.players[1].stamina == 5
     end
@@ -440,7 +440,7 @@ defmodule Arena.CraftingTest do
 
       state = make_state(%{1 => entity}, trigger_map: %{{50, 49} => 6})
 
-      {:noreply, new_state} = Crafting.handle_work(state, 1, :mining)
+      {:ok, new_state, _effects} = Crafting.handle_work(state, 1, :mining)
       # Stamina should not be consumed — wrong tool
       assert new_state.players[1].stamina == 100
     end
@@ -459,7 +459,7 @@ defmodule Arena.CraftingTest do
       # No trigger at facing tile
       state = make_state(%{1 => entity}, trigger_map: %{})
 
-      {:noreply, new_state} = Crafting.handle_work(state, 1, :mining)
+      {:ok, new_state, _effects} = Crafting.handle_work(state, 1, :mining)
       assert new_state.players[1].stamina == 100
     end
 
@@ -478,7 +478,7 @@ defmodule Arena.CraftingTest do
       # Trigger 6 at facing tile (50, 49)
       state = make_state(%{1 => entity}, trigger_map: %{{50, 49} => 6})
 
-      {:noreply, new_state} = Crafting.handle_work(state, 1, :mining)
+      {:ok, new_state, _effects} = Crafting.handle_work(state, 1, :mining)
       # Warrior (non-worker) pays 3x stamina: 15 * 3 = 45
       assert new_state.players[1].stamina == 55
     end
@@ -612,19 +612,19 @@ defmodule Arena.CraftingTest do
     test "rejects dead player" do
       entity = %PlayerEntity{char_id: 1, dead: true, stamina: 100}
       state = make_state(%{1 => entity})
-      {:noreply, _state} = Crafting.handle_craft_item(state, 1, :blacksmithing, 386)
+      {:ok, _state, _effects} = Crafting.handle_craft_item(state, 1, :blacksmithing, 386)
     end
 
     test "rejects player with insufficient stamina" do
       entity = %PlayerEntity{char_id: 1, dead: false, stamina: 0}
       state = make_state(%{1 => entity})
-      {:noreply, _state} = Crafting.handle_craft_item(state, 1, :blacksmithing, 386)
+      {:ok, _state, _effects} = Crafting.handle_craft_item(state, 1, :blacksmithing, 386)
     end
 
     test "rejects unknown item" do
       entity = %PlayerEntity{char_id: 1, dead: false, stamina: 100, skills: %{blacksmithing: 50}}
       state = make_state(%{1 => entity})
-      {:noreply, _state} = Crafting.handle_craft_item(state, 1, :blacksmithing, 99999)
+      {:ok, _state, _effects} = Crafting.handle_craft_item(state, 1, :blacksmithing, 99999)
     end
 
     test "rejects when skill too low" do
@@ -637,7 +637,7 @@ defmodule Arena.CraftingTest do
         inventory: [%{item_id: 388, amount: 500, equipped: false} | List.duplicate(nil, 23)]
       }
       state = make_state(%{1 => entity}, objects: [%{x: 50, y: 49, obj_index: 384, amount: 1}])
-      {:noreply, _state} = Crafting.handle_craft_item(state, 1, :blacksmithing, 402, 1, 50, 49)
+      {:ok, _state, _effects} = Crafting.handle_craft_item(state, 1, :blacksmithing, 402, 1, 50, 49)
     end
 
     test "rejects when materials missing" do
@@ -650,7 +650,7 @@ defmodule Arena.CraftingTest do
         inventory: List.duplicate(nil, 24)
       }
       state = make_state(%{1 => entity}, objects: [%{x: 50, y: 49, obj_index: 384, amount: 1}])
-      {:noreply, _state} = Crafting.handle_craft_item(state, 1, :blacksmithing, 386, 1, 50, 49)
+      {:ok, _state, _effects} = Crafting.handle_craft_item(state, 1, :blacksmithing, 386, 1, 50, 49)
     end
 
     test "crafts item and consumes ingredients" do
@@ -663,7 +663,7 @@ defmodule Arena.CraftingTest do
         inventory: [%{item_id: 192, amount: 5, equipped: false} | List.duplicate(nil, 23)]
       }
       state = make_state(%{1 => entity}, objects: [%{x: 50, y: 49, obj_index: 384, amount: 1}])
-      {:noreply, new_state} = Crafting.handle_craft_item(state, 1, :blacksmithing, 386, 1, 50, 49)
+      {:ok, new_state, _effects} = Crafting.handle_craft_item(state, 1, :blacksmithing, 386, 1, 50, 49)
 
       updated_entity = new_state.players[1]
       # Stamina should be reduced
@@ -677,7 +677,7 @@ defmodule Arena.CraftingTest do
 
     test "returns :noreply for missing player" do
       state = make_state(%{})
-      {:noreply, _state} = Crafting.handle_craft_item(state, 999, :blacksmithing, 386)
+      {:ok, _state, _effects} = Crafting.handle_craft_item(state, 999, :blacksmithing, 386)
     end
 
     test "blacksmithing rejects when no anvil or forge object is selected" do
@@ -692,10 +692,14 @@ defmodule Arena.CraftingTest do
       }
 
       state = make_state(%{1 => entity}, sessions: %{1 => self()}, objects: [])
-      {:noreply, unchanged_state} = Crafting.handle_craft_item(state, 1, :blacksmithing, 386, 1, 50, 49)
+      {:ok, unchanged_state, effects} =
+        Crafting.handle_craft_item(state, 1, :blacksmithing, 386, 1, 50, 49)
 
       assert unchanged_state.players[1].inventory == state.players[1].inventory
-      assert_receive {:send_raw, _}
+      # Effects-contract migration: rejection arrives as a console-msg
+      # `Effects.send` rather than a legacy `{:send_raw, _}` mailbox push.
+      assert Enum.any?(effects, &match?({:send, 1, _}, &1)),
+             "expected a rejection effect targeting char_id=1, got #{inspect(effects)}"
     end
   end
 
@@ -705,38 +709,38 @@ defmodule Arena.CraftingTest do
     test "sends recipe list for blacksmithing" do
       entity = %PlayerEntity{char_id: 1, dead: false, stamina: 100, skills: %{blacksmithing: 10}}
       state = make_state(%{1 => entity})
-      {:noreply, _state} = Crafting.open_crafting_window(state, 1, :blacksmithing)
+      {:ok, _state, _effects} = Crafting.open_crafting_window(state, 1, :blacksmithing)
     end
 
     test "sends recipe list for carpentry" do
       entity = %PlayerEntity{char_id: 1, dead: false, stamina: 100, skills: %{carpentry: 50}}
       state = make_state(%{1 => entity})
-      {:noreply, _state} = Crafting.open_crafting_window(state, 1, :carpentry)
+      {:ok, _state, _effects} = Crafting.open_crafting_window(state, 1, :carpentry)
     end
 
     test "sends recipe list for alchemy" do
       entity = %PlayerEntity{char_id: 1, dead: false, stamina: 100, skills: %{alchemy: 30}}
       state = make_state(%{1 => entity})
-      {:noreply, _state} = Crafting.open_crafting_window(state, 1, :alchemy)
+      {:ok, _state, _effects} = Crafting.open_crafting_window(state, 1, :alchemy)
     end
 
     test "sends recipe list for tailoring" do
       entity = %PlayerEntity{char_id: 1, dead: false, stamina: 100, skills: %{tailoring: 20}}
       state = make_state(%{1 => entity})
-      {:noreply, _state} = Crafting.open_crafting_window(state, 1, :tailoring)
+      {:ok, _state, _effects} = Crafting.open_crafting_window(state, 1, :tailoring)
     end
 
-    test "returns :noreply for missing player" do
+    test "returns empty effects for missing player" do
       state = make_state(%{})
-      {:noreply, _state} = Crafting.open_crafting_window(state, 999, :blacksmithing)
+      {:ok, _state, []} = Crafting.open_crafting_window(state, 999, :blacksmithing)
     end
   end
 
   describe "working tool use opens production forms" do
-    # Roadmap #4: handle_use_item returns {:ok, state, effects}. The crafting
-    # branch (obj_type 18) still routes through `Arena.Map.Crafting` which
-    # uses the legacy `Helpers.send_to_session/3` shim, so the production
-    # form packets continue to arrive as `{:send_raw, _}` for now.
+    # Crafting.handle_tool_use is on the effects contract since the
+    # roadmap-#4 follow-up: `handle_use_item` propagates the form packets
+    # as `Effects.send/2` entries in the returned effects list rather
+    # than dispatching them through the legacy `{:send_raw, _}` shim.
     test "carpentry form opens from using the equipped saw without any workstation NPC" do
       entity = %PlayerEntity{
         char_id: 1,
@@ -746,9 +750,11 @@ defmodule Arena.CraftingTest do
       }
 
       state = make_state(%{1 => entity}, sessions: %{1 => self()})
-      assert {:ok, _state, _effects} = InventoryHandlers.handle_use_item(state, 1, 0)
-      assert_receive {:send_raw, _}
-      assert_receive {:send_raw, _}
+      assert {:ok, _state, effects} = InventoryHandlers.handle_use_item(state, 1, 0)
+      # Expect at least the recipe-list and show-form packets in the
+      # returned effects (both targeting char_id=1).
+      sends = Enum.filter(effects, &match?({:send, 1, _}, &1))
+      assert length(sends) >= 2
     end
 
     test "blacksmith form opens from using the equipped hammer with a selected anvil object" do
@@ -768,9 +774,9 @@ defmodule Arena.CraftingTest do
           objects: [%{x: 50, y: 49, obj_index: 384, amount: 1}]
         )
 
-      assert {:ok, _state, _effects} = InventoryHandlers.handle_use_item(state, 1, 0, 50, 49)
-      assert_receive {:send_raw, _}
-      assert_receive {:send_raw, _}
+      assert {:ok, _state, effects} = InventoryHandlers.handle_use_item(state, 1, 0, 50, 49)
+      sends = Enum.filter(effects, &match?({:send, 1, _}, &1))
+      assert length(sends) >= 2
     end
 
     test "blacksmith form rejects hammer use without a selected anvil or forge object" do
@@ -784,12 +790,13 @@ defmodule Arena.CraftingTest do
       }
 
       state = make_state(%{1 => entity}, sessions: %{1 => self()})
-      # Rejection from Crafting.handle_tool_use returns {:error, :missing_target}
-      # but apply_item_use bubbles it up; handle_use_item swallows the error
-      # and replies {:ok, state, []}. The crafting console message is still
-      # sent via the legacy shim from inside Crafting.
-      assert {:ok, _state, _effects} = InventoryHandlers.handle_use_item(state, 1, 0)
-      assert_receive {:send_raw, _}
+      # Rejection from Crafting.handle_tool_use returns {:error, :missing_target}.
+      # apply_item_use bubbles it up; handle_use_item swallows the error and
+      # replies {:ok, state, []}. Crafting runs the console-message effect
+      # inline (since the rejection short-circuits the effects propagation),
+      # which lands on the test's session pid as an `{:egress, _}` envelope.
+      assert {:ok, _state, []} = InventoryHandlers.handle_use_item(state, 1, 0)
+      assert_receive {:egress, _}
     end
   end
 end

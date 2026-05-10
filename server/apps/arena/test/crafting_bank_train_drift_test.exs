@@ -164,9 +164,11 @@ defmodule Arena.CraftingBankTrainDriftTest do
           meta: %{objects: [%{x: 50, y: 49, obj_index: 384, amount: 1}]}
         )
 
-      assert {:ok, _state, _effects} = InventoryHandlers.handle_use_item(state, 1, 0, 50, 49)
-      assert_receive {:send_raw, _}, 500
-      assert_receive {:send_raw, _}, 500
+      assert {:ok, _state, effects} = InventoryHandlers.handle_use_item(state, 1, 0, 50, 49)
+      # Effects-contract migration: production-form packets arrive as
+      # `Effects.send/2` entries instead of legacy mailbox sends.
+      sends = Enum.filter(effects, &match?({:send, 1, _}, &1))
+      assert length(sends) >= 2
     end
 
     test "carpentry opens from the equipped saw with no workstation NPC nearby" do
@@ -186,9 +188,9 @@ defmodule Arena.CraftingBankTrainDriftTest do
           npcs_live: %{}
         )
 
-      assert {:ok, _state, _effects} = InventoryHandlers.handle_use_item(state, 1, 0)
-      assert_receive {:send_raw, _}, 500
-      assert_receive {:send_raw, _}, 500
+      assert {:ok, _state, effects} = InventoryHandlers.handle_use_item(state, 1, 0)
+      sends = Enum.filter(effects, &match?({:send, 1, _}, &1))
+      assert length(sends) >= 2
     end
 
     test "blacksmith crafting rejects when no anvil or forge object is selected" do
@@ -211,9 +213,12 @@ defmodule Arena.CraftingBankTrainDriftTest do
           meta: %{objects: []}
         )
 
-      {:noreply, new_state} = Crafting.handle_craft_item(state, 1, :blacksmithing, 386, 1, 50, 49)
+      {:ok, new_state, effects} =
+        Crafting.handle_craft_item(state, 1, :blacksmithing, 386, 1, 50, 49)
+
       assert new_state.players[1].inventory == state.players[1].inventory
-      assert_receive {:send_raw, _}, 500
+      assert Enum.any?(effects, &match?({:send, 1, _}, &1)),
+             "expected a rejection effect targeting char_id=1, got #{inspect(effects)}"
     end
   end
 

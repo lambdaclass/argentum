@@ -147,7 +147,7 @@ defmodule Arena.Test.Scenario do
 
       scenario
       |> update_state(fn s ->
-        {:noreply, new_state} = Crafting.handle_work(s, 7, :taming)
+        {:ok, new_state, _effects} = Crafting.handle_work(s, 7, :taming)
         new_state
       end)
   """

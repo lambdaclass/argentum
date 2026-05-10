@@ -537,24 +537,20 @@ defmodule Arena.Map.InventoryHandlers do
 
         {:ok, entity, state, effects}
 
-      # Working tools used for production-form opening.
-      # Crafting still uses legacy send_to_session shims and returns
-      # {:ok, entity, state} | {:error, reason}. We bridge by treating
-      # its side effects as already-applied and emitting an empty
-      # effects list — the legacy shim is what the existing crafting
-      # tests assert against.
+      # Working tools used for production-form opening. Crafting is on
+      # the effects contract; `handle_tool_use/6` returns
+      # `{:ok, entity, state, effects} | {:error, reason}`. The
+      # rejection path runs its own console-message effects internally
+      # so the gateway still sees the prompt.
       18 ->
-        case Arena.Map.Crafting.handle_tool_use(
-               state,
-               entity.char_id,
-               entity,
-               item_def.id,
-               target_x,
-               target_y
-             ) do
-          {:ok, entity, state} -> {:ok, entity, state, []}
-          {:error, reason} -> {:error, reason}
-        end
+        Arena.Map.Crafting.handle_tool_use(
+          state,
+          entity.char_id,
+          entity,
+          item_def.id,
+          target_x,
+          target_y
+        )
 
       _ ->
         {:error, :not_usable}

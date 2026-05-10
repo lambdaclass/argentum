@@ -204,7 +204,7 @@ defmodule Arena.FactionCraftDriftTest do
       }
       state = make_craft_state(%{1 => entity})
 
-      {:noreply, new_state} = Crafting.handle_craft_item(state, 1, :carpentry, 479, 3)
+      {:ok, new_state, _effects} = Crafting.handle_craft_item(state, 1, :carpentry, 479, 3)
 
       updated = new_state.players[1]
 
@@ -235,7 +235,7 @@ defmodule Arena.FactionCraftDriftTest do
       }
       state = make_craft_state(%{1 => entity})
 
-      {:noreply, new_state} = Crafting.handle_craft_item(state, 1, :carpentry, 479, 1)
+      {:ok, new_state, _effects} = Crafting.handle_craft_item(state, 1, :carpentry, 479, 1)
 
       updated = new_state.players[1]
       wood_count = updated.inventory
@@ -264,7 +264,7 @@ defmodule Arena.FactionCraftDriftTest do
       }
       state = make_craft_state(%{1 => entity})
 
-      {:noreply, new_state} = Crafting.handle_craft_item(state, 1, :carpentry, 479)
+      {:ok, new_state, _effects} = Crafting.handle_craft_item(state, 1, :carpentry, 479)
 
       updated = new_state.players[1]
       bow_count = updated.inventory

@@ -25,10 +25,12 @@ defmodule Arena.PetTamingExtendedTest do
   the effects contract since slice 5b — the `run_effects/2`
   closure lifts them onto the scenario's recorded effect buffer.
 
-  Pet command handlers (`Pets.handle_pet_*`) and `Crafting.handle_work/3`
-  still return `{:noreply, state}` (they have not been migrated to the
-  effects contract), so we drive them via `update_state/2` and assert on
-  the post-state.
+  Pet command handlers (`Pets.handle_pet_*`) still return
+  `{:noreply, state}` and are driven via `update_state/2`. Crafting
+  handlers (`Crafting.handle_work/3`) are on the effects contract and
+  return `{:ok, state, effects}`; the test still discards their effects
+  via `update_state/2` because these assertions only care about the
+  post-state pet/stamina values.
   """
   use ExUnit.Case, async: true
 
@@ -442,7 +444,7 @@ defmodule Arena.PetTamingExtendedTest do
 
       s =
         update_state(s, fn st ->
-          {:noreply, st} = Crafting.handle_work(st, 7, :taming)
+          {:ok, st, _effects} = Crafting.handle_work(st, 7, :taming)
           st
         end)
 
@@ -460,7 +462,7 @@ defmodule Arena.PetTamingExtendedTest do
 
       s =
         update_state(s, fn st ->
-          {:noreply, st} = Crafting.handle_work(st, 7, :taming)
+          {:ok, st, _effects} = Crafting.handle_work(st, 7, :taming)
           st
         end)
 
@@ -483,7 +485,7 @@ defmodule Arena.PetTamingExtendedTest do
       # Force taming to succeed by setting skill to 100
       s =
         update_state(s, fn st ->
-          {:noreply, st} = Crafting.handle_work(st, 7, :taming)
+          {:ok, st, _effects} = Crafting.handle_work(st, 7, :taming)
           st
         end)
 
@@ -513,7 +515,7 @@ defmodule Arena.PetTamingExtendedTest do
 
       s_worker =
         update_state(s_worker, fn st ->
-          {:noreply, st} = Crafting.handle_work(st, 7, :taming)
+          {:ok, st, _effects} = Crafting.handle_work(st, 7, :taming)
           st
         end)
 
@@ -528,7 +530,7 @@ defmodule Arena.PetTamingExtendedTest do
 
       s_warrior =
         update_state(s_warrior, fn st ->
-          {:noreply, st} = Crafting.handle_work(st, 7, :taming)
+          {:ok, st, _effects} = Crafting.handle_work(st, 7, :taming)
           st
         end)
 
@@ -574,7 +576,7 @@ defmodule Arena.PetTamingExtendedTest do
 
       s =
         update_state(s, fn st ->
-          {:noreply, st} = Crafting.handle_work(st, 7, :taming)
+          {:ok, st, _effects} = Crafting.handle_work(st, 7, :taming)
           st
         end)
 
@@ -599,7 +601,7 @@ defmodule Arena.PetTamingExtendedTest do
 
       s =
         update_state(s, fn st ->
-          {:noreply, st} = Crafting.handle_work(st, 7, :taming)
+          {:ok, st, _effects} = Crafting.handle_work(st, 7, :taming)
           st
         end)
 
@@ -812,7 +814,7 @@ defmodule Arena.PetTamingExtendedTest do
 
       s_2 =
         update_state(s_2, fn st ->
-          {:noreply, st} = Crafting.handle_work(st, 7, :taming)
+          {:ok, st, _effects} = Crafting.handle_work(st, 7, :taming)
           st
         end)
 
@@ -831,7 +833,7 @@ defmodule Arena.PetTamingExtendedTest do
 
       s_3 =
         update_state(s_3, fn st ->
-          {:noreply, st} = Crafting.handle_work(st, 7, :taming)
+          {:ok, st, _effects} = Crafting.handle_work(st, 7, :taming)
           st
         end)
 
@@ -852,7 +854,7 @@ defmodule Arena.PetTamingExtendedTest do
 
       s =
         update_state(s, fn st ->
-          {:noreply, st} = Crafting.handle_work(st, 7, :taming)
+          {:ok, st, _effects} = Crafting.handle_work(st, 7, :taming)
           st
         end)
 

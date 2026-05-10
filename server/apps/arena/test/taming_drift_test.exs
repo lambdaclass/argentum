@@ -110,17 +110,6 @@ defmodule Arena.TamingDriftTest do
     end
   end
 
-  defp collect_messages do
-    collect_messages([])
-  end
-
-  defp collect_messages(acc) do
-    receive do
-      msg -> collect_messages([msg | acc])
-    after
-      50 -> Enum.reverse(acc)
-    end
-  end
 
   # ================================================================
   # Drift #1: Charisma x Taming formula
@@ -204,8 +193,6 @@ defmodule Arena.TamingDriftTest do
     end
 
     test "player below min_tame_level is rejected with level message" do
-      flush_messages()
-
       # Create a player with level 5
       player = make_player(level: 5, cha: 25, skills: %{taming: 100}, class: :druida)
 
@@ -221,24 +208,26 @@ defmodule Arena.TamingDriftTest do
       # Seed rand so skill checks pass — the min level check should block first
       :rand.seed(:exsss, {100, 100, 100})
 
-      {:noreply, new_state} = Crafting.handle_work(state, 7, :taming)
+      {:ok, new_state, effects} = Crafting.handle_work(state, 7, :taming)
 
       # The NPC should NOT have been tamed (owner_id remains nil)
       assert new_state.npcs_live[1].owner_id == nil,
              "NPC should not be tamed when player level is below min_tame_level"
 
-      # Should receive a message about level requirement
-      messages = collect_messages()
-
+      # Should produce a rejection effect targeting the player. The
+      # specific message depends on which gate fires first (level vs.
+      # random gate); the original test was content with "any message
+      # was emitted", which on the effects contract means at least one
+      # `Effects.send/2` envelope.
       has_level_msg =
-        Enum.any?(messages, fn
-          {:send_raw, data} when is_binary(data) ->
+        Enum.any?(effects, fn
+          {:send, 7, %{payload: data}} when is_binary(data) ->
             String.contains?(data, "nivel") or String.contains?(data, "level")
           _ -> false
         end)
 
-      assert has_level_msg or length(messages) > 0,
-             "Player should receive a rejection message about level requirement"
+      assert has_level_msg or length(effects) > 0,
+             "Player should receive at least one rejection effect, got #{inspect(effects)}"
     end
   end
 
@@ -277,7 +266,7 @@ defmodule Arena.TamingDriftTest do
               sessions: %{7 => self()}
             )
 
-            {:noreply, new_state} = Crafting.handle_work(state, 7, :taming)
+            {:ok, new_state, _effects} = Crafting.handle_work(state, 7, :taming)
 
             if new_state.npcs_live[1] && new_state.npcs_live[1].owner_id == 7 do
               acc + 1
@@ -334,7 +323,7 @@ defmodule Arena.TamingDriftTest do
         for _ <- 1..20 do
           flush_messages()
 
-          {:noreply, new_state} = Crafting.handle_work(state, 7, :taming)
+          {:ok, new_state, _effects} = Crafting.handle_work(state, 7, :taming)
 
           new_state.npcs_live[1].owner_id
         end
@@ -407,11 +396,8 @@ defmodule Arena.TamingDriftTest do
       )
 
       # Run many times to get at least one success (due to 1-in-5 gate)
-      _found_safe_zone_msg = false
       found_safe_zone_msg =
         Enum.reduce_while(1..100, false, fn _, _acc ->
-          flush_messages()
-
           fresh_state = make_state(
             players: %{7 => player},
             npcs: %{1 => make_npc(x: 50, y: 50)},
@@ -419,17 +405,17 @@ defmodule Arena.TamingDriftTest do
             meta: %{safe_zone: true, no_mascotas: true}
           )
 
-          {:noreply, new_state} = Crafting.handle_work(fresh_state, 7, :taming)
-
-          messages = collect_messages()
+          {:ok, new_state, effects} = Crafting.handle_work(fresh_state, 7, :taming)
 
           tamed = new_state.players[7].pet_ids != []
 
           if tamed do
             # In safe zone: pet should be in pet_ids but NPC should be removed from npcs_live
+            # On the effects contract the safe-zone message arrives as an
+            # `Effects.send/2` envelope — look for it in the returned list.
             has_safe_msg =
-              Enum.any?(messages, fn
-                {:send_raw, data} when is_binary(data) ->
+              Enum.any?(effects, fn
+                {:send, 7, %{payload: data}} when is_binary(data) ->
                   String.contains?(data, "aguarda afuera") or
                     String.contains?(data, "esperan afuera") or
                     String.contains?(data, "mascota")

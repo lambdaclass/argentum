@@ -781,15 +781,18 @@ defmodule Arena.Map.MapServer do
 
   @impl true
   def handle_cast({:craft_item, char_id, skill_atom, item_id, amount, target_x, target_y}, state),
-    do: Arena.Map.Crafting.handle_craft_item(
-      state,
-      char_id,
-      skill_atom,
-      item_id,
-      amount,
-      target_x,
-      target_y
-    )
+    do:
+      Effects.run_handler(state, fn s ->
+        Arena.Map.Crafting.handle_craft_item(
+          s,
+          char_id,
+          skill_atom,
+          item_id,
+          amount,
+          target_x,
+          target_y
+        )
+      end)
 
   @impl true
   def handle_cast({:request_skills, char_id}, state),
