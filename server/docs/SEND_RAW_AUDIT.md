@@ -62,7 +62,6 @@ are the next migration targets.
 - `arena/lib/arena/map/gm/moderation.ex`
 - `arena/lib/arena/map/gm/world.ex`
 - `arena/lib/arena/map/gm_commands.ex`
-- `arena/lib/arena/map/movement.ex`
 - `arena/lib/arena/map/quest_handlers.ex`
 - `arena/lib/arena/map/training.ex`
 
@@ -98,4 +97,5 @@ module here:
 - `arena/lib/arena/map/trade.ex`
 - `arena/lib/arena/map/faction.ex`
 - `arena/lib/arena/map/chat.ex`
+- `arena/lib/arena/map/movement.ex`
 - `arena/lib/arena/npc_ai.ex`

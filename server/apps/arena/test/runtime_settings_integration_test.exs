@@ -191,7 +191,10 @@ defmodule Arena.RuntimeSettingsIntegrationTest do
 
       assert result == {:error, :speed_hack}
       assert new_state.players[player.char_id].speed_hack_counter == 0.0
-      assert_receive {:send_raw, _}
+      # Movement now emits the position-correction snap-back through
+      # the egress queue (Effects.send/2) instead of a bare
+      # {:send_raw, _} envelope.
+      assert_receive {:egress, _}
     end
 
     test "base_walk_interval_ms changes the applied speed-hack penalty window" do
@@ -207,7 +210,7 @@ defmodule Arena.RuntimeSettingsIntegrationTest do
 
       penalty_ms = new_state.players[player.char_id].next_move_at - before
       assert penalty_ms >= 700
-      assert_receive {:send_raw, _}
+      assert_receive {:egress, _}
     end
   end
 

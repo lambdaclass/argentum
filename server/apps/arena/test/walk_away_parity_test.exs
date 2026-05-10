@@ -8,10 +8,20 @@ defmodule Arena.WalkAwayParityTest do
   use ExUnit.Case, async: false
 
   alias Arena.Data.GameData
-  alias Arena.Map.{Commerce, NpcInteraction, Movement, Bank}
+  alias Arena.Map.{Effects, NpcInteraction, Movement}
   alias AoProtocol.Server.Encoder
 
   import Arena.Test.MapStateFactory
+
+  # check_npc_session_proximity returns `{state, effects}` after the
+  # Movement effects-contract migration. Run the effects so the
+  # session pid receives the commerce_end / bank_end packets the
+  # tests assert on.
+  defp run_proximity_check(state, char_id) do
+    {state, effects} = Movement.check_npc_session_proximity(state, char_id)
+    Effects.run(state, effects)
+    state
+  end
 
   setup_all do
     case GameData.start_link() do
@@ -124,21 +134,22 @@ defmodule Arena.WalkAwayParityTest do
         )
 
       # Player is at distance 3 — session still open
-      state = Movement.check_npc_session_proximity(state, :player)
+      state = run_proximity_check(state, :player)
       updated = state.players[:player]
       assert updated.commerce_npc_id == merchant.npc_id
 
       # Now move player to distance 4 (> 3)
       entity_far = %{updated | x: 54, y: 50}
       state = %{state | players: Map.put(state.players, :player, entity_far)}
-      state = Movement.check_npc_session_proximity(state, :player)
+      state = run_proximity_check(state, :player)
 
       updated_far = state.players[:player]
       assert updated_far.commerce_npc_id == nil
       assert updated_far.commerce_npc_instance_id == nil
 
-      # Client should receive commerce_end
-      assert_received {:send_raw, raw}
+      # Client should receive commerce_end (now via the egress queue
+      # after the Movement effects-contract migration).
+      assert_received {:egress, %{payload: raw}}
       assert raw == Encoder.encode({:commerce_end, %{}})
     end
 
@@ -159,7 +170,7 @@ defmodule Arena.WalkAwayParityTest do
           occupancy: %{{52, 50} => {:player, :player}}
         )
 
-      state = Movement.check_npc_session_proximity(state, :player)
+      state = run_proximity_check(state, :player)
       updated = state.players[:player]
       assert updated.commerce_npc_id == merchant.npc_id
     end
@@ -179,7 +190,7 @@ defmodule Arena.WalkAwayParityTest do
           occupancy: %{{50, 50} => {:player, :player}}
         )
 
-      state = Movement.check_npc_session_proximity(state, :player)
+      state = run_proximity_check(state, :player)
       updated = state.players[:player]
       assert updated.commerce_npc_id == nil
       assert updated.commerce_npc_instance_id == nil
@@ -206,19 +217,19 @@ defmodule Arena.WalkAwayParityTest do
         )
 
       # Player at distance 6 — still open
-      state = Movement.check_npc_session_proximity(state, :player)
+      state = run_proximity_check(state, :player)
       updated = state.players[:player]
       assert updated.bank_npc_id == :banker_1
 
       # Move to distance 7
       entity_far = %{updated | x: 57, y: 50}
       state = %{state | players: Map.put(state.players, :player, entity_far)}
-      state = Movement.check_npc_session_proximity(state, :player)
+      state = run_proximity_check(state, :player)
 
       updated_far = state.players[:player]
       assert updated_far.bank_npc_id == nil
 
-      assert_received {:send_raw, raw}
+      assert_received {:egress, %{payload: raw}}
       assert raw == Encoder.encode({:bank_end, %{}})
     end
 
@@ -238,7 +249,7 @@ defmodule Arena.WalkAwayParityTest do
           occupancy: %{{55, 50} => {:player, :player}}
         )
 
-      state = Movement.check_npc_session_proximity(state, :player)
+      state = run_proximity_check(state, :player)
       updated = state.players[:player]
       assert updated.bank_npc_id == :banker_1
     end
@@ -257,7 +268,7 @@ defmodule Arena.WalkAwayParityTest do
           occupancy: %{{50, 50} => {:player, :player}}
         )
 
-      state = Movement.check_npc_session_proximity(state, :player)
+      state = run_proximity_check(state, :player)
       updated = state.players[:player]
       assert updated.bank_npc_id == nil
     end

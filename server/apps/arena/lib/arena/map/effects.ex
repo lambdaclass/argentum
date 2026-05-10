@@ -104,6 +104,23 @@ defmodule Arena.Map.Effects do
     {:broadcast_visible_except, x, y, exclude_char_id, build_envelope(packet, opts)}
   end
 
+  @doc """
+  Broadcast `packet` to every GM session whose AoI covers (x, y),
+  skipping `exclude_char_id`. Used for movement / heading packets of
+  invisible players: non-GM observers must not see them, but GMs do.
+  """
+  @spec broadcast_visible_gm_only(
+          pos_integer(),
+          pos_integer(),
+          term(),
+          binary(),
+          keyword()
+        ) :: Arena.Map.Effect.t()
+  def broadcast_visible_gm_only(x, y, exclude_char_id, packet, opts \\ [])
+      when is_binary(packet) do
+    {:broadcast_visible_gm_only, x, y, exclude_char_id, build_envelope(packet, opts)}
+  end
+
   @doc "Broadcast a character_change packet for `entity` to its visibility region."
   @spec broadcast_character_change(map()) :: Arena.Map.Effect.t()
   def broadcast_character_change(entity) do
@@ -265,6 +282,12 @@ defmodule Arena.Map.Effects do
 
   defp dispatch(state, {:broadcast_visible_except, x, y, exclude_char_id, outbound}) do
     Visibility.broadcast_visible(state, x, y, exclude_char_id, fn pid ->
+      AoSession.Egress.enqueue(pid, outbound)
+    end)
+  end
+
+  defp dispatch(state, {:broadcast_visible_gm_only, x, y, exclude_char_id, outbound}) do
+    Visibility.broadcast_visible_gm_only(state, x, y, exclude_char_id, fn pid ->
       AoSession.Egress.enqueue(pid, outbound)
     end)
   end

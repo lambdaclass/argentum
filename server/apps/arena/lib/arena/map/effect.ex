@@ -42,6 +42,10 @@ defmodule Arena.Map.Effect do
     * `{:broadcast_visible_except, x, y, exclude_char_id, %Outbound{}}` —
       fan to every visible session whose `char_id` is not
       `exclude_char_id`. Used for animation packets like `char_swing`.
+    * `{:broadcast_visible_gm_only, x, y, exclude_char_id, %Outbound{}}` —
+      fan to every visible GM session, excluding `exclude_char_id`.
+      Used for invisible-player movement / heading updates so GMs still
+      see them while non-GM observers do not.
     * `{:broadcast_map, %Outbound{}}` — every session on the map,
       ignoring AoI. Used for global announcements (marriage,
       world-state).
@@ -86,6 +90,7 @@ defmodule Arena.Map.Effect do
           | {:broadcast_visible, coord(), coord(), envelope()}
           | {:broadcast_visible_all, coord(), coord(), envelope()}
           | {:broadcast_visible_except, coord(), coord(), char_id(), envelope()}
+          | {:broadcast_visible_gm_only, coord(), coord(), char_id(), envelope()}
           | {:broadcast_map, envelope()}
           | {:broadcast_character_change, entity :: map()}
           | {:hide_from_non_gm, entity :: map()}

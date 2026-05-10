@@ -38,6 +38,7 @@ defmodule Arena.EffectsSendRawGuardTest do
     "lib/arena/map/trade.ex",
     "lib/arena/map/faction.ex",
     "lib/arena/map/chat.ex",
+    "lib/arena/map/movement.ex",
     "lib/arena/npc_ai.ex"
   ]
 

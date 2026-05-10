@@ -96,7 +96,7 @@ defmodule Arena.OcultoParityTest do
         )
 
       now = System.monotonic_time(:millisecond)
-      state = Movement.do_move(state, 1, entity, 51, 50, :east, now, 200)
+      {state, _effects} = Movement.do_move(state, 1, entity, 51, 50, :east, now, 200)
       moved = state.players[1]
 
       assert moved.oculto == false
@@ -127,7 +127,7 @@ defmodule Arena.OcultoParityTest do
         )
 
       now = System.monotonic_time(:millisecond)
-      state = Movement.do_move(state, 1, entity, 51, 50, :east, now, 200)
+      {state, _effects} = Movement.do_move(state, 1, entity, 51, 50, :east, now, 200)
       moved = state.players[1]
 
       assert moved.oculto == false
@@ -164,7 +164,7 @@ defmodule Arena.OcultoParityTest do
         )
 
       now = System.monotonic_time(:millisecond)
-      state = Movement.do_move(state, 1, entity, 51, 50, :east, now, 200)
+      {state, _effects} = Movement.do_move(state, 1, entity, 51, 50, :east, now, 200)
       moved = state.players[1]
 
       assert moved.oculto == true
@@ -195,7 +195,7 @@ defmodule Arena.OcultoParityTest do
         )
 
       now = System.monotonic_time(:millisecond)
-      state = Movement.do_move(state, 1, entity, 51, 50, :east, now, 200)
+      {state, _effects} = Movement.do_move(state, 1, entity, 51, 50, :east, now, 200)
       moved = state.players[1]
 
       assert moved.oculto == true
@@ -226,7 +226,7 @@ defmodule Arena.OcultoParityTest do
         )
 
       now = System.monotonic_time(:millisecond)
-      state = Movement.do_move(state, 1, entity, 51, 50, :east, now, 200)
+      {state, _effects} = Movement.do_move(state, 1, entity, 51, 50, :east, now, 200)
       moved = state.players[1]
 
       assert moved.oculto == false
@@ -257,7 +257,7 @@ defmodule Arena.OcultoParityTest do
         )
 
       now = System.monotonic_time(:millisecond)
-      state = Movement.do_move(state, 1, entity, 51, 50, :east, now, 200)
+      {state, _effects} = Movement.do_move(state, 1, entity, 51, 50, :east, now, 200)
       moved = state.players[1]
 
       assert moved.oculto == true
@@ -288,7 +288,7 @@ defmodule Arena.OcultoParityTest do
         )
 
       now = System.monotonic_time(:millisecond)
-      state = Movement.do_move(state, 1, entity_enough, 51, 50, :east, now, 200)
+      {state, _effects} = Movement.do_move(state, 1, entity_enough, 51, 50, :east, now, 200)
       moved = state.players[1]
 
       assert moved.oculto == true,
@@ -319,7 +319,7 @@ defmodule Arena.OcultoParityTest do
           meta: %{tile_exit_map: %{}}
         )
 
-      state2 = Movement.do_move(state2, 2, entity_not_enough, 51, 50, :east, now, 200)
+      {state2, _effects} = Movement.do_move(state2, 2, entity_not_enough, 51, 50, :east, now, 200)
       moved2 = state2.players[2]
 
       assert moved2.oculto == false,
