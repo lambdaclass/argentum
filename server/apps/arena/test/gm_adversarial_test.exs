@@ -1917,10 +1917,10 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Arena.Map.QuestHandlers.handle_quest_accept(state, :player, 1)
+      {:ok, new_state, effects} = Arena.Map.QuestHandlers.handle_quest_accept(state, :player, 1)
       # Entity should be unchanged
       assert new_state.players[:player].active_quests == []
-      assert_receive {:send_raw, _}
+      assert effects != []
     end
   end
 
@@ -1930,9 +1930,9 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Arena.Map.QuestHandlers.handle_quest_abandon(state, :player, 99)
+      {:ok, new_state, effects} = Arena.Map.QuestHandlers.handle_quest_abandon(state, :player, 99)
       assert new_state.players[:player].active_quests == []
-      assert_receive {:send_raw, _}
+      assert effects != []
     end
 
     test "quest_abandon with slot 0 and no active quests sends error" do
@@ -1940,9 +1940,9 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Arena.Map.QuestHandlers.handle_quest_abandon(state, :player, 0)
+      {:ok, new_state, effects} = Arena.Map.QuestHandlers.handle_quest_abandon(state, :player, 0)
       assert new_state.players[:player].active_quests == []
-      assert_receive {:send_raw, _}
+      assert effects != []
     end
   end
 
@@ -1952,9 +1952,9 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Arena.Map.QuestHandlers.handle_quest_details_request(state, :player, 99)
+      {:ok, new_state, effects} = Arena.Map.QuestHandlers.handle_quest_details_request(state, :player, 99)
       assert new_state.players[:player].active_quests == []
-      assert_receive {:send_raw, _}
+      assert effects != []
     end
 
     test "quest_details_request with slot 0 and no active quests sends error" do
@@ -1962,9 +1962,9 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Arena.Map.QuestHandlers.handle_quest_details_request(state, :player, 0)
+      {:ok, new_state, effects} = Arena.Map.QuestHandlers.handle_quest_details_request(state, :player, 0)
       assert new_state.players[:player].active_quests == []
-      assert_receive {:send_raw, _}
+      assert effects != []
     end
   end
 
@@ -1974,40 +1974,45 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, _new_state} = Arena.Map.QuestHandlers.handle_quest_list_request(state, :player)
-      assert_receive {:send_raw, _raw}
+      {:ok, _new_state, effects} = Arena.Map.QuestHandlers.handle_quest_list_request(state, :player)
+      assert effects != []
     end
   end
 
   describe "quest handlers with unknown char_id" do
     test "quest_list_request for unknown char_id is silently ignored" do
       state = make_map_state(%{})
-      {:noreply, new_state} = Arena.Map.QuestHandlers.handle_quest_list_request(state, :unknown)
+      {:ok, new_state, effects} = Arena.Map.QuestHandlers.handle_quest_list_request(state, :unknown)
       assert new_state == state
+      assert effects == []
     end
 
     test "quest_details_request for unknown char_id is silently ignored" do
       state = make_map_state(%{})
-      {:noreply, new_state} = Arena.Map.QuestHandlers.handle_quest_details_request(state, :unknown, 1)
+      {:ok, new_state, effects} = Arena.Map.QuestHandlers.handle_quest_details_request(state, :unknown, 1)
       assert new_state == state
+      assert effects == []
     end
 
     test "quest_accept for unknown char_id is silently ignored" do
       state = make_map_state(%{})
-      {:noreply, new_state} = Arena.Map.QuestHandlers.handle_quest_accept(state, :unknown, 1)
+      {:ok, new_state, effects} = Arena.Map.QuestHandlers.handle_quest_accept(state, :unknown, 1)
       assert new_state == state
+      assert effects == []
     end
 
     test "quest_abandon for unknown char_id is silently ignored" do
       state = make_map_state(%{})
-      {:noreply, new_state} = Arena.Map.QuestHandlers.handle_quest_abandon(state, :unknown, 1)
+      {:ok, new_state, effects} = Arena.Map.QuestHandlers.handle_quest_abandon(state, :unknown, 1)
       assert new_state == state
+      assert effects == []
     end
 
     test "handle_quest for unknown char_id is silently ignored" do
       state = make_map_state(%{})
-      {:noreply, new_state} = Arena.Map.QuestHandlers.handle_quest(state, :unknown)
+      {:ok, new_state, effects} = Arena.Map.QuestHandlers.handle_quest(state, :unknown)
       assert new_state == state
+      assert effects == []
     end
   end
 

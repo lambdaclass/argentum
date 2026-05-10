@@ -921,11 +921,16 @@ defmodule Arena.Map.MapServer do
 
   def handle_cast({:request_reward, char_id}, state),
     do: Effects.run_handler(state, fn s -> Social.handle_request_reward(s, char_id) end)
-  def handle_cast({:quest, char_id}, state), do: QuestHandlers.handle_quest(state, char_id)
-  def handle_cast({:quest_list_request, char_id}, state), do: QuestHandlers.handle_quest_list_request(state, char_id)
-  def handle_cast({:quest_details_request, char_id, slot}, state), do: QuestHandlers.handle_quest_details_request(state, char_id, slot)
-  def handle_cast({:quest_accept, char_id, index}, state), do: QuestHandlers.handle_quest_accept(state, char_id, index)
-  def handle_cast({:quest_abandon, char_id, slot}, state), do: QuestHandlers.handle_quest_abandon(state, char_id, slot)
+  def handle_cast({:quest, char_id}, state),
+    do: Effects.run_handler(state, fn s -> QuestHandlers.handle_quest(s, char_id) end)
+  def handle_cast({:quest_list_request, char_id}, state),
+    do: Effects.run_handler(state, fn s -> QuestHandlers.handle_quest_list_request(s, char_id) end)
+  def handle_cast({:quest_details_request, char_id, slot}, state),
+    do: Effects.run_handler(state, fn s -> QuestHandlers.handle_quest_details_request(s, char_id, slot) end)
+  def handle_cast({:quest_accept, char_id, index}, state),
+    do: Effects.run_handler(state, fn s -> QuestHandlers.handle_quest_accept(s, char_id, index) end)
+  def handle_cast({:quest_abandon, char_id, slot}, state),
+    do: Effects.run_handler(state, fn s -> QuestHandlers.handle_quest_abandon(s, char_id, slot) end)
 
   def handle_cast({:set_duel_state, char_id, in_duel, opponent_id}, state) do
     case Map.fetch(state.players, char_id) do

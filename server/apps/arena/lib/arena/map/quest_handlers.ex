@@ -1,13 +1,18 @@
 defmodule Arena.Map.QuestHandlers do
-  @moduledoc "Quest system handlers."
+  @moduledoc """
+  Quest system handlers.
 
-  alias Arena.Map.Helpers
+  All public handlers return `{:ok, state, [Effect.t()]}` and dispatch
+  through `Arena.Map.Effects.run_handler/2`. Console-message rejections
+  are surfaced as `Effects.send/2` effects rather than via the legacy
+  `Helpers.msg/3` shim.
+  """
+
+  alias Arena.Map.{Effects, Helpers}
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 
   @npc_type_quest 17
-
-  defp msg(state, char_id, message), do: Helpers.msg(state, char_id, message)
 
   @doc "Handle quest list request: send the player their active quests."
   def handle_quest_list_request(state, char_id) do
@@ -17,17 +22,15 @@ defmodule Arena.Map.QuestHandlers do
         count = length(active)
         quest_ids_str = Enum.map_join(active, ";", fn aq -> Integer.to_string(aq.quest_id) end)
 
-        Helpers.send_to_session(
-          state.sessions,
-          char_id,
-          {:send_raw,
-           Encoder.encode({:quest_list_send, %{quest_count: count, quest_ids_str: quest_ids_str}})}
-        )
+        packet =
+          Encoder.encode(
+            {:quest_list_send, %{quest_count: count, quest_ids_str: quest_ids_str}}
+          )
 
-        {:noreply, state}
+        {:ok, state, [Effects.send(char_id, packet)]}
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
@@ -39,28 +42,22 @@ defmodule Arena.Map.QuestHandlers do
 
         case Enum.at(entity.active_quests, index) do
           nil ->
-            msg(state, char_id, "Mision no encontrada.")
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("Mision no encontrada."))]}
 
           _quest_state ->
             case Arena.QuestServer.build_quest_details(entity, index) do
               nil ->
-                msg(state, char_id, "Datos de mision no disponibles.")
-                {:noreply, state}
+                {:ok, state,
+                 [Effects.send(char_id, console("Datos de mision no disponibles."))]}
 
               details ->
-                Helpers.send_to_session(
-                  state.sessions,
-                  char_id,
-                  {:send_raw, Encoder.encode({:quest_details, details})}
-                )
-
-                {:noreply, state}
+                packet = Encoder.encode({:quest_details, details})
+                {:ok, state, [Effects.send(char_id, packet)]}
             end
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
@@ -71,46 +68,45 @@ defmodule Arena.Map.QuestHandlers do
         npc_id = entity.quest_npc_id
 
         if npc_id == nil do
-          msg(state, char_id, "No estas interactuando con un NPC de misiones.")
-          {:noreply, state}
+          {:ok, state,
+           [Effects.send(char_id, console("No estas interactuando con un NPC de misiones."))]}
         else
           npc_def = GameData.get_npc(npc_id)
 
           if npc_def == nil do
-            {:noreply, state}
+            {:ok, state, []}
           else
             available = Arena.QuestServer.available_quests_for_npc(entity, npc_def)
             quest_index = list_index - 1
 
             case Enum.at(available, quest_index) do
               nil ->
-                msg(state, char_id, "Mision no disponible.")
-                {:noreply, state}
+                {:ok, state, [Effects.send(char_id, console("Mision no disponible."))]}
 
               quest_id ->
                 quest_def = GameData.get_quest(quest_id)
 
                 cond do
                   quest_def == nil ->
-                    msg(state, char_id, "Mision no disponible.")
-                    {:noreply, state}
+                    {:ok, state, [Effects.send(char_id, console("Mision no disponible."))]}
 
                   Arena.QuestServer.can_accept_quest?(entity, quest_def) ->
                     entity = Arena.QuestServer.accept_quest(entity, quest_def)
-                    msg(state, char_id, "Mision aceptada: #{quest_def.name}")
                     state = put_in(state.players[char_id], entity)
-                    {:noreply, state}
+
+                    {:ok, state,
+                     [Effects.send(char_id, console("Mision aceptada: #{quest_def.name}"))]}
 
                   true ->
-                    msg(state, char_id, "No puedes aceptar esta mision.")
-                    {:noreply, state}
+                    {:ok, state,
+                     [Effects.send(char_id, console("No puedes aceptar esta mision."))]}
                 end
             end
           end
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
@@ -122,20 +118,20 @@ defmodule Arena.Map.QuestHandlers do
 
         case Enum.at(entity.active_quests, index) do
           nil ->
-            msg(state, char_id, "Mision no encontrada.")
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("Mision no encontrada."))]}
 
           quest_state ->
             quest_def = GameData.get_quest(quest_state.quest_id)
             name = if quest_def, do: quest_def.name, else: "mision"
             entity = Arena.QuestServer.abandon_quest(entity, index)
-            msg(state, char_id, "Abandonaste la mision: #{name}")
             state = put_in(state.players[char_id], entity)
-            {:noreply, state}
+
+            {:ok, state,
+             [Effects.send(char_id, console("Abandonaste la mision: #{name}"))]}
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
   end
 
@@ -166,59 +162,89 @@ defmodule Arena.Map.QuestHandlers do
               updated_entity = Arena.QuestServer.complete_quest(entity, slot)
 
               if updated_entity != entity and quest_def != nil do
-                if quest_def.desc_final != "" do
-                  msg(state, char_id, npc_def.name <> " dice: " <> quest_def.desc_final)
-                end
-
-                if quest_def.reward_gld > 0 do
-                  msg(state, char_id, "Recibiste #{quest_def.reward_gld} monedas de oro.")
-
-                  Helpers.send_to_session(
-                    state.sessions,
-                    char_id,
-                    {:send_raw,
-                     Encoder.encode({:update_gold, %{gold: updated_entity.gold}})}
-                  )
-                end
-
-                if quest_def.reward_exp > 0 do
-                  msg(state, char_id, "Recibiste #{quest_def.reward_exp} puntos de experiencia.")
-                end
-
                 state = put_in(state.players[char_id], updated_entity)
-                {:noreply, state}
+
+                desc_final_effects =
+                  if quest_def.desc_final != "" do
+                    [
+                      Effects.send(
+                        char_id,
+                        console(npc_def.name <> " dice: " <> quest_def.desc_final)
+                      )
+                    ]
+                  else
+                    []
+                  end
+
+                gold_effects =
+                  if quest_def.reward_gld > 0 do
+                    [
+                      Effects.send(
+                        char_id,
+                        console("Recibiste #{quest_def.reward_gld} monedas de oro.")
+                      ),
+                      Effects.send(
+                        char_id,
+                        Encoder.encode({:update_gold, %{gold: updated_entity.gold}})
+                      )
+                    ]
+                  else
+                    []
+                  end
+
+                exp_effects =
+                  if quest_def.reward_exp > 0 do
+                    [
+                      Effects.send(
+                        char_id,
+                        console(
+                          "Recibiste #{quest_def.reward_exp} puntos de experiencia."
+                        )
+                      )
+                    ]
+                  else
+                    []
+                  end
+
+                effects = desc_final_effects ++ gold_effects ++ exp_effects
+                {:ok, state, effects}
               else
-                msg(state, char_id, "No se pudo completar la mision.")
-                {:noreply, state}
+                {:ok, state,
+                 [Effects.send(char_id, console("No se pudo completar la mision."))]}
               end
             else
               available = Arena.QuestServer.available_quests_for_npc(entity, npc_def)
 
               if available == [] do
-                msg(state, char_id, npc_def.name <> " dice: No tengo misiones disponibles para ti.")
-                {:noreply, state}
+                {:ok, state,
+                 [
+                   Effects.send(
+                     char_id,
+                     console(npc_def.name <> " dice: No tengo misiones disponibles para ti.")
+                   )
+                 ]}
               else
                 npc_quest_params = Arena.QuestServer.build_npc_quest_list(available)
-
-                Helpers.send_to_session(
-                  state.sessions,
-                  char_id,
-                  {:send_raw, Encoder.encode({:npc_quest_list_send, %{quests: npc_quest_params}})}
-                )
-
                 entity = %{entity | quest_npc_id: npc_def.id}
                 state = put_in(state.players[char_id], entity)
-                {:noreply, state}
+
+                packet =
+                  Encoder.encode({:npc_quest_list_send, %{quests: npc_quest_params}})
+
+                {:ok, state, [Effects.send(char_id, packet)]}
               end
             end
 
           :not_found ->
-            msg(state, char_id, "No hay un NPC de misiones cerca.")
-            {:noreply, state}
+            {:ok, state, [Effects.send(char_id, console("No hay un NPC de misiones cerca."))]}
         end
 
       :error ->
-        {:noreply, state}
+        {:ok, state, []}
     end
+  end
+
+  defp console(message) do
+    Encoder.encode({:console_msg, %{message: message, font_index: 0}})
   end
 end

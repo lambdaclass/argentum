@@ -271,7 +271,7 @@ defmodule Arena.QuestDriftTest do
       result = QuestHandlers.handle_quest_accept(state, 1, 1)
 
       # Should succeed without crashing: the quest gets accepted
-      assert {:noreply, new_state} = result
+      assert {:ok, new_state, _effects} = result
 
       # Verify quest was actually accepted (not empty due to reversed args)
       updated = new_state.players[1]
@@ -319,10 +319,18 @@ defmodule Arena.QuestDriftTest do
       # quest_slot=1 (1-based from protocol) should be converted to index=0
       # and passed to build_quest_details(entity, 0)
       result = QuestHandlers.handle_quest_details_request(state, 1, 1)
-      assert {:noreply, _} = result
+      assert {:ok, _state, effects} = result
 
-      # Should receive the quest details packet (not "Datos de mision no disponibles.")
-      assert_receive {:send_raw, _raw}
+      # Should produce a quest_details effect (not "Datos de mision no disponibles.")
+      details_id = AoProtocol.PacketIds.Server.quest_details()
+
+      assert Enum.any?(effects, fn
+               {:send, _, %{payload: <<id::little-signed-integer-16, _::binary>>}} ->
+                 id == details_id
+
+               _ ->
+                 false
+             end)
     end
   end
 
@@ -442,7 +450,7 @@ defmodule Arena.QuestDriftTest do
       # Protocol sends quest_slot=1 (1-based). The handler should convert
       # to 0-based index and pass index=0 to abandon_quest.
       # Bug: it passed quest_slot=1 directly, which removes the SECOND quest.
-      {:noreply, new_state} = QuestHandlers.handle_quest_abandon(state, 1, 1)
+      {:ok, new_state, _effects} = QuestHandlers.handle_quest_abandon(state, 1, 1)
 
       updated = new_state.players[1]
 
@@ -464,7 +472,7 @@ defmodule Arena.QuestDriftTest do
       sessions = %{1 => self()}
       state = make_map_state(%{1 => entity}, sessions: sessions)
 
-      {:noreply, new_state} = QuestHandlers.handle_quest_abandon(state, 1, 2)
+      {:ok, new_state, _effects} = QuestHandlers.handle_quest_abandon(state, 1, 2)
 
       updated = new_state.players[1]
 
@@ -491,12 +499,19 @@ defmodule Arena.QuestDriftTest do
       sessions = %{1 => self()}
       state = make_map_state(%{1 => entity}, sessions: sessions)
 
-      # handle_quest just shows the player's own quest list
+      # handle_quest now consults nearby quest NPC; with none nearby it
+      # surfaces a console-message effect.
       result = QuestHandlers.handle_quest(state, 1)
-      assert {:noreply, _} = result
+      assert {:ok, _state, effects} = result
 
-      # Should receive the quest list packet
-      assert_receive {:send_raw, _raw}
+      # Should produce a console-message effect about no NPC nearby.
+      assert Enum.any?(effects, fn
+               {:send, _, %{payload: payload}} when is_binary(payload) ->
+                 :binary.match(payload, "NPC") != :nomatch
+
+               _ ->
+                 false
+             end)
     end
 
     test "handle_quest with no active quests sends empty list" do
@@ -510,10 +525,10 @@ defmodule Arena.QuestDriftTest do
       state = make_map_state(%{1 => entity}, sessions: sessions)
 
       result = QuestHandlers.handle_quest(state, 1)
-      assert {:noreply, _} = result
+      assert {:ok, _state, effects} = result
 
-      # Should still send a packet (with count=0)
-      assert_receive {:send_raw, _raw}
+      # Should still produce one effect (the no-NPC-nearby console)
+      assert effects != []
     end
   end
 

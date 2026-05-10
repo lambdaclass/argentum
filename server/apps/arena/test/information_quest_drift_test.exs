@@ -388,7 +388,7 @@ defmodule Arena.InformationQuestDriftTest do
         npcs_live: %{quest_inst: @quest_npc}
       )
 
-      {:noreply, new_state} = QuestHandlers.handle_quest(state, :player)
+      {:ok, new_state, _effects} = QuestHandlers.handle_quest(state, :player)
 
       # VB6: eQuest should show the NPC's available quests, not the player's active quest list.
       # After the fix, the player should have quest_npc_id set (indicating NPC interaction)
@@ -405,12 +405,10 @@ defmodule Arena.InformationQuestDriftTest do
         npcs_live: %{}
       )
 
-      {:noreply, _state} = QuestHandlers.handle_quest(state, :player)
+      {:ok, _state, effects} = QuestHandlers.handle_quest(state, :player)
 
       # Should get "no quest NPC nearby" message
-      assert_receive {:send_raw, raw}
-      msg = IO.iodata_to_binary(raw)
-      assert msg =~ "NPC"
+      assert effect_payload_contains?(effects, "NPC")
     end
 
     test "handle_quest with quest NPC too far (> 5) sends error" do
@@ -422,7 +420,7 @@ defmodule Arena.InformationQuestDriftTest do
         npcs_live: %{quest_inst: @quest_npc_far}
       )
 
-      {:noreply, new_state} = QuestHandlers.handle_quest(state, :player)
+      {:ok, new_state, _effects} = QuestHandlers.handle_quest(state, :player)
 
       # NPC at distance 6 should be too far
       assert new_state.players[:player].quest_npc_id == nil
