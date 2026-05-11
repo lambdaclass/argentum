@@ -274,7 +274,9 @@ defmodule Arena.GmCommandsParityTest do
       gm = admin_gm()
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SETBODY Nobody 210")
+      {:ok, run_state, run_effects} = Chat.handle_chat(state, 1, "/SETBODY Nobody 210")
+
+      Arena.Map.Effects.run(run_state, run_effects)
 
       assert_receive {:egress, _}, 200
     end
@@ -284,7 +286,9 @@ defmodule Arena.GmCommandsParityTest do
       target = target_player()
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self()})
 
-      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SETBODY Target abc")
+      {:ok, run_state, run_effects} = Chat.handle_chat(state, 1, "/SETBODY Target abc")
+
+      Arena.Map.Effects.run(run_state, run_effects)
 
       assert_receive {:egress, _}, 200
     end
@@ -310,7 +314,9 @@ defmodule Arena.GmCommandsParityTest do
       gm = admin_gm()
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SETHEAD Nobody 45")
+      {:ok, run_state, run_effects} = Chat.handle_chat(state, 1, "/SETHEAD Nobody 45")
+
+      Arena.Map.Effects.run(run_state, run_effects)
 
       assert_receive {:egress, _}, 200
     end
@@ -364,7 +370,9 @@ defmodule Arena.GmCommandsParityTest do
       gm = admin_gm()
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SETGOLD Nobody 5000")
+      {:ok, run_state, run_effects} = Chat.handle_chat(state, 1, "/SETGOLD Nobody 5000")
+
+      Arena.Map.Effects.run(run_state, run_effects)
 
       assert_receive {:egress, _}, 200
     end
@@ -401,7 +409,9 @@ defmodule Arena.GmCommandsParityTest do
       gm = admin_gm()
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SETLEVEL Nobody 25")
+      {:ok, run_state, run_effects} = Chat.handle_chat(state, 1, "/SETLEVEL Nobody 25")
+
+      Arena.Map.Effects.run(run_state, run_effects)
 
       assert_receive {:egress, _}, 200
     end
@@ -438,7 +448,9 @@ defmodule Arena.GmCommandsParityTest do
       gm = admin_gm()
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SETSKILL Nobody magic 100")
+      {:ok, run_state, run_effects} = Chat.handle_chat(state, 1, "/SETSKILL Nobody magic 100")
+
+      Arena.Map.Effects.run(run_state, run_effects)
 
       assert_receive {:egress, _}, 200
     end
@@ -454,7 +466,9 @@ defmodule Arena.GmCommandsParityTest do
       target = target_player(2, "Target", %{x: 42, y: 73})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self()})
 
-      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/WHERECHAR Target")
+      {:ok, run_state, run_effects} = Chat.handle_chat(state, 1, "/WHERECHAR Target")
+
+      Arena.Map.Effects.run(run_state, run_effects)
 
       assert_receive {:send_raw, _}, 200
     end
@@ -463,7 +477,9 @@ defmodule Arena.GmCommandsParityTest do
       gm = admin_gm()
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/WHERECHAR Nobody")
+      {:ok, run_state, run_effects} = Chat.handle_chat(state, 1, "/WHERECHAR Nobody")
+
+      Arena.Map.Effects.run(run_state, run_effects)
 
       assert_receive {:send_raw, _}, 200
     end
@@ -479,7 +495,9 @@ defmodule Arena.GmCommandsParityTest do
       target = target_player(2, "Target", %{account_id: "acc_42"})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/IPCHAR Target")
+      {:ok, run_state, run_effects} = Chat.handle_chat(state, 1, "/IPCHAR Target")
+
+      Arena.Map.Effects.run(run_state, run_effects)
 
       assert_receive {:send_raw, _}, 200
     end
@@ -488,7 +506,9 @@ defmodule Arena.GmCommandsParityTest do
       gm = admin_gm()
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/IPCHAR Nobody")
+      {:ok, run_state, run_effects} = Chat.handle_chat(state, 1, "/IPCHAR Nobody")
+
+      Arena.Map.Effects.run(run_state, run_effects)
 
       assert_receive {:send_raw, _}, 200
     end
@@ -503,7 +523,9 @@ defmodule Arena.GmCommandsParityTest do
       gm = admin_gm()
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SYSTEMINFO")
+      {:ok, run_state, run_effects} = Chat.handle_chat(state, 1, "/SYSTEMINFO")
+
+      Arena.Map.Effects.run(run_state, run_effects)
 
       assert_receive {:send_raw, _}, 200
     end
@@ -519,7 +541,9 @@ defmodule Arena.GmCommandsParityTest do
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
       # /UNBAN is routed as an alias for /UNBANCUENTA
-      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/UNBAN SomeName")
+      {:ok, run_state, run_effects} = Chat.handle_chat(state, 1, "/UNBAN SomeName")
+
+      Arena.Map.Effects.run(run_state, run_effects)
 
       assert_receive {:egress, _outbound}, 200
     end
@@ -535,7 +559,9 @@ defmodule Arena.GmCommandsParityTest do
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
       # Should route to the spawn NPC handler (may fail with "NPC not found" but won't crash)
-      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SPAWN 1")
+      {:ok, run_state, run_effects} = Chat.handle_chat(state, 1, "/SPAWN 1")
+
+      Arena.Map.Effects.run(run_state, run_effects)
 
       assert_receive {:egress, _}, 200
     end
