@@ -361,11 +361,14 @@ defmodule Arena.GmParityTest do
       target = make_entity(%{name: "Target", char_id: 2, char_index: 2, gm: false, gm_level: nil, x: 80, y: 80})
       state = make_map_state(%{1 => gm, 2 => target}, sessions: %{1 => self(), 2 => self()})
 
-      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/SUMMON Target")
+      {:ok, run_state, run_effects} = Chat.handle_chat(state, 1, "/SUMMON Target")
+      Arena.Map.Effects.run(run_state, run_effects)
 
       # The summon should send a transfer message to the target's session
-      # (teleporting them to the GM's location)
-      assert_receive {:send_raw, _}, 200
+      # (teleporting them to the GM's location), plus a console
+      # confirmation back to the GM via the egress queue.
+      assert_receive {:transfer, _, _, _, _}, 200
+      assert_receive {:egress, _}, 200
     end
 
     test "summon returns not found for missing player" do

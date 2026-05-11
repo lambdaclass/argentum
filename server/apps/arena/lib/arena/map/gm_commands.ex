@@ -130,17 +130,15 @@ defmodule Arena.Map.GmCommands do
     case upper_parts do
       # Teleport
       ["/TELEPORT", map_str, x_str, y_str] ->
-        bridge_legacy(state, fn ->
-          Teleport.gm_teleport(state, char_id, entity, map_str, x_str, y_str)
-        end)
+        Teleport.gm_teleport(state, char_id, entity, map_str, x_str, y_str)
 
       ["/GOTO", _name_upper] ->
         target_name = Enum.at(parts, 1)
-        bridge_legacy(state, fn -> Teleport.gm_goto(state, char_id, entity, target_name) end)
+        Teleport.gm_goto(state, char_id, entity, target_name)
 
       ["/SUMMON", _name_upper] ->
         target_name = Enum.at(parts, 1)
-        bridge_legacy(state, fn -> Teleport.gm_summon(state, char_id, entity, target_name) end)
+        Teleport.gm_summon(state, char_id, entity, target_name)
 
       # World
       ["/SPAWNITEM", item_str, amount_str] ->
@@ -215,61 +213,58 @@ defmodule Arena.Map.GmCommands do
       # Inspection
       ["/INFO", _name_upper] ->
         target_name = Enum.at(parts, 1)
-        bridge_legacy(state, fn -> Inspection.gm_info(state, char_id, target_name) end)
+        Inspection.gm_info(state, char_id, target_name)
 
       ["/LOCATE", _name_upper] ->
         target_name = Enum.at(parts, 1)
-        bridge_legacy(state, fn -> Inspection.gm_locate(state, char_id, target_name) end)
+        Inspection.gm_locate(state, char_id, target_name)
 
       ["/ONLINEMAP"] ->
-        bridge_legacy(state, fn -> Inspection.gm_online_map(state, char_id) end)
+        Inspection.gm_online_map(state, char_id)
 
       ["/ONLINE"] ->
-        bridge_legacy(state, fn -> Inspection.gm_online(state, char_id) end)
+        Inspection.gm_online(state, char_id)
 
       ["/WHERECHAR", _name_upper] ->
         target_name = Enum.at(parts, 1)
-        bridge_legacy(state, fn -> Inspection.gm_wherechar(state, char_id, target_name) end)
+        Inspection.gm_wherechar(state, char_id, target_name)
 
       ["/IPCHAR", _name_upper] ->
         target_name = Enum.at(parts, 1)
-        bridge_legacy(state, fn -> Inspection.gm_ipchar(state, char_id, target_name) end)
+        Inspection.gm_ipchar(state, char_id, target_name)
 
       ["/SYSTEMINFO"] ->
-        bridge_legacy(state, fn -> Inspection.gm_system_info(state, char_id) end)
+        Inspection.gm_system_info(state, char_id)
 
       ["/CHARSTATS", _name] ->
         target_name = Enum.at(parts, 1)
-        bridge_legacy(state, fn -> Inspection.gm_char_stats(state, char_id, target_name) end)
+        Inspection.gm_char_stats(state, char_id, target_name)
 
       ["/CHARGOLD", _name] ->
         target_name = Enum.at(parts, 1)
-        bridge_legacy(state, fn -> Inspection.gm_char_gold(state, char_id, target_name) end)
+        Inspection.gm_char_gold(state, char_id, target_name)
 
       ["/CHARINV", _name] ->
         target_name = Enum.at(parts, 1)
-        bridge_legacy(state, fn -> Inspection.gm_char_inventory(state, char_id, target_name) end)
+        Inspection.gm_char_inventory(state, char_id, target_name)
 
       ["/CHARBANK", _name] ->
         target_name = Enum.at(parts, 1)
-        bridge_legacy(state, fn -> Inspection.gm_char_bank(state, char_id, target_name) end)
+        Inspection.gm_char_bank(state, char_id, target_name)
 
       ["/CHARSKILLS", _name] ->
         target_name = Enum.at(parts, 1)
-        bridge_legacy(state, fn -> Inspection.gm_char_skills(state, char_id, target_name) end)
+        Inspection.gm_char_skills(state, char_id, target_name)
 
       ["/CHECKSLOT", _name, slot_str] ->
         target_name = Enum.at(parts, 1)
-
-        bridge_legacy(state, fn ->
-          Inspection.gm_check_slot(state, char_id, target_name, slot_str)
-        end)
+        Inspection.gm_check_slot(state, char_id, target_name, slot_str)
 
       ["/CREATURES", map_str] ->
-        bridge_legacy(state, fn -> Inspection.gm_creatures_in_map(state, char_id, map_str) end)
+        Inspection.gm_creatures_in_map(state, char_id, map_str)
 
       ["/SPAWNLIST"] ->
-        bridge_legacy(state, fn -> Inspection.gm_spawn_list(state, char_id) end)
+        Inspection.gm_spawn_list(state, char_id)
 
       # Moderation
       ["/KILL", _name_upper] ->

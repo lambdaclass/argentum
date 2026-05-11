@@ -172,20 +172,22 @@ defmodule Arena.GmCommandsParityTest do
       t2 = target_player(3, "Bob", %{char_index: 3})
       state = make_map_state(%{1 => gm, 2 => t1, 3 => t2}, sessions: %{1 => self()})
 
-      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/ONLINE")
+      {:ok, run_state, run_effects} = Chat.handle_chat(state, 1, "/ONLINE")
+      Arena.Map.Effects.run(run_state, run_effects)
 
       # Should receive a console message with the online count
-      assert_receive {:send_raw, _}, 200
+      assert_receive {:egress, _}, 200
     end
 
     test "is accessible at consejero tier" do
       gm = make_entity(%{name: "ConsGM", char_id: 1, char_index: 1, gm: true, gm_level: :consejero})
       state = make_map_state(%{1 => gm}, sessions: %{1 => self()})
 
-      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/ONLINE")
+      {:ok, run_state, run_effects} = Chat.handle_chat(state, 1, "/ONLINE")
+      Arena.Map.Effects.run(run_state, run_effects)
 
       # Consejero should be able to use /ONLINE (inspection-tier command)
-      assert_receive {:send_raw, _}, 200
+      assert_receive {:egress, _}, 200
     end
   end
 
@@ -471,7 +473,7 @@ defmodule Arena.GmCommandsParityTest do
 
       Arena.Map.Effects.run(run_state, run_effects)
 
-      assert_receive {:send_raw, _}, 200
+      assert_receive {:egress, _}, 200
     end
 
     test "returns not found for missing player" do
@@ -482,7 +484,7 @@ defmodule Arena.GmCommandsParityTest do
 
       Arena.Map.Effects.run(run_state, run_effects)
 
-      assert_receive {:send_raw, _}, 200
+      assert_receive {:egress, _}, 200
     end
   end
 
@@ -500,7 +502,7 @@ defmodule Arena.GmCommandsParityTest do
 
       Arena.Map.Effects.run(run_state, run_effects)
 
-      assert_receive {:send_raw, _}, 200
+      assert_receive {:egress, _}, 200
     end
 
     test "returns not found for missing player" do
@@ -511,7 +513,7 @@ defmodule Arena.GmCommandsParityTest do
 
       Arena.Map.Effects.run(run_state, run_effects)
 
-      assert_receive {:send_raw, _}, 200
+      assert_receive {:egress, _}, 200
     end
   end
 
@@ -528,7 +530,7 @@ defmodule Arena.GmCommandsParityTest do
 
       Arena.Map.Effects.run(run_state, run_effects)
 
-      assert_receive {:send_raw, _}, 200
+      assert_receive {:egress, _}, 200
     end
   end
 

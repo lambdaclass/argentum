@@ -1,9 +1,19 @@
 defmodule Arena.Map.Gm.Teleport do
-  @moduledoc "GM teleport commands: teleport, goto, summon."
+  @moduledoc """
+  GM teleport commands: teleport, goto, summon.
+
+  Public handlers return `{:ok, state, [Effect.t()]}`. Console
+  confirmations flow through `Effects.send/2`; the actual relocation
+  message — the bare `{:transfer, _, _, _, _}` tuple expected by
+  `AoTcpGateway` — flows through `Effects.transfer/5`, which is
+  intentionally out-of-band of the egress queue (transfers are
+  session-control, not packet traffic).
+  """
 
   alias Arena.AuditLog
-  alias Arena.Map.Helpers
+  alias Arena.Map.{Effects, Helpers}
   alias Arena.Map.Gm.Permissions
+  alias AoProtocol.Server.Encoder
 
   # VB6 parity: high-tier GMs (admin, dios, semi_dios) can /GOTO anyone.
   # Lower-tier GMs (consejero) can only /GOTO players with active SOS requests.
@@ -13,14 +23,17 @@ defmodule Arena.Map.Gm.Teleport do
     with {map_id, ""} <- Integer.parse(map_str),
          {x, ""} <- Integer.parse(x_str),
          {y, ""} <- Integer.parse(y_str) do
-      Helpers.send_to_session(state.sessions, char_id, {:transfer, map_id, x, y, entity})
       AuditLog.log_gm_action(char_id, "teleport", "map #{map_id} (#{x}, #{y})")
-      Helpers.gm_console(state, char_id, "Teleporting to map #{map_id} (#{x}, #{y})...")
-      {:noreply, state}
+
+      effects = [
+        Effects.transfer(char_id, map_id, x, y, entity),
+        Effects.send(char_id, console("Teleporting to map #{map_id} (#{x}, #{y})..."))
+      ]
+
+      {:ok, state, effects}
     else
       _ ->
-        Helpers.gm_console(state, char_id, "Usage: /TELEPORT map_id x y")
-        {:noreply, state}
+        {:ok, state, [Effects.send(char_id, console("Usage: /TELEPORT map_id x y"))]}
     end
   end
 
@@ -31,18 +44,18 @@ defmodule Arena.Map.Gm.Teleport do
         if goto_allowed?(entity, target_name) do
           do_goto(state, char_id, entity, target)
         else
-          Helpers.gm_console(
-            state,
-            char_id,
-            "No podes ir cerca de ningun Usuario si no pidio SOS."
-          )
-
-          {:noreply, state}
+          {:ok, state,
+           [
+             Effects.send(
+               char_id,
+               console("No podes ir cerca de ningun Usuario si no pidio SOS.")
+             )
+           ]}
         end
 
       :not_found ->
-        Helpers.gm_console(state, char_id, "Player '#{target_name}' not found on this map.")
-        {:noreply, state}
+        {:ok, state,
+         [Effects.send(char_id, console("Player '#{target_name}' not found on this map."))]}
     end
   end
 
@@ -55,33 +68,27 @@ defmodule Arena.Map.Gm.Teleport do
     AuditLog.log_gm_action(char_id, "goto", target.name)
 
     if target.map_id == entity.map_id do
-      Helpers.send_to_session(
-        state.sessions,
-        char_id,
-        {:transfer, entity.map_id, target.x, target.y, entity}
-      )
+      effects = [
+        Effects.transfer(char_id, entity.map_id, target.x, target.y, entity),
+        Effects.send(
+          char_id,
+          console("Teleporting to #{target.name} at (#{target.x}, #{target.y})...")
+        )
+      ]
 
-      Helpers.gm_console(
-        state,
-        char_id,
-        "Teleporting to #{target.name} at (#{target.x}, #{target.y})..."
-      )
-
-      {:noreply, state}
+      {:ok, state, effects}
     else
-      Helpers.send_to_session(
-        state.sessions,
-        char_id,
-        {:transfer, target.map_id, target.x, target.y, entity}
-      )
+      effects = [
+        Effects.transfer(char_id, target.map_id, target.x, target.y, entity),
+        Effects.send(
+          char_id,
+          console(
+            "Teleporting to #{target.name} on map #{target.map_id} (#{target.x}, #{target.y})..."
+          )
+        )
+      ]
 
-      Helpers.gm_console(
-        state,
-        char_id,
-        "Teleporting to #{target.name} on map #{target.map_id} (#{target.x}, #{target.y})..."
-      )
-
-      {:noreply, state}
+      {:ok, state, effects}
     end
   end
 
@@ -94,23 +101,25 @@ defmodule Arena.Map.Gm.Teleport do
       {:ok, target_id, target} ->
         AuditLog.log_gm_action(char_id, "summon", target.name)
 
-        Helpers.send_to_session(
-          state.sessions,
-          target_id,
-          {:transfer, entity.map_id, entity.x, entity.y, target}
-        )
+        effects = [
+          Effects.transfer(target_id, entity.map_id, entity.x, entity.y, target),
+          Effects.send(
+            char_id,
+            console(
+              "Summoning #{target.name} to your position (map #{entity.map_id}, #{entity.x}, #{entity.y})..."
+            )
+          )
+        ]
 
-        Helpers.gm_console(
-          state,
-          char_id,
-          "Summoning #{target.name} to your position (map #{entity.map_id}, #{entity.x}, #{entity.y})..."
-        )
-
-        {:noreply, state}
+        {:ok, state, effects}
 
       :not_found ->
-        Helpers.gm_console(state, char_id, "Player '#{target_name}' not found on this map.")
-        {:noreply, state}
+        {:ok, state,
+         [Effects.send(char_id, console("Player '#{target_name}' not found on this map."))]}
     end
+  end
+
+  defp console(message) do
+    Encoder.encode({:console_msg, %{message: message, font_index: 0}})
   end
 end

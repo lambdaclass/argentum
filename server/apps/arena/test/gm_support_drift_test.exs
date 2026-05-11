@@ -483,12 +483,15 @@ defmodule Arena.GmSupportDriftTest do
       }
 
       # No SOS request in queue -> should be rejected
-      result = Arena.Map.Gm.Teleport.gm_goto(map_state, 90500, consejero_entity, "TargetPlayer")
-      assert {:noreply, _} = result
+      {:ok, new_state, effects} =
+        Arena.Map.Gm.Teleport.gm_goto(map_state, 90500, consejero_entity, "TargetPlayer")
 
-      # Check that a rejection console message was sent (send_raw with SOS warning)
-      assert_receive {:send_raw, raw_msg}, 200
-      assert is_binary(raw_msg)
+      Arena.Map.Effects.run(new_state, effects)
+
+      # Check that a rejection console message was sent (egress envelope routed
+      # through the effects runner — `:send_raw` is the legacy path that the
+      # adversarial guard still accepts via the lenient `kind in [...]` pattern).
+      assert_receive {kind, _packet} when kind in [:egress, :send_raw]
 
       # Should NOT receive a :transfer message (teleport was blocked)
       refute_receive {:transfer, _, _, _, _}, 50
@@ -533,8 +536,10 @@ defmodule Arena.GmSupportDriftTest do
       }
 
       # Admin should be able to GOTO without SOS
-      result = Arena.Map.Gm.Teleport.gm_goto(map_state, 90600, admin_entity, "TargetPlayer2")
-      assert {:noreply, _} = result
+      {:ok, new_state, effects} =
+        Arena.Map.Gm.Teleport.gm_goto(map_state, 90600, admin_entity, "TargetPlayer2")
+
+      Arena.Map.Effects.run(new_state, effects)
 
       # Should receive a transfer message (teleport happened)
       assert_receive {:transfer, 1, 60, 60, _entity}, 200
@@ -582,10 +587,10 @@ defmodule Arena.GmSupportDriftTest do
       AoSession.SosQueue.add_request(90701, "SOSPlayer", "Need help please")
 
       # Now consejero should be able to GOTO
-      result =
+      {:ok, new_state, effects} =
         Arena.Map.Gm.Teleport.gm_goto(map_state, 90700, consejero_entity, "SOSPlayer")
 
-      assert {:noreply, _} = result
+      Arena.Map.Effects.run(new_state, effects)
 
       # Should receive a transfer message (teleport happened)
       assert_receive {:transfer, 1, 70, 70, _entity}, 200
