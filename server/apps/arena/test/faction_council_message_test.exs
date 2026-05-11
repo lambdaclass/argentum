@@ -216,8 +216,8 @@ defmodule Arena.FactionCouncilMessageTest do
           meta: %{rain: false, sin_invi_ocul: false}
         )
 
-      {:ok, _new_state, _effects} =
-        Chat.handle_chat(state, :sender, "/RMSG Por el rey!")
+      {:ok, new_state, effects} =        Chat.handle_chat(state, :sender, "/RMSG Por el rey!")
+      Arena.Map.Effects.run(new_state, effects)
 
       # The sender's own pid should NOT receive any [Armada Real] broadcast
       # via the sender_session (sender is self()). But the recipient tasks
@@ -263,8 +263,8 @@ defmodule Arena.FactionCouncilMessageTest do
           meta: %{rain: false, sin_invi_ocul: false}
         )
 
-      {:ok, _new_state, _effects} =
-        Chat.handle_chat(state, :sender, "/CMSG Glory to chaos!")
+      {:ok, new_state, effects} =        Chat.handle_chat(state, :sender, "/CMSG Glory to chaos!")
+      Arena.Map.Effects.run(new_state, effects)
 
       messages = collect_console_messages(self())
 
@@ -324,8 +324,8 @@ defmodule Arena.FactionCouncilMessageTest do
           meta: %{rain: false, sin_invi_ocul: false}
         )
 
-      {:ok, _new_state, _effects} =
-        Chat.handle_chat(state, :sender, "/CMSG Por el caos!")
+      {:ok, new_state, effects} =        Chat.handle_chat(state, :sender, "/CMSG Por el caos!")
+      Arena.Map.Effects.run(new_state, effects)
 
       messages = collect_console_messages(self())
 
@@ -368,8 +368,8 @@ defmodule Arena.FactionCouncilMessageTest do
           meta: %{rain: false, sin_invi_ocul: false}
         )
 
-      {:ok, _new_state, _effects} =
-        Chat.handle_chat(state, :sender, "/RMSG unauthorised broadcast")
+      {:ok, new_state, effects} =        Chat.handle_chat(state, :sender, "/RMSG unauthorised broadcast")
+      Arena.Map.Effects.run(new_state, effects)
 
       messages = collect_console_messages(self())
 
@@ -409,8 +409,8 @@ defmodule Arena.FactionCouncilMessageTest do
           meta: %{rain: false, sin_invi_ocul: false}
         )
 
-      {:ok, _new_state, _effects} =
-        Chat.handle_chat(state, :sender, "/CMSG unauthorised chaos broadcast")
+      {:ok, new_state, effects} =        Chat.handle_chat(state, :sender, "/CMSG unauthorised chaos broadcast")
+      Arena.Map.Effects.run(new_state, effects)
 
       messages = collect_console_messages(self())
 
@@ -452,7 +452,8 @@ defmodule Arena.FactionCouncilMessageTest do
           meta: %{rain: false, sin_invi_ocul: false}
         )
 
-      {:ok, _, _effects} = Chat.handle_chat(state, :sender, "/RMSG gm broadcast")
+      {:ok, new_state, effects} = Chat.handle_chat(state, :sender, "/RMSG gm broadcast")
+      Arena.Map.Effects.run(new_state, effects)
 
       messages = collect_console_messages(self())
 

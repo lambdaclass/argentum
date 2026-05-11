@@ -233,7 +233,8 @@ defmodule Arena.GmCommandsParityTest do
           sessions: %{1 => self(), 2 => alice_pid, 3 => bob_pid}
         )
 
-      {:ok, _state, _effects} = Chat.handle_chat(state, 1, "/KICKALLCHARS")
+      {:ok, run_state, run_effects} = Chat.handle_chat(state, 1, "/KICKALLCHARS")
+      Arena.Map.Effects.run(run_state, run_effects)
 
       # Moderation is on the effects contract; the GM confirmation
       # flows through `Effects.send/2` and arrives as `{:egress, _}`.

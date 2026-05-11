@@ -459,7 +459,7 @@ defmodule Arena.GmAdversarialTest do
         result = Chat.handle_chat(state, :attacker, slash)
 
         # Must return {:noreply, state} with state unchanged
-        assert result == {:noreply, state}
+        assert {:ok, ^state, _effects} = result
       end
     end
   end
@@ -507,7 +507,7 @@ defmodule Arena.GmAdversarialTest do
 
       result = Chat.handle_chat(state, :nonexistent, "/KILL someone")
 
-      assert result == {:noreply, state}
+      assert {:ok, ^state, _effects} = result
     end
   end
 
@@ -557,7 +557,7 @@ defmodule Arena.GmAdversarialTest do
       result = Chat.handle_chat(state, :gm_player, "/ONLINEMAP")
 
       # /ONLINEMAP sends a console message listing players; it returns {:noreply, state}
-      assert {:noreply, _new_state} = result
+      assert {:ok, _new_state, _effects} = result
     end
 
     test "GM /INVISIBLE toggles invisible flag" do
@@ -565,7 +565,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/INVISIBLE")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/INVISIBLE")
 
       updated = new_state.players[:gm_player]
       assert updated.invisible == true
@@ -576,10 +576,14 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: entity}, sessions: sessions)
 
-      {:ok, _new_state, _effects} = Chat.handle_chat(state, :gm_player, "/NOSUCHCMD")
+      {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/NOSUCHCMD")
 
       # The GM receives a console message about the unknown command
-      assert_receive {:egress, %{payload: _}}
+      Arena.Map.Effects.run(run_state, run_effects)
+
+
+      # The GM receives a console message about the unknown command
+      assert_receive {kind, _payload} when kind in [:egress, :send_raw]
     end
   end
 
@@ -596,7 +600,7 @@ defmodule Arena.GmAdversarialTest do
       result = Chat.handle_chat(state, :player, "Hello world!")
 
       # Normal chat returns {:noreply, updated_state} — not rejected
-      assert {:noreply, _new_state} = result
+      assert {:ok, _new_state, _effects} = result
     end
   end
 
@@ -613,7 +617,7 @@ defmodule Arena.GmAdversarialTest do
       # snow starts as nil/false
       assert Map.get(state.meta, :snow, false) == false
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/NIEVE")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/NIEVE")
       assert new_state.meta[:snow] == true
     end
   end
@@ -626,7 +630,7 @@ defmodule Arena.GmAdversarialTest do
 
       assert Map.get(state.meta, :fog, false) == false
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/NIEBLA")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/NIEBLA")
       assert new_state.meta[:fog] == true
     end
   end
@@ -637,7 +641,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/MAPPK 1")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/MAPPK 1")
       assert new_state.meta[:pk] == true
     end
 
@@ -646,7 +650,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/MAPPK 0")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/MAPPK 0")
       assert new_state.meta[:pk] == false
     end
   end
@@ -657,7 +661,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/MAPNOMAGIC 1")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/MAPNOMAGIC 1")
       assert new_state.meta[:no_magic] == true
     end
   end
@@ -668,7 +672,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/MAPNOINVI 1")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/MAPNOINVI 1")
       assert new_state.meta[:no_invi] == true
     end
   end
@@ -679,7 +683,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/MAPNORESU 1")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/MAPNORESU 1")
       assert new_state.meta[:no_resu] == true
     end
   end
@@ -690,7 +694,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/SHOWNAME")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/SHOWNAME")
       updated = new_state.players[:gm_player]
       assert Map.get(updated, :show_name) == false
     end
@@ -702,7 +706,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/SETDESC The mighty admin")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/SETDESC The mighty admin")
       updated = new_state.players[:gm_player]
       assert updated.description == "The mighty admin"
     end
@@ -714,7 +718,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/SETSPEED 2.5")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/SETSPEED 2.5")
       updated = new_state.players[:gm_player]
       assert Map.get(updated, :speed_mod) == 2.5
     end
@@ -726,7 +730,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/TILEBLOCK")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/TILEBLOCK")
 
       blocked = new_state.gm_blocked_tiles
       # facing south from (50, 50) = (50, 51)
@@ -740,7 +744,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/SETTRIGGER 5")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/SETTRIGGER 5")
 
       triggers = new_state.triggers
       assert Map.get(triggers, {50, 51}) == 5
@@ -755,10 +759,14 @@ defmodule Arena.GmAdversarialTest do
       # Pre-set a trigger
       state = %{state | triggers: %{{50, 51} => 42}}
 
-      {:ok, _new_state, _effects} = Chat.handle_chat(state, :gm_player, "/ASKTRIGGER")
+      {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/ASKTRIGGER")
 
       # GM should receive a message about the trigger value
-      assert_receive {:send_raw, _raw}
+      Arena.Map.Effects.run(run_state, run_effects)
+
+
+      # GM should receive a message about the trigger value
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
   end
 
@@ -769,7 +777,7 @@ defmodule Arena.GmAdversarialTest do
       state = make_map_state(%{gm_player: entity}, sessions: sessions)
       state = %{state | ground_items: %{{10, 10} => %{item_id: 1, amount: 5}}}
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/CLEANWORLD")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/CLEANWORLD")
       assert new_state.ground_items == %{}
     end
   end
@@ -782,7 +790,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self(), victim: self()}
       state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/COUNCILKICK Victim")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/COUNCILKICK Victim")
       assert Map.get(new_state.players[:victim], :council) == false
     end
   end
@@ -794,7 +802,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self(), victim: self()}
       state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/ROYALCOUNCIL Victim")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/ROYALCOUNCIL Victim")
       assert Map.get(new_state.players[:victim], :council) == :royal
     end
   end
@@ -806,7 +814,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self(), victim: self()}
       state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/CHAOSCOUNCIL Victim")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/CHAOSCOUNCIL Victim")
       assert Map.get(new_state.players[:victim], :council) == :chaos
     end
   end
@@ -818,7 +826,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self(), victim: self()}
       state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/ROYALKICK Victim")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/ROYALKICK Victim")
       assert new_state.players[:victim].faction == :none
     end
   end
@@ -830,7 +838,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self(), victim: self()}
       state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/CHAOSKICK Victim")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/CHAOSKICK Victim")
       assert new_state.players[:victim].faction == :none
     end
   end
@@ -842,9 +850,12 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self(), soldier: self()}
       state = make_map_state(%{gm_player: gm, soldier: soldier}, sessions: sessions)
 
-      {:ok, _new_state, _effects} = Chat.handle_chat(state, :gm_player, "/RMSG Attention troops!")
+      {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/RMSG Attention troops!")
       # GM gets confirmation and faction player gets message
-      assert_receive {:send_raw, _raw}
+      Arena.Map.Effects.run(run_state, run_effects)
+
+      # GM gets confirmation and faction player gets message
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
   end
 
@@ -856,7 +867,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/CMSG Dark legion orders!")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
   end
 
@@ -869,7 +880,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/REMOVEPUNISHMENT Victim 1 reason")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
   end
 
@@ -879,9 +890,12 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
-      {:ok, _new_state, _effects} = Chat.handle_chat(state, :gm_player, "/FORCEMIDIMAP 5 1")
+      {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/FORCEMIDIMAP 5 1")
       # Receives MIDI packet + gm_console confirmation
-      assert_receive {:send_raw, _raw}
+      Arena.Map.Effects.run(run_state, run_effects)
+
+      # Receives MIDI packet + gm_console confirmation
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
   end
 
@@ -893,7 +907,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/FORCEWAVEMAP 3 50 50 1")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
   end
 
@@ -905,7 +919,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/ITEMSFLOOR")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
   end
 
@@ -916,7 +930,7 @@ defmodule Arena.GmAdversarialTest do
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
       state = %{state | ground_items: %{{50, 51} => %{item_id: 1, amount: 3}}}
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/DESTROYITEMS")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/DESTROYITEMS")
       ground_items = new_state.ground_items
       refute Map.has_key?(ground_items, {50, 51})
     end
@@ -934,7 +948,7 @@ defmodule Arena.GmAdversarialTest do
           {90, 90} => %{item_id: 2, amount: 1}
         }}
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/DESTROYALLAREA")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/DESTROYALLAREA")
       ground_items = new_state.ground_items
       # (52,52) is within range 10 of (50,50), should be removed
       refute Map.has_key?(ground_items, {52, 52})
@@ -953,7 +967,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/SETSPEED abc")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/SETSPEED abc")
       # speed_mod should not be set
       refute Map.has_key?(new_state.players[:gm_player], :speed_mod)
     end
@@ -963,7 +977,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/SETTRIGGER notanumber")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/SETTRIGGER notanumber")
       triggers = new_state.triggers
       assert triggers == %{}
     end
@@ -973,9 +987,12 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
-      {:ok, _new_state, _effects} = Chat.handle_chat(state, :gm_player, "/TELEPORT abc def ghi")
+      {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/TELEPORT abc def ghi")
       # Should receive usage message
-      assert_receive {:send_raw, _raw}
+      Arena.Map.Effects.run(run_state, run_effects)
+
+      # Should receive usage message
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/SPAWNITEM with non-numeric item_id returns usage" do
@@ -985,7 +1002,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/SPAWNITEM abc")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/SPAWNITEM with zero amount returns usage" do
@@ -995,7 +1012,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/SPAWNITEM 100 0")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/SPAWNITEM with negative amount returns usage" do
@@ -1005,7 +1022,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/SPAWNITEM 100 -5")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/FORCEMIDIMAP with non-numeric midi returns usage" do
@@ -1015,7 +1032,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/FORCEMIDIMAP abc def")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/CHECKSLOT with non-numeric slot returns error" do
@@ -1026,7 +1043,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/CHECKSLOT Victim abc")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/BANTEMPORAL with non-numeric days returns error" do
@@ -1036,7 +1053,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/BANTEMPORAL Victim abc reason")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/CREATURES with non-numeric map_id returns usage" do
@@ -1046,7 +1063,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/CREATURES abc")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/GIVEITEM with bad amount returns usage" do
@@ -1057,7 +1074,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/GIVEITEM Victim abc xyz")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/EDITCHAR with invalid option returns usage" do
@@ -1068,7 +1085,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/EDITCHAR Victim 99 abc")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/BAN with non-numeric days returns usage" do
@@ -1078,7 +1095,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/BAN Victim abc")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/MUTE with non-numeric minutes returns usage" do
@@ -1088,7 +1105,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/MUTE Victim abc")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
   end
 
@@ -1098,7 +1115,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/GOTO GhostPlayer")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/GOTO GhostPlayer")
       # State unchanged (no player to teleport to)
       assert new_state.players == state.players
     end
@@ -1110,7 +1127,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/KILL GhostPlayer")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/INFO targeting non-existent player returns not found" do
@@ -1120,7 +1137,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/INFO GhostPlayer")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/KICK targeting non-existent player returns not found" do
@@ -1130,7 +1147,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/KICK GhostPlayer")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/REVIVE targeting non-existent player returns not found" do
@@ -1140,7 +1157,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/REVIVE GhostPlayer")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/UNMUTE targeting non-existent player returns not found" do
@@ -1150,7 +1167,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/UNMUTE GhostPlayer")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/COUNCILKICK targeting non-existent player returns not found" do
@@ -1160,7 +1177,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/COUNCILKICK GhostPlayer")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/ROYALCOUNCIL targeting non-existent player returns not found" do
@@ -1170,7 +1187,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/ROYALCOUNCIL GhostPlayer")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/CHAOSCOUNCIL targeting non-existent player returns not found" do
@@ -1180,7 +1197,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/CHAOSCOUNCIL GhostPlayer")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/ROYALKICK targeting non-existent player returns not found" do
@@ -1190,7 +1207,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/ROYALKICK GhostPlayer")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/CHAOSKICK targeting non-existent player returns not found" do
@@ -1200,7 +1217,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/CHAOSKICK GhostPlayer")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/CHARSTATS targeting non-existent player returns not found" do
@@ -1210,7 +1227,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/CHARSTATS GhostPlayer")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/CHARGOLD targeting non-existent player returns not found" do
@@ -1220,7 +1237,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/CHARGOLD GhostPlayer")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/ALTERNAME targeting non-existent player returns not found" do
@@ -1230,7 +1247,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/ALTERNAME GhostPlayer NewName")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
   end
 
@@ -1241,9 +1258,12 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self(), victim: self()}
       state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
 
-      {:ok, _new_state, _effects} = Chat.handle_chat(state, :gm_player, "/CHECKSLOT Victim 0")
+      {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/CHECKSLOT Victim 0")
       # Slot 0 is < 1 so falls to invalid case
-      assert_receive {:send_raw, _raw}
+      Arena.Map.Effects.run(run_state, run_effects)
+
+      # Slot 0 is < 1 so falls to invalid case
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/CHECKSLOT with negative slot returns error" do
@@ -1254,7 +1274,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/CHECKSLOT Victim -1")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/BAN with zero days returns usage" do
@@ -1264,7 +1284,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/BAN Victim 0")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/BAN with negative days returns usage" do
@@ -1274,7 +1294,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/BAN Victim -5")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/MUTE with zero minutes returns usage" do
@@ -1284,7 +1304,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/MUTE Victim 0")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _raw}
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
 
     test "/SETDESC with only whitespace after command sets to trimmed remainder" do
@@ -1295,7 +1315,7 @@ defmodule Arena.GmAdversarialTest do
       # "/SETDESC " gets trimmed to "/SETDESC", then trim_leading("/SETDESC ") doesn't
       # match the space, so description becomes "/SETDESC" (the full trimmed string).
       # This exercises the edge case of sending the command with no real argument.
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/SETDESC ")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/SETDESC ")
       updated = new_state.players[:gm_player]
       assert updated.description == "/SETDESC"
     end
@@ -1305,7 +1325,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/SETSPEED 0")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/SETSPEED 0")
       updated = new_state.players[:gm_player]
       assert Map.get(updated, :speed_mod) == 0.0
     end
@@ -1315,7 +1335,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/SETSPEED -1.0")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/SETSPEED -1.0")
       updated = new_state.players[:gm_player]
       assert Map.get(updated, :speed_mod) == -1.0
     end
@@ -1327,7 +1347,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/NIEVE")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/NIEVE")
       assert new_state.meta[:snow] == true
     end
 
@@ -1336,7 +1356,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/INVISIBLE")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/INVISIBLE")
       assert new_state.players[:gm_player].invisible == true
     end
 
@@ -1345,7 +1365,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/SHOWNAME")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/SHOWNAME")
       updated = new_state.players[:gm_player]
       assert Map.get(updated, :show_name) == false
     end
@@ -1356,7 +1376,7 @@ defmodule Arena.GmAdversarialTest do
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
       state = %{state | ground_items: %{{5, 5} => %{item_id: 1, amount: 1}}}
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/CLEANWORLD")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/CLEANWORLD")
       assert new_state.ground_items == %{}
     end
 
@@ -1365,7 +1385,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/MAPPK 1")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/MAPPK 1")
       assert new_state.meta[:pk] == true
     end
 
@@ -1376,7 +1396,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self(), victim: self()}
       state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/COUNCILKICK Victim")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/COUNCILKICK Victim")
       assert Map.get(new_state.players[:victim], :council) == false
     end
   end
@@ -1392,9 +1412,9 @@ defmodule Arena.GmAdversarialTest do
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
       assert Map.get(state.meta, :snow, false) == false
-      {:noreply, state1} = Chat.handle_chat(state, :gm_player, "/NIEVE")
+      {:ok, state1, _effects} = Chat.handle_chat(state, :gm_player, "/NIEVE")
       assert state1.meta[:snow] == true
-      {:noreply, state2} = Chat.handle_chat(state1, :gm_player, "/NIEVE")
+      {:ok, state2, _effects} = Chat.handle_chat(state1, :gm_player, "/NIEVE")
       assert state2.meta[:snow] == false
     end
 
@@ -1404,9 +1424,9 @@ defmodule Arena.GmAdversarialTest do
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
       assert Map.get(state.meta, :fog, false) == false
-      {:noreply, state1} = Chat.handle_chat(state, :gm_player, "/NIEBLA")
+      {:ok, state1, _effects} = Chat.handle_chat(state, :gm_player, "/NIEBLA")
       assert state1.meta[:fog] == true
-      {:noreply, state2} = Chat.handle_chat(state1, :gm_player, "/NIEBLA")
+      {:ok, state2, _effects} = Chat.handle_chat(state1, :gm_player, "/NIEBLA")
       assert state2.meta[:fog] == false
     end
 
@@ -1415,9 +1435,9 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
-      {:noreply, state1} = Chat.handle_chat(state, :gm_player, "/INVISIBLE")
+      {:ok, state1, _effects} = Chat.handle_chat(state, :gm_player, "/INVISIBLE")
       assert state1.players[:gm_player].invisible == true
-      {:noreply, state2} = Chat.handle_chat(state1, :gm_player, "/INVISIBLE")
+      {:ok, state2, _effects} = Chat.handle_chat(state1, :gm_player, "/INVISIBLE")
       assert state2.players[:gm_player].invisible == false
     end
 
@@ -1427,9 +1447,9 @@ defmodule Arena.GmAdversarialTest do
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
       # Default show_name is true (Map.get with default true)
-      {:noreply, state1} = Chat.handle_chat(state, :gm_player, "/SHOWNAME")
+      {:ok, state1, _effects} = Chat.handle_chat(state, :gm_player, "/SHOWNAME")
       assert Map.get(state1.players[:gm_player], :show_name) == false
-      {:noreply, state2} = Chat.handle_chat(state1, :gm_player, "/SHOWNAME")
+      {:ok, state2, _effects} = Chat.handle_chat(state1, :gm_player, "/SHOWNAME")
       assert Map.get(state2.players[:gm_player], :show_name) == true
     end
 
@@ -1438,11 +1458,11 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
-      {:noreply, state1} = Chat.handle_chat(state, :gm_player, "/TILEBLOCK")
+      {:ok, state1, _effects} = Chat.handle_chat(state, :gm_player, "/TILEBLOCK")
       blocked1 = state1.gm_blocked_tiles
       assert MapSet.member?(blocked1, {50, 51})
 
-      {:noreply, state2} = Chat.handle_chat(state1, :gm_player, "/TILEBLOCK")
+      {:ok, state2, _effects} = Chat.handle_chat(state1, :gm_player, "/TILEBLOCK")
       blocked2 = state2.gm_blocked_tiles
       refute MapSet.member?(blocked2, {50, 51})
     end
@@ -1454,9 +1474,9 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
-      {:noreply, state1} = Chat.handle_chat(state, :gm_player, "/SETDESC first")
+      {:ok, state1, _effects} = Chat.handle_chat(state, :gm_player, "/SETDESC first")
       assert state1.players[:gm_player].description == "first"
-      {:noreply, state2} = Chat.handle_chat(state1, :gm_player, "/SETDESC second")
+      {:ok, state2, _effects} = Chat.handle_chat(state1, :gm_player, "/SETDESC second")
       assert state2.players[:gm_player].description == "second"
     end
 
@@ -1465,9 +1485,9 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
-      {:noreply, state1} = Chat.handle_chat(state, :gm_player, "/SETSPEED 1.5")
+      {:ok, state1, _effects} = Chat.handle_chat(state, :gm_player, "/SETSPEED 1.5")
       assert Map.get(state1.players[:gm_player], :speed_mod) == 1.5
-      {:noreply, state2} = Chat.handle_chat(state1, :gm_player, "/SETSPEED 3.0")
+      {:ok, state2, _effects} = Chat.handle_chat(state1, :gm_player, "/SETSPEED 3.0")
       assert Map.get(state2.players[:gm_player], :speed_mod) == 3.0
     end
 
@@ -1476,9 +1496,9 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
-      {:noreply, state1} = Chat.handle_chat(state, :gm_player, "/SETTRIGGER 5")
+      {:ok, state1, _effects} = Chat.handle_chat(state, :gm_player, "/SETTRIGGER 5")
       assert state1.triggers |> Map.get({50, 51}) == 5
-      {:noreply, state2} = Chat.handle_chat(state1, :gm_player, "/SETTRIGGER 10")
+      {:ok, state2, _effects} = Chat.handle_chat(state1, :gm_player, "/SETTRIGGER 10")
       assert state2.triggers |> Map.get({50, 51}) == 10
     end
 
@@ -1487,9 +1507,9 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
-      {:noreply, state1} = Chat.handle_chat(state, :gm_player, "/MAPPK 1")
+      {:ok, state1, _effects} = Chat.handle_chat(state, :gm_player, "/MAPPK 1")
       assert state1.meta[:pk] == true
-      {:noreply, state2} = Chat.handle_chat(state1, :gm_player, "/MAPPK 1")
+      {:ok, state2, _effects} = Chat.handle_chat(state1, :gm_player, "/MAPPK 1")
       assert state2.meta[:pk] == true
     end
 
@@ -1499,10 +1519,10 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self(), victim: self()}
       state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
 
-      {:noreply, state1} = Chat.handle_chat(state, :gm_player, "/ROYALCOUNCIL Victim")
+      {:ok, state1, _effects} = Chat.handle_chat(state, :gm_player, "/ROYALCOUNCIL Victim")
       assert Map.get(state1.players[:victim], :council) == :royal
 
-      {:noreply, state2} = Chat.handle_chat(state1, :gm_player, "/CHAOSCOUNCIL Victim")
+      {:ok, state2, _effects} = Chat.handle_chat(state1, :gm_player, "/CHAOSCOUNCIL Victim")
       assert Map.get(state2.players[:victim], :council) == :chaos
     end
 
@@ -1513,9 +1533,9 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self(), victim: self()}
       state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
 
-      {:noreply, state1} = Chat.handle_chat(state, :gm_player, "/COUNCILKICK Victim")
+      {:ok, state1, _effects} = Chat.handle_chat(state, :gm_player, "/COUNCILKICK Victim")
       assert Map.get(state1.players[:victim], :council) == false
-      {:noreply, state2} = Chat.handle_chat(state1, :gm_player, "/COUNCILKICK Victim")
+      {:ok, state2, _effects} = Chat.handle_chat(state1, :gm_player, "/COUNCILKICK Victim")
       assert Map.get(state2.players[:victim], :council) == false
     end
 
@@ -1525,7 +1545,7 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self(), victim: self()}
       state = make_map_state(%{gm_player: gm, victim: victim}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/ROYALKICK Victim")
+      {:ok, new_state, _effects} = Chat.handle_chat(state, :gm_player, "/ROYALKICK Victim")
       assert new_state.players[:victim].faction == :none
     end
   end
@@ -1735,7 +1755,7 @@ defmodule Arena.GmAdversarialTest do
         entity = make_entity(%{char_id: :player, gm: false})
         sessions = %{player: self()}
         state = make_map_state(%{player: entity}, sessions: sessions)
-        assert {:noreply, ^state} = Chat.handle_chat(state, :player, unquote(cmd))
+        assert {:ok, ^state, _effects} = Chat.handle_chat(state, :player, unquote(cmd))
       end
     end
   end
@@ -1750,9 +1770,12 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{gm_player: self()}
       state = make_map_state(%{gm_player: gm}, sessions: sessions)
 
-      {:noreply, new_state} = Chat.handle_chat(state, :gm_player, "/INVASION abc 5 10")
+      {:ok, new_state, run_effects} = Chat.handle_chat(state, :gm_player, "/INVASION abc 5 10")
       assert new_state.players == state.players
-      assert_receive {:send_raw, _}
+      Arena.Map.Effects.run(new_state, run_effects)
+
+      assert new_state.players == state.players
+      assert_receive {kind, _} when kind in [:egress, :send_raw]
     end
 
     test "/INVASION with zero count returns usage" do
@@ -1762,7 +1785,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/INVASION 1 5 0")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _}
+      assert_receive {kind, _} when kind in [:egress, :send_raw]
     end
 
     test "/INVASION with count > 200 returns usage" do
@@ -1772,7 +1795,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/INVASION 1 5 201")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _}
+      assert_receive {kind, _} when kind in [:egress, :send_raw]
     end
 
     test "/INVASION with negative count returns usage" do
@@ -1782,7 +1805,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/INVASION 1 5 -1")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _}
+      assert_receive {kind, _} when kind in [:egress, :send_raw]
     end
 
     test "/INVASION STOP with no active invasion returns error" do
@@ -1792,7 +1815,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/INVASION STOP 9999")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _}
+      assert_receive {kind, _} when kind in [:egress, :send_raw]
     end
 
     test "/INVASION STOP with non-numeric map_id returns usage" do
@@ -1802,7 +1825,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/INVASION STOP abc")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _}
+      assert_receive {kind, _} when kind in [:egress, :send_raw]
     end
   end
 
@@ -1821,7 +1844,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/TOURNAMENT CANCEL")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _}
+      assert_receive {kind, _} when kind in [:egress, :send_raw]
     end
 
     test "/TOURNAMENT STATUS with no active tournament returns message" do
@@ -1833,7 +1856,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/TOURNAMENT STATUS")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _}
+      assert_receive {kind, _} when kind in [:egress, :send_raw]
     end
 
     test "/TOURNAMENT BEGIN with no active tournament returns error" do
@@ -1845,7 +1868,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/TOURNAMENT BEGIN")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _}
+      assert_receive {kind, _} when kind in [:egress, :send_raw]
     end
   end
 
@@ -1861,7 +1884,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/EVENT START xp_bonus 0")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _}
+      assert_receive {kind, _} when kind in [:egress, :send_raw]
     end
 
     test "/EVENT START with negative duration returns usage" do
@@ -1871,7 +1894,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/EVENT START xp_bonus -5")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _}
+      assert_receive {kind, _} when kind in [:egress, :send_raw]
     end
 
     test "/EVENT STOP with no active event returns error" do
@@ -1884,7 +1907,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/EVENT STOP xp_bonus")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _}
+      assert_receive {kind, _} when kind in [:egress, :send_raw]
     end
 
     test "/EVENT LIST with no active events returns message" do
@@ -1900,7 +1923,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/EVENT LIST")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _}
+      assert_receive {kind, _} when kind in [:egress, :send_raw]
     end
 
     test "/EVENT START with unknown type maps to :custom" do
@@ -1913,7 +1936,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/EVENT START unknown_type 5")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:send_raw, _}
+      assert_receive {kind, _} when kind in [:egress, :send_raw]
 
       # Clean up
       Arena.Events.EventManager.stop_event(:custom)
@@ -1965,10 +1988,11 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Arena.Map.QuestHandlers.handle_quest_accept(state, :player, 1)
+      {:ok, new_state, _q_effects} = Arena.Map.QuestHandlers.handle_quest_accept(state, :player, 1)
+      Arena.Map.Effects.run(new_state, _q_effects)
       # Entity should be unchanged
       assert new_state.players[:player].active_quests == []
-      assert_receive {:send_raw, _}
+      assert_receive {kind, _} when kind in [:egress, :send_raw]
     end
   end
 
@@ -1978,9 +2002,10 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Arena.Map.QuestHandlers.handle_quest_abandon(state, :player, 99)
+      {:ok, new_state, _q_effects} = Arena.Map.QuestHandlers.handle_quest_abandon(state, :player, 99)
+      Arena.Map.Effects.run(new_state, _q_effects)
       assert new_state.players[:player].active_quests == []
-      assert_receive {:send_raw, _}
+      assert_receive {kind, _} when kind in [:egress, :send_raw]
     end
 
     test "quest_abandon with slot 0 and no active quests sends error" do
@@ -1988,9 +2013,10 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Arena.Map.QuestHandlers.handle_quest_abandon(state, :player, 0)
+      {:ok, new_state, _q_effects} = Arena.Map.QuestHandlers.handle_quest_abandon(state, :player, 0)
+      Arena.Map.Effects.run(new_state, _q_effects)
       assert new_state.players[:player].active_quests == []
-      assert_receive {:send_raw, _}
+      assert_receive {kind, _} when kind in [:egress, :send_raw]
     end
   end
 
@@ -2000,9 +2026,10 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Arena.Map.QuestHandlers.handle_quest_details_request(state, :player, 99)
+      {:ok, new_state, _q_effects} = Arena.Map.QuestHandlers.handle_quest_details_request(state, :player, 99)
+      Arena.Map.Effects.run(new_state, _q_effects)
       assert new_state.players[:player].active_quests == []
-      assert_receive {:send_raw, _}
+      assert_receive {kind, _} when kind in [:egress, :send_raw]
     end
 
     test "quest_details_request with slot 0 and no active quests sends error" do
@@ -2010,9 +2037,10 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, new_state} = Arena.Map.QuestHandlers.handle_quest_details_request(state, :player, 0)
+      {:ok, new_state, _q_effects} = Arena.Map.QuestHandlers.handle_quest_details_request(state, :player, 0)
+      Arena.Map.Effects.run(new_state, _q_effects)
       assert new_state.players[:player].active_quests == []
-      assert_receive {:send_raw, _}
+      assert_receive {kind, _} when kind in [:egress, :send_raw]
     end
   end
 
@@ -2022,39 +2050,45 @@ defmodule Arena.GmAdversarialTest do
       sessions = %{player: self()}
       state = make_map_state(%{player: entity}, sessions: sessions)
 
-      {:noreply, _new_state} = Arena.Map.QuestHandlers.handle_quest_list_request(state, :player)
-      assert_receive {:send_raw, _raw}
+      {:ok, new_state, q_effects} = Arena.Map.QuestHandlers.handle_quest_list_request(state, :player)
+      Arena.Map.Effects.run(new_state, q_effects)
+      assert_receive {kind, _raw} when kind in [:egress, :send_raw]
     end
   end
 
   describe "quest handlers with unknown char_id" do
     test "quest_list_request for unknown char_id is silently ignored" do
       state = make_map_state(%{})
-      {:noreply, new_state} = Arena.Map.QuestHandlers.handle_quest_list_request(state, :unknown)
+      {:ok, new_state, _q_effects} = Arena.Map.QuestHandlers.handle_quest_list_request(state, :unknown)
+      Arena.Map.Effects.run(new_state, _q_effects)
       assert new_state == state
     end
 
     test "quest_details_request for unknown char_id is silently ignored" do
       state = make_map_state(%{})
-      {:noreply, new_state} = Arena.Map.QuestHandlers.handle_quest_details_request(state, :unknown, 1)
+      {:ok, new_state, _q_effects} = Arena.Map.QuestHandlers.handle_quest_details_request(state, :unknown, 1)
+      Arena.Map.Effects.run(new_state, _q_effects)
       assert new_state == state
     end
 
     test "quest_accept for unknown char_id is silently ignored" do
       state = make_map_state(%{})
-      {:noreply, new_state} = Arena.Map.QuestHandlers.handle_quest_accept(state, :unknown, 1)
+      {:ok, new_state, _q_effects} = Arena.Map.QuestHandlers.handle_quest_accept(state, :unknown, 1)
+      Arena.Map.Effects.run(new_state, _q_effects)
       assert new_state == state
     end
 
     test "quest_abandon for unknown char_id is silently ignored" do
       state = make_map_state(%{})
-      {:noreply, new_state} = Arena.Map.QuestHandlers.handle_quest_abandon(state, :unknown, 1)
+      {:ok, new_state, _q_effects} = Arena.Map.QuestHandlers.handle_quest_abandon(state, :unknown, 1)
+      Arena.Map.Effects.run(new_state, _q_effects)
       assert new_state == state
     end
 
     test "handle_quest for unknown char_id is silently ignored" do
       state = make_map_state(%{})
-      {:noreply, new_state} = Arena.Map.QuestHandlers.handle_quest(state, :unknown)
+      {:ok, new_state, _q_effects} = Arena.Map.QuestHandlers.handle_quest(state, :unknown)
+      Arena.Map.Effects.run(new_state, _q_effects)
       assert new_state == state
     end
   end
@@ -2178,7 +2212,7 @@ defmodule Arena.GmAdversarialTest do
 
       {:ok, run_state, run_effects} = Chat.handle_chat(state, :gm_player, "/NONEXISTENTCOMMAND")
       Arena.Map.Effects.run(run_state, run_effects)
-      assert_receive {:egress, %{payload: _}}
+      assert_receive {kind, _payload} when kind in [:egress, :send_raw]
     end
   end
 end
