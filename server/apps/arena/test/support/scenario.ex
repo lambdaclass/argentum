@@ -401,4 +401,77 @@ defmodule Arena.Test.Scenario do
       Process.delete(:arena_effects_recorder)
     end
   end
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Snapshot / diff surface (delegates to Arena.Test.Scenario.Snapshot)
+  # ──────────────────────────────────────────────────────────────────────
+
+  @doc """
+  Build a stable snapshot of part of the scenario state. Use as input
+  to `diff_snapshots/2` or as a literal expected term in parity tests.
+
+  Keys:
+
+    * `snapshot(scenario, :effects)` — list of normalised
+      `Arena.Map.Effect.t()` in emission order. Binary payloads are
+      replaced with `%{class, packet_id, payload_size}`.
+    * `snapshot(scenario, :player, char_id)` — load-bearing subset of
+      the player entity (vitals, flags, position). Ephemeral
+      cooldown fields are dropped.
+    * `snapshot(scenario, :inventory, char_id)` — list of
+      `%{slot, item_id, amount, equipped}` for non-nil slots.
+    * `snapshot(scenario, :buffs, char_id)` — list of
+      `%{type, expires_at[, value]}` sorted by `type`.
+    * `snapshot(scenario, :visible, char_id)` — sorted list of
+      `{:player, _}`/`{:npc, _}`/`{:ground_item, _}` entries inside
+      the player's AoI box.
+  """
+  @spec snapshot(t, atom()) :: term()
+  def snapshot(%__MODULE__{} = scenario, :effects) do
+    Arena.Test.Scenario.Snapshot.take(scenario, :effects, nil)
+  end
+
+  @spec snapshot(t, atom(), term()) :: term()
+  def snapshot(%__MODULE__{} = scenario, key, char_id) do
+    Arena.Test.Scenario.Snapshot.take(scenario, key, char_id)
+  end
+
+  @doc """
+  Walk two snapshots and surface the first point of divergence.
+  Returns `:ok` for identical structures or
+  `{:divergence, path, actual_value, expected_value}` otherwise.
+  See `Arena.Test.Scenario.Snapshot.diff/2` for the precise rules
+  (map intersection, positional list/tuple compare, deterministic key
+  ordering).
+  """
+  @spec diff_snapshots(term(), term()) ::
+          :ok | {:divergence, [term()], term(), term()}
+  def diff_snapshots(actual, expected) do
+    Arena.Test.Scenario.Snapshot.diff(actual, expected)
+  end
+
+  @doc """
+  Render a divergence as a one-line message. `format_diff(:ok)`
+  returns an empty string so the caller can splice the result into a
+  message without special-casing.
+  """
+  @spec format_diff(:ok | {:divergence, [term()], term(), term()}) :: String.t()
+  def format_diff(diff), do: Arena.Test.Scenario.Snapshot.format(diff)
+
+  @doc """
+  Compare `expected` against fresh snapshots of `scenario`. The top
+  level keys of `expected` choose which snapshot to take — see
+  `Arena.Test.Scenario.Snapshot.assert_equal/3`. Raises
+  `ExUnit.AssertionError` on the first divergence.
+
+      expected = %{
+        player: %{hp: 50, dead: false},
+        inventory: [%{slot: 0, item_id: 9500, amount: 5, equipped: false}]
+      }
+      Scenario.assert_state_equal(scenario, expected, :hero)
+  """
+  @spec assert_state_equal(t, map(), term()) :: t | no_return()
+  def assert_state_equal(scenario, expected, char_id \\ nil) do
+    Arena.Test.Scenario.Snapshot.assert_equal(scenario, expected, char_id)
+  end
 end
