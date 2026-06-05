@@ -10,9 +10,23 @@ defmodule Arena.PotionsGoldenTest do
   restores attributes on `duracion_efecto` zero-out.
 
   Phase 1 / Item 5 of `ROADMAP.md` — sibling of `healing_golden_test.exs`
-  and `forgive_golden_test.exs`. VB6 references throughout: potion shapes
-  live in `InvUsuario.bas:1877-1956`, expiry tick in
-  `General.bas:1278-1297` (DuracionPociones).
+  and `forgive_golden_test.exs`.
+
+  VB6 anchors (lines confirmed against `Arena.Map.InventoryHandlers` /
+  `Arena.Map.StatusTicks` port comments; no VB6 source tree is vendored):
+    * otPotions dispatch  — InvUsuario.bas:1877-1887 (`handle_use_item/3` →
+                            `apply_potion/2`; inventory_handlers.ex:459).
+    * HP potion (tipo 1)  — InvUsuario.bas:1923-1945; `DivineBlood > 0` blocks
+                            HP potions (InvUsuario.bas:1925; inventory_handlers.ex:679).
+    * Mana potion (tipo 2)— InvUsuario.bas:1946-1956 (`Porcentaje`-scaled).
+    * Stamina (tipo 4)    — InvUsuario.bas (stamina branch).
+    * Strength (tipo 6)   — InvUsuario.bas:1908-1922.
+    * Agility (tipo 7)    — InvUsuario.bas:1893-1907.
+    * Poison-cure (tipo 5)/ Paralysis-cure (tipo 8) — InvUsuario.bas:1983/2149
+                            (`WriteParalizeOK`; inventory_handlers.ex:687).
+    * Buff expiry         — General.bas:1278-1297 `DuracionPociones`
+                            (`StatusTicks.process_player_buffs/4`,
+                            attribute restore on `duracion_efecto` zero-out).
   """
   use ExUnit.Case, async: false
 
@@ -118,6 +132,11 @@ defmodule Arena.PotionsGoldenTest do
       assert entity(s, :p).hp == 80, "VB6: 50 + 30*1.0 = 80"
       assert_effect(s, :send, to: :p, packet: :update_hp)
       assert_effect(s, :send, to: :p, packet: :change_inventory_slot)
+
+      # Byte-level fixture: eUpdateHP (27) — MinHp(Int16) + shield(Int32).
+      # The encoded HP must match the post-potion value (80), not just the id.
+      assert <<27::little-signed-16, 80::little-signed-16, _shield::little-signed-32>> =
+               assert_payload(s, :send, to: :p, packet: :update_hp)
     end
 
     test "heal is clamped at max_hp" do
@@ -184,6 +203,10 @@ defmodule Arena.PotionsGoldenTest do
 
       assert entity(s, :p).mana == 600, "VB6: 100 + 50% of 1000 = 600"
       assert_effect(s, :send, to: :p, packet: :update_mana)
+
+      # Byte-level fixture: eUpdateMana (26) — MinMAN(Int16).
+      assert <<26::little-signed-16, 600::little-signed-16>> =
+               assert_payload(s, :send, to: :p, packet: :update_mana)
     end
 
     test "restore is clamped at max_mana" do
@@ -221,6 +244,10 @@ defmodule Arena.PotionsGoldenTest do
 
       assert entity(s, :p).stamina == 75
       assert_effect(s, :send, to: :p, packet: :update_sta)
+
+      # Byte-level fixture: eUpdateSta (25) — MinSta(Int16).
+      assert <<25::little-signed-16, 75::little-signed-16>> =
+               assert_payload(s, :send, to: :p, packet: :update_sta)
     end
 
     test "restore is clamped at max_stamina" do
@@ -517,6 +544,11 @@ defmodule Arena.PotionsGoldenTest do
       refute e.paralyzed
       refute Enum.any?(e.buffs, &(&1.type == :paralyzed))
       assert_effect(s, :send, to: :p, packet: :paralize_ok)
+
+      # Byte-level fixture: eParalizeOK (97) is a pure status-clear signal —
+      # exactly the 2-byte id, no trailing bytes.
+      assert <<97::little-signed-16>> ==
+               assert_payload(s, :send, to: :p, packet: :paralize_ok)
     end
 
     test "no paralize_ok when player wasn't paralyzed" do

@@ -217,7 +217,7 @@ defmodule Arena.CharacterCreation do
 
     # Stamina = 20 × random(1..agility/6, min 2)
     sta_roll = max(div(agi, 6), 2)
-    stamina = 20 * Enum.random(1..sta_roll)
+    stamina = 20 * Arena.Rng.between(1, sta_roll)
 
     # Spawn point from home city
     spawn = GameData.city_spawn(params.home_city)

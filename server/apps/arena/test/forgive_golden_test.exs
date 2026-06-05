@@ -9,6 +9,21 @@ defmodule Arena.ForgiveGoldenTest do
     * Faction-member rejection (armada/caos cannot use /PERDON).
     * Priest range (3 tiles, VB6 `Distancia`).
     * ResucitadorNewbie level gating (level <= 12 only).
+
+  VB6 anchors (confirmed against `Arena.Map.NpcInteraction` port comments;
+  no VB6 source tree is vendored, so Protocol.bas lines are pending):
+    * `handle_forgive/3`  — Protocol.bas `HandleDonateGold` + `HandleForgive`;
+                            donation threshold scales on `ciudadanosMatados`
+                            (npc_interaction.ex:334).
+    * Priest range        — `Distancia <= 3` (npc_interaction.ex:304,378).
+    * Faction gate        — armada/caos members cannot use /PERDON
+                            (npc_interaction.ex:317).
+    * Newbie path         — `ResucitadorNewbie` serves `EsNewbie` only
+                            (level <= 12; npc_interaction.ex:329).
+
+  Constants below are VB6-sourced: `@npc_type_revividor 1`,
+  `@npc_type_resucitador_newbie 9`,
+  `@costo_perdon_por_ciudadano 5000` (per-citizen donation cost).
   """
   use ExUnit.Case, async: false
 

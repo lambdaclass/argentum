@@ -81,6 +81,69 @@ defmodule Arena.Test.Scenario.Assertions do
     Enum.filter(Scenario.emitted_effects(scenario), &match_effect(&1, kind, opts))
   end
 
+  @doc """
+  Return the raw encoded packet payloads (binaries) of every payload-bearing
+  effect of `kind` matching `opts`.
+
+  This is the entry point for byte-level golden assertions: instead of only
+  checking the leading packet-id Int16 (what `assert_effect(.., packet: x)`
+  does), the caller can pattern-match the full wire layout to pin the
+  encoded fields a flow produces end-to-end.
+
+      [payload] = payloads_for(s, :send, to: :p, packet: :update_hp)
+      assert <<27::little-signed-16, 150::little-signed-16, 0::little-signed-32>> = payload
+  """
+  @spec payloads_for(Scenario.t(), atom(), keyword()) :: [binary()]
+  def payloads_for(%Scenario{} = scenario, kind, opts \\ []) do
+    scenario
+    |> effects_for(kind, opts)
+    |> Enum.map(&extract_payload/1)
+  end
+
+  @doc """
+  Assert that exactly one payload-bearing effect of `kind` matches `opts`
+  and return its raw encoded binary, so the caller can pattern-match the
+  wire fields:
+
+      payload = assert_payload(s, :send, to: :p, packet: :change_bank_slot)
+      assert <<65::little-signed-16, slot, obj::little-signed-16, _rest::binary>> = payload
+      assert slot == 1
+
+  Requiring *exactly one* match keeps byte-level fixtures unambiguous; if a
+  flow legitimately emits the same packet more than once, narrow with `opts`
+  or use `payloads_for/3`.
+  """
+  defmacro assert_payload(scenario, kind, opts \\ []) do
+    quote do
+      Arena.Test.Scenario.Assertions.__assert_payload__(
+        unquote(scenario),
+        unquote(kind),
+        unquote(opts)
+      )
+    end
+  end
+
+  @doc false
+  def __assert_payload__(%Scenario{} = scenario, kind, opts) do
+    case payloads_for(scenario, kind, opts) do
+      [payload] ->
+        payload
+
+      [] ->
+        flunk(
+          "expected exactly one payload-bearing effect #{format_kind(kind, opts)}; got none. " <>
+            "emitted: #{inspect(Scenario.emitted_effects(scenario), pretty: true, limit: :infinity)}"
+        )
+
+      many ->
+        flunk(
+          "expected exactly one payload-bearing effect #{format_kind(kind, opts)}; " <>
+            "got #{length(many)}. Narrow with opts or use payloads_for/3. " <>
+            "payloads: #{inspect(many, pretty: true, limit: :infinity)}"
+        )
+    end
+  end
+
   # ──────────────────────────────────────────────────────────────────────
   # Per-kind match clauses
   # ──────────────────────────────────────────────────────────────────────
@@ -137,6 +200,19 @@ defmodule Arena.Test.Scenario.Assertions do
   end
 
   defp match_effect(_, _, _), do: false
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Payload extraction (byte-level fixtures)
+  # ──────────────────────────────────────────────────────────────────────
+
+  defp extract_payload({:send, _to, %{payload: payload}}), do: payload
+  defp extract_payload({:broadcast_visible, _x, _y, %{payload: payload}}), do: payload
+  defp extract_payload({:broadcast_visible_all, _x, _y, %{payload: payload}}), do: payload
+
+  defp extract_payload({:broadcast_visible_except, _x, _y, _exclude, %{payload: payload}}),
+    do: payload
+
+  defp extract_payload({:broadcast_map, %{payload: payload}}), do: payload
 
   # ──────────────────────────────────────────────────────────────────────
   # Match helpers

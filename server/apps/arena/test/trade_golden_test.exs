@@ -30,6 +30,20 @@ defmodule Arena.TradeGoldenTest do
   — that path is exercised by the "commit failure" test. The "happy
   path" commit test checks out the sandbox and creates real DB chars,
   mirroring `trade_persistence_test.exs`.
+
+  VB6 anchors (Comercio.bas procedures, confirmed against `Arena.Map.Trade`
+  port comments; no VB6 source tree is vendored, so line numbers are pending):
+    * `start_user_trade_request/4` — `IniciarComercio` / `OnRecvComerciarUsuario`
+                                     (mutual-request handshake).
+    * `handle_user_trade_offer/4`  — `OfertarOroComUsu` / `OfertarItemComUsu`
+                                     (offer is staged; inventory NOT mutated
+                                     until both-side accept). Instransferible and
+                                     newbie items are rejected (trade.ex:41,47).
+    * `handle_user_trade_accept/2` — `AceptarComUsu` (single-side flag flip vs.
+                                     both-side atomic commit; no un-accept toggle).
+    * `handle_user_trade_reject/2` — `RechazarComUsu` (no un-accept toggle).
+    * `handle_user_trade_end/2`    — `TerminarComUsu` (closes both sides,
+                                     emits `user_commerce_end`).
   """
   use ExUnit.Case, async: false
 
@@ -278,6 +292,15 @@ defmodule Arena.TradeGoldenTest do
       # Both sides receive the user_commerce_init packet (UI flag).
       assert_effect(s, :send, to: :p1, packet: :user_commerce_init)
       assert_effect(s, :send, to: :p2, packet: :user_commerce_init)
+
+      # Byte-level fixture: eUserCommerceInit (12) — name(String8), where
+      # String8 is an Int16 length prefix + raw bytes. Each side is told the
+      # OTHER trader's name so the client can label the window.
+      assert <<12::little-signed-16, 3::little-signed-16, "Bob">> =
+               assert_payload(s, :send, to: :p1, packet: :user_commerce_init)
+
+      assert <<12::little-signed-16, 5::little-signed-16, "Alice">> =
+               assert_payload(s, :send, to: :p2, packet: :user_commerce_init)
     end
   end
 
@@ -357,6 +380,27 @@ defmodule Arena.TradeGoldenTest do
 
       assert_effect(s, :send, to: :p1, packet: :change_user_trade_slot)
       assert_effect(s, :send, to: :p2, packet: :change_user_trade_slot)
+
+      # Byte-level fixture: eChangeUserTradeSlot (100) — my_offer(Bool) +
+      # gold(Int32) + the first offered item (obj_index(Int16) + name(String8)
+      # + grh(Int32) + amount(Int32) + tags(Int32)). The offerer sees their
+      # own side with my_offer=1; the partner sees the same items with
+      # my_offer=0. We pin the flag, gold, and item identity/amount; grh and
+      # the 5 empty trailing slots are bound, not value-checked.
+      assert <<100::little-signed-16, 1, 0::little-signed-32, sword_obj::little-signed-16,
+               9::little-signed-16, "TestSword", _grh::little-signed-32, 3::little-signed-32,
+               0::little-signed-32, _rest::binary>> =
+               assert_payload(s, :send, to: :p1, packet: :change_user_trade_slot)
+
+      # obj_index is an Int16 on the wire. @sword_id is a synthetic test id that
+      # deliberately sits above real game data and exceeds the Int16 range, so
+      # the wire carries its low 16 bits — real AO obj indices fit in Int16.
+      assert sword_obj == rem(@sword_id, 0x1_0000)
+
+      assert <<100::little-signed-16, 0, 0::little-signed-32, ^sword_obj::little-signed-16,
+               9::little-signed-16, "TestSword", _grh::little-signed-32, 3::little-signed-32,
+               0::little-signed-32, _rest::binary>> =
+               assert_payload(s, :send, to: :p2, packet: :change_user_trade_slot)
     end
 
     test "offering more of the same item updates the existing entry" do
@@ -580,6 +624,13 @@ defmodule Arena.TradeGoldenTest do
       assert_effect(s, :send, to: :p2, packet: :console_msg)
       assert_effect(s, :send, to: :p1, packet: :user_commerce_end)
       assert_effect(s, :send, to: :p2, packet: :user_commerce_end)
+
+      # Byte-level fixture: eConsoleMsg (37) — chat(String8) + FontIndex(Int8).
+      # Pin the exact failure text the client renders on a rolled-back commit.
+      assert <<37::little-signed-16, len::little-signed-16, msg::binary-size(len), _font>> =
+               assert_payload(s, :send, to: :p1, packet: :console_msg)
+
+      assert msg == "Comercio fallido, intente nuevamente."
     end
 
     test "second accept after partner accepted commits (and ends), no swap on DB failure" do
@@ -601,6 +652,11 @@ defmodule Arena.TradeGoldenTest do
 
       assert_effect(s, :send, to: :p1, packet: :user_commerce_end)
       assert_effect(s, :send, to: :p2, packet: :user_commerce_end)
+
+      # Byte-level fixture: eUserCommerceEnd (13) closes the window with an
+      # empty payload — exactly the 2-byte id, no trailing bytes.
+      assert <<13::little-signed-16>> ==
+               assert_payload(s, :send, to: :p1, packet: :user_commerce_end)
     end
   end
 

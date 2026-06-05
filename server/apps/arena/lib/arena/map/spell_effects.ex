@@ -141,7 +141,7 @@ defmodule Arena.Map.SpellEffects do
       spell_def.sube_hp == 1 or spell_def.sanacion ->
         heal =
           if spell_def.max_hp > spell_def.min_hp,
-            do: Enum.random(spell_def.min_hp..spell_def.max_hp),
+            do: Arena.Rng.between(spell_def.min_hp, spell_def.max_hp),
             else: spell_def.min_hp
 
         apply_spell_heal(state, char_id, entity, heal, spell_def, target_x, target_y)
@@ -703,7 +703,7 @@ defmodule Arena.Map.SpellEffects do
             :agi -> {spell_def.sube_ag, spell_def.min_ag, spell_def.max_ag}
           end
 
-        amount = if max_val > min_val, do: Enum.random(min_val..max_val), else: min_val
+        amount = if max_val > min_val, do: Arena.Rng.between(min_val, max_val), else: min_val
         duration_ms = max((spell_def.duration || 0) * 1000, 3000)
         buff_type = if attr == :str, do: :str_buff, else: :agi_buff
 
@@ -742,7 +742,7 @@ defmodule Arena.Map.SpellEffects do
       target_entity ->
         amount =
           if spell_def.max_mana > spell_def.min_mana,
-            do: Enum.random(spell_def.min_mana..spell_def.max_mana),
+            do: Arena.Rng.between(spell_def.min_mana, spell_def.max_mana),
             else: spell_def.min_mana
 
         target_entity =
@@ -781,7 +781,7 @@ defmodule Arena.Map.SpellEffects do
       target_entity ->
         amount =
           if spell_def.max_sta > spell_def.min_sta,
-            do: Enum.random(spell_def.min_sta..spell_def.max_sta),
+            do: Arena.Rng.between(spell_def.min_sta, spell_def.max_sta),
             else: spell_def.min_sta
 
         target_entity =

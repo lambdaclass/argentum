@@ -11,9 +11,19 @@ defmodule Arena.GambleGoldenTest do
     * Win/loss accounting (gold, gamble_wins/losses/plays counters).
     * Outcome packets (`update_gold` + `console_msg`).
 
-  RNG: `handle_gamble/4` calls `:rand.uniform(100)` directly, so we seed
-  via `:rand.seed(:exsss, _)` immediately before invoking the handler.
-  Probed seeds:
+  VB6 anchors (confirmed against `Arena.Map.NpcInteraction` port comments;
+  no VB6 source tree is vendored, so the line within Comercio.bas is pending):
+    * `handle_gamble/4`   — Comercio.bas `HandleGambleGold` / `RandomNumber(1, 100) <= 10`
+                            (10% win rate; npc_interaction.ex:261).
+    * Timbero NPC         — shipped Apostador (NPC301) is `NpcType = 10`, NOT the
+                            VB6 enum `Timbero = 7` (npc_interaction.ex:12); 10-tile range.
+    * `@max_bet 5000`     — VB6 max bet cap.
+
+  RNG: `handle_gamble/4` rolls via `Arena.Rng.uniform(100)`. This test does
+  not install an `Arena.Test.Rng` strategy; with no strategy in the process
+  dictionary `Arena.Rng` delegates straight to `:rand.uniform/1`, so seeding
+  `:rand.seed(:exsss, _)` immediately before invoking the handler still pins
+  the roll. Probed seeds:
     * `{1, 1, 1}` → first roll 8  (win,  roll <= 10)
     * `{1, 2, 3}` → first roll 27 (loss, roll  > 10)
   """

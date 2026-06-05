@@ -4,6 +4,35 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **Phase 1 proof-hardening — VB6 anchors, packet byte fixtures, RNG
+  guardrails (2026-06-05):**
+  - **VB6 source anchors** added to all 8 scenario golden fixtures
+    (`bank`, `trade`, `criminal_conversion`, `faction_enlistment`,
+    `forgive`, `gamble`, `healing`, `potions`). Each `@moduledoc` now carries
+    a `VB6 anchors` block naming the source file, procedure, and key
+    branch/constants it defends, propagated from the confirmed in-tree port
+    comments. Anchors whose exact line is not confirmable against the
+    (gitignored) `old/server/Codigo/*.bas` tree are marked pending rather
+    than guessed.
+  - **Packet byte-level fixtures**: new `assert_payload/3` + `payloads_for/3`
+    helpers in `Arena.Test.Scenario.Assertions` expose the raw encoded
+    payload of an effect. The bank, trade, healing, and potion golden flows
+    now assert encoded fields (not just packet id) for `bank_init`/`bank_end`/
+    `update_bank_gold`/`update_gold`/`change_bank_slot`,
+    `user_commerce_init`/`change_user_trade_slot`/`console_msg`/
+    `user_commerce_end`, resurrect `update_hp`/`update_mana`, `rest_ok`,
+    and potion `update_hp`/`update_mana`/`update_sta`/`paralize_ok`. The trade
+    slot fixture also documents Int16 obj-index truncation for synthetic ids.
+  - **RNG guardrails**: `Arena.Rng` gained `between/2` (shimmable replacement
+    for `Enum.random(min..max)`). The 10 parity-sensitive modules (combat,
+    combat_handlers, spell_effects, status_ticks, social, inventory_handlers,
+    npc_interaction, crafting, character_creation, npc_entity) now route every
+    draw through `Arena.Rng`. New `apps/arena/test/rng_guard_test.exs` walks
+    their AST and fails on any direct `:rand.uniform` / `Enum.random` /
+    `Enum.shuffle`; the event-flavor allowlist (npc_ai, treasure_event,
+    map_server, invasion/siege/tournament servers) is documented in
+    `server/docs/RNG_AUDIT.md`. Full arena suite: 4196 tests, 0 failures.
+
 - **Drift #19 audit — blind / dumb / work-target encoders verified wired
   (2026-06-05):**
   - `:blind_no_more` is emitted both from

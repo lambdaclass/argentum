@@ -258,7 +258,7 @@ defmodule Arena.Map.NpcInteraction do
 
               {:ok, _npc, npc_def} ->
                 # VB6 parity: RandomNumber(1, 100) <= 10 → 10% win rate
-                won = :rand.uniform(100) <= 10
+                won = Arena.Rng.uniform(100) <= 10
 
                 entity =
                   if won do

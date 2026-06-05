@@ -697,7 +697,7 @@ defmodule Arena.Map.Social do
             # VB6: nonlinear cubic polynomial success roll
             chance = hiding_success_chance(skill_level)
 
-            if :rand.uniform(100) <= chance do
+            if Arena.Rng.uniform(100) <= chance do
               # VB6: class-specific duration
               {min_d, max_d} =
                 hiding_duration_range(entity.class, skill_level, navigating: entity.navigating)
@@ -706,7 +706,7 @@ defmodule Arena.Map.Social do
                 if min_d == max_d do
                   max(min_d, 1)
                 else
-                  max(Enum.random(min_d..max_d), 1)
+                  max(Arena.Rng.between(min_d, max_d), 1)
                 end
 
               # VB6: pirate navigating sets ghost-ship body

@@ -262,7 +262,7 @@ defmodule Arena.Map.Crafting do
                 domable = if npc_def, do: Map.get(npc_def, :domable, 0), else: 0
 
                 # VB6 drift #4: domable check AND 1-in-5 random gate
-                if domable <= score and :rand.uniform(5) == 1 do
+                if domable <= score and Arena.Rng.uniform(5) == 1 do
                   # Taming success — set ownership
                   npc = %{npc | owner_id: char_id, target_id: nil}
                   state = put_in(state.npcs_live[instance_id], npc)
@@ -454,10 +454,10 @@ defmodule Arena.Map.Crafting do
 
   # ---- Helpers ----
 
-  defp skill_check(skill_value), do: :rand.uniform(100) <= skill_value
+  defp skill_check(skill_value), do: Arena.Rng.uniform(100) <= skill_value
 
   defp try_skill_up(entity, skill_atom, skill_value) do
-    if skill_value < 100 and :rand.uniform(100) > skill_value do
+    if skill_value < 100 and Arena.Rng.uniform(100) > skill_value do
       %{entity | skills: Map.put(entity.skills, skill_atom, skill_value + 1)}
     else
       entity

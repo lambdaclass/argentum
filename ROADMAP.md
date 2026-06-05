@@ -34,33 +34,26 @@ Work:
      `:stun_start` / `:work_request_target` at their clear sites
    - Shrink `drift.md` to reflect what's actually closed
 
-3. Add VB6 reference anchors beside golden fixtures.
-   - Each golden module names the VB6 file, procedure/function, and important
-     branch/constants it defends
-   - Drift fixes require a golden/parity fixture or an explicit drift ticket
-
-4. Add packet golden fixtures for high-risk gameplay packets.
-   - Assert encoded bytes for selected flow-critical packets, not only effect
-     kind
-   - Start with movement, bank/trade, death/resurrect, spells/status clears,
-     and inventory/equip/use
-
-5. Standardize RNG control for parity-sensitive tests.
-   - Seed or inject RNG for gamble, taming, loot-like, and other random flows
-   - Guard parity-sensitive modules against direct `Enum.random` /
-     `:rand.uniform` calls unless explicitly allowlisted
-   - Remove seed-sensitive parity noise from the default test lane
+3. Extend packet byte-level fixtures to the remaining high-risk families.
+   - Done: bank (init/end/gold/slot), trade (init/slot/console/end),
+     death/resurrect (update_hp/mana), status clears (paralize_ok, rest_ok),
+     and inventory-use (potion hp/mana/sta) now assert encoded bytes via the
+     `assert_payload/3` helper, not only effect kind.
+   - Remaining: movement (pos_update), spell-cast, and equip/unequip packets.
 
 Exit criteria:
 
 - Source-data parity tail has explicit fixtures or drift tickets.
 - `drift.md` has zero open items, or each open item is explicitly ticketed.
-- Golden fixtures cite the VB6 source they are defending.
+- Golden fixtures cite the VB6 source they are defending. **(Done — all 8
+  scenario golden modules carry a `VB6 anchors` block; see CHANGELOG.)**
 - Flow-critical packets have byte-level fixtures or an explicit reason they do
-  not need one yet.
+  not need one yet. *(In progress — bank/trade/resurrect/status/inventory-use
+  covered; movement/spell-cast/equip remain, item 3 above.)*
 - Random flows are deterministic in the default test lane and parity-sensitive
   modules can't reintroduce raw `:rand` / `Enum.random` calls without an
-  allowlist entry.
+  allowlist entry. **(Done — `rng_guard_test.exs` + `docs/RNG_AUDIT.md`; see
+  CHANGELOG.)**
 
 ## Phase 2: Automated Proof Gate
 

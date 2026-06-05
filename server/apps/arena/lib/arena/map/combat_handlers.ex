@@ -448,7 +448,7 @@ defmodule Arena.Map.CombatHandlers do
 
               # Drift #7: Apply full physical damage pipeline for PvP
               {min_def, max_def} = CombatStats.effective_defense(defender.equipment)
-              defense = if max_def > min_def, do: Enum.random(min_def..max_def), else: min_def
+              defense = if max_def > min_def, do: Rng.between(min_def, max_def), else: min_def
               defense_bonus = CombatStats.equipment_defense_bonus(defender.equipment)
 
               final_damage =

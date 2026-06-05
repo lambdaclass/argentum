@@ -65,8 +65,8 @@ defmodule Arena.Combat do
   """
   def melee_damage(weapon_min, weapon_max, str, class_id, user_min \\ 0, user_max \\ 0) do
     dmg_mod = GameData.class_damage_mod(class_id)
-    weapon_dmg = if weapon_max > weapon_min, do: Enum.random(weapon_min..weapon_max), else: weapon_min
-    user_dmg = if user_max > user_min, do: Enum.random(user_min..user_max), else: user_min
+    weapon_dmg = if weapon_max > weapon_min, do: Rng.between(weapon_min, weapon_max), else: weapon_min
+    user_dmg = if user_max > user_min, do: Rng.between(user_min, user_max), else: user_min
     raw = (3 * weapon_dmg + weapon_max * 0.2 * max(0, str - 15) + user_dmg) * dmg_mod
     max(round(raw), 1)
   end
@@ -106,8 +106,8 @@ defmodule Arena.Combat do
   Returns {reduced_damage, hit_location}.
   """
   def apply_defense(raw_damage, {min_def, max_def}) do
-    defense = if max_def > min_def, do: Enum.random(min_def..max_def), else: min_def
-    location = if Enum.random(1..6) == 1, do: :head, else: :body
+    defense = if max_def > min_def, do: Rng.between(min_def, max_def), else: min_def
+    location = if Rng.uniform(6) == 1, do: :head, else: :body
     {max(raw_damage - defense, 0), location}
   end
 
@@ -124,7 +124,7 @@ defmodule Arena.Combat do
   def shield_block?(shield_pct, def_defense_skill, def_tactics) when shield_pct > 0 do
     chance = round(shield_pct * def_defense_skill / max(def_defense_skill + def_tactics, 1))
     chance = clamp(chance, 10, 90)
-    Enum.random(1..100) <= chance
+    Rng.uniform(100) <= chance
   end
 
   def shield_block?(_shield_pct, _defense_skill, _tactics), do: false
@@ -155,7 +155,7 @@ defmodule Arena.Combat do
   Mages get 0.7x modifier.
   """
   def spell_damage(min_hp, max_hp, caster_level, is_mage) do
-    base = if max_hp > min_hp, do: Enum.random(min_hp..max_hp), else: min_hp
+    base = if max_hp > min_hp, do: Rng.between(min_hp, max_hp), else: min_hp
     level_bonus = floor(base * 0.03 * caster_level)
     total = base + level_bonus
     if is_mage, do: round(total * 0.7), else: total
@@ -184,7 +184,7 @@ defmodule Arena.Combat do
 
   @doc "NPC damage roll between min and max hit."
   def npc_damage(min_hit, max_hit) do
-    if max_hit > min_hit, do: Enum.random(min_hit..max_hit), else: max(min_hit, 1)
+    if max_hit > min_hit, do: Rng.between(min_hit, max_hit), else: max(min_hit, 1)
   end
 
   @doc """
@@ -387,8 +387,8 @@ defmodule Arena.Combat do
   VB6 RandomIntBiased (General.bas:1744-1762).
 
   Generates a biased random value in [min, max]:
-    random_range = :rand.uniform() * (max - min) + min
-    mix = :rand.uniform() * influence
+    random_range = Rng.uniform() * (max - min) + min
+    mix = Rng.uniform() * influence
     result = random_range * (1 - mix) + bias * mix
 
   When influence is 0, result is purely random in [min, max].

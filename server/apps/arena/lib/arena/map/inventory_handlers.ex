@@ -560,7 +560,7 @@ defmodule Arena.Map.InventoryHandlers do
   defp item_use_cooldown_ms, do: Arena.Settings.get(:item_use_cooldown_ms)
 
   def apply_potion(entity, item_def) do
-    amount = Enum.random(item_def.min_modificador..max(item_def.max_modificador, item_def.min_modificador))
+    amount = Arena.Rng.between(item_def.min_modificador, max(item_def.max_modificador, item_def.min_modificador))
 
     case item_def.tipo_pocion do
       # HP potion — VB6 InvUsuario.bas:1923-1945.

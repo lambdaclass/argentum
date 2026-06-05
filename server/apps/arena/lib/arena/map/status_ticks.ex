@@ -83,7 +83,7 @@ defmodule Arena.Map.StatusTicks do
     {active_rev, entity, poison_effects_rev} =
       Enum.reduce(active, {[], entity, []}, fn buff, {bacc, ent, eacc} ->
         if buff.type == :poisoned and now >= (buff[:next_tick] || 0) do
-          damage = max(Enum.random(3..5) * div(ent.max_hp, 100), 1)
+          damage = max(Arena.Rng.between(3, 5) * div(ent.max_hp, 100), 1)
           new_hp = max(ent.hp - damage, 0)
           ent = %{ent | hp: new_hp}
 

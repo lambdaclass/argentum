@@ -11,6 +11,25 @@ defmodule Arena.HealingGoldenTest do
   Phase 1 / Item 5 of `ROADMAP.md` — "per-flow golden fixtures for
   high-drift gameplay flows", starting with heal because `Arena.Map.Healing`
   was the first effects-migrated module.
+
+  VB6 anchors (confirmed against `Arena.Map.Healing` port comments; no VB6
+  source tree is vendored in this repo, so procedure entry points the port
+  does not cite are marked pending rather than guessed):
+    * `handle_rest`       — Protocol.bas:1693 `WriteRestOK` flips client-side
+                            resting; rest requires a nearby campfire
+                            (`OBJ_INDEX_FOGATA = 21`, `HayOBJarea` within 8 tiles).
+    * `handle_meditate`   — Montado guard ("No podes meditar estando montado");
+                            meditate FX varies by level/faction.
+                            (Protocol.bas entry point pending VB6 source.)
+    * `handle_heal`       — Revividor NPC full heal; jail short-circuit
+                            `If .pos.Map = MAP_HOME_IN_JAIL (66) And npcType = Revividor Then Exit Sub`.
+    * `handle_resucitate` — Revividor NPC required nearby; `ResucitadorNewbie`
+                            serves newbies only (level <= 12); NPC revive does
+                            NOT zero mana (only spell-based revive does).
+
+  Constants below are VB6-sourced: `@npc_type_revividor 1`,
+  `@npc_type_resucitador_newbie 9`, `@fogata_obj_index 21` (OBJ_INDEX_FOGATA),
+  `@jail_map_id 66` (MAP_HOME_IN_JAIL).
   """
   use ExUnit.Case, async: false
 
@@ -109,6 +128,10 @@ defmodule Arena.HealingGoldenTest do
       assert entity(s, :p).resting
       assert_effect(s, :send, to: :p, packet: :console_msg)
       assert_effect(s, :send, to: :p, packet: :rest_ok)
+
+      # Byte-level fixture: eRestOK (72) toggles the resting animation with an
+      # empty payload — exactly the 2-byte id, no trailing bytes.
+      assert <<72::little-signed-16>> == assert_payload(s, :send, to: :p, packet: :rest_ok)
     end
 
     test "second call toggles resting off, still emits rest_ok" do
@@ -304,6 +327,11 @@ defmodule Arena.HealingGoldenTest do
       assert entity(s, :p).hp == 100
       assert_effect(s, :send, to: :p, packet: :console_msg)
       assert_effect(s, :send, to: :p, packet: :update_hp)
+
+      # Byte-level fixture: eUpdateHP (27) — MinHp(Int16) + shield(Int32).
+      # The NPC heal restores to max (100); the encoded field must say so.
+      assert <<27::little-signed-16, 100::little-signed-16, _shield::little-signed-32>> =
+               assert_payload(s, :send, to: :p, packet: :update_hp)
     end
 
     test "ResucitadorNewbie heals non-newbie player (VB6: no level check on heal)" do
@@ -432,6 +460,15 @@ defmodule Arena.HealingGoldenTest do
       assert_effect(s, :send, to: :p, packet: :console_msg)
       assert_effect(s, :broadcast_character_change, char_id: :p)
       assert_effect(s, :broadcast_visible_all, at: {50, 50}, packet: :create_fx)
+
+      # Byte-level fixture: resurrect restores HP to max (100) and preserves
+      # mana (150) — the encoded eUpdateHP (27) / eUpdateMana (26) fields must
+      # carry those exact post-revive values, pinning drift #23.
+      assert <<27::little-signed-16, 100::little-signed-16, _shield::little-signed-32>> =
+               assert_payload(s, :send, to: :p, packet: :update_hp)
+
+      assert <<26::little-signed-16, 150::little-signed-16>> =
+               assert_payload(s, :send, to: :p, packet: :update_mana)
     end
 
     test "resurrection clears all status effects" do

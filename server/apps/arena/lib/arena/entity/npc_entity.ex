@@ -39,7 +39,7 @@ defmodule Arena.Entity.NpcEntity do
       cond do
         npc_def.max_hp <= 0 -> 0
         npc_def.min_hp == npc_def.max_hp -> npc_def.max_hp
-        true -> Enum.random(npc_def.min_hp..npc_def.max_hp)
+        true -> Arena.Rng.between(npc_def.min_hp, npc_def.max_hp)
       end
 
     %__MODULE__{

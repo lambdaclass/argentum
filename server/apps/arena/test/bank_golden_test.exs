@@ -203,6 +203,13 @@ defmodule Arena.BankGoldenTest do
       assert e.bank_gold == 250
       assert_effect(s, :send, to: char_id, packet: :bank_init)
       assert_effect(s, :send, to: char_id, packet: :update_bank_gold)
+
+      # Byte-level fixture: eBankInit (11) opens the UI with an empty payload;
+      # eUpdateBankGld (175) carries the loaded bank balance.
+      assert <<11::little-signed-16>> == assert_payload(s, :send, to: char_id, packet: :bank_init)
+
+      assert <<175::little-signed-16, 250::little-signed-32>> =
+               assert_payload(s, :send, to: char_id, packet: :update_bank_gold)
     end
 
     test "with seeded bank items: emits :change_bank_slot per row" do
@@ -358,6 +365,16 @@ defmodule Arena.BankGoldenTest do
       assert e.bank_gold == 400
       assert_effect(s, :send, to: char_id, packet: :update_gold)
       assert_effect(s, :send, to: char_id, packet: :update_bank_gold)
+
+      # Byte-level fixture: the encoded fields must carry the post-deposit
+      # purse/bank balances, not just the right packet IDs.
+      # eUpdateGold (28) — Gold(Int32) + OroPorNivelBilletera(Int32).
+      assert <<28::little-signed-16, 600::little-signed-32, 0::little-signed-32>> =
+               assert_payload(s, :send, to: char_id, packet: :update_gold)
+
+      # eUpdateBankGld (175) — bank_gold(Int32).
+      assert <<175::little-signed-16, 400::little-signed-32>> =
+               assert_payload(s, :send, to: char_id, packet: :update_bank_gold)
     end
 
     test "deposit equal to current gold: drains purse, deposit succeeds" do
@@ -538,6 +555,17 @@ defmodule Arena.BankGoldenTest do
       assert Enum.find(bank, &(&1.slot == 1)).amount == 4
       assert_effect(s, :send, to: char_id, packet: :change_inventory_slot)
       assert_effect(s, :send, to: char_id, packet: :change_bank_slot)
+
+      # Byte-level fixture: eChangeBankSlot (65) — slot(Int8) + obj_index(Int16)
+      #   + elemental_tags(Int32) + amount(Int16) + valor(Int32) + puede_usar(Int8).
+      # Pin the key fields the deposit computes (target bank slot 1, the
+      # stackable obj id, no element tags, the resulting stack of 4); valor
+      # and puede_usar are item/class-derived so we only bind them.
+      assert <<65::little-signed-16, 1, obj_index::little-signed-16, 0::little-signed-32,
+               4::little-signed-16, _valor::little-signed-32, _puede_usar>> =
+               assert_payload(s, :send, to: char_id, packet: :change_bank_slot)
+
+      assert obj_index == @stackable_item_id
     end
 
     test "deposit full stack: inventory slot cleared" do
@@ -854,6 +882,10 @@ defmodule Arena.BankGoldenTest do
 
       assert entity(s, char_id).bank_npc_id == nil
       assert_effect(s, :send, to: char_id, packet: :bank_end)
+
+      # Byte-level fixture: eBankEnd (9) is a pure signal — the payload must be
+      # exactly the 2-byte packet id with no trailing bytes.
+      assert <<9::little-signed-16>> == assert_payload(s, :send, to: char_id, packet: :bank_end)
     end
 
     test "idempotent: calling without an active session still clears + emits :bank_end" do
