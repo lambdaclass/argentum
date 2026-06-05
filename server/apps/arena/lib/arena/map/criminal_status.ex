@@ -16,7 +16,7 @@ defmodule Arena.Map.CriminalStatus do
   the result into their existing reducer-style flow.
   """
 
-  alias Arena.Map.Effects
+  alias Arena.Map.{Effects, Faction}
   alias AoProtocol.Server.Encoder
 
   @trigger_safe_zone 6
@@ -44,13 +44,72 @@ defmodule Arena.Map.CriminalStatus do
       true ->
         entity = maybe_reset_faction_score(entity)
         # VB6:2275 — `.Faccion.Status = 0` resets to Ciudadano before the
-        # criminal flag is applied.  We keep `:none` here (Armada Real
-        # expulsion path remains handled separately by faction code).
+        # criminal flag is applied. For Armada Real members the criminal
+        # transition also triggers ExpulsarFaccionReal: faction cleared,
+        # `Reenlistadas` bumped, and all Real/Caos items stripped from
+        # inventory + bank (PerderItemsFaccionarios).
+        {entity, faction_effects} = expel_from_royal_army(char_id, entity)
+
         entity = %{entity | criminal: true}
 
         {entity, state, warp_effects} = maybe_warp_no_pks(state, char_id, entity)
         {state, party_effects} = handle_party(state, char_id, entity)
-        {entity, state, warp_effects ++ party_effects}
+        {entity, state, faction_effects ++ warp_effects ++ party_effects}
+    end
+  end
+
+  # VB6 Modulo_UsUaRiOs.bas:2284-2291 (inside VolverCriminal) — when a
+  # Royal Army member becomes a criminal, expel them from the faction and
+  # strip every Real/Caos flagged item from both inventory and bank.
+  defp expel_from_royal_army(char_id, %{faction: :royal_army} = entity) do
+    entity = Faction.strip_faction_items(entity)
+    Faction.strip_bank_faction_items(Map.get(entity, :char_id))
+
+    entity = %{
+      entity
+      | faction: :none,
+        faction_rank_armada: 0,
+        faction_reenlistadas: Map.get(entity, :faction_reenlistadas, 0) + 1
+    }
+
+    if function_exported?(AoSession.OnlineDirectory, :update_faction, 2) do
+      AoSession.OnlineDirectory.update_faction(char_id, :none)
+    end
+
+    slot_effects =
+      Enum.map(0..23, fn slot ->
+        Effects.send(char_id, inventory_slot_packet(entity.inventory, slot))
+      end)
+
+    {entity, slot_effects ++ [Effects.broadcast_character_change(entity)]}
+  end
+
+  defp expel_from_royal_army(_char_id, entity), do: {entity, []}
+
+  # Mirror of the inventory-slot packet builder in `Faction` / `Bank`,
+  # inlined so this module does not have to depend on either for the
+  # tiny packet shape.
+  defp inventory_slot_packet(inventory, slot) do
+    case Enum.at(inventory, slot) do
+      nil ->
+        Encoder.encode({:change_inventory_slot, %{slot: slot + 1, obj_index: 0, amount: 0}})
+
+      item ->
+        item_def = Arena.Data.GameData.get_item(item.item_id)
+        valor = if item_def, do: item_def.valor, else: 0
+        instance_tags = Map.get(item, :elemental_tags, 0)
+
+        Encoder.encode(
+          {:change_inventory_slot,
+           %{
+             slot: slot + 1,
+             obj_index: item.item_id,
+             amount: item.amount,
+             equipped: item.equipped,
+             valor: valor / 1,
+             elemental_tags: instance_tags
+           }}
+        )
     end
   end
 

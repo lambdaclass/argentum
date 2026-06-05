@@ -317,6 +317,7 @@ defmodule Arena.Map.Faction do
                  ]}
               else
                 entity = strip_faction_items(entity)
+                strip_bank_faction_items(entity.char_id)
 
                 entity = %{
                   entity
@@ -363,37 +364,44 @@ defmodule Arena.Map.Faction do
     end
   end
 
-  # Unequip and remove all faction-exclusive items (Real/Caos flagged).
-  #
-  # VB6: ModFacciones.bas:357 — PerderItemsFaccionarios
-  defp strip_faction_items(entity) do
-    alias Arena.Data.GameData
+  @doc """
+  Remove all faction-exclusive items (Real / Caos flagged) from `entity`'s
+  inventory. Equipped slots are unequipped before being cleared so the
+  matching equipment-slot mapping (and the body sprite, for armor) is
+  also reset.
 
+  Returns the updated entity. Bank items are stripped separately via
+  `strip_bank_faction_items/1` so callers can scope DB writes.
+
+  VB6: ModFacciones.bas:357 — PerderItemsFaccionarios
+  """
+  def strip_faction_items(entity) do
     Enum.reduce(0..(length(entity.inventory) - 1), entity, fn slot_idx, ent ->
       case Enum.at(ent.inventory, slot_idx) do
-        %{item_id: item_id, equipped: true} when item_id > 0 ->
+        %{item_id: item_id} = item when is_integer(item_id) and item_id > 0 ->
           case GameData.get_item(item_id) do
             nil ->
               ent
 
             item_def ->
               if item_def.real or item_def.caos do
-                inv = List.update_at(ent.inventory, slot_idx, &%{&1 | equipped: false})
-                ent = %{ent | inventory: inv}
-
+                # Unequip side-effects first (sprite + equipment slot)
                 ent =
-                  if item_def.equip_slot do
+                  if Map.get(item, :equipped, false) and item_def.equip_slot do
                     equipment = Map.put(ent.equipment, item_def.equip_slot, nil)
-                    %{ent | equipment: equipment}
+
+                    base_body =
+                      if item_def.equip_slot == :armor,
+                        do: Map.get(ent, :base_body_id, ent.body_id),
+                        else: ent.body_id
+
+                    %{ent | equipment: equipment, body_id: base_body}
                   else
                     ent
                   end
 
-                if item_def.equip_slot == :armor do
-                  %{ent | body_id: ent.base_body_id}
-                else
-                  ent
-                end
+                # Remove the item from the slot entirely.
+                %{ent | inventory: List.replace_at(ent.inventory, slot_idx, nil)}
               else
                 ent
               end
@@ -404,6 +412,35 @@ defmodule Arena.Map.Faction do
       end
     end)
   end
+
+  @doc """
+  Remove all faction-exclusive items from the persisted bank rows for
+  `char_id`. Always returns `:ok`; called for its DB side effects.
+
+  VB6: ModFacciones.bas:357 — PerderItemsFaccionarios also walks
+  `BancoInventario` and zeroes any Real / Caos flagged slot.
+  """
+  def strip_bank_faction_items(char_id) when is_integer(char_id) do
+    try do
+      char_id
+      |> GameBackend.BankItems.get_bank()
+      |> Enum.each(fn bi ->
+        case GameData.get_item(bi.item_id) do
+          %{real: real, caos: caos} when real or caos ->
+            _ = GameBackend.BankItems.withdraw(char_id, bi.slot, bi.amount)
+
+          _ ->
+            :ok
+        end
+      end)
+    rescue
+      _ -> :ok
+    end
+
+    :ok
+  end
+
+  def strip_bank_faction_items(_), do: :ok
 
   @doc """
   Calculate faction score awarded for a PvP kill.
