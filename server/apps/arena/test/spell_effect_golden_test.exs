@@ -187,6 +187,23 @@ defmodule Arena.SpellEffectGoldenTest do
     struct!(defaults, Map.to_list(overrides))
   end
 
+  # Byte-level helper: return the encoded payload of the first `:send` effect
+  # carrying `packet_name`, so a test can pattern-match the wire fields the
+  # spell flow produced (not just the packet id). These SpellEffects.* tests
+  # return a raw effect list rather than a %Scenario{}, so we can't reuse
+  # `Arena.Test.Scenario.Assertions.assert_payload/3` here.
+  defp send_payload(effects, packet_name) do
+    id = apply(AoProtocol.PacketIds.Server, packet_name, [])
+
+    Enum.find_value(effects, fn
+      {:send, _to, %{payload: <<pid::little-signed-16, _::binary>> = payload}} when pid == id ->
+        payload
+
+      _ ->
+        nil
+    end)
+  end
+
   # ═══════════════════════════════════════════════════════════════════════════
   # 1. Combat.spell_damage/4 golden values
   # ═══════════════════════════════════════════════════════════════════════════
@@ -357,11 +374,16 @@ defmodule Arena.SpellEffectGoldenTest do
       state = make_state(%{caster: caster, target: target}, occupancy: occupancy)
 
       spell = make_spell(%{sube_hp: 1, min_hp: 40, max_hp: 40, mana_required: 20})
-      {new_state, _effects} = SpellEffects.apply_spell_heal(state, :caster, caster, 40, spell, 51, 50)
+      {new_state, effects} = SpellEffects.apply_spell_heal(state, :caster, caster, 40, spell, 51, 50)
 
       assert new_state.players[:target].hp == 70
       # Caster HP unchanged
       assert new_state.players[:caster].hp == 100
+
+      # Byte-level: eUpdateHP (27) to the healed target carries the new HP (70).
+      # Layout: MinHp(Int16) + shield(Int32).
+      assert <<27::little-signed-16, 70::little-signed-16, _shield::little-signed-32>> =
+               send_payload(effects, :update_hp)
     end
 
     test "cannot heal dead target" do
@@ -684,7 +706,7 @@ defmodule Arena.SpellEffectGoldenTest do
 
       # VB6: min_hp is revive percentage, e.g., 10 means 10% of max_hp
       spell = make_spell(%{revivir: true, min_hp: 10, mana_required: 20, work_on_dead: true})
-      {new_state, _effects} = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 51, 50)
+      {new_state, effects} = SpellEffects.apply_spell_resurrect(state, :caster, caster, spell, 51, 50)
 
       revived = new_state.players[:target]
       assert revived.dead == false
@@ -692,6 +714,13 @@ defmodule Arena.SpellEffectGoldenTest do
       assert revived.hp == 20
       # VB6: revived player's mana resets to 0
       assert revived.mana == 0
+
+      # Byte-level: the revive fans eUpdateHP (27) = 20 and eUpdateMana (26) = 0
+      # to the target, carrying the exact revive values.
+      assert <<27::little-signed-16, 20::little-signed-16, _shield::little-signed-32>> =
+               send_payload(effects, :update_hp)
+
+      assert <<26::little-signed-16, 0::little-signed-16>> = send_payload(effects, :update_mana)
       # VB6: resurrection clears all status effects
       assert revived.poisoned == false
       assert revived.paralyzed == false

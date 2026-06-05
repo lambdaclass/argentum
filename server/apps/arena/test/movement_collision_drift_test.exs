@@ -210,4 +210,122 @@ defmodule Arena.MovementCollisionDriftTest do
         "An invisible GM should be walk-throughable"
     end
   end
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # Packet byte-level fixtures (carry-forward from Phase 1 item 4):
+  # movement broadcast, mover pos_update, heading, and the out-of-band
+  # transfer control message.
+  # ═══════════════════════════════════════════════════════════════════════
+
+  describe "movement packet bytes" do
+    test "successful east step: mover gets ePosUpdate, observer gets eCharacterMove" do
+      sess1 = start_receiver(:sess1)
+      sess2 = start_receiver(:sess2)
+
+      mover = make_player(1, %{x: 50, y: 50})
+      # Observer sits two tiles east so it does not block the (51,50) step but
+      # is still in the (global) AoI and receives the move broadcast.
+      observer = make_player(2, %{x: 52, y: 50})
+
+      state =
+        map_state(
+          map_id: @test_map_id,
+          players: %{1 => mover, 2 => observer},
+          sessions: %{1 => sess1, 2 => sess2},
+          occupancy: %{{50, 50} => {:player, 1}, {52, 50} => {:player, 2}},
+          visibility_mode: :global,
+          meta: %{tile_exit_map: %{}}
+        )
+
+      {:reply, {:ok, {51, 50}}, _state} = Movement.handle_move(state, 1, :east)
+
+      pos_id = AoProtocol.PacketIds.Server.pos_update()
+      move_id = AoProtocol.PacketIds.Server.character_move()
+
+      # Byte-level: ePosUpdate (31) is unicast to the mover — x(Int8) + y(Int8)
+      # carrying the new tile (51, 50).
+      assert_receive {:receiver, :sess1, {:egress, %{payload: <<^pos_id::little-signed-16, 51, 50>>}}}
+
+      # Byte-level: eCharacterMove (44) fans to the observer —
+      # char_index(Int16) + x(Int8) + y(Int8) for the mover's char_index (1)
+      # and its new tile.
+      assert_receive {:receiver, :sess2,
+                      {:egress, %{payload: <<^move_id::little-signed-16, 1::little-signed-16, 51, 50>>}}}
+
+      # The mover must NOT receive its own character_move broadcast (the
+      # AoI fanout excludes the originator).
+      refute_receive {:receiver, :sess1,
+                      {:egress, %{payload: <<^move_id::little-signed-16, _::binary>>}}}
+    end
+
+    test "change heading: observer gets eCharacterChange carrying the new heading" do
+      sess1 = start_receiver(:sess1)
+      sess2 = start_receiver(:sess2)
+
+      # Mover faces south (heading_to_int 3); flip to north (1).
+      mover = make_player(1, %{x: 50, y: 50, heading: :south, body_id: 1, head_id: 1})
+      observer = make_player(2, %{x: 52, y: 50})
+
+      state =
+        map_state(
+          map_id: @test_map_id,
+          players: %{1 => mover, 2 => observer},
+          sessions: %{1 => sess1, 2 => sess2},
+          occupancy: %{{50, 50} => {:player, 1}, {52, 50} => {:player, 2}},
+          visibility_mode: :global,
+          meta: %{tile_exit_map: %{}}
+        )
+
+      {:noreply, _state} = Movement.handle_change_heading(state, 1, :north)
+
+      cc_id = AoProtocol.PacketIds.Server.character_change()
+
+      # Byte-level: eCharacterChange — char_index(Int16) + flags(Int8) +
+      # body(Int16) + head(Int16) + heading(Int8) + ... The heading byte must
+      # be 1 (north); char_index is the mover's (1).
+      assert_receive {:receiver, :sess2,
+                      {:egress,
+                       %{
+                         payload:
+                           <<^cc_id::little-signed-16, 1::little-signed-16, _flags,
+                             _body::little-signed-16, _head::little-signed-16, heading_byte,
+                             _rest::binary>>
+                       }}}
+
+      assert heading_byte == 1, "heading byte must encode :north (heading_to_int 1)"
+    end
+
+    test "stepping onto a tile-exit: out-of-band transfer control message, pos_update suppressed" do
+      sess1 = start_receiver(:sess1)
+      sess2 = start_receiver(:sess2)
+
+      mover = make_player(1, %{x: 50, y: 50})
+      observer = make_player(2, %{x: 52, y: 50})
+
+      state =
+        map_state(
+          map_id: @test_map_id,
+          players: %{1 => mover, 2 => observer},
+          sessions: %{1 => sess1, 2 => sess2},
+          occupancy: %{{50, 50} => {:player, 1}, {52, 50} => {:player, 2}},
+          visibility_mode: :global,
+          meta: %{tile_exit_map: %{{51, 50} => %{dest_map: 5, dest_x: 30, dest_y: 40}}}
+        )
+
+      {:reply, {:ok, {51, 50}}, _state} = Movement.handle_move(state, 1, :east)
+
+      # The transfer is OUT-OF-BAND: it is not an encoded wire packet. The
+      # `:transfer` effect is delivered as a control message straight to the
+      # mover's session process (the session then drives enter(dest_map),
+      # which is where the client-visible eChangeMap is produced).
+      assert_receive {:receiver, :sess1, {:transfer, 5, 30, 40, _entity}}
+
+      # On a transfer, the mover's own ePosUpdate is suppressed (the dest-map
+      # enter repositions the client) — assert it never arrives.
+      pos_id = AoProtocol.PacketIds.Server.pos_update()
+
+      refute_receive {:receiver, :sess1,
+                      {:egress, %{payload: <<^pos_id::little-signed-16, _::binary>>}}}
+    end
+  end
 end

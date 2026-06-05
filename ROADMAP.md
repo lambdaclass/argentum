@@ -9,11 +9,12 @@ earlier.
 
 ## Current Priority
 
-Close Phase 1. The immediate priority is the source-data parity tail, the
-last open drift item (#19), and strengthening the parity proof surface with
-VB6 source anchors, packet fixtures, and RNG guardrails. Snapshot/diff
-tooling, the deterministic harness, all golden gameplay fixtures, and the
-map-layer effects migration are already shipped.
+Start Phase 2 (Automated Proof Gate). Phase 1 is closed except the explicitly
+blocked `:stun_start` drift item (#19), which needs VB6 source/formula
+confirmation. The deterministic harness, snapshot/diff tooling, all golden
+gameplay fixtures, the map-layer effects migration, VB6 source anchors, packet
+byte-level fixtures, and RNG guardrails are all shipped; the source-data
+parity tail has explicit fixtures.
 
 ## Phase 1: Deterministic Parity Harness
 
@@ -33,23 +34,20 @@ Work:
    - Port the missing pieces and emit `:blind_no_more` / `:dumb_no_more` /
      `:stun_start` / `:work_request_target` at their clear sites
    - Shrink `drift.md` to reflect what's actually closed
-
-3. Extend packet byte-level fixtures to the remaining high-risk families.
-   - Done: bank (init/end/gold/slot), trade (init/slot/console/end),
-     death/resurrect (update_hp/mana), status clears (paralize_ok, rest_ok),
-     and inventory-use (potion hp/mana/sta) now assert encoded bytes via the
-     `assert_payload/3` helper, not only effect kind.
-   - Remaining: movement (pos_update), spell-cast, and equip/unequip packets.
+   - Only residual: `:stun_start` (melee stun-on-hit buff system), blocked on
+     VB6 source/formula confirmation — tracked as the lone open Drift #19 item.
 
 Exit criteria:
 
 - Source-data parity tail has explicit fixtures or drift tickets.
 - `drift.md` has zero open items, or each open item is explicitly ticketed.
+  *(Only `:stun_start` remains, explicitly ticketed and blocked.)*
 - Golden fixtures cite the VB6 source they are defending. **(Done — all 8
   scenario golden modules carry a `VB6 anchors` block; see CHANGELOG.)**
 - Flow-critical packets have byte-level fixtures or an explicit reason they do
-  not need one yet. *(In progress — bank/trade/resurrect/status/inventory-use
-  covered; movement/spell-cast/equip remain, item 3 above.)*
+  not need one yet. **(Done — bank/trade/resurrect/status/inventory-use plus
+  equip/use, spell-cast (heal/resurrect/status-clear), and movement
+  (pos_update/character_move/heading/transfer); see CHANGELOG.)**
 - Random flows are deterministic in the default test lane and parity-sensitive
   modules can't reintroduce raw `:rand` / `Enum.random` calls without an
   allowlist entry. **(Done — `rng_guard_test.exs` + `docs/RNG_AUDIT.md`; see

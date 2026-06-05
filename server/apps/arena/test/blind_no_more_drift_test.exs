@@ -89,6 +89,11 @@ defmodule Arena.BlindNoMoreDriftTest do
 
       refute entity(s, :target).blind, "tick must clear the blind flag"
       assert_effect(s, :send, to: :target, packet: :blind_no_more)
+
+      # Byte-level: eBlindNoMore (85) is a pure status-clear signal — exactly
+      # the 2-byte packet id with no trailing bytes.
+      assert <<85::little-signed-16>> ==
+               assert_payload(s, :send, to: :target, packet: :blind_no_more)
     end
   end
 
@@ -127,6 +132,10 @@ defmodule Arena.BlindNoMoreDriftTest do
              "cura_ceguera must drop the :blind buff entry"
 
       assert_effect(s, :send, to: :target, packet: :blind_no_more)
+
+      # Byte-level: eBlindNoMore (85) carries no payload — assert exact bytes.
+      assert <<85::little-signed-16>> ==
+               assert_payload(s, :send, to: :target, packet: :blind_no_more)
     end
   end
 

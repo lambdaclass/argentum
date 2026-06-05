@@ -225,8 +225,30 @@ defmodule Arena.Map.InventoryHandlersEquipUseE2ETest do
       inv_id = AoProtocol.PacketIds.Server.change_inventory_slot()
       char_change_id = AoProtocol.PacketIds.Server.character_change()
 
-      assert_receive {:egress, %{payload: <<^inv_id::little-signed-integer-16, _::binary>>}}
-      assert_receive {:egress, %{payload: <<^char_change_id::little-signed-integer-16, _::binary>>}}
+      # Byte-level: eChangeInventorySlot — slot(Int8) + obj_index(Int16)
+      #   + amount(Int16) + equipped(Bool) + valor(Real32) + puede_usar(Int8)
+      #   + elemental_tags(Int32) + is_bindable(Bool). Slot 0 now holds the
+      # equipped sword (amount 1, equipped flag flipped true). The wire slot is
+      # 1-based (VB6 inventory slots are 1..N) so internal index 0 -> slot 1.
+      # obj_index is Int16 on the wire and @sword_id is a synthetic id above
+      # that range, so it carries the low 16 bits — real obj indices fit in Int16.
+      assert_receive {:egress, %{payload: <<^inv_id::little-signed-integer-16, inv_payload::binary>>}}
+
+      assert <<1, obj::little-signed-16, 1::little-signed-16, 1, _valor::little-float-32,
+               _puede_usar, 0::little-signed-32, _is_bindable>> = inv_payload
+
+      assert obj == rem(@sword_id, 0x1_0000)
+
+      # Byte-level: eCharacterChange visual fans for the equipping player
+      # (char_index 1) and reflects the equipped weapon id (visual.weapon_id =
+      # equipment[:weapon], also Int16-truncated). Layout: char_index(Int16) +
+      # flags(Int8) + body(Int16) + head(Int16) + heading(Int8) + weapon(Int16)...
+      assert_receive {:egress, %{payload: <<^char_change_id::little-signed-integer-16, cc_payload::binary>>}}
+
+      assert <<1::little-signed-16, _flags, _body::little-signed-16, _head::little-signed-16,
+               _heading, weapon::little-signed-16, _rest::binary>> = cc_payload
+
+      assert weapon == rem(@sword_id, 0x1_0000)
 
       refute_receive {:send_raw, _}, 50
     end
@@ -404,15 +426,28 @@ defmodule Arena.Map.InventoryHandlersEquipUseE2ETest do
       assert Enum.at(updated.inventory, 0).amount == 1, "potion stack decremented"
 
       inv_id = AoProtocol.PacketIds.Server.change_inventory_slot()
+      hp_id = AoProtocol.PacketIds.Server.update_hp()
+      mana_id = AoProtocol.PacketIds.Server.update_mana()
+      sta_id = AoProtocol.PacketIds.Server.update_sta()
 
-      # Effect ordering: change_inventory_slot, then update_hp/mana/stamina.
-      assert_receive {:egress, %{payload: <<id1::little-signed-integer-16, _::binary>>}}
-      assert id1 == inv_id, "first envelope must be change_inventory_slot"
+      # Byte-level: change_inventory_slot shows the decremented stack (2 -> 1),
+      # still unequipped. Wire slot is 1-based (internal index 0 -> slot 1);
+      # obj_index is the Int16-truncated synthetic potion id.
+      assert_receive {:egress, %{payload: <<^inv_id::little-signed-integer-16, inv_payload::binary>>}}
 
-      # Three update_* packets follow (hp, mana, stamina).
-      assert_receive {:egress, %{payload: <<_id2::little-signed-integer-16, _::binary>>}}
-      assert_receive {:egress, %{payload: <<_id3::little-signed-integer-16, _::binary>>}}
-      assert_receive {:egress, %{payload: <<_id4::little-signed-integer-16, _::binary>>}}
+      assert <<1, obj::little-signed-16, 1::little-signed-16, 0, _valor::little-float-32,
+               _puede_usar, _tags::little-signed-32, _is_bindable>> = inv_payload
+
+      assert obj == rem(@hp_potion_id, 0x1_0000)
+
+      # Byte-level: the three vital refreshes carry the post-potion values in
+      # hp/mana/sta order — HP restored to 80, mana/stamina unchanged (50/80).
+      # eUpdateHP (27): MinHp(Int16) + shield(Int32); eUpdateMana/eUpdateSta: Int16.
+      assert_receive {:egress,
+                      %{payload: <<^hp_id::little-signed-integer-16, 80::little-signed-16, _shield::little-signed-32>>}}
+
+      assert_receive {:egress, %{payload: <<^mana_id::little-signed-integer-16, 50::little-signed-16>>}}
+      assert_receive {:egress, %{payload: <<^sta_id::little-signed-integer-16, 80::little-signed-16>>}}
 
       refute_receive {:send_raw, _}, 50
     end

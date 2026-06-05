@@ -4,6 +4,29 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **Phase 1 packet byte fixtures — carry-forward families closed
+  (2026-06-05):** extended byte-level packet assertions to the last three
+  high-risk families, closing Phase 1 item 4.
+  - **Equip / use inventory** (`inventory_handlers_equip_use_e2e_test.exs`):
+    the equip-sword and use-HP-potion flows now decode encoded fields, not
+    just packet ids — `change_inventory_slot` (slot is 1-based on the wire,
+    obj_index/amount/equipped), `character_change` (equipping player's
+    char_index + Int16-truncated equipped weapon id), and the three vital
+    refreshes `update_hp`/`update_mana`/`update_stamina` with exact values.
+  - **Spell-cast** (`spell_effect_golden_test.exs` +
+    `blind_no_more_drift_test.exs`): added a local `send_payload/2` helper and
+    pinned `update_hp` on target-heal (70) and on resurrect (revive HP 20 +
+    `update_mana` 0); `blind_no_more` now asserts exact (empty) bytes,
+    matching the pre-existing `dumb_no_more` fixture. Representative families:
+    heal, resurrect, status-clear.
+  - **Movement / transfer** (`movement_collision_drift_test.exs`): a new
+    "movement packet bytes" block drives `Movement.handle_move` /
+    `handle_change_heading` through the deterministic receiver harness and
+    asserts `pos_update` (mover, new tile), `character_move` (observer,
+    char_index + tile, mover excluded), `character_change` heading byte, and
+    the out-of-band `:transfer` control message (delivered to the session
+    process, not a wire packet — `pos_update` is suppressed on transfer).
+
 - **Phase 1 proof-hardening — VB6 anchors, packet byte fixtures, RNG
   guardrails (2026-06-05):**
   - **VB6 source anchors** added to all 8 scenario golden fixtures
