@@ -10,28 +10,30 @@ Scope rules:
 
 ## NPC, Service, and Gameplay Flows
 
-19. Status-clear encoders lack backing flags (partial close; encoders added,
-    wiring pending subsystem ports).
+19. `:stun_start` encoder lacks a backing stun buff (residual from the
+    Drift #19 audit; blind/dumb/work-target wiring is now closed — see
+    `CHANGELOG.md`).
 Current:
-- `server/apps/ao_protocol/lib/ao_protocol/server/encoder.ex` — all six encoders
-  (`:paralize_ok`, `:blind_no_more`, `:dumb_no_more`, `:rest_ok`,
-  `:work_request_target`, `:stun_start`) exist and are under test in
-  `encoder_drift_19_test.exs`.
-- Live call sites exist for `:paralize_ok` (`inventory_handlers.ex`,
-  `status_ticks.ex`) and `:rest_ok` (`healing.ex`).
-- No call sites for `:blind_no_more`, `:dumb_no_more`, `:work_request_target`,
-  `:stun_start` — the underlying blind/dumb/stun flags and the VB6
-  server-prompted work-target flow are not ported yet.
+- `server/apps/ao_protocol/lib/ao_protocol/server/encoder.ex:707` — the
+  `:stun_start` encoder (eStunStart = 98, Int16 Duration) is in place and
+  pinned by `apps/ao_protocol/test/encoder_drift_19_test.exs`.
+- No live call site. `PlayerEntity` exposes `paralyzed`/`blind`/`dumb` flags
+  but no `stun` flag, and `Arena.Map.CombatHandlers.handle_attack/4` does not
+  roll a melee stun proc.
+- `Arena.Map.StatusTicks.process_player_buffs/4` already clears
+  `:paralyzed` / `:blind` / `:dumb` buffs from the same `entity.buffs` list,
+  so a `:stun` buff type would slot in without restructuring.
 VB6:
-- `old/server/Codigo/modHechizos.bas` (dispel paths for blind/dumb),
-  `old/server/Codigo/SistemaCombate.bas` (stun on melee hit),
-  `old/server/Codigo/Trabajo.bas` (work-request target prompt).
-Notes:
-- Encoders ship as-is so the subsystem ports can drop in without protocol churn.
-- Needs: port the blind/dumb/stun buff system (flag on `PlayerEntity`,
-  spell/combat side effects, buff-tick clear) and wire the three encoders at
-  their clear sites. Port the server-prompted work-target flow and emit
-  `:work_request_target` when a tool requires a target selection.
+- `old/server/Codigo/SistemaCombate.bas` — stun-on-melee chance roll
+  (post-hit, weapon-dependent).
+- `old/server/Codigo/Protocol_Writes.bas:2460` — `WriteStunStart` body
+  (Int16 duration in ms).
+Needs:
+- Add a `stun` flag and buff-type to `PlayerEntity` / status-tick clearing.
+- Wire the VB6 stun chance into the post-hit path in
+  `Arena.Map.CombatHandlers` and emit `:stun_start` via `Effects.send/2`
+  when the proc lands.
+- Mirror the `blind_no_more_drift_test.exs` shape in a `stun_drift_test.exs`.
 
 ## Needs Verification
 

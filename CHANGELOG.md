@@ -4,6 +4,24 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **Drift #19 audit — blind / dumb / work-target encoders verified wired
+  (2026-06-05):**
+  - `:blind_no_more` is emitted both from
+    `Arena.Map.StatusTicks.process_player_buffs/4` on `:blind` buff expiry
+    and from `Arena.Map.SpellEffects` on a `cura_ceguera`-spell clear (VB6
+    `modHechizos.bas` `If .flags.Ceguera > 0` guard preserved). Coverage:
+    `apps/arena/test/blind_no_more_drift_test.exs`.
+  - `:dumb_no_more` is emitted from the same two paths for `:dumb` /
+    `cura_estupidez`. Coverage: `apps/arena/test/dumb_no_more_drift_test.exs`.
+  - `:work_request_target` is emitted from
+    `Arena.Map.CombatHandlers.handle_attack/4` when the player casts a
+    non-`AutoLanzar` spell with no target picked (VB6
+    `modHechizos.bas:4150-4156`). Coverage:
+    `apps/arena/test/work_request_target_drift_test.exs`.
+  - The drift entry overstated the gap; the only residual is `:stun_start`,
+    which still needs the melee stun-on-hit buff system (kept as Drift #19
+    in `drift.md`).
+
 - **Map-layer effects migration fully closed (2026-05-11):**
   - Migrated the last three legacy GM sub-handlers —
     `Arena.Map.Gm.Inspection`, `Arena.Map.Gm.Teleport`, and
