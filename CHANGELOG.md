@@ -4,6 +4,79 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **Map-layer effects migration fully closed (2026-05-11):**
+  - Migrated the last three legacy GM sub-handlers —
+    `Arena.Map.Gm.Inspection`, `Arena.Map.Gm.Teleport`, and
+    `Arena.Map.Gm.Permissions` — to the `{:ok, state, [Effect.t()]}`
+    contract. `Inspection` covers 15 public handlers (charinfo, charstats,
+    charinventory, charbank, locate, onlinemap, checkslot, etc.) and
+    `Teleport` covers `gm_teleport` / `gm_goto` / `gm_summon`, all routing
+    relocations through `Effects.transfer/5`. `Permissions` was already
+    pure (predicates returning `:ok` / `{:error, _}`) and joined the
+    send_raw guard with no handler changes.
+  - Dropped `Arena.Map.GmCommands.bridge_legacy/2` and all 90 of its call
+    sites. Every GM sub-handler now returns `{:ok, state, effects}` and
+    `handle_gm_command/4` delegates directly. The bridge wrapper plus its
+    moduledoc paragraph are gone.
+  - 31 map-handler modules are now in the `effects_send_raw_guard_test.exs`
+    allowlist; the guard fails the build on any new `{:send_raw, _}` in a
+    migrated producer.
+  - Added `Arena.Test.Scenario.Snapshot`: stable serializers for player
+    state, inventory, buffs, AoI-visible set, and emitted effects, plus
+    `diff_snapshots/2`, `format_diff/1`, and `assert_state_equal/3`.
+    Failure output surfaces the first meaningful divergence path. 25-test
+    smoke suite (`scenario_snapshot_test.exs`) exercises every API path.
+  - Full arena suite green at 4151 tests after all three GM migrations,
+    bridge removal, and snapshot tooling landed.
+
+- **Golden fixture expansion and effects cleanup closure (2026-05-09):**
+  - Added `gamble_golden_test.exs` with deterministic win/loss coverage and
+    all reachable gamble-handler branches pinned through the scenario DSL.
+  - Added `potions_golden_test.exs` covering every `tipo_pocion` branch:
+    HP, mana, stamina, strength, agility, poison cure, paralysis cure,
+    unknown potion handling, duration stacking, and `tick(:buff)` expiry.
+  - Migrated `Arena.Map.Bank` and `Arena.Map.Banking` to the effects
+    contract, converting bank open/deposit/withdraw/gold handlers away from
+    the legacy `{:send_raw, _}` lane.
+  - Migrated `Arena.Map.Trade` entry points to the effects contract while
+    preserving two-player flow semantics and the existing persistence path.
+  - Added `bank_golden_test.exs` with DB-backed bank scenarios for banker
+    selection/range, item and gold deposit/withdraw, stack caps, full-bank
+    rollback, and rejection of untradeable or gold-as-item cases.
+  - Added `trade_golden_test.exs` covering initiation, rejection/cancel,
+    item offers, slot updates, both-player effects, and documented current
+    handler divergences for destructive reject, missing gold-offer setter,
+    Commerce-owned initiate guards, and commit coverage split.
+  - Closed the effects cleanup pass: bank, banking, and trade joined the
+    migrated producer set, `SEND_RAW_AUDIT.md` was updated, and
+    `effects_send_raw_guard_test.exs` now prevents `{:send_raw, _}`
+    regressions across the migrated map modules.
+  - Full arena suite is green at 4070 tests after the bank and trade golden
+    fixture expansion.
+
+- **Phase 1 parity harness and effects-migration closure (2026-05-09):**
+  - Deterministic scenario harness and gameplay-shaped DSL are now in active
+    use for golden fixtures. Scenario ticks can record emitted effects from
+    buff, regen, and NPC AI paths so tests assert with helpers such as
+    `assert_effect/3` instead of mailbox timing.
+  - Added the first high-drift golden gameplay fixtures:
+    `healing_golden_test.exs` covers rest, meditate, heal, and resurrect;
+    `forgive_golden_test.exs` covers the `/PERDON` donation flow.
+  - Completed the `StatusTicks` effects migration. `process_player_buffs/4`
+    and `process_regen_tick/1` now return `{state, effects}` and emit
+    canonical `Arena.Map.Effects.*` entries for status clears, poison,
+    hunger/thirst, HP/mana/stamina updates, invisibility reveal, character
+    change, and player-death side effects. `MapServer` accumulates those
+    effects across players and runs them once at the tick boundary.
+  - Completed NPC AI effect unification. `Arena.NpcAi.tick/1` now returns the
+    same canonical map-layer effect shape as other producers; the separate
+    `Arena.NpcAi.dispatch_effects/2` runner was removed, and pet despawn,
+    NPC death, and player-death effects flow up through the tick accumulator.
+  - Updated adjacent drift, potion, invisibility, hunger/thirst, timer clamp,
+    NPC AI, and scenario tests for the unified effect-return shape. The full
+    arena suite is green at 3939 tests after removing the now-dead
+    `dispatch_effects/2` tests.
+
 - **Browser product surface foundations (2026-05-02):**
   - Browser account/lobby basics are wired against real backend APIs:
     `/api/auth/session`, `/api/auth/login`, `/api/auth/register`,

@@ -9,9 +9,11 @@ earlier.
 
 ## Current Priority
 
-Start with Phase 1. The highest-leverage next deliverable is the deterministic
-scenario harness plus DSL because it makes every later parity and replay task
-cheaper to write and easier to debug.
+Close Phase 1. The immediate priority is the source-data parity tail, the
+last open drift item (#19), and strengthening the parity proof surface with
+VB6 source anchors, packet fixtures, and RNG guardrails. Snapshot/diff
+tooling, the deterministic harness, all golden gameplay fixtures, and the
+map-layer effects migration are already shipped.
 
 ## Phase 1: Deterministic Parity Harness
 
@@ -20,56 +22,45 @@ depending on mailbox noise or incidental timing.
 
 Work:
 
-1. Build a deterministic scenario harness.
-   - Synthetic maps
-   - Frozen clock
-   - Background ticks disabled unless explicitly enabled
-   - Scripted packet or handler drivers
-   - Exact state and effect assertions
-
-2. Add a parity test DSL and real gameplay fixture factories.
-   - Helpers like `click_npc`, `use_item`, `cast_spell`, `expect_effect`,
-     and `expect_entity`
-   - Factories for NPCs, entities, inventory, buffs, and selected-target state
-   - Gameplay-shaped tests instead of mailbox-shaped tests
-
-3. Add structured state and effect snapshots plus failure diff tooling.
-   - Stable serializers for entity, inventory, buffs, and visible state
-   - Failure output showing the first meaningful divergence
-
-4. Standardize RNG control for parity-sensitive tests.
-   - Seed or inject RNG for gamble, taming, loot-like, and other random flows
-   - Remove seed-sensitive parity noise from the default test lane
-
-5. Add per-flow golden fixtures for high-drift gameplay and service flows.
-   - Heal
-   - Forgive
-   - Gamble
-   - Trade
-   - Bank
-   - Faction enlistment
-   - Criminal conversion
-   - Potions
-
-6. Clean up deferred effects egress shims.
-   - Route `Helpers.break_invisibility/3` through the normal effects lane.
-   - Route `StatusTicks` reveal/hide expiry packets through the normal effects
-     lane.
-   - Align pet despawn dispatch with the map-layer runner shape.
-
-7. Close the backend parity tail from source data.
+1. Close the backend parity tail from source data.
    - Real per-instance item `elemental_tags`
    - Faction-exclusive item flags and strip rules
    - Recipe data expansion and validation against source `.dat` data
 
+2. Close Drift #19 from `drift.md`: blind/dumb/stun subsystem wiring.
+   - Audit current state — blind/dumb expiry already ticks; stun-on-melee
+     and the server-prompted work-target packet may still be missing
+   - Port the missing pieces and emit `:blind_no_more` / `:dumb_no_more` /
+     `:stun_start` / `:work_request_target` at their clear sites
+   - Shrink `drift.md` to reflect what's actually closed
+
+3. Add VB6 reference anchors beside golden fixtures.
+   - Each golden module names the VB6 file, procedure/function, and important
+     branch/constants it defends
+   - Drift fixes require a golden/parity fixture or an explicit drift ticket
+
+4. Add packet golden fixtures for high-risk gameplay packets.
+   - Assert encoded bytes for selected flow-critical packets, not only effect
+     kind
+   - Start with movement, bank/trade, death/resurrect, spells/status clears,
+     and inventory/equip/use
+
+5. Standardize RNG control for parity-sensitive tests.
+   - Seed or inject RNG for gamble, taming, loot-like, and other random flows
+   - Guard parity-sensitive modules against direct `Enum.random` /
+     `:rand.uniform` calls unless explicitly allowlisted
+   - Remove seed-sensitive parity noise from the default test lane
+
 Exit criteria:
 
-- New parity scenarios can be written without hand-assembling full map state.
-- Failing parity tests produce stable diffs.
-- Random flows are deterministic in the default test lane.
-- Core high-drift flows have golden fixtures.
-- Deferred egress shim paths have regression coverage before migration.
 - Source-data parity tail has explicit fixtures or drift tickets.
+- `drift.md` has zero open items, or each open item is explicitly ticketed.
+- Golden fixtures cite the VB6 source they are defending.
+- Flow-critical packets have byte-level fixtures or an explicit reason they do
+  not need one yet.
+- Random flows are deterministic in the default test lane and parity-sensitive
+  modules can't reintroduce raw `:rand` / `Enum.random` calls without an
+  allowlist entry.
 
 ## Phase 2: Automated Proof Gate
 
