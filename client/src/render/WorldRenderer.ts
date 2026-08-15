@@ -34,6 +34,7 @@ import {
   getRawNpcBodySheetUrl
 } from "./npcRawBodies.generated";
 import { fitFrameWithinTexture, resolveBaseTextureSize } from "./textureFrames";
+import { renderProfiler } from "./renderProfiler";
 
 const TILE_SIZE = 32;
 const DEFAULT_MAP_SIZE = 100;
@@ -733,7 +734,9 @@ export class WorldRenderer {
   private transferInProgress = false;
   private liveNpcMapId: number | null = null;
   private sawLiveNpcThisMap = false;
-  private runtimeTick: ((now: number) => void) | null = null;
+  // Returns whether the runtime still needs ticking, which keeps the render
+  // loop alive across the gap between walk steps. See GameRuntime.tick.
+  private runtimeTick: ((now: number) => boolean) | null = null;
   private tileInteractionHandler: ((payload: TileInteractionPayload) => void) | null = null;
   private renderLoopActive = false;
   private rainLayer: Container | null = null;
@@ -824,7 +827,7 @@ export class WorldRenderer {
     }
   }
 
-  setRuntimeTick(runtimeTick: ((now: number) => void) | null) {
+  setRuntimeTick(runtimeTick: ((now: number) => boolean) | null) {
     this.runtimeTick = runtimeTick;
   }
 
@@ -846,15 +849,24 @@ export class WorldRenderer {
     }
 
     const now = performance.now();
-    this.runtimeTick?.(now);
+    const runtimeNeedsTick = renderProfiler.measure(
+      "ticker frame",
+      () => this.runtimeTick?.(now) ?? false
+    );
     const motionsAnimating = this.updateCharacterMotions(now);
     this.updateCamera(this.lastWorld);
     this.updateHud(this.lastWorld);
     this.updateRain();
     this.updateSnow();
 
+    // runtimeNeedsTick keeps the loop alive between walk steps while a movement
+    // key is held; otherwise stepping falls back to OS key auto-repeat timing.
     const needsContinuousRender =
-      motionsAnimating || this.transferInProgress || this.rainActive || this.snowActive;
+      runtimeNeedsTick ||
+      motionsAnimating ||
+      this.transferInProgress ||
+      this.rainActive ||
+      this.snowActive;
     if (!needsContinuousRender) {
       this.stopRenderLoop();
     }
@@ -938,6 +950,17 @@ export class WorldRenderer {
     this.app.ticker.add(this.tick);
     this.app.stop();
     this.renderLoopActive = false;
+  }
+
+  /**
+   * Restart the render loop from outside.
+   *
+   * Needed when a movement key goes down while the loop is stopped and the walk
+   * is still interval-gated: no motion starts, so nothing else would wake the
+   * ticker, and movement would stall until the next key auto-repeat.
+   */
+  wake() {
+    this.ensureRenderLoop();
   }
 
   private ensureRenderLoop() {
@@ -1084,12 +1107,13 @@ export class WorldRenderer {
       this.rebuildGroundObjects(world, assetCatalog);
     }
 
-    this.syncCharacters(world, assetCatalog);
-    this.rebuildChatBubbles(world.chatBubbles);
-    this.rebuildEffects(world);
-    this.updateCamera(world);
-    this.updateHud(world);
-    this.renderOnce();
+    renderProfiler.countPass();
+    renderProfiler.measure("syncCharacters", () => this.syncCharacters(world, assetCatalog));
+    renderProfiler.measure("rebuildChatBubbles", () => this.rebuildChatBubbles(world.chatBubbles));
+    renderProfiler.measure("rebuildEffects", () => this.rebuildEffects(world));
+    renderProfiler.measure("updateCamera", () => this.updateCamera(world));
+    renderProfiler.measure("updateHud", () => this.updateHud(world));
+    renderProfiler.measure("app.render", () => this.renderOnce());
     this.ensureRenderLoop();
   }
 
