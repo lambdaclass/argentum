@@ -13,8 +13,35 @@ defmodule Arena.Map.MapSupervisor do
 
   require Logger
 
+  @boot_status_key {__MODULE__, :boot_status}
+
   def start_link(opts) do
     DynamicSupervisor.start_link(__MODULE__, opts, name: __MODULE__)
+  end
+
+  @doc """
+  World boot readiness.
+
+  Returns `%{state: :booting | :ready | :degraded, ready: n, total: n,
+  not_ready: [map_id]}`.
+
+  Boot used to be fire-and-forget: a timeout logged one warning and the result
+  was recorded nowhere, so a server that booted only part of the world still
+  accepted logins and still answered /api/health with 200. Players landed in maps
+  whose MapServer did not exist and simply could not move, with nothing to
+  distinguish it from a client bug. Health checks read this instead.
+  """
+  def boot_status do
+    :persistent_term.get(@boot_status_key, %{
+      state: :booting,
+      ready: 0,
+      total: 0,
+      not_ready: []
+    })
+  end
+
+  defp put_boot_status(status) do
+    :persistent_term.put(@boot_status_key, status)
   end
 
   @impl true
@@ -114,18 +141,39 @@ defmodule Arena.Map.MapSupervisor do
         end
       end)
 
+    total = length(map_ids)
+
     cond do
       not_ready == [] ->
+        put_boot_status(%{state: :ready, ready: length(ready), total: total, not_ready: []})
         Logger.info("All #{length(ready)} maps loaded and ready.")
 
       System.monotonic_time(:millisecond) >= deadline ->
         failed = length(not_ready)
 
-        Logger.warning(
-          "Map boot timed out: #{length(ready)} ready, #{failed} still loading or failed (#{inspect(Enum.take(not_ready, 5))}...)"
+        put_boot_status(%{
+          state: :degraded,
+          ready: length(ready),
+          total: total,
+          not_ready: not_ready
+        })
+
+        # Error, not warning: a partly-booted world is unplayable on the missing
+        # maps, and this is the only signal that says so.
+        Logger.error(
+          "Map boot timed out: #{length(ready)}/#{total} ready, #{failed} still loading or failed " <>
+            "(#{inspect(Enum.take(not_ready, 5))}...). Players entering those maps will be unable " <>
+            "to move. /api/health reports degraded until the server is restarted."
         )
 
       true ->
+        put_boot_status(%{
+          state: :booting,
+          ready: length(ready),
+          total: total,
+          not_ready: not_ready
+        })
+
         Process.sleep(poll_ms)
         do_wait_all_ready(map_ids, deadline, poll_ms)
     end

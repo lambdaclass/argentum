@@ -22,6 +22,7 @@
 #     BENCH_HOST        gateway host                    (default 127.0.0.1)
 #     BENCH_PORT        gateway WebSocket port          (default 7667)
 #     BENCH_P95_BUDGET_MS  fail above this p95          (default 5.0)
+#     BENCH_START_ID    first bot char id               (default 90000)
 #
 # Exits non-zero if p95 exceeds the budget or if no samples were collected, so
 # this can gate CI as well as be read by a human.
@@ -61,6 +62,10 @@ host = System.get_env("BENCH_HOST", "127.0.0.1")
 port = Bench.env_int("BENCH_PORT", 7667)
 budget_ms = Bench.env_float("BENCH_P95_BUDGET_MS", 5.0)
 
+# Bot characters persist, so a previous run can leave them wedged against a wall
+# where every walk is legitimately blocked. Vary this to test with fresh ones.
+start_id = Bench.env_int("BENCH_START_ID", 90_000)
+
 # Fail fast with an actionable message rather than a wall of connect errors.
 case :gen_tcp.connect(String.to_charlist(host), port, [:binary, active: false], 2_000) do
   {:ok, probe} ->
@@ -89,7 +94,7 @@ IO.puts("  bots=#{bots} warmup=#{warmup_s}s window=#{duration_s}s p95 budget=#{b
 # Tight action intervals maximise samples per second of wall clock.
 BotArmy.spawn(bots,
   profile: :walk_only,
-  start_id: 90_000,
+  start_id: start_id,
   min_action_interval: 200,
   max_action_interval: 400
 )

@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./app/App";
+import { BuildStamp } from "./ui/BuildStamp";
 import "./styles.css";
 
 const PlaywrightHarness = __AO_ENABLE_TEST_SURFACES__
@@ -173,5 +174,9 @@ ReactDOM.createRoot(mountNode).render(
         <App uiDemoMode={uiDemoMode} />
       )}
     </RootErrorBoundary>
+    {/* Outside the error boundary so the build is still identifiable on a
+        fatal boot error — that is exactly when you need to know which bundle
+        you are looking at. */}
+    <BuildStamp />
   </React.StrictMode>
 );

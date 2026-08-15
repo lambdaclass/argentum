@@ -3883,3 +3883,41 @@ h3 {
     font-size: 9px;
   }
 }
+
+/* Build identifier — pinned top-right so a stale bundle is obvious at a glance.
+   Deliberately unobtrusive and click-through-safe: it must never sit in front of
+   gameplay input. */
+.build-stamp {
+  position: fixed;
+  top: 4px;
+  right: 6px;
+  z-index: 9999;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: rgba(10, 8, 7, 0.55);
+  color: rgba(238, 215, 183, 0.62);
+  font-family: monospace;
+  font-size: 10px;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 120ms ease;
+}
+
+.build-stamp:hover,
+.build-stamp:focus-visible {
+  opacity: 1;
+  color: rgba(238, 215, 183, 0.95);
+}
+
+/* Dev server and uncommitted builds are called out — those are the two cases
+   where "what am I actually running?" bites hardest. */
+.build-stamp[data-dev="true"] {
+  color: rgba(165, 212, 255, 0.75);
+}
+
+.build-stamp[data-dirty="true"] {
+  color: rgba(255, 221, 133, 0.85);
+}
