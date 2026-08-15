@@ -99,6 +99,35 @@ Work:
     - Bots repeatedly change maps
     - No duplicate entities or stale sessions remain
 
+12. Make time-dependent gameplay deterministic in tests.
+    - Add an injectable clock for cooldowns, buffs, autosave, combat, and
+      transfer timing
+    - Add deterministic scheduling helpers for periodic and delayed work
+    - Remove parity-gate dependence on `Process.sleep/1` where controlled time
+      can prove the same behavior
+
+13. Add a versioned protocol compatibility contract.
+    - One manifest for packet IDs, binary layouts, direction, and support
+      status
+    - Shared Elixir and TypeScript fixtures generated from or checked against
+      the manifest
+    - Explicit backward-compatibility and packet-deprecation rules
+    - Defined handling for unknown, unsupported, and retired packets
+
+14. Turn benchmark results into performance regression budgets.
+    - Store versioned baselines for representative hardware and scenarios
+    - Gate movement RTT p99, tick-duration p99, maximum queue depth, memory per
+      connected player, login throughput, and autosave latency
+    - Report both the absolute result and change from the accepted baseline
+
+15. Produce a failure-reproduction bundle for integration, replay, load, and
+    soak failures.
+    - RNG seed and deterministic-clock state
+    - Bot scenario and action history
+    - Relevant packet trace
+    - State snapshots and first meaningful diff
+    - Logs, metrics, commit, and runtime configuration
+
 Exit criteria:
 
 - Fast and slow parity gates are documented and runnable.
@@ -106,6 +135,14 @@ Exit criteria:
 - Real VB6 packet captures are versioned or the blocker is explicitly tracked.
 - Replay coverage exists for the major protocol surfaces once captures exist.
 - Integration and soak suites cover combat, guilds, commerce, and transfers.
+- Time-dependent parity tests run against a controllable clock without
+  timing-sensitive sleeps in the critical path.
+- The protocol compatibility manifest is versioned and checked by both server
+  and browser tests.
+- Performance regressions have stored baselines, explicit budgets, and a
+  failing gate.
+- Failed proof-gate runs preserve enough evidence to reproduce the failure
+  locally.
 
 ## Phase 3: Observability And Operations
 
@@ -152,9 +189,23 @@ Work:
    - Gateway overload
    - Deploy rollback
 
-8. Add structured audit log review and export for moderation actions.
+8. Add durable structured audit storage, review, and export for moderation
+   actions.
+   - Append-only persistence rather than logger output as the system of record
+   - Retention and archival policy
+   - Tamper-evident records
+   - RBAC-protected access
    - Search by actor, target, action, and time range
    - Export in an operator-friendly format
+
+9. Define service-level objectives and error budgets.
+   - Availability
+   - Login success rate
+   - Tick and movement latency
+   - Disconnect rate
+   - Persistence failure rate
+   - Recovery-time objective and acceptable data-loss window
+   - Use the objectives to drive alert thresholds and release decisions
 
 Exit criteria:
 
@@ -162,6 +213,10 @@ Exit criteria:
 - Critical failure modes emit telemetry and metrics.
 - Dashboards and alerts cover backpressure, disconnects, and autosave failures.
 - Incident response and moderation audit flows are documented and usable.
+- Service-level objectives are measurable from production telemetry and have
+  explicit error budgets.
+- Audit records are durable, access-controlled, searchable, exportable, and
+  tamper-evident.
 
 ## Phase 4: Security And Abuse Hardening
 
@@ -174,10 +229,20 @@ Work:
 3. Expand adversarial tests for protocol abuse, impossible movement, combat
    abuse, chat abuse, and economic abuse.
 
+4. Complete the account-security lifecycle.
+   - Password reset and email verification
+   - Session listing and revocation
+   - Login throttling and account-lockout policy
+   - Multi-factor authentication for administrative accounts
+   - Secret and signing-key rotation
+   - Account recovery and deletion flows
+
 Exit criteria:
 
 - Abuse checks are represented by automated tests or executable audit tasks.
 - New hardening does not silently break VB6 protocol parity.
+- Account recovery, session control, administrative MFA, and secret rotation
+  are implemented and covered by adversarial tests.
 
 ## Phase 5: Runtime Performance And Architecture
 
@@ -242,6 +307,20 @@ Work:
     - Verify account, character, guild, and bank data
     - Record drill result before public release
 
+14. Add a production-shaped staging and upgrade-compatibility gate.
+    - Previous browser client against the candidate server
+    - Candidate browser client against the previous server where supported
+    - Rolling deployment and graceful session drain
+    - Database migration while the previous release is still running
+    - Rollback after a failed application release or migration
+
+15. Add a data and content validation pipeline.
+    - Broken map exits and unreachable spawn points
+    - Invalid or duplicate object, NPC, spell, recipe, and drop references
+    - Client/server asset-hash mismatches
+    - World-pack and client-build version compatibility
+    - Fail release builds with actionable diagnostics
+
 Exit criteria:
 
 - A release can be built and deployed from automation.
@@ -250,6 +329,10 @@ Exit criteria:
 - Pre-public soak has a documented pass/fail threshold.
 - Toolchain verification catches local setup drift before build/test commands.
 - Restore drills pass before a public release is cut.
+- Staging proves supported old/new client-server combinations, rolling deploy,
+  migration, drain, and rollback behavior.
+- Invalid world data or incompatible client/server assets cannot enter a
+  release artifact.
 
 ## Phase 7: Browser Product
 
@@ -326,6 +409,15 @@ Work:
    - Changed client build hash
    - Reload/retry paths
 
+12. Add browser accessibility and performance release gates.
+    - Keyboard-only navigation
+    - Screen-reader labels and announcements
+    - Automated color-contrast checks
+    - Reduced-motion support
+    - Explicit responsive/mobile support policy
+    - Asset-size, startup-time, and frame-time budgets
+    - Low-bandwidth and degraded-network coverage
+
 Exit criteria:
 
 - Browser account, lobby, character creation, and launch flows have live-backend
@@ -334,6 +426,8 @@ Exit criteria:
 - Browser E2E and visual checks cover the release-critical flows.
 - Shared packet fixtures protect browser/server protocol compatibility in CI.
 - Asset and cache mismatch recovery is covered by tests.
+- Supported browser surfaces pass the accessibility checks and stay within
+  documented asset, startup, and frame-time budgets.
 
 ## Phase 8: Optional Legacy And Multi-Realm
 
