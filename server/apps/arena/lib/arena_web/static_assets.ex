@@ -56,10 +56,23 @@ defmodule ArenaWeb.StaticAssets do
     end)
   end
 
-  defp project_root do
+  # Anchored to this module's own compile-time location, NOT File.cwd!/0.
+  #
+  # The working directory is process-global in the BEAM, and mix changes it per
+  # umbrella app while compiling. In dev, code reloading recompiles on request,
+  # so a cwd-derived root could resolve to `server/apps/...` — asset roots then
+  # failed File.dir?/1 and every sprite fell through to the SPA catch-all, and
+  # the SPA controller itself 500'd on `server/apps/client/dist/index.html`.
+  @source_project_root Path.expand("../../../../..", __DIR__)
+
+  @doc """
+  Absolute path to the repository root, for resolving `client/dist` and
+  `resources/`. Shared with ArenaWeb.SpaController so both agree.
+  """
+  def project_root do
     System.get_env("ARGENTUM_PROJECT_ROOT") ||
       case System.get_env("RELEASE_ROOT") do
-        nil -> Path.expand("..", File.cwd!())
+        nil -> @source_project_root
         release_root -> Path.expand("..", release_root)
       end
   end
