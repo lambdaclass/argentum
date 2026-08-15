@@ -42,7 +42,20 @@ defmodule Arena.Map.MapServer do
   alias AoEntities.PlayerEntity
   alias Arena.Entity.NpcEntity
   alias Arena.Map.{Helpers, Visibility, Movement, CombatHandlers, InventoryHandlers, Commerce, Bank, Trade, Social}
-  alias Arena.Map.{Chat, Healing, Pets, QuestHandlers, Faction, NpcInteraction, Training, Banking, GmCommands, StatusTicks}
+
+  alias Arena.Map.{
+    Chat,
+    Healing,
+    Pets,
+    QuestHandlers,
+    Faction,
+    NpcInteraction,
+    Training,
+    Banking,
+    GmCommands,
+    StatusTicks
+  }
+
   alias Arena.Map.Effects
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
@@ -105,6 +118,7 @@ defmodule Arena.Map.MapServer do
   def drop_item(map_id, char_id, slot, amount), do: GenServer.call(via(map_id), {:drop_item, char_id, slot, amount})
   def equip_item(map_id, char_id, slot), do: GenServer.call(via(map_id), {:equip_item, char_id, slot})
   def use_item(map_id, char_id, slot), do: GenServer.call(via(map_id), {:use_item, char_id, slot, nil, nil})
+
   def use_item(map_id, char_id, slot, target_x, target_y),
     do: GenServer.call(via(map_id), {:use_item, char_id, slot, target_x, target_y})
 
@@ -241,7 +255,10 @@ defmodule Arena.Map.MapServer do
   # Quest commands
   def quest(map_id, char_id), do: GenServer.cast(via(map_id), {:quest, char_id})
   def quest_list_request(map_id, char_id), do: GenServer.cast(via(map_id), {:quest_list_request, char_id})
-  def quest_details_request(map_id, char_id, slot), do: GenServer.cast(via(map_id), {:quest_details_request, char_id, slot})
+
+  def quest_details_request(map_id, char_id, slot),
+    do: GenServer.cast(via(map_id), {:quest_details_request, char_id, slot})
+
   def quest_accept(map_id, char_id, index), do: GenServer.cast(via(map_id), {:quest_accept, char_id, index})
   def quest_abandon(map_id, char_id, slot), do: GenServer.cast(via(map_id), {:quest_abandon, char_id, slot})
 
@@ -308,8 +325,7 @@ defmodule Arena.Map.MapServer do
           {:ok, test_map_data(map_id)}
 
         true ->
-          csm_path = Path.join(maps_dir(), "mapa#{map_id}.csm")
-          CsmParser.parse_file(csm_path)
+          CsmParser.parse_file(csm_path(map_id))
       end
 
     case map_data_result do
@@ -582,6 +598,7 @@ defmodule Arena.Map.MapServer do
   @impl true
   def handle_call({:safe_toggle, char_id}, _from, state),
     do: Effects.run_handler_call(state, fn s -> Social.handle_safe_toggle(s, char_id) end)
+
   @impl true
   def handle_call({:open_commerce, char_id, tx, ty}, _from, state),
     do:
@@ -609,6 +626,7 @@ defmodule Arena.Map.MapServer do
       Effects.run_handler_call_reply(state, fn s ->
         Commerce.handle_commerce_end(s, char_id)
       end)
+
   @impl true
   def handle_call({:open_bank, char_id, tx, ty}, _from, state),
     do:
@@ -647,6 +665,7 @@ defmodule Arena.Map.MapServer do
   @impl true
   def handle_call({:bank_end, char_id}, _from, state),
     do: Effects.run_handler_call_reply(state, fn s -> Bank.handle_bank_end(s, char_id) end)
+
   @impl true
   def handle_call({:user_trade_offer, char_id, obj_index, amount}, _from, state),
     do:
@@ -752,12 +771,15 @@ defmodule Arena.Map.MapServer do
   @impl true
   def handle_cast({:chat, char_id, message}, state),
     do: Effects.run_handler(state, fn s -> Chat.handle_chat(s, char_id, message) end)
+
   @impl true
   def handle_cast({:gm_rain_toggle, char_id}, state),
     do: Effects.run_handler(state, fn s -> GmCommands.handle_gm_rain_toggle(s, char_id) end)
+
   @impl true
   def handle_cast({:yell, char_id, message}, state),
     do: Effects.run_handler(state, fn s -> Chat.handle_yell(s, char_id, message) end)
+
   @impl true
   def handle_cast({:rest, char_id}, state),
     do: Effects.run_handler(state, fn s -> Healing.handle_rest(s, char_id) end)
@@ -773,9 +795,11 @@ defmodule Arena.Map.MapServer do
   @impl true
   def handle_cast({:resucitate, char_id}, state),
     do: Effects.run_handler(state, fn s -> Healing.handle_resucitate(s, char_id) end)
+
   @impl true
   def handle_cast({:request_atributes, char_id}, state),
     do: Effects.run_handler(state, fn s -> Social.handle_request_atributes(s, char_id) end)
+
   @impl true
   def handle_cast({:train_skill, char_id, skill_index}, state),
     do: Effects.run_handler(state, fn s -> Training.handle_train_skill(s, char_id, skill_index) end)
@@ -802,12 +826,15 @@ defmodule Arena.Map.MapServer do
   @impl true
   def handle_cast({:request_mini_stats, char_id}, state),
     do: Effects.run_handler(state, fn s -> Social.handle_request_mini_stats(s, char_id) end)
+
   @impl true
   def handle_cast({:information, char_id}, state),
     do: Effects.run_handler(state, fn s -> NpcInteraction.handle_information(s, char_id) end)
+
   @impl true
   def handle_cast({:double_click, char_id, x, y}, state),
     do: Effects.run_handler(state, fn s -> NpcInteraction.handle_double_click(s, char_id, x, y) end)
+
   @impl true
   def handle_cast({:enlist_faction, char_id, faction}, state),
     do: Effects.run_handler(state, fn s -> Faction.handle_enlist_faction(s, char_id, faction) end)
@@ -819,6 +846,7 @@ defmodule Arena.Map.MapServer do
   @impl true
   def handle_cast({:faction_chat, char_id, message}, state),
     do: Effects.run_handler(state, fn s -> Faction.handle_faction_chat(s, char_id, message) end)
+
   @impl true
   def handle_cast({:pet_stand, char_id, pet_id}, state), do: Pets.handle_pet_stand(state, char_id, pet_id)
   @impl true
@@ -847,8 +875,7 @@ defmodule Arena.Map.MapServer do
 
   @impl true
   def handle_cast({:move_item, char_id, from_slot, to_slot}, state),
-    do:
-      Effects.run_handler(state, fn s -> Social.handle_move_item(s, char_id, from_slot, to_slot) end)
+    do: Effects.run_handler(state, fn s -> Social.handle_move_item(s, char_id, from_slot, to_slot) end)
 
   @impl true
   def handle_cast({:modify_gold, char_id, amount}, state),
@@ -919,21 +946,28 @@ defmodule Arena.Map.MapServer do
 
   def handle_cast({:forgive, char_id, gold_amount}, state),
     do: Effects.run_handler(state, fn s -> NpcInteraction.handle_forgive(s, char_id, gold_amount) end)
+
   def handle_cast({:arena_entry, char_id}, state),
     do: Effects.run_handler(state, fn s -> NpcInteraction.handle_arena_entry(s, char_id) end)
+
   def handle_cast({:request_account_state, char_id}, state),
     do: Effects.run_handler(state, fn s -> Social.handle_request_account_state(s, char_id) end)
 
   def handle_cast({:request_reward, char_id}, state),
     do: Effects.run_handler(state, fn s -> Social.handle_request_reward(s, char_id) end)
+
   def handle_cast({:quest, char_id}, state),
     do: Effects.run_handler(state, fn s -> QuestHandlers.handle_quest(s, char_id) end)
+
   def handle_cast({:quest_list_request, char_id}, state),
     do: Effects.run_handler(state, fn s -> QuestHandlers.handle_quest_list_request(s, char_id) end)
+
   def handle_cast({:quest_details_request, char_id, slot}, state),
     do: Effects.run_handler(state, fn s -> QuestHandlers.handle_quest_details_request(s, char_id, slot) end)
+
   def handle_cast({:quest_accept, char_id, index}, state),
     do: Effects.run_handler(state, fn s -> QuestHandlers.handle_quest_accept(s, char_id, index) end)
+
   def handle_cast({:quest_abandon, char_id, slot}, state),
     do: Effects.run_handler(state, fn s -> QuestHandlers.handle_quest_abandon(s, char_id, slot) end)
 
@@ -1019,9 +1053,11 @@ defmodule Arena.Map.MapServer do
 
     {:message_queue_len, queue_len} = Process.info(self(), :message_queue_len)
 
-    :telemetry.execute([:arena, :map, :tick], %{duration: duration, queue_len: queue_len,
-      players: map_size(state.players), npcs: map_size(state.npcs_live)},
-      %{map_id: state.map_id, tick_type: :npc_ai})
+    :telemetry.execute(
+      [:arena, :map, :tick],
+      %{duration: duration, queue_len: queue_len, players: map_size(state.players), npcs: map_size(state.npcs_live)},
+      %{map_id: state.map_id, tick_type: :npc_ai}
+    )
 
     Process.send_after(self(), :npc_ai_tick, @npc_ai_tick_ms)
     {:noreply, state}
@@ -1052,9 +1088,11 @@ defmodule Arena.Map.MapServer do
 
     duration = System.monotonic_time() - start
 
-    :telemetry.execute([:arena, :map, :tick], %{duration: duration, queue_len: 0,
-      players: map_size(state.players), npcs: map_size(state.npcs_live)},
-      %{map_id: state.map_id, tick_type: :buff})
+    :telemetry.execute(
+      [:arena, :map, :tick],
+      %{duration: duration, queue_len: 0, players: map_size(state.players), npcs: map_size(state.npcs_live)},
+      %{map_id: state.map_id, tick_type: :buff}
+    )
 
     Process.send_after(self(), :buff_tick, 1000)
     {:noreply, state}
@@ -1070,9 +1108,11 @@ defmodule Arena.Map.MapServer do
     Arena.Map.Effects.run(state, effects)
     duration = System.monotonic_time() - start
 
-    :telemetry.execute([:arena, :map, :tick], %{duration: duration, queue_len: 0,
-      players: map_size(state.players), npcs: map_size(state.npcs_live)},
-      %{map_id: state.map_id, tick_type: :regen})
+    :telemetry.execute(
+      [:arena, :map, :tick],
+      %{duration: duration, queue_len: 0, players: map_size(state.players), npcs: map_size(state.npcs_live)},
+      %{map_id: state.map_id, tick_type: :regen}
+    )
 
     Process.send_after(self(), :regen_tick, regen_tick_ms())
     {:noreply, state}
@@ -1141,8 +1181,7 @@ defmodule Arena.Map.MapServer do
           entity.char_id,
           {:send_raw,
            Encoder.encode(
-             {:console_msg,
-              %{message: "Una fuerza divina que vigila esta zona te ha vuelto visible.", font_index: 0}}
+             {:console_msg, %{message: "Una fuerza divina que vigila esta zona te ha vuelto visible.", font_index: 0}}
            )}
         )
 
@@ -1390,5 +1429,37 @@ defmodule Arena.Map.MapServer do
 
   defp maps_dir do
     Application.get_env(:arena, :maps_dir, Path.join(:code.priv_dir(:arena), "maps"))
+  end
+
+  @doc false
+  # Resolve a map's .csm path tolerating filename case.
+  #
+  # The VB6 resources come from Windows, where case never mattered, and the set
+  # is mixed: 324 of 843 files are `MapaNNN.csm` while the rest are `mapaNNN.csm`.
+  # MapSupervisor discovers maps with a case-insensitive regex, so every map is
+  # started, but loading used a hardcoded lowercase name — so on a case-sensitive
+  # filesystem those 324 maps started, failed to read, and never became ready.
+  # Boot then timed out with "518 ready, 325 still loading or failed" and players
+  # entering any of them could not move and saw an unrendered map.
+  #
+  # The two common spellings are tried directly because this runs per map at boot;
+  # the directory scan is only a fallback for other casings.
+  def csm_path(map_id) do
+    dir = maps_dir()
+    candidates = ["mapa#{map_id}.csm", "Mapa#{map_id}.csm"]
+
+    case Enum.find(candidates, &File.regular?(Path.join(dir, &1))) do
+      nil -> Path.join(dir, find_csm_any_case(dir, map_id) || "mapa#{map_id}.csm")
+      name -> Path.join(dir, name)
+    end
+  end
+
+  defp find_csm_any_case(dir, map_id) do
+    wanted = "mapa#{map_id}.csm"
+
+    case File.ls(dir) do
+      {:ok, names} -> Enum.find(names, &(String.downcase(&1) == wanted))
+      {:error, _} -> nil
+    end
   end
 end

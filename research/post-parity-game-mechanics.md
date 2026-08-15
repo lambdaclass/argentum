@@ -7,6 +7,9 @@ This document is not a backlog dump. It is a prioritization note for which
 major game mechanics should come next, why they matter, and what must exist
 before each one is worth building.
 
+Related evidence and product recommendations are documented in
+[Official Wiki and Patreon Feature Audit](wiki-patreon-feature-audit.md).
+
 ## Product Principle
 
 After parity, the next mechanics should improve one or more of:

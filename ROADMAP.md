@@ -451,3 +451,78 @@ Exit criteria:
 
 - Optional legacy systems have explicit product approval.
 - Multi-realm design is documented before implementation starts.
+
+## Phase 9: Product Research And Future Ideas
+
+Goal: continuously discover, compare, and validate ideas for what the game
+should become after the committed roadmap is healthy.
+
+This phase is intentionally exploratory and does not block a release. Research
+items are not implementation commitments until they have an explicit product
+decision and are promoted into a delivery phase.
+
+Work:
+
+1. Maintain a source-backed inventory of possible game features.
+   - Official Argentum Online documentation and source
+   - Player feedback, support requests, and community discussions
+   - Comparable MMORPGs and online social games
+   - Internal ideas, prototypes, and technical opportunities
+
+2. Identify player problems before selecting solutions.
+   - New-player confusion and early abandonment
+   - Missing short-, medium-, and long-term goals
+   - Solo, group, guild, PvE, PvP, economy, and social needs
+   - International access, latency, language, and accessibility barriers
+
+3. Write a short research brief for each serious candidate.
+   - Player problem and target audience
+   - Proposed experience and core gameplay loop
+   - Dependencies and systems it can reuse
+   - Engineering, content, moderation, and operating costs
+   - Economy, balance, abuse, and pay-to-win risks
+   - Success metrics and smallest useful experiment
+
+4. Validate promising ideas before full implementation.
+   - Paper designs and data-model reviews
+   - UI mockups and disposable prototypes
+   - Focused technical spikes for the highest-risk assumptions
+   - Staging playtests and structured player feedback
+   - Telemetry review where production evidence exists
+
+5. Review and rank candidates using consistent criteria.
+   - Player value and long-term retention
+   - Repeatable goals and social coordination
+   - Content leverage per developer hour
+   - Fit with the existing world, economy, and technical architecture
+   - Accessibility, internationalization, safety, and moderation impact
+   - Ongoing infrastructure and support cost
+
+6. Give every reviewed idea an explicit outcome.
+   - Promote accepted ideas into a scoped roadmap phase
+   - Keep uncertain ideas in research with a named validation question
+   - Defer ideas whose prerequisites do not exist yet
+   - Record why rejected ideas should not be pursued
+
+7. Revisit supporter and monetization ideas separately from gameplay access.
+   - Prefer cosmetics, identity, account organization, and communication tools
+   - Keep worlds, quests, destinations, classes, and competitive power free
+   - Document recurring service cost and entitlement behavior
+   - Review downgrade safety and abuse cases before launch
+
+Initial research inputs:
+
+- `research/post-parity-game-mechanics.md`
+- `research/wiki-patreon-feature-audit.md`
+- `research/ui-ux/runescape-ui-ux.md`
+
+Exit criteria for promoting an idea:
+
+- The player problem, intended audience, and expected value are documented.
+- The smallest useful version and its dependencies are understood.
+- Economy, balance, abuse, moderation, accessibility, and operating risks have
+  been reviewed where relevant.
+- The idea has measurable success criteria and a validation plan.
+- A clear accept, defer, or reject decision is recorded.
+- Accepted work is moved into a concrete implementation phase before coding
+  begins.
