@@ -24,6 +24,12 @@
             pkgs.nodejs_22
             pkgs.protobuf
             pkgs.cacert
+            # Rust/WASM client (client-rs). rustc ships the wasm32 std but not a
+            # linker for it, so lld is required; wasm-bindgen generates the JS
+            # bindings and binaryen's wasm-opt shrinks the release build.
+            pkgs.lld
+            pkgs.wasm-bindgen-cli
+            pkgs.binaryen
           ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
             pkgs.inotify-tools
           ];
@@ -32,8 +38,12 @@
             export PATH="$HOME/.mix/escripts:$PATH"
             export SSL_CERT_FILE="${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
             export HEX_CACERTS_PATH="$SSL_CERT_FILE"
-            export PGDATA="$PWD/.pgdata"
-            export PGHOST="$PWD/.pgdata"
+            # Anchor the cluster to the repo, not $PWD. Entering the shell
+            # from client-rs (or anywhere else) used to initialise a second,
+            # stray postgres data directory there.
+            AO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")"
+            export PGDATA="$AO_ROOT/server/.pgdata"
+            export PGHOST="$PGDATA"
             export PGPORT="5432"
 
             if [ ! -d "$PGDATA" ]; then

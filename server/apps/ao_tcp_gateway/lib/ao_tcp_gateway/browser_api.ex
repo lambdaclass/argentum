@@ -154,7 +154,11 @@ defmodule AoTcpGateway.BrowserApi do
                 json(conn, 201, %{character: character_payload(character)})
 
               {:error, changeset} ->
-                json_error(conn, 422, changeset_error_message(changeset, "Could not create character."))
+                json_error(
+                  conn,
+                  422,
+                  changeset_error_message(changeset, "Could not create character.")
+                )
             end
 
           {:error, reason} ->
@@ -205,7 +209,14 @@ defmodule AoTcpGateway.BrowserApi do
   end
 
   def world_pack(conn) do
-    json(conn, 200, Arena.ClientMapPack.manifest())
+    # Public, read-only metadata naming the current map pack. The pack file
+    # itself is already served with `access-control-allow-origin: *`, so
+    # without the same header here an alternative client on another origin
+    # (the Rust/wasm client, a dev server, a map tool) can read the pack but
+    # not discover which one to read.
+    conn
+    |> Plug.Conn.put_resp_header("access-control-allow-origin", "*")
+    |> json(200, Arena.ClientMapPack.manifest())
   end
 
   def current_account(conn) do
@@ -315,7 +326,10 @@ defmodule AoTcpGateway.BrowserApi do
   defp creation_error_message(:name_too_short), do: "Name too short (min 3 characters)."
   defp creation_error_message(:name_too_long), do: "Name too long (max 30 characters)."
   defp creation_error_message(:name_invalid_chars), do: "Name contains invalid characters."
-  defp creation_error_message(:invalid_head), do: "Selected head is not valid for that race and gender."
+
+  defp creation_error_message(:invalid_head),
+    do: "Selected head is not valid for that race and gender."
+
   defp creation_error_message({field, value}), do: "Invalid #{field}: #{inspect(value)}."
   defp creation_error_message(_reason), do: "Could not create character."
 

@@ -2,6 +2,7 @@ import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./app/App";
 import { BuildStamp } from "./ui/BuildStamp";
+import { isNonFatalBrowserPayload, isOpaqueCrossOriginError } from "./app/fatalErrors";
 import "./styles.css";
 
 const PlaywrightHarness = __AO_ENABLE_TEST_SURFACES__
@@ -54,25 +55,29 @@ function formatFatalError(error: unknown) {
   }
 }
 
-function isNonFatalBrowserEvent(error: unknown) {
-  if (error instanceof Event) {
-    return !(error instanceof ErrorEvent);
-  }
+const isNonFatalBrowserEvent = isNonFatalBrowserPayload;
 
-  if (
-    typeof error === "object" &&
-    error != null &&
-    "isTrusted" in error &&
-    !("message" in error) &&
-    !("stack" in error)
-  ) {
-    return true;
-  }
-
-  return false;
-}
+/**
+ * Whether the app rendered successfully at least once.
+ *
+ * The fatal screen replaces the mount node's innerHTML, which is the right
+ * response to a failure during boot — there is nothing to preserve. Once the
+ * player is in the world it is the wrong response to a stray window error or
+ * unhandled rejection: it ends the session over something the game may well
+ * have survived. After boot these are logged loudly and the session continues.
+ */
+let hasBooted = false;
 
 function renderFatalBootScreen(summary: string, detail: string) {
+  if (hasBooted) {
+    console.error(
+      "[argentum] post-boot error — keeping the session alive instead of showing the fatal screen",
+      summary,
+      detail
+    );
+    return;
+  }
+
   const mountNode = document.getElementById("app");
   if (!mountNode) {
     return;
@@ -134,6 +139,14 @@ if (typeof window !== "undefined") {
       return;
     }
 
+    if (isOpaqueCrossOriginError(event)) {
+      console.warn(
+        "window.error opaque cross-origin error — ignoring, it carries no detail about our code",
+        event.message
+      );
+      return;
+    }
+
     if (!event.error && !event.message) {
       return;
     }
@@ -180,3 +193,12 @@ ReactDOM.createRoot(mountNode).render(
     <BuildStamp />
   </React.StrictMode>
 );
+
+// Boot is considered successful once React has committed and the app node has
+// content. From here on, window errors and unhandled rejections are logged
+// rather than replacing the session with the fatal screen.
+requestAnimationFrame(() => {
+  if (mountNode.childElementCount > 0) {
+    hasBooted = true;
+  }
+});

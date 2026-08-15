@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Argentum</title>
+    <style>
+      :root {
+        --bg: #07090d;
+        --panel: #0e1420;
+        --panel-edge: #1d2739;
+        --ink: #e8dcc4;
+        --ink-dim: #8d9099;
+        --gold: #e0a94a;
+        --gold-soft: #f0c989;
+        --danger: #ff8a73;
+      }
+
+      * { box-sizing: border-box; }
+
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+        overflow: hidden;
+      }
+
+      #shell {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+      }
+
+      /* The canvas is pixel art. Integer scaling matters: at a fractional scale
+         nearest-neighbour duplicates some source pixels and not others, and as
+         the camera pans that duplication pattern shifts across the whole
+         viewport, which reads as the entire image shimmering. Bevy sizes the
+         backing store; this keeps the presented size honest. */
+      #ao-canvas {
+        display: block;
+        image-rendering: pixelated;
+        background: #000;
+        border: 1px solid var(--panel-edge);
+        border-radius: 3px;
+        box-shadow: 0 0 0 1px #000, 0 18px 48px rgba(0, 0, 0, 0.75);
+        outline: none;
+      }
+
+      #boot {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        background: radial-gradient(circle at 50% 40%, #101725 0%, var(--bg) 70%);
+        z-index: 10;
+        transition: opacity 260ms ease;
+      }
+
+      #boot[hidden] { display: none; }
+
+      #boot h1 {
+        margin: 0;
+        font-size: 30px;
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+        color: var(--gold);
+        text-shadow: 0 2px 0 #000;
+      }
+
+      #boot .sub {
+        margin: 0;
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        color: var(--ink-dim);
+      }
+
+      .bar {
+        width: min(340px, 70vw);
+        height: 3px;
+        background: var(--panel-edge);
+        border-radius: 2px;
+        overflow: hidden;
+      }
+
+      .bar span {
+        display: block;
+        height: 100%;
+        width: 35%;
+        background: linear-gradient(90deg, transparent, var(--gold), transparent);
+        animation: sweep 1.15s ease-in-out infinite;
+      }
+
+      @keyframes sweep {
+        from { transform: translateX(-100%); }
+        to { transform: translateX(340%); }
+      }
+
+      #boot .err {
+        max-width: min(560px, 84vw);
+        color: var(--danger);
+        font-size: 12px;
+        line-height: 1.6;
+        text-align: center;
+        white-space: pre-wrap;
+      }
+
+      #hint {
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        color: var(--ink-dim);
+      }
+
+      #hint b { color: var(--gold-soft); font-weight: 600; }
+
+      @media (prefers-reduced-motion: reduce) {
+        .bar span { animation: none; width: 100%; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="shell">
+      <canvas id="ao-canvas" width="736" height="608" tabindex="0"></canvas>
+      <p id="hint">Move with <b>WASD</b> or the <b>arrow keys</b></p>
+    </div>
+
+    <div id="boot">
+      <h1>Argentum</h1>
+      <p class="sub">Cargando cliente…</p>
+      <div class="bar"><span></span></div>
+      <p class="err" id="boot-error" hidden></p>
+    </div>
+
+    <script type="module">
+      import init from "./pkg/ao-client.js";
+
+      const boot = document.getElementById("boot");
+      const bootError = document.getElementById("boot-error");
+
+      function fail(message) {
+        bootError.hidden = false;
+        bootError.textContent = message;
+        boot.querySelector(".bar")?.remove();
+        boot.querySelector(".sub")?.remove();
+      }
+
+      try {
+        await init();
+        // Bevy takes over the canvas from here. Give it a frame to present
+        // before lifting the boot screen, so there is no black flash between.
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            boot.style.opacity = "0";
+            setTimeout(() => (boot.hidden = true), 260);
+            document.getElementById("ao-canvas")?.focus();
+          })
+        );
+      } catch (error) {
+        // Bevy's winit shuts the app down by throwing a control-flow exception;
+        // that is not a load failure and must not be reported as one.
+        const text = String(error?.message ?? error);
+        if (text.includes("Using exceptions for control flow")) {
+          boot.hidden = true;
+        } else {
+          console.error("client boot failed", error);
+          fail(`No se pudo iniciar el cliente.\n\n${text}`);
+        }
+      }
+    </script>
+  </body>
+</html>
