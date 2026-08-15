@@ -24,16 +24,27 @@ defmodule AoTcpGateway.WsHandler do
 
   # ---- Cowboy callbacks ----
 
-  def init(req, state) do
-    {:cowboy_websocket, req, state, %{idle_timeout: @ws_idle_timeout}}
+  def init(req, _state) do
+    # The req is only available here, so resolve the peer before the upgrade.
+    {:cowboy_websocket, req, %{peer_ip: peer_ip(req)}, %{idle_timeout: @ws_idle_timeout}}
   end
 
-  def websocket_init(_state) do
+  defp peer_ip(req) do
+    case :cowboy_req.peer(req) do
+      {address, _port} -> address |> :inet.ntoa() |> to_string()
+      _ -> "desconocida"
+    end
+  rescue
+    _ -> "desconocida"
+  end
+
+  def websocket_init(init_state) do
     Logger.info("WebSocket client connected")
     Process.send_after(self(), :ws_ping, @ping_interval)
 
     {:ok,
      %{
+       peer_ip: Map.get(init_state || %{}, :peer_ip, "desconocida"),
        buffer: <<>>,
        account_id: nil,
        character_id: nil,

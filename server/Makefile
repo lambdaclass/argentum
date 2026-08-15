@@ -1,4 +1,4 @@
-.PHONY: deps db setup run start test console format credo check docs clean purge pg.start pg.stop client.dev client.build client.typecheck client.preview client.clean docker.up docker.down docker.migrate docker.test docker.build stats stats.code stats.test stats.ratio
+.PHONY: deps db setup run start test console format credo check docs clean purge pg.start pg.stop client.dev client.build client.typecheck client.preview client.clean docker.up docker.down docker.migrate docker.test docker.build bench.walk stats stats.code stats.test stats.ratio
 
 NIX := nix develop --command
 
@@ -95,6 +95,15 @@ client.clean:
 
 purge: pg.stop
 	rm -rf _build/ deps/ .pgdata/ ../client/node_modules ../client/dist
+
+# ---- Benchmarks ----
+
+# Walk responsiveness against a server started separately with `make run`.
+# Answers "is the backend responsible for movement feeling slow?" before
+# anyone profiles the renderer. Tunables: BENCH_BOTS, BENCH_DURATION_S,
+# BENCH_P95_BUDGET_MS (see scripts/bench_walk_latency.exs).
+bench.walk:
+	$(NIX) mix run --no-start scripts/bench_walk_latency.exs
 
 # ---- Stats ----
 

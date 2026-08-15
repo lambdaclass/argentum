@@ -154,6 +154,53 @@ defmodule AoSession.OnlineDirectoryTest do
     end
   end
 
+  describe "ip tracking" do
+    test "stores the peer ip passed at register time" do
+      :ok = OnlineDirectory.register(1, "Elrond", 10, self(), ip: "10.0.0.7")
+
+      assert {:ok, info} = OnlineDirectory.lookup_by_id(1)
+      assert info.ip == "10.0.0.7"
+    end
+
+    test "defaults to desconocida when no ip is supplied" do
+      :ok = OnlineDirectory.register(1, "Anon", 10, self())
+
+      assert {:ok, info} = OnlineDirectory.lookup_by_id(1)
+      assert info.ip == "desconocida"
+    end
+
+    test "ip survives map and faction updates" do
+      :ok = OnlineDirectory.register(1, "Mover", 10, self(), ip: "10.0.0.7")
+      :ok = OnlineDirectory.update_map(1, 20)
+      :ok = OnlineDirectory.update_faction(1, :royal_army)
+
+      assert {:ok, info} = OnlineDirectory.lookup_by_id(1)
+      assert info.ip == "10.0.0.7"
+    end
+
+    test "list_names_by_ip returns only players sharing that ip" do
+      :ok = OnlineDirectory.register(1, "Alt1", 1, self(), ip: "192.168.1.5")
+      :ok = OnlineDirectory.register(2, "Alt2", 1, self(), ip: "192.168.1.5")
+      :ok = OnlineDirectory.register(3, "Other", 1, self(), ip: "192.168.1.9")
+
+      assert ["Alt1", "Alt2"] == Enum.sort(OnlineDirectory.list_names_by_ip("192.168.1.5"))
+      assert ["Other"] == OnlineDirectory.list_names_by_ip("192.168.1.9")
+    end
+
+    test "list_names_by_ip returns [] for an ip with nobody online" do
+      :ok = OnlineDirectory.register(1, "Someone", 1, self(), ip: "192.168.1.5")
+
+      assert [] == OnlineDirectory.list_names_by_ip("8.8.8.8")
+    end
+
+    test "unregister drops the player from ip lookups" do
+      :ok = OnlineDirectory.register(1, "Leaver", 1, self(), ip: "192.168.1.5")
+      OnlineDirectory.unregister(1)
+
+      assert [] == OnlineDirectory.list_names_by_ip("192.168.1.5")
+    end
+  end
+
   describe "broadcast_all/1" do
     test "sends message to all registered session pids" do
       # Register self under multiple char_ids

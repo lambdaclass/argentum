@@ -33,6 +33,7 @@ defmodule AoTcpGateway.ClientHandler do
     loop(%{
       socket: socket,
       transport: transport,
+      peer_ip: peer_ip(transport, socket),
       buffer: <<>>,
       account_id: nil,
       character_id: nil,
@@ -53,6 +54,15 @@ defmodule AoTcpGateway.ClientHandler do
       egress: Egress.new(self()),
       pressure: :ok
     })
+  end
+
+  # Peer address for GM moderation lookups. Resolved once at accept time
+  # because the socket is gone by the time a disconnect is investigated.
+  defp peer_ip(transport, socket) do
+    case transport.peername(socket) do
+      {:ok, {address, _port}} -> address |> :inet.ntoa() |> to_string()
+      _ -> "desconocida"
+    end
   end
 
   defp loop(state) do

@@ -1,7 +1,7 @@
 defmodule Arena.Map.StatusTicks do
   @moduledoc "Buff expiry, regen, hunger/thirst, and penalty ticks."
 
-  alias Arena.Map.{Effects, Helpers}
+  alias Arena.Map.Effects
   alias Arena.Data.GameData
   alias AoProtocol.Server.Encoder
 

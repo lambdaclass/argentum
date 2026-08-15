@@ -571,7 +571,6 @@ defmodule Arena.Events.CaptureServer do
       own_team = participant.team
 
       enemy_flag = Map.fetch!(c.flags, enemy_team)
-      own_flag = Map.fetch!(c.flags, own_team)
 
       # Check 1: Pick up enemy flag at their base
       {c, events} =

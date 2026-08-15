@@ -74,7 +74,8 @@ defmodule AoTcpGateway.SessionWorld do
 
       AoSession.OnlineDirectory.register(entity.char_id, entity.name, map_id, self(),
         is_gm: state.is_gm,
-        faction: entity.faction
+        faction: entity.faction,
+        ip: Map.get(state, :peer_ip)
       )
 
       # Send party snapshot if player is in a party

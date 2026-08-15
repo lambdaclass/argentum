@@ -15,12 +15,19 @@ defmodule AoSession.OnlineDirectory do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  @doc "Register an online character."
+  @doc """
+  Register an online character.
+
+  `:ip` is the peer address of the session's transport, kept in memory only so
+  GM moderation commands (`/NICK2IP`, `/IP2NICK`) can resolve it. `"desconocida"`
+  when the transport could not report a peer.
+  """
   def register(char_id, name, map_id, session_pid, opts \\ []) do
     normalized = String.downcase(String.trim(name))
     is_gm = Keyword.get(opts, :is_gm, false)
     faction = Keyword.get(opts, :faction, :none)
     role_master = Keyword.get(opts, :role_master, false)
+    ip = Keyword.get(opts, :ip) || "desconocida"
 
     :ets.insert(
       @table,
@@ -31,7 +38,8 @@ defmodule AoSession.OnlineDirectory do
          session_pid: session_pid,
          is_gm: is_gm,
          faction: faction,
-         role_master: role_master
+         role_master: role_master,
+         ip: ip
        }}
     )
 
@@ -120,6 +128,18 @@ defmodule AoSession.OnlineDirectory do
     :ets.foldl(
       fn
         {{:by_id, _char_id}, %{name: name}}, acc -> [name | acc]
+        _other, acc -> acc
+      end,
+      [],
+      @table
+    )
+  end
+
+  @doc "Return the names of every online player connected from `ip`."
+  def list_names_by_ip(ip) do
+    :ets.foldl(
+      fn
+        {{:by_id, _char_id}, %{name: name, ip: ^ip}}, acc -> [name | acc]
         _other, acc -> acc
       end,
       [],

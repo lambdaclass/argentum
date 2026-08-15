@@ -423,8 +423,8 @@ defmodule AoTcpGateway.SessionCommands.Gm do
 
   def handle_command(state, {:nick_to_ip, %{name: name}}) do
     case AoSession.OnlineDirectory.lookup_by_name(name) do
-      {:ok, session} ->
-        ip = Map.get(session, :ip, "desconocida")
+      {:ok, _char_id, info} ->
+        ip = Map.get(info, :ip, "desconocida")
         {state, [{:console_msg, %{message: "IP de #{name}: #{ip}", font_index: 0}}]}
 
       :not_found ->
@@ -433,10 +433,13 @@ defmodule AoTcpGateway.SessionCommands.Gm do
   end
 
   def handle_command(state, {:ip_to_nick, %{ip: ip}}) do
-    names = AoSession.OnlineDirectory.list_all_names()
+    message =
+      case AoSession.OnlineDirectory.list_names_by_ip(ip) do
+        [] -> "Busqueda IP #{ip}: sin resultados."
+        names -> "Busqueda IP #{ip}: #{Enum.join(names, ", ")}"
+      end
 
-    {state,
-     [{:console_msg, %{message: "Busqueda IP #{ip}: #{Enum.join(names, ", ")}", font_index: 0}}]}
+    {state, [{:console_msg, %{message: message, font_index: 0}}]}
   end
 
   def handle_command(state, {:check_slot, %{name: name, slot: slot}}) do
