@@ -88,9 +88,6 @@ export class GameRuntime {
   rememberMovementKey(direction: Direction) {
     this.movementKeys = this.movementKeys.filter((key) => key !== direction);
     this.movementKeys.push(direction);
-    // The loop may be stopped and this step may still be interval-gated, so
-    // wake the ticker explicitly rather than relying on a motion starting.
-    this.renderer?.wake();
   }
 
   releaseMovementKey(direction: Direction) {
@@ -101,25 +98,13 @@ export class GameRuntime {
     this.movementKeys = [];
   }
 
-  /**
-   * Advance held-key movement.
-   *
-   * Returns whether the runtime still needs to be ticked. The render loop stops
-   * itself when no sprite is animating, and the visual step is deliberately
-   * shorter than the walk interval (VISUAL_WALK_DURATION_SCALE), so there is a
-   * dead gap between steps. Without this signal the loop halts in that gap and
-   * the next step can only be triggered by a browser key auto-repeat event —
-   * which makes held-key movement inherit the OS key-repeat delay (500ms on a
-   * default Linux desktop) instead of the walk interval.
-   */
-  tick(now: number): boolean {
+  tick(now: number) {
     const direction = this.activeMovementDirection();
     if (!direction) {
-      return false;
+      return;
     }
 
     this.tryPredictedWalk(direction, now);
-    return true;
   }
 
   requestPositionUpdate() {

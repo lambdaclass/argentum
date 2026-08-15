@@ -33,7 +33,9 @@ export const WorldCanvas = memo(function WorldCanvas({
 
     const renderer = new WorldRenderer();
     renderer.mount(rootRef.current);
-    renderer.setRuntimeTick((now) => session.tick(now));
+    renderer.setRuntimeTick((now) => {
+      session.tick(now);
+    });
     renderer.render(world, assetCatalog, showTileDebug);
     rendererRef.current = renderer;
     session.setRenderer(renderer);

@@ -715,9 +715,8 @@ export class SessionClient {
     this.runtime.clearMovementKeys();
   }
 
-  /** Returns whether the runtime still needs ticking (a movement key is held). */
-  tick(now: number): boolean {
-    return this.runtime.tick(now);
+  tick(now: number) {
+    this.runtime.tick(now);
   }
 
   hasTargetTile() {
