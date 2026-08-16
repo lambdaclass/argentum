@@ -1,9 +1,8 @@
-//! Status row: frame rate, round-trip latency and players online.
+//! Sampling for the status readout: round-trip latency and players online.
 //!
-//! Modelled on the reference client documented in `research/argentumunited`,
-//! which keeps FPS, ping and online count permanently in the window chrome.
-//! They are cheap trust signals — a player can see at a glance whether a
-//! stutter is their machine, the network, or the server.
+//! Data only. The numbers are drawn by `ui::topbar`, which owns the shell's
+//! presentation; this module owns how often they are measured, which is a
+//! server-side cost as much as a client one.
 
 use crate::config::ClientConfig;
 use crate::session::{ConnectionState, Session};
@@ -31,8 +30,7 @@ impl Plugin for HudPlugin {
                 ONLINE_INTERVAL_SECS,
                 TimerMode::Repeating,
             )))
-            .add_systems(Startup, spawn_hud)
-            .add_systems(Update, (send_ping, poll_online, update_hud));
+            .add_systems(Update, (send_ping, poll_online));
     }
 }
 
@@ -55,6 +53,11 @@ impl Default for HudStats {
 }
 
 impl HudStats {
+    /// Players online, or None until the first poll returns.
+    pub fn online(&self) -> Option<u32> {
+        self.read().1
+    }
+
     fn read(&self) -> (Option<u32>, Option<u32>) {
         self.inner.lock().map(|s| (s.ping_ms, s.online)).unwrap_or((None, None))
     }
@@ -77,62 +80,6 @@ struct PingTimer(Timer);
 #[derive(Resource)]
 struct OnlineTimer(Timer);
 
-#[derive(Component)]
-struct HudText;
-
-/// Smoothed frame rate.
-///
-/// A raw per-frame reciprocal is unreadable — it flickers over a wide range
-/// every frame. This is an exponential moving average, which is what makes the
-/// number legible without hiding a genuine drop.
-#[derive(Component, Default)]
-struct FpsAverage(f32);
-
-fn spawn_hud(mut commands: Commands) {
-    commands.spawn((
-        Text::new("FPS --   PING --   ON --"),
-        TextFont { font_size: 13.0, ..default() },
-        TextColor(Color::srgb(0.88, 0.66, 0.29)),
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Px(6.0),
-            right: Val::Px(10.0),
-            ..default()
-        },
-        HudText,
-        FpsAverage::default(),
-    ));
-}
-
-fn update_hud(
-    time: Res<Time>,
-    stats: Res<HudStats>,
-    session: Res<Session>,
-    mut query: Query<(&mut Text, &mut FpsAverage), With<HudText>>,
-) {
-    let dt = time.delta_secs();
-    if dt <= 0.0 {
-        return;
-    }
-
-    for (mut text, mut average) in &mut query {
-        let instant = 1.0 / dt;
-        average.0 = if average.0 == 0.0 {
-            instant
-        } else {
-            // ~0.9 weight on history: responsive to a real drop within a few
-            // frames, but not jittering on single-frame noise.
-            average.0 * 0.9 + instant * 0.1
-        };
-
-        let (_http_ping, online) = stats.read();
-        let ping = ping_label(&session.state(), session.ping_ms());
-        let online = online.map(|v| v.to_string()).unwrap_or_else(|| "--".into());
-
-        text.0 = format!("FPS {}   PING {}   ON {}", average.0.round() as u32, ping, online);
-    }
-}
-
 /// What to show for latency.
 ///
 /// "--" used to mean two unrelated things: no session to measure, and a session
@@ -141,14 +88,13 @@ fn update_hud(
 /// login *succeeded*, whether a number ever appeared depended on how login went
 /// — so the field looked random. They are now distinct: a reading, a wait, or
 /// an explicit statement that there is nothing to measure.
-fn ping_label(state: &ConnectionState, ping_ms: Option<u32>) -> String {
+pub fn ping_label(state: &ConnectionState, ping_ms: Option<u32>) -> String {
     match (state, ping_ms) {
         // A stale reading from a dead socket is worse than no reading.
         (ConnectionState::Offline | ConnectionState::Failed(_), _) => "--".into(),
         (_, Some(rtt)) => format!("{rtt}ms"),
         // Connected, nothing back yet. One probe every few seconds, so this is
         // the normal state for the first moments of a session.
-        (ConnectionState::Connecting, None) => "...".into(),
         (_, None) => "...".into(),
     }
 }

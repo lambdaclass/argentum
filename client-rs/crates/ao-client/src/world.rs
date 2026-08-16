@@ -264,6 +264,9 @@ fn setup(mut commands: Commands, player: Res<LocalPlayer>, blockmap: Res<Blockma
     // renderer failure while debugging.
     commands.spawn((
         Camera2d,
+        // Marked so the shell can drive its viewport: the world occupies only
+        // the space the character rail leaves, not the whole window.
+        crate::ui::shell::WorldCamera,
         Transform::from_xyz(
             (player.x - 1) as f32 * TILE_SIZE,
             -((player.y - 1) as f32) * TILE_SIZE,

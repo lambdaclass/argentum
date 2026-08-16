@@ -12,6 +12,7 @@ mod graphics;
 mod hud;
 mod net;
 mod session;
+mod ui;
 mod world;
 
 use bevy::prelude::*;
@@ -77,9 +78,16 @@ fn main() {
         // so movement appears to lag and then jump a whole tile at a time.
         .insert_resource(WinitSettings {
             focused_mode: UpdateMode::Continuous,
-            unfocused_mode: UpdateMode::reactive_low_power(std::time::Duration::from_millis(100)),
+            // Also continuous while unfocused. Throttling to 10Hz saves power
+            // but stalls the world: an unfocused window is still being watched
+            // — alt-tabbed to a guide, second monitor — and the frame rate
+            // visibly collapsing is worse than the battery it saves. The
+            // browser throttles a *hidden* tab on its own, which is the case
+            // that genuinely wants throttling, and the latency probe already
+            // pauses there.
+            unfocused_mode: UpdateMode::Continuous,
         })
-        .add_plugins((world::WorldPlugin, hud::HudPlugin))
+        .add_plugins((world::WorldPlugin, ui::UiPlugin, hud::HudPlugin))
         .run();
 }
 
