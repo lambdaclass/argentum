@@ -209,10 +209,16 @@ fn experience_bar(experience: Gauge) -> impl Bundle {
             align_items: AlignItems::Center,
             // The fill is absolutely positioned; without this it draws past the
             // track's rounded end and over whatever is beside it.
+            border: UiRect::all(Val::Px(size::BORDER)),
             overflow: Overflow::clip(),
             ..default()
         },
         BackgroundColor(surface::WELL),
+        // Outlined, or an empty track is indistinguishable from bare panel:
+        // the well and the panel differ by 1.05:1, which is deliberate — the
+        // reference is just as dark — and means the border is what makes a bar
+        // read as a bar at all.
+        BorderColor::all(surface::EDGE),
         children![
             (
                 Node {
@@ -270,10 +276,12 @@ fn vital_bar(prefix: &str, gauge: Gauge, fill: Color) -> impl Bundle {
             height: Val::Px(size::STATUS_BAR_HEIGHT),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
+            border: UiRect::all(Val::Px(size::BORDER)),
             overflow: Overflow::clip(),
             ..default()
         },
         BackgroundColor(surface::WELL),
+        BorderColor::all(surface::EDGE),
         children![
             (
                 Node {

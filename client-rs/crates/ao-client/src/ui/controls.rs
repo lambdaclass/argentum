@@ -293,6 +293,170 @@ pub fn rarity_ink(rarity: ao_core::view::Rarity) -> Color {
     }
 }
 
+/// What a control was activated by.
+///
+/// Recorded because the two paths must stay equivalent: a control reachable by
+/// mouse but not by keyboard is one a keyboard player cannot use at all, and
+/// that is invisible unless something says which path fired.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivationSource {
+    Pointer,
+    Keyboard,
+}
+
+/// A control was activated.
+///
+/// One message for every control in the client, whatever activated it. Panels
+/// listen for this rather than polling `Interaction` themselves, which is what
+/// stops a click and an Enter press taking two different code paths that drift.
+#[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Activated {
+    pub entity: Entity,
+    pub source: ActivationSource,
+}
+
+/// Ordering for the interaction pipeline.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ControlSet {
+    /// Reads pointers and keys, updates `Control`, emits `Activated`.
+    Interact,
+    /// Redraws controls from their resolved state.
+    Present,
+}
+
+pub struct ControlsPlugin;
+
+impl Plugin for ControlsPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<FocusOwner>()
+            .add_message::<Activated>()
+            .configure_sets(Update, ControlSet::Interact.before(ControlSet::Present))
+            .add_systems(
+                Update,
+                (track_pointer, move_focus_with_tab, activate_with_keyboard, forget_missing_focus)
+                    .chain()
+                    .in_set(ControlSet::Interact),
+            )
+            .add_systems(Update, present_controls.in_set(ControlSet::Present));
+    }
+}
+
+/// Mirror Bevy's `Interaction` into `Control`, and fire on release.
+///
+/// On release rather than on press, because a press that slides off the control
+/// before letting go is a cancellation — every desktop toolkit behaves this way
+/// and players notice when one does not.
+fn track_pointer(
+    mut controls: Query<(Entity, &Interaction, &mut Control)>,
+    mut focus: ResMut<FocusOwner>,
+    mut activated: MessageWriter<Activated>,
+) {
+    for (entity, interaction, mut control) in &mut controls {
+        let was_pressed = control.pressed;
+
+        control.hovered = !matches!(interaction, Interaction::None);
+        control.pressed = matches!(interaction, Interaction::Pressed);
+
+        if !control.enabled {
+            // A disabled control still tracks hover so the cursor can change,
+            // but it never takes focus and never activates.
+            control.pressed = false;
+            continue;
+        }
+
+        if matches!(interaction, Interaction::Pressed) {
+            focus.0 = Some(entity);
+        }
+
+        // Released while still over the control.
+        if was_pressed && matches!(interaction, Interaction::Hovered) {
+            activated.write(Activated { entity, source: ActivationSource::Pointer });
+        }
+    }
+}
+
+/// Tab and Shift+Tab move focus.
+///
+/// Suppressed while a text field owns the keyboard is *not* the rule here: Tab
+/// is how a player leaves a field. Text fields swallow ordinary characters, not
+/// navigation.
+fn move_focus_with_tab(
+    keys: Res<ButtonInput<KeyCode>>,
+    controls: Query<(Entity, &Control)>,
+    mut focus: ResMut<FocusOwner>,
+) {
+    if !keys.just_pressed(KeyCode::Tab) {
+        return;
+    }
+    let backwards = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+
+    let candidates: Vec<FocusCandidate> = controls
+        .iter()
+        .map(|(entity, control)| FocusCandidate {
+            entity,
+            tab_index: control.tab_index,
+            enabled: control.enabled,
+        })
+        .collect();
+
+    focus.0 = next_focus(&candidates, focus.0, backwards);
+}
+
+/// Enter and Space activate the focused control.
+///
+/// Space as well as Enter because a slot grid is navigated like a list, and
+/// Space is what a player's hand reaches for there.
+fn activate_with_keyboard(
+    keys: Res<ButtonInput<KeyCode>>,
+    controls: Query<&Control>,
+    focus: Res<FocusOwner>,
+    mut activated: MessageWriter<Activated>,
+) {
+    if !keys.just_pressed(KeyCode::Enter) && !keys.just_pressed(KeyCode::Space) {
+        return;
+    }
+    let Some(entity) = focus.0 else {
+        return;
+    };
+    // A control that became disabled while focused must not fire.
+    if controls.get(entity).map(|control| control.enabled).unwrap_or(false) {
+        activated.write(Activated { entity, source: ActivationSource::Keyboard });
+    }
+}
+
+/// Drop focus that no longer points at a usable control.
+///
+/// Panels rebuild on every snapshot, so the focused entity is routinely
+/// despawned underneath the player. Left dangling, Tab appears to do nothing:
+/// traversal restarts from a control that no longer exists.
+fn forget_missing_focus(controls: Query<&Control>, mut focus: ResMut<FocusOwner>) {
+    let Some(entity) = focus.0 else {
+        return;
+    };
+    let usable = controls.get(entity).map(|control| control.enabled).unwrap_or(false);
+    if !usable {
+        focus.0 = None;
+    }
+}
+
+/// Redraw controls from their resolved state.
+fn present_controls(
+    focus: Res<FocusOwner>,
+    mut controls: Query<(Entity, &Control, &mut BackgroundColor, &mut BorderColor)>,
+) {
+    for (entity, control, mut background, mut border) in &mut controls {
+        let state = ControlState::resolve(
+            control.enabled,
+            control.hovered,
+            focus.0 == Some(entity),
+            control.pressed,
+        );
+        background.0 = state.surface();
+        *border =
+            BorderColor::all(if state.shows_focus_ring() { focus::RING } else { surface::EDGE });
+    }
+}
+
 /// A button.
 pub fn button(label_text: &str, state: ControlState, tab_index: u32) -> impl Bundle {
     (
@@ -425,6 +589,211 @@ mod tests {
 
     fn candidate(index: u32, tab_index: u32, enabled: bool) -> FocusCandidate {
         FocusCandidate { entity: entity(index), tab_index, enabled }
+    }
+
+    /// An app running the interaction pipeline over a few controls.
+    fn control_app(count: usize) -> (App, Vec<Entity>) {
+        let mut app = App::new();
+        app.add_plugins(ControlsPlugin).insert_resource(ButtonInput::<KeyCode>::default());
+
+        let entities: Vec<Entity> = (0..count)
+            .map(|index| {
+                app.world_mut()
+                    .spawn((
+                        Control { tab_index: index as u32, ..default() },
+                        Interaction::None,
+                        BackgroundColor(Color::NONE),
+                        BorderColor::all(Color::NONE),
+                    ))
+                    .id()
+            })
+            .collect();
+
+        app.update();
+        (app, entities)
+    }
+
+    /// Tap a key: press, run a frame, release.
+    ///
+    /// The release matters. `ButtonInput::press` only records `just_pressed`
+    /// when the key was not already held, so pressing twice without releasing
+    /// makes the second tap a no-op — a real keyboard sends the release, and a
+    /// helper that does not silently tests one keystroke while claiming two.
+    fn press_key(app: &mut App, key: KeyCode) {
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(key);
+        app.update();
+        let mut input = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        input.release(key);
+        input.clear();
+    }
+
+    fn activations(app: &mut App) -> Vec<Activated> {
+        let messages = app.world().resource::<Messages<Activated>>();
+        let mut cursor = messages.get_cursor();
+        cursor.read(messages).copied().collect()
+    }
+
+    fn set_interaction(app: &mut App, entity: Entity, interaction: Interaction) {
+        *app.world_mut().get_mut::<Interaction>(entity).unwrap() = interaction;
+        app.update();
+    }
+
+    #[test]
+    fn a_click_activates_on_release_rather_than_on_press() {
+        // A press that slides off before letting go is a cancellation. Every
+        // desktop toolkit behaves this way and players notice when one does not.
+        let (mut app, controls) = control_app(1);
+
+        set_interaction(&mut app, controls[0], Interaction::Pressed);
+        assert!(activations(&mut app).is_empty(), "activated on press");
+
+        set_interaction(&mut app, controls[0], Interaction::Hovered);
+        let fired = activations(&mut app);
+        assert_eq!(fired.len(), 1);
+        assert_eq!(fired[0].source, ActivationSource::Pointer);
+    }
+
+    #[test]
+    fn a_press_that_slides_off_the_control_is_cancelled() {
+        let (mut app, controls) = control_app(1);
+
+        set_interaction(&mut app, controls[0], Interaction::Pressed);
+        set_interaction(&mut app, controls[0], Interaction::None);
+
+        assert!(activations(&mut app).is_empty(), "a cancelled press still fired");
+    }
+
+    #[test]
+    fn clicking_a_control_gives_it_focus() {
+        // So that Enter afterwards acts on what was just clicked, rather than
+        // on wherever focus happened to be.
+        let (mut app, controls) = control_app(2);
+
+        set_interaction(&mut app, controls[1], Interaction::Pressed);
+        assert_eq!(app.world().resource::<FocusOwner>().0, Some(controls[1]));
+    }
+
+    #[test]
+    fn keyboard_and_pointer_activation_produce_the_same_message() {
+        // The invariant that keeps a control usable both ways. Two separate
+        // paths drift, and the keyboard one is the half nobody notices is
+        // broken.
+        let (mut app, controls) = control_app(1);
+
+        set_interaction(&mut app, controls[0], Interaction::Pressed);
+        set_interaction(&mut app, controls[0], Interaction::Hovered);
+        let by_pointer = activations(&mut app);
+
+        let (mut app, controls) = control_app(1);
+        app.world_mut().resource_mut::<FocusOwner>().0 = Some(controls[0]);
+        press_key(&mut app, KeyCode::Enter);
+        let by_keyboard = activations(&mut app);
+
+        assert_eq!(by_pointer.len(), 1);
+        assert_eq!(by_keyboard.len(), 1);
+        assert_eq!(by_pointer[0].entity, by_keyboard[0].entity);
+        // Only the recorded source differs, which is the point of recording it.
+        assert_ne!(by_pointer[0].source, by_keyboard[0].source);
+    }
+
+    #[test]
+    fn space_activates_as_well_as_enter() {
+        // A slot grid is navigated like a list, and Space is what the hand
+        // reaches for there.
+        let (mut app, controls) = control_app(1);
+        app.world_mut().resource_mut::<FocusOwner>().0 = Some(controls[0]);
+
+        press_key(&mut app, KeyCode::Space);
+        assert_eq!(activations(&mut app).len(), 1);
+    }
+
+    #[test]
+    fn tab_moves_focus_through_the_controls() {
+        let (mut app, controls) = control_app(3);
+
+        press_key(&mut app, KeyCode::Tab);
+        assert_eq!(app.world().resource::<FocusOwner>().0, Some(controls[0]));
+
+        press_key(&mut app, KeyCode::Tab);
+        assert_eq!(app.world().resource::<FocusOwner>().0, Some(controls[1]));
+    }
+
+    #[test]
+    fn shift_tab_moves_focus_backwards() {
+        let (mut app, controls) = control_app(3);
+        app.world_mut().resource_mut::<FocusOwner>().0 = Some(controls[1]);
+
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ShiftLeft);
+        press_key(&mut app, KeyCode::Tab);
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().release(KeyCode::ShiftLeft);
+
+        assert_eq!(app.world().resource::<FocusOwner>().0, Some(controls[0]));
+    }
+
+    #[test]
+    fn a_disabled_control_neither_takes_focus_nor_activates() {
+        let (mut app, controls) = control_app(2);
+        app.world_mut().get_mut::<Control>(controls[0]).unwrap().enabled = false;
+
+        set_interaction(&mut app, controls[0], Interaction::Pressed);
+        set_interaction(&mut app, controls[0], Interaction::Hovered);
+
+        assert!(activations(&mut app).is_empty(), "a disabled control activated");
+        assert_ne!(app.world().resource::<FocusOwner>().0, Some(controls[0]));
+    }
+
+    #[test]
+    fn a_control_disabled_while_focused_does_not_fire_on_enter() {
+        // Panels rebuild constantly, and a control can lose its enabled state
+        // between the player choosing it and pressing the key.
+        let (mut app, controls) = control_app(1);
+        app.world_mut().resource_mut::<FocusOwner>().0 = Some(controls[0]);
+        app.world_mut().get_mut::<Control>(controls[0]).unwrap().enabled = false;
+
+        press_key(&mut app, KeyCode::Enter);
+        assert!(activations(&mut app).is_empty());
+    }
+
+    #[test]
+    fn focus_is_dropped_when_the_focused_control_disappears() {
+        // Panels rebuild on every snapshot, so the focused entity is routinely
+        // despawned underneath the player. Left dangling, Tab appears to do
+        // nothing because traversal restarts from something that is gone.
+        let (mut app, controls) = control_app(2);
+        app.world_mut().resource_mut::<FocusOwner>().0 = Some(controls[0]);
+        app.world_mut().despawn(controls[0]);
+        app.update();
+
+        assert_eq!(app.world().resource::<FocusOwner>().0, None);
+
+        // And traversal still works afterwards.
+        press_key(&mut app, KeyCode::Tab);
+        assert_eq!(app.world().resource::<FocusOwner>().0, Some(controls[1]));
+    }
+
+    #[test]
+    fn the_focused_control_is_drawn_with_its_ring() {
+        // Presentation follows the resolved state rather than being set at each
+        // call site, so a control cannot be focused without looking focused.
+        let (mut app, controls) = control_app(2);
+        app.world_mut().resource_mut::<FocusOwner>().0 = Some(controls[0]);
+        app.update();
+
+        let ring = app.world().get::<BorderColor>(controls[0]).unwrap().top;
+        let plain = app.world().get::<BorderColor>(controls[1]).unwrap().top;
+        assert_eq!(ring, focus::RING);
+        assert_ne!(plain, focus::RING);
+    }
+
+    #[test]
+    fn hovering_changes_how_a_control_is_drawn() {
+        let (mut app, controls) = control_app(1);
+        let plain = app.world().get::<BackgroundColor>(controls[0]).unwrap().0;
+
+        set_interaction(&mut app, controls[0], Interaction::Hovered);
+        let hovered = app.world().get::<BackgroundColor>(controls[0]).unwrap().0;
+
+        assert_ne!(plain, hovered);
     }
 
     #[test]

@@ -28,6 +28,7 @@ impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             fonts::FontPlugin,
+            controls::ControlsPlugin,
             state::UiStatePlugin,
             shell::ShellPlugin,
             topbar::TopBarPlugin,
