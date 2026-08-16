@@ -7,6 +7,7 @@ use crate::net::{start_graphics_load, LoadState, MapLoader};
 use crate::net::{DEFAULT_BODY, DEFAULT_HEAD};
 use crate::session::{ConnectionState, Session};
 use crate::ui::layout::within_area_of_interest;
+use crate::ui::scale::ScaleDomains;
 use ao_core::{is_walkable, TileFlags, WalkGate, WalkGateConfig, WalkOutcome};
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
@@ -424,10 +425,11 @@ fn follow_camera(
     motion: Res<Motion>,
     player: Res<LocalPlayer>,
     mut cameras: Query<&mut Transform, (With<Camera2d>, Without<PlayerSprite>)>,
+    domains: Res<ScaleDomains>,
 ) {
     let now_ms = time.elapsed_secs_f64() as f32 * 1000.0;
     let position = if motion.duration_ms > 0.0 {
-        motion.sample_snapped(now_ms)
+        motion.sample_snapped(now_ms, *domains)
     } else {
         tile_to_world(player.x, player.y)
     };
@@ -567,10 +569,11 @@ fn fade_overlays(
     motion: Res<Motion>,
     player: Res<LocalPlayer>,
     mut overlays: Query<(&Overlay, &mut Sprite)>,
+    domains: Res<ScaleDomains>,
 ) {
     let now_ms = time.elapsed_secs_f64() as f32 * 1000.0;
     let feet = if motion.duration_ms > 0.0 {
-        motion.sample_snapped(now_ms)
+        motion.sample_snapped(now_ms, *domains)
     } else {
         tile_to_world(player.x, player.y)
     };
@@ -638,9 +641,8 @@ impl Motion {
     /// character then wobbles half a pixel against a world that snaps — so the
     /// character and the camera must round the *same* value, which is why this
     /// lives here rather than in either system.
-    fn sample_snapped(&self, now_ms: f32) -> Vec2 {
-        let p = self.sample(now_ms);
-        Vec2::new(p.x.round(), p.y.round())
+    fn sample_snapped(&self, now_ms: f32, domains: ScaleDomains) -> Vec2 {
+        crate::ui::scale::snap_to_pixel_grid(self.sample(now_ms), domains)
     }
 
     fn is_moving(&self, now_ms: f32) -> bool {
@@ -1329,9 +1331,10 @@ fn animate_character(
     time: Res<Time>,
     motion: Res<Motion>,
     mut parts: Query<(&mut Transform, Option<&mut Sprite>, Option<&mut WalkCycle>, &CharacterPart)>,
+    domains: Res<ScaleDomains>,
 ) {
     let now_ms = time.elapsed_secs_f64() as f32 * 1000.0;
-    let position = motion.sample_snapped(now_ms);
+    let position = motion.sample_snapped(now_ms, *domains);
     let moving = motion.is_moving(now_ms);
 
     for (mut transform, sprite, cycle, part) in &mut parts {
@@ -1691,6 +1694,7 @@ mod tests {
         app.insert_resource(Time::<()>::default())
             .insert_resource(Motion::default())
             .insert_resource(LocalPlayer::default())
+            .insert_resource(ScaleDomains::default())
             .add_systems(Update, fade_overlays);
         app.world_mut().spawn((Overlay { bounds }, Sprite::from_color(Color::WHITE, Vec2::ONE)));
         app

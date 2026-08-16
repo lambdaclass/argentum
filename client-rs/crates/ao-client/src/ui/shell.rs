@@ -11,6 +11,7 @@
 //! visible on resize as a stale strip down the edge of the world.
 
 use super::layout::{self, RailMode, ShellGeometry, WorldView};
+use super::scale::{self, ScaleDomains};
 use super::tokens::{focus, ink, size, space, surface, type_scale};
 use bevy::camera::Viewport;
 use bevy::prelude::*;
@@ -71,6 +72,7 @@ pub struct ShellPlugin;
 impl Plugin for ShellPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AppliedGeometry>()
+            .init_resource::<ScaleDomains>()
             .add_systems(Startup, spawn_shell)
             .add_systems(Update, (apply_geometry, apply_rail_mode).chain());
     }
@@ -178,19 +180,27 @@ fn apply_geometry(
     windows: Query<&Window>,
     mut applied: ResMut<AppliedGeometry>,
     mut regions: Query<(&Region, &mut Node)>,
-    mut cameras: Query<&mut Camera, With<WorldCamera>>,
+    mut cameras: Query<(&mut Camera, &mut Projection), With<WorldCamera>>,
     mut radius: ResMut<crate::world::ViewRadius>,
+    mut domains: ResMut<ScaleDomains>,
+    mut ui_scale: ResMut<UiScale>,
 ) {
     let Ok(window) = windows.single() else {
         return;
     };
 
     let logical = Vec2::new(window.width(), window.height());
+    let resolved = scale::resolve(logical, window.scale_factor());
     let geometry = layout::shell_geometry(logical);
-    if geometry == applied.0 {
+    if geometry == applied.0 && resolved == *domains {
         return;
     }
     applied.0 = geometry;
+    *domains = resolved;
+
+    // Text and controls only. Bevy's UiScale does not touch the world camera,
+    // which is what keeps "bigger text" from meaning "see more tiles".
+    ui_scale.0 = resolved.ui;
 
     for (region, mut node) in &mut regions {
         let rect = match region {
@@ -206,21 +216,23 @@ fn apply_geometry(
 
     // The camera viewport is in physical pixels; everything above is logical.
     // This is the single place device pixel ratio is applied.
-    let scale = window.scale_factor();
     let view = layout::world_view(geometry.world);
-    for mut camera in &mut cameras {
-        camera.viewport = view_viewport(view, scale);
+    let physical = view.rect.size() * resolved.device;
+
+    for (mut camera, mut projection) in &mut cameras {
+        camera.viewport = view_viewport(view, resolved.device);
+        // One world unit becomes exactly `world` physical pixels. Any other
+        // value resamples the tile atlas, which is the blur this domain exists
+        // to prevent.
+        if let Projection::Orthographic(ortho) = projection.as_mut() {
+            ortho.scale = resolved.projection_scale();
+        }
     }
 
     // Painting follows the viewport. It used to follow a constant, so a window
     // wider than the constant drew black beyond it.
-    radius.0 = view_radius_tiles(view);
-}
-
-/// Half the visible world in tiles, rounded up so a partially visible edge tile
-/// is still painted rather than clipped to black.
-pub fn view_radius_tiles(view: WorldView) -> IVec2 {
-    IVec2::new((view.tiles.x + 1) / 2, (view.tiles.y + 1) / 2)
+    let tiles = scale::visible_tiles(physical, resolved);
+    radius.0 = IVec2::new((tiles.x + 1) / 2, (tiles.y + 1) / 2);
 }
 
 /// Physical-pixel viewport for the world camera.
@@ -295,6 +307,40 @@ pub fn muted_label(text: impl Into<String>) -> impl Bundle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_camera_viewport_tracks_the_world_view_not_the_whole_region() {
+        // On a capped display the view is inset inside its region. A camera
+        // still filling the region would render world under the perimeter.
+        let geometry = layout::shell_geometry(Vec2::new(7680.0, 2160.0));
+        let view = layout::world_view(geometry.world);
+        let viewport = view_viewport(view, 1.0).expect("has area");
+
+        assert!(view.has_perimeter, "this display should be capped");
+        assert_eq!(viewport.physical_size.x, view.rect.width() as u32);
+        assert!(
+            viewport.physical_size.x < geometry.world.width() as u32,
+            "the camera claimed the perimeter as world"
+        );
+    }
+
+    #[test]
+    fn a_high_dpi_display_gets_a_larger_viewport_and_a_matching_projection() {
+        // Both halves have to move together. A 2x viewport with a 1x
+        // projection shows twice the world; the reverse shows a quarter of it,
+        // scaled up.
+        let geometry = layout::shell_geometry(Vec2::new(1280.0, 720.0));
+        let view = layout::world_view(geometry.world);
+
+        let one = scale::resolve(Vec2::new(1280.0, 720.0), 1.0);
+        let two = scale::resolve(Vec2::new(1280.0, 720.0), 2.0);
+
+        let at_1x = view_viewport(view, one.device).unwrap();
+        let at_2x = view_viewport(view, two.device).unwrap();
+
+        assert_eq!(at_2x.physical_size.x, at_1x.physical_size.x * 2);
+        assert_eq!(two.projection_scale() * 2.0, one.projection_scale());
+    }
 
     #[test]
     fn the_world_camera_viewport_matches_the_world_region() {

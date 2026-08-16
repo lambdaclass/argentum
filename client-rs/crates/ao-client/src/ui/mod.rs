@@ -9,6 +9,7 @@
 pub mod hotbar;
 pub mod layout;
 pub mod rail;
+pub mod scale;
 pub mod shell;
 pub mod tokens;
 pub mod topbar;
