@@ -76,6 +76,16 @@
         overflow: hidden;
       }
 
+      /* Real fullscreen. The browser sizes the element to the display, so
+         only the window chrome has to go. */
+      #shell:fullscreen {
+        width: 100vw;
+        height: 100vh;
+        border: none;
+        box-shadow: none;
+      }
+
+      /* Fallback for when fullscreen is refused — see aoWindow.setMaximized. */
       #shell.maximized {
         width: 100vw;
         height: 100vh;
@@ -187,10 +197,28 @@
       // only the page can do. Deliberately tiny and stateless-ish: the shell is
       // still the single source of truth for whether it is maximised.
       window.aoWindow = {
-        setMaximized(on) {
-          document.getElementById("shell")?.classList.toggle("maximized", !!on);
+        async setMaximized(on) {
+          const shell = document.getElementById("shell");
+          try {
+            if (on && !document.fullscreenElement) {
+              await shell.requestFullscreen();
+            } else if (!on && document.fullscreenElement) {
+              await document.exitFullscreen();
+            }
+            // Real fullscreen sizes the element itself, so the fallback class
+            // must come off or the two fight over the restore.
+            shell?.classList.remove("maximized");
+            return;
+          } catch {
+            // Fullscreen can be refused: the browser requires a recent user
+            // gesture, and an automated capture has none. Filling the tab is
+            // the honest fallback — the control still does something visible
+            // rather than appearing broken.
+            shell?.classList.toggle("maximized", !!on);
+          }
         },
         isMaximized() {
+          if (document.fullscreenElement) return true;
           return !!document.getElementById("shell")?.classList.contains("maximized");
         },
       };

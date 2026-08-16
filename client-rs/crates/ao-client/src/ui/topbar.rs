@@ -61,21 +61,31 @@ pub enum BarAction {
     MuteAudio,
     MuteCombat,
     Settings,
-    /// Expand the client to fill the page, and back.
+    /// Enter and leave fullscreen.
     ///
     /// The client presents as a window on the page by default, like the
-    /// reference client does. Bevy cannot resize its own host element, so this
-    /// is the one action that has to reach the page — through a capability
-    /// adapter, not by growing a second UI tree there.
+    /// reference client does; this takes over the whole display rather than
+    /// merely filling the browser tab. Bevy cannot put its own host element
+    /// into fullscreen, so this is the one action that has to reach the page —
+    /// through a capability adapter, not by growing a second UI tree there.
     ToggleMaximise,
 }
 
-/// Whether the host page is currently maximised.
+/// Whether the client is currently fullscreen.
 ///
 /// Mirrored here so the button can render its state without asking the page
-/// every frame. The page remains authoritative; this is refreshed from it.
+/// every frame. The page stays authoritative, and this is re-read from it
+/// periodically — a player can leave fullscreen with Escape, which the client
+/// never hears about otherwise and would then show the wrong state forever.
 #[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Maximised(pub bool);
+
+/// How often the page is asked whether it is still fullscreen.
+///
+/// Escape leaves fullscreen without telling anyone, so the mirror has to be
+/// refreshed. Twice a second is far below anything a player would notice and
+/// far above one call per frame.
+const FULLSCREEN_POLL_SECS: f32 = 0.5;
 
 pub struct TopBarPlugin;
 
@@ -83,7 +93,7 @@ impl Plugin for TopBarPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Maximised>()
             .add_systems(Startup, populate.after(super::shell::spawn_shell))
-            .add_systems(Update, (update_readout, handle_bar_clicks));
+            .add_systems(Update, (update_readout, handle_bar_clicks, refresh_maximised));
     }
 }
 
@@ -267,7 +277,50 @@ fn handle_bar_clicks(
     }
 }
 
-/// Ask the page to grow or shrink the client.
+/// Re-read the page's fullscreen state.
+///
+/// A player can leave fullscreen with Escape, and the page does not tell the
+/// client. Without this the mirror is wrong from then on and the button offers
+/// to do what has already happened.
+fn refresh_maximised(time: Res<Time>, mut since: Local<f32>, mut maximised: ResMut<Maximised>) {
+    *since += time.delta_secs();
+    if *since < FULLSCREEN_POLL_SECS {
+        return;
+    }
+    *since = 0.0;
+
+    let actual = page_is_maximised();
+    if actual != maximised.0 {
+        maximised.0 = actual;
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn page_is_maximised() -> bool {
+    use wasm_bindgen::JsValue;
+
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+    let Ok(adapter) = js_sys::Reflect::get(&window, &JsValue::from_str("aoWindow")) else {
+        return false;
+    };
+    let Ok(getter) = js_sys::Reflect::get(&adapter, &JsValue::from_str("isMaximized")) else {
+        return false;
+    };
+    getter
+        .dyn_ref::<js_sys::Function>()
+        .and_then(|f| f.call0(&adapter).ok())
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn page_is_maximised() -> bool {
+    false
+}
+
+/// Ask the page to enter or leave fullscreen.
 #[cfg(target_arch = "wasm32")]
 fn set_page_maximised(on: bool) {
     use wasm_bindgen::JsValue;
