@@ -200,9 +200,16 @@ fn experience_bar(experience: Gauge) -> impl Bundle {
     (
         Node {
             width: Val::Percent(100.0),
+            // The header centres its children, which makes a 100%-width bar
+            // collapse to its content — the track vanished and the fill became
+            // a small square floating in the middle of the panel.
+            align_self: AlignSelf::Stretch,
             height: Val::Px(size::STATUS_BAR_HEIGHT),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
+            // The fill is absolutely positioned; without this it draws past the
+            // track's rounded end and over whatever is beside it.
+            overflow: Overflow::clip(),
             ..default()
         },
         BackgroundColor(surface::WELL),
@@ -259,9 +266,11 @@ fn vital_bar(prefix: &str, gauge: Gauge, fill: Color) -> impl Bundle {
     (
         Node {
             width: Val::Percent(100.0),
+            align_self: AlignSelf::Stretch,
             height: Val::Px(size::STATUS_BAR_HEIGHT),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
+            overflow: Overflow::clip(),
             ..default()
         },
         BackgroundColor(surface::WELL),
@@ -413,6 +422,11 @@ fn inventory_slot(
             align_items: AlignItems::Center,
             justify_content: JustifyContent::Center,
             border: UiRect::all(Val::Px(size::BORDER)),
+            // Until slots draw their artwork, they hold a name, and a long one
+            // ran across its neighbours and out of the panel. Clipping is the
+            // honest stopgap: a truncated name is legibly truncated, where an
+            // overflowing one silently corrupts the row.
+            overflow: Overflow::clip(),
             ..default()
         },
         BackgroundColor(if locked { surface::VOID } else { surface::WELL }),
