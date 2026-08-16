@@ -20,7 +20,8 @@ use bevy::prelude::*;
 ///
 /// Fixed rather than proportional: it holds one row of text and icons, and a
 /// bar that grows with the window just wastes vertical space on large screens.
-pub const TOP_BAR_HEIGHT: f32 = 34.0;
+/// Measured from the reference client.
+pub const TOP_BAR_HEIGHT: f32 = 30.0;
 
 /// Share of the window width the character rail aims for.
 ///

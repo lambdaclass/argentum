@@ -138,6 +138,33 @@ fn icon_button(action: BarAction, glyph: &'static str) -> impl Bundle {
     )
 }
 
+/// One `LABEL value` pair in the status row.
+///
+/// The label is muted and the value is not, so the eye lands on the number
+/// rather than on the word naming it.
+fn readout_field(name: &'static str, value: &str) -> impl Bundle {
+    (
+        Node { align_items: AlignItems::Center, column_gap: Val::Px(space::TIGHT), ..default() },
+        children![
+            (
+                Text::new(name),
+                TextFont { font_size: type_scale::SMALL, ..default() },
+                TextColor(ink::MUTED),
+            ),
+            (
+                Text::new(value.to_string()),
+                TextFont { font_size: type_scale::SMALL, ..default() },
+                TextColor(ink::PRIMARY),
+                ReadoutValue,
+            ),
+        ],
+    )
+}
+
+/// The changing half of a readout field.
+#[derive(Component)]
+struct ReadoutValue;
+
 fn populate(mut commands: Commands, bars: Query<(Entity, &Region)>) {
     let Some((bar, _)) = bars.iter().find(|(_, region)| **region == Region::TopBar) else {
         return;
@@ -175,10 +202,23 @@ fn populate(mut commands: Commands, bars: Query<(Entity, &Region)>) {
                     BarAction::Support,
                     children![label("SUPPORT", type_scale::SMALL, ink::GOLD)],
                 ),
+                // Three nodes with a real gap, not one string with spaces in
+                // it. The face is proportional, so runs of spaces collapse to
+                // about a character's width and the row reads "FPS144 PING--
+                // ON1".
                 (
-                    label("FPS --   PING --   ON --", type_scale::SMALL, ink::PRIMARY),
+                    Node {
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(space::WIDE),
+                        ..default()
+                    },
                     StatusReadout,
                     FpsAverage::default(),
+                    children![
+                        readout_field("FPS", "--"),
+                        readout_field("PING", "--"),
+                        readout_field("ON", "--"),
+                    ],
                 ),
             ],
         ))

@@ -129,7 +129,7 @@ fn rebuild_on_change(
                 });
             }
             RailRegion::SlotGrid => {
-                let inner = geometry.0.rail.width() - space::BASE * 2.0 - space::TIGHT * 2.0;
+                let inner = grid_inner_width(geometry.0.rail.width());
                 commands.entity(entity).with_children(|parent| {
                     parent.spawn((
                         PanelContent,
@@ -170,6 +170,11 @@ fn column(gap: f32) -> Node {
     }
 }
 
+/// A centred column, for the character header.
+fn centred_column(gap: f32) -> Node {
+    Node { align_items: AlignItems::Center, ..column(gap) }
+}
+
 fn character_header(snapshot: &UiSnapshot) -> impl Bundle {
     let progression = &snapshot.progression;
     // A loading snapshot has no name yet. An em dash says "not known" where a
@@ -179,7 +184,7 @@ fn character_header(snapshot: &UiSnapshot) -> impl Bundle {
     let subtitle = format!("{} · level {}", progression.class_key, progression.level);
 
     (
-        column(space::TIGHT),
+        centred_column(space::TIGHT),
         children![
             text(name, type_scale::TITLE, ink::GOLD),
             text(subtitle, type_scale::SMALL, ink::MUTED),
@@ -221,15 +226,29 @@ fn experience_bar(experience: Gauge) -> impl Bundle {
 fn vitals_stack(snapshot: &UiSnapshot) -> impl Bundle {
     let vitals = snapshot.vitals;
     (
-        column(space::TIGHT),
+        column(space::HAIR),
         children![
+            // The three that decide a fight, full width and stacked, as in the
+            // reference composition.
             vital_bar("HP", vitals.health, status::HEALTH),
             vital_bar("Mana", vitals.mana, status::MANA),
             vital_bar("Sta", vitals.stamina, status::STAMINA),
-            vital_bar("Food", vitals.hunger, status::HUNGER),
-            vital_bar("Water", vitals.thirst, status::THIRST),
+            // Hunger and thirst change over minutes rather than seconds, so
+            // they share a row and give their height back to the world.
+            (
+                Node { width: Val::Percent(100.0), column_gap: Val::Px(space::HAIR), ..default() },
+                children![
+                    half_width(vital_bar("Food", vitals.hunger, status::HUNGER)),
+                    half_width(vital_bar("Water", vitals.thirst, status::THIRST)),
+                ],
+            ),
         ],
     )
+}
+
+/// Wrap a bar so two sit side by side.
+fn half_width(inner: impl Bundle) -> impl Bundle {
+    (Node { flex_grow: 1.0, flex_basis: Val::Px(0.0), ..default() }, children![inner])
 }
 
 /// One vital, with its numbers inside the bar.
@@ -263,6 +282,24 @@ fn vital_bar(prefix: &str, gauge: Gauge, fill: Color) -> impl Bundle {
     )
 }
 
+/// Width the slot grid actually has, inside a rail of `rail_width`.
+///
+/// Every inset between the rail's edge and the slots has to be subtracted, and
+/// missing one is not a cosmetic error: overflowing by a single pixel makes
+/// flex wrap the sixth slot onto its own row, so the grid silently becomes five
+/// columns and the last rows fall out of the panel. That is exactly what
+/// happened when the region's border was left out of this sum.
+pub fn grid_inner_width(rail_width: f32) -> f32 {
+    let rail_padding = space::BASE * 2.0;
+    let region_border = size::BORDER * 2.0;
+    // No padding of its own: the reference grid sits flush inside its well, and
+    // six 43-pixel slots plus their gaps need every pixel of a 280-pixel rail.
+    let grid_padding = 0.0;
+    // A pixel of slack, because the layout engine rounds and a grid that fits
+    // exactly is one rounding step from not fitting.
+    (rail_width - rail_padding - region_border - grid_padding - 1.0).max(0.0)
+}
+
 /// Slot size that fits `columns` of them across `available` logical pixels.
 ///
 /// The grid is fixed at six columns to match the reference composition, but the
@@ -272,7 +309,7 @@ fn vital_bar(prefix: &str, gauge: Gauge, fill: Color) -> impl Bundle {
 /// panel entirely.
 pub fn slot_size(available: f32, columns: usize) -> f32 {
     let columns = columns.max(1) as f32;
-    let gaps = (columns - 1.0) * space::HAIR;
+    let gaps = (columns - 1.0) * space::GRID_GAP;
     let fitted = (available - gaps) / columns;
     // Never larger than the design size, and never so small it stops being a
     // target: below this the compact rail is the right answer instead.
@@ -294,9 +331,8 @@ fn inventory_grid(
             width: Val::Percent(100.0),
             flex_direction: FlexDirection::Row,
             flex_wrap: FlexWrap::Wrap,
-            column_gap: Val::Px(space::HAIR),
-            row_gap: Val::Px(space::HAIR),
-            padding: UiRect::all(Val::Px(space::TIGHT)),
+            column_gap: Val::Px(space::GRID_GAP),
+            row_gap: Val::Px(space::GRID_GAP),
             ..default()
         },
         Children::spawn(SpawnIter({
@@ -530,13 +566,33 @@ mod tests {
             if geometry.rail_mode != layout::RailMode::Full {
                 continue;
             }
-            let inner = geometry.rail.width() - space::BASE * 2.0 - space::TIGHT * 2.0;
+            let inner = grid_inner_width(geometry.rail.width());
             let slot = slot_size(inner, 6);
-            let used = slot * 6.0 + space::HAIR * 5.0;
+            let used = slot * 6.0 + space::GRID_GAP * 5.0;
 
             assert!(used <= inner, "at {width}px the grid needs {used} of {inner} available");
             assert!(slot >= 24.0, "at {width}px a slot is only {slot}px, too small to hit");
         }
+    }
+
+    #[test]
+    fn the_grid_width_accounts_for_every_inset_between_it_and_the_rail() {
+        // Overflowing by one pixel makes flex wrap the sixth slot onto its own
+        // row, so the grid silently becomes five columns and the last rows fall
+        // out of the panel. Leaving the region's border out of the sum did
+        // exactly that.
+        let rail = 275.0;
+        let inner = grid_inner_width(rail);
+        // Every inset between the rail's edge and the first slot. The grid has
+        // no padding of its own, matching the reference.
+        let insets = space::BASE * 2.0 + size::BORDER * 2.0;
+
+        assert!(inner <= rail - insets, "an inset is missing from the sum");
+        assert!(inner > 0.0);
+
+        // And the result genuinely fits six.
+        let slot = slot_size(inner, 6);
+        assert!(slot * 6.0 + space::GRID_GAP * 5.0 <= inner);
     }
 
     #[test]

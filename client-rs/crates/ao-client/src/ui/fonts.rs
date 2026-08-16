@@ -39,7 +39,9 @@ impl Plugin for FontPlugin {
 fn install_default_font(mut fonts: ResMut<Assets<Font>>) {
     match Font::try_from_bytes(FONT_BYTES.to_vec()) {
         Ok(font) => {
-            fonts.insert(&Handle::<Font>::default(), font);
+            // The handle is the built-in default, so this replaces rather
+            // than inserts; the returned previous value is of no interest.
+            let _ = fonts.insert(&Handle::<Font>::default(), font);
         }
         Err(error) => {
             // Not fatal: the built-in font still renders ASCII, which is enough

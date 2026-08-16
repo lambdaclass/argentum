@@ -18,23 +18,28 @@ use bevy::prelude::*;
 pub mod surface {
     use super::*;
 
-    // These were all roughly half as bright, and on a real screen the whole
-    // rail rendered as a single black rectangle: the panel, the wells inside
-    // it and the borders between them were within a few percent of each other
-    // and of the page background. Every surface here now has to be separable
-    // from its neighbour, which the `panel_surfaces_are_separable` test holds
-    // them to.
+    // Sampled from the reference client rather than invented. An earlier
+    // version of this palette was roughly twice as bright, because a test here
+    // demanded that every pair of surfaces differ by 1.25:1 — a threshold that
+    // belongs to *text*, not to panels. The reference separates its surfaces by
+    // only 1.03 to 1.28 and carries structure through borders and type instead,
+    // which is why lightening everything moved away from the target rather than
+    // toward it.
 
-    /// Behind everything. Only visible in the perimeter on capped displays.
-    pub const VOID: Color = Color::srgb(0.012, 0.010, 0.009);
+    /// The page behind the client window, and the perimeter on capped displays.
+    pub const VOID: Color = Color::srgb(0.027, 0.027, 0.055);
     /// The top bar and rail body.
-    pub const PANEL: Color = Color::srgb(0.250, 0.204, 0.147);
-    /// Inset areas inside a panel: slot grids, list backgrounds.
-    pub const WELL: Color = Color::srgb(0.155, 0.127, 0.098);
-    /// A raised element inside a panel: an unfilled slot, a button face.
-    pub const RAISED: Color = Color::srgb(0.320, 0.262, 0.186);
+    pub const PANEL: Color = Color::srgb(0.090, 0.071, 0.051);
+    /// Inset areas inside a panel: slot grids, list backgrounds, bar tracks.
+    pub const WELL: Color = Color::srgb(0.059, 0.047, 0.027);
+    /// A raised element inside a panel: a slot face, a button, a selected tab.
+    pub const RAISED: Color = Color::srgb(0.114, 0.094, 0.059);
     /// Panel edges and separators.
-    pub const EDGE: Color = Color::srgb(0.450, 0.360, 0.225);
+    ///
+    /// A little brighter than the reference's slot border, which is the same
+    /// tone as its raised faces. Left equal, a border drawn *on* a raised face
+    /// disappears, and the structure the whole palette depends on goes with it.
+    pub const EDGE: Color = Color::srgb(0.212, 0.172, 0.108);
 }
 
 /// Text and iconography.
@@ -55,15 +60,15 @@ pub mod ink {
 pub mod status {
     use super::*;
 
-    pub const HEALTH: Color = Color::srgb(0.776, 0.157, 0.157);
-    pub const MANA: Color = Color::srgb(0.204, 0.325, 0.831);
+    pub const HEALTH: Color = Color::srgb(0.773, 0.110, 0.110);
+    pub const MANA: Color = Color::srgb(0.243, 0.365, 0.816);
     pub const STAMINA: Color = Color::srgb(0.851, 0.706, 0.208);
     /// A food brown, not a green. It was a green, and measured only 0.12 from
     /// EXPERIENCE in linear RGB — the hunger bar and the XP bar would have read
     /// as the same colour at a glance.
     pub const HUNGER: Color = Color::srgb(0.550, 0.380, 0.200);
     pub const THIRST: Color = Color::srgb(0.243, 0.612, 0.729);
-    pub const EXPERIENCE: Color = Color::srgb(0.361, 0.722, 0.361);
+    pub const EXPERIENCE: Color = Color::srgb(0.239, 0.624, 0.239);
     /// A rejected action, and error text in the world message area.
     pub const DANGER: Color = Color::srgb(0.918, 0.353, 0.286);
     /// A server notice in the world message area.
@@ -94,6 +99,13 @@ pub mod focus {
 
 /// Spacing scale. One unit is 4 logical pixels.
 pub mod space {
+    /// Gap between slots in a grid.
+    ///
+    /// Measured from the reference client: its six columns span 263 logical
+    /// pixels, which is 43-pixel slots separated by a single pixel. Anything
+    /// wider and six no longer fit a 280-pixel rail.
+    pub const GRID_GAP: f32 = 1.0;
+
     pub const HAIR: f32 = 2.0;
     pub const TIGHT: f32 = 4.0;
     pub const SNUG: f32 = 6.0;
@@ -110,20 +122,27 @@ pub mod type_scale {
     pub const SMALL: f32 = 12.0;
     /// Body text and values.
     pub const BODY: f32 = 13.0;
-    /// Panel headings.
-    pub const HEADING: f32 = 16.0;
-    /// The character name.
-    pub const TITLE: f32 = 20.0;
+    /// Panel headings. Below the character name, which is the only text in the
+    /// rail that outranks them.
+    pub const HEADING: f32 = 14.0;
+    /// The character name. Sized from the reference client, where it is the
+    /// largest text in the interface but still only a little above body size —
+    /// a rail is not a poster.
+    pub const TITLE: f32 = 16.0;
 }
 
 /// Fixed sizes shared by controls.
 pub mod size {
     /// An inventory or spell slot, including its border.
-    pub const SLOT: f32 = 44.0;
+    ///
+    /// Measured: six columns and five one-pixel gaps across the 263 logical
+    /// pixels the reference rail gives its grid.
+    pub const SLOT: f32 = 43.0;
     /// A hotbar slot.
     pub const HOTBAR_SLOT: f32 = 46.0;
-    /// A status bar's height, chosen so a numeral fits inside it.
-    pub const STATUS_BAR_HEIGHT: f32 = 18.0;
+    /// A status bar's height, chosen so a numeral fits inside it. Measured
+    /// from the reference client's HP bar.
+    pub const STATUS_BAR_HEIGHT: f32 = 16.0;
     /// An icon button in the top bar or rail footer.
     pub const ICON_BUTTON: f32 = 26.0;
     /// Border thickness on panels and slots.
@@ -165,10 +184,24 @@ mod tests {
     const AA_LARGE: f32 = 3.0;
 
     #[test]
-    fn panel_surfaces_are_separable_from_each_other() {
-        // The whole rail once rendered as one black rectangle: panel, well,
-        // raised and edge were within a few percent of each other, so none of
-        // the structure was visible. Each pair has to be distinguishable.
+    fn a_border_is_visible_against_every_surface_it_separates() {
+        // This is what actually carries the structure. The reference client's
+        // surfaces differ by as little as 1.03:1 and its interface still reads,
+        // because the borders and the type do the work. A border that
+        // disappears against a slot face is what makes a grid look like one
+        // continuous well.
+        for (name, against) in
+            [("panel", surface::PANEL), ("well", surface::WELL), ("raised", surface::RAISED)]
+        {
+            let ratio = contrast_ratio(surface::EDGE, against);
+            assert!(ratio >= 1.15, "the edge is only {ratio:.3}:1 against {name}");
+        }
+    }
+
+    #[test]
+    fn no_two_surfaces_are_the_same_colour() {
+        // They are allowed to be close — the reference's are — but two that are
+        // identical mean one of the five tokens is not doing anything.
         let surfaces = [
             ("void", surface::VOID),
             ("panel", surface::PANEL),
@@ -176,37 +209,18 @@ mod tests {
             ("raised", surface::RAISED),
             ("edge", surface::EDGE),
         ];
-
         for (i, (a_name, a)) in surfaces.iter().enumerate() {
             for (b_name, b) in &surfaces[i + 1..] {
-                let ratio = contrast_ratio(*a, *b);
-                assert!(
-                    ratio >= 1.25,
-                    "{a_name} and {b_name} are only {ratio:.2}:1 apart — the boundary is invisible"
-                );
+                assert_ne!(a, b, "{a_name} and {b_name} are the same colour");
             }
         }
     }
 
     #[test]
-    fn a_panel_is_visible_against_the_page_behind_it() {
-        // The client presents as a window on a dark page. A panel that matches
-        // the page has no edge, and the interface looks like it is floating in
-        // nothing.
-        let page = Color::srgb(0.027, 0.035, 0.051);
-        assert!(contrast_ratio(surface::PANEL, page) >= 1.5);
-    }
-
-    #[test]
-    fn a_border_is_visible_against_both_surfaces_it_separates() {
-        // A border only doing its job on one side still leaves slots looking
-        // like one continuous well.
-        for (name, against) in
-            [("panel", surface::PANEL), ("well", surface::WELL), ("raised", surface::RAISED)]
-        {
-            let ratio = contrast_ratio(surface::EDGE, against);
-            assert!(ratio >= 1.3, "the edge is only {ratio:.2}:1 against {name}");
-        }
+    fn the_client_window_is_visible_against_the_page_behind_it() {
+        // The client presents as a window on a dark page. Its own border is
+        // what separates the two, so that is what is measured.
+        assert!(contrast_ratio(surface::EDGE, surface::VOID) >= 1.2);
     }
 
     #[test]

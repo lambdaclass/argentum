@@ -11,8 +11,8 @@
 //! its time, and vitals at the bottom edge nearest the world — the numbers you
 //! check mid-fight sit closest to what you are looking at.
 
-use super::shell::{label, muted_label, CompactRailOnly, FullRailOnly, Region};
-use super::tokens::{ink, size, space, surface, type_scale};
+use super::shell::{muted_label, CompactRailOnly, FullRailOnly, Region};
+use super::tokens::{size, space, surface};
 use bevy::prelude::*;
 
 /// The rail's stacked regions, top to bottom.
