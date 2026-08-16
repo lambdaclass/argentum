@@ -10,6 +10,7 @@ pub mod character;
 pub mod controls;
 pub mod fonts;
 pub mod hotbar;
+pub mod icons;
 pub mod layout;
 pub mod pointer;
 pub mod rail;
@@ -32,6 +33,7 @@ impl Plugin for UiPlugin {
             fonts::FontPlugin,
             controls::ControlsPlugin,
             pointer::PointerPlugin,
+            icons::TooltipPlugin,
             state::UiStatePlugin,
             shell::ShellPlugin,
             topbar::TopBarPlugin,

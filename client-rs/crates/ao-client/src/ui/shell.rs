@@ -552,6 +552,121 @@ mod tests {
         assert!(app.world().get::<UiCamera>(target).is_some(), "and it must be the shell's own");
     }
 
+    /// Every region the shell partitions the window into.
+    fn regions_of(geometry: ShellGeometry) -> [(&'static str, Rect); 3] {
+        [("top bar", geometry.top_bar), ("world", geometry.world), ("rail", geometry.rail)]
+    }
+
+    fn overlap(a: Rect, b: Rect) -> bool {
+        let intersection = a.intersect(b);
+        intersection.width() > 0.01 && intersection.height() > 0.01
+    }
+
+    #[test]
+    fn the_regions_partition_the_window_without_overlap_or_spill() {
+        // The shell's whole job. Checked across every size a player can produce
+        // — including the degenerate ones a browser reports mid-restore, which
+        // is where negative extents come from.
+        let sizes = [
+            Vec2::new(1280.0, 720.0),
+            Vec2::new(1920.0, 1080.0),
+            Vec2::new(2560.0, 1440.0),
+            Vec2::new(3440.0, 1440.0),
+            Vec2::new(1024.0, 768.0),
+            Vec2::new(900.0, 700.0),
+            Vec2::new(640.0, 480.0),
+            Vec2::new(1.0, 1.0),
+            Vec2::ZERO,
+        ];
+
+        for size in sizes {
+            let geometry = layout::shell_geometry(size);
+            let window = Rect::from_corners(Vec2::ZERO, size);
+
+            for (name, rect) in regions_of(geometry) {
+                assert!(rect.width() >= 0.0, "{size:?}: {name} has negative width");
+                assert!(rect.height() >= 0.0, "{size:?}: {name} has negative height");
+                assert!(
+                    rect.min.x >= -0.01
+                        && rect.min.y >= -0.01
+                        && rect.max.x <= window.max.x + 0.01
+                        && rect.max.y <= window.max.y + 0.01,
+                    "{size:?}: {name} at {rect:?} is outside the window"
+                );
+            }
+
+            let regions = regions_of(geometry);
+            for (i, (a_name, a)) in regions.iter().enumerate() {
+                for (b_name, b) in &regions[i + 1..] {
+                    assert!(!overlap(*a, *b), "{size:?}: {a_name} overlaps {b_name}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_top_bar_spans_the_full_width_and_the_rail_is_full_height_below_it() {
+        // The layout contract from the roadmap, stated as geometry rather than
+        // as a screenshot.
+        for size in [Vec2::new(1280.0, 720.0), Vec2::new(1920.0, 1080.0)] {
+            let geometry = layout::shell_geometry(size);
+
+            assert_eq!(geometry.top_bar.min.x, 0.0, "{size:?}: the bar does not start at the edge");
+            assert_eq!(geometry.top_bar.max.x, size.x, "{size:?}: the bar does not span the width");
+
+            assert_eq!(
+                geometry.rail.min.y, geometry.top_bar.max.y,
+                "{size:?}: a gap under the bar"
+            );
+            assert_eq!(geometry.rail.max.y, size.y, "{size:?}: the rail stops short of the bottom");
+            assert_eq!(geometry.rail.max.x, size.x, "{size:?}: the rail stops short of the edge");
+        }
+    }
+
+    #[test]
+    fn the_world_and_the_rail_together_fill_the_width_below_the_bar() {
+        // Any unused perimeter has to be a deliberate layout result. A gap here
+        // would be an accidental black rectangle, which is exactly what the
+        // task forbids.
+        for size in [Vec2::new(1280.0, 720.0), Vec2::new(1920.0, 1080.0), Vec2::new(1024.0, 768.0)]
+        {
+            let geometry = layout::shell_geometry(size);
+            assert_eq!(
+                geometry.world.width() + geometry.rail.width(),
+                size.x,
+                "{size:?}: world and rail leave a gap"
+            );
+        }
+    }
+
+    #[test]
+    fn the_hotbar_stays_inside_and_centred_on_the_world() {
+        // Centred on the *world*, not the window: with a 420-pixel rail,
+        // centring on the window puts it visibly right of the world it belongs
+        // to, and at the extreme it slides under the rail.
+        for size in [Vec2::new(1280.0, 720.0), Vec2::new(1920.0, 1080.0), Vec2::new(3440.0, 1440.0)]
+        {
+            let geometry = layout::shell_geometry(size);
+            let view = layout::world_view(geometry.world);
+
+            let world_centre = view.rect.center().x;
+            let window_centre = size.x / 2.0;
+            assert!(
+                world_centre < window_centre,
+                "{size:?}: the world's centre is not left of the window's, so this proves nothing"
+            );
+
+            // The hotbar spans the viewport and centres its own children, so
+            // its bounds are the viewport's.
+            assert!(view.rect.min.x >= geometry.world.min.x - 0.01);
+            assert!(view.rect.max.x <= geometry.world.max.x + 0.01);
+            assert!(
+                view.rect.max.y <= size.y + 0.01,
+                "{size:?}: the hotbar row is below the window"
+            );
+        }
+    }
+
     #[test]
     fn the_shell_and_the_world_are_drawn_by_different_cameras() {
         // A camera's viewport clips everything it draws. With one camera,

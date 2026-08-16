@@ -8,6 +8,8 @@
 //! Presentation only. Sampling lives in `hud`, which owns the probe cadence;
 //! this module reads what it published.
 
+use super::controls::Control;
+use super::icons::{action_icon, icon, AccessibleName, Icon, ShowsTooltip};
 use super::shell::{label, Region};
 use super::telemetry::{fps_label, FpsAverage};
 use super::tokens::{ink, size, space, surface, type_scale};
@@ -97,7 +99,12 @@ impl Plugin for TopBarPlugin {
     }
 }
 
-fn icon_button(action: BarAction, glyph: &'static str) -> impl Bundle {
+/// A top-bar action: an icon, a tooltip and an accessible name.
+///
+/// Never an abbreviation on its own. `LN`, `PIC`, `AUD`, `CBT` and `CFG` were
+/// unreadable to anyone who had not written them, and an icon without a name is
+/// the same guess in a different font.
+fn icon_button(action: BarAction, kind: Icon) -> impl Bundle {
     (
         // Buttons opt back in to picking; the shell root ignores it so clicks
         // meant for the world are not swallowed by a transparent overlay.
@@ -111,8 +118,28 @@ fn icon_button(action: BarAction, glyph: &'static str) -> impl Bundle {
         },
         BackgroundColor(surface::RAISED),
         action,
-        children![label(glyph, type_scale::SMALL, ink::MUTED)],
+        AccessibleName::new(kind.name_key()),
+        ShowsTooltip,
+        Control { tab_index: bar_tab_index(action), ..default() },
+        children![action_icon(kind, ink::PRIMARY)],
     )
+}
+
+/// Position of a bar action in the keyboard order.
+///
+/// Explicit rather than incidental: the bar is the first thing Tab reaches, and
+/// its order should follow the row as it is read rather than the order the
+/// systems happened to spawn it.
+fn bar_tab_index(action: BarAction) -> u32 {
+    match action {
+        BarAction::Support => 1,
+        BarAction::Language => 2,
+        BarAction::Screenshot => 3,
+        BarAction::MuteAudio => 4,
+        BarAction::MuteCombat => 5,
+        BarAction::Settings => 6,
+        BarAction::ToggleMaximise => 7,
+    }
 }
 
 /// One `LABEL value` pair in the status row.
@@ -171,13 +198,25 @@ fn populate(mut commands: Commands, bars: Query<(Entity, &Region)>) {
             Node { align_items: AlignItems::Center, column_gap: Val::Px(space::BASE), ..default() },
             children![
                 (
+                    Button,
                     Node {
                         padding: UiRect::axes(Val::Px(space::WIDE), Val::Px(space::TIGHT)),
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(space::TIGHT),
                         ..default()
                     },
                     BackgroundColor(surface::RAISED),
                     BarAction::Support,
-                    children![label("SUPPORT", type_scale::SMALL, ink::GOLD)],
+                    AccessibleName::new(Icon::Support.name_key()),
+                    ShowsTooltip,
+                    Control { tab_index: bar_tab_index(BarAction::Support), ..default() },
+                    // Icon *and* word: support is the one action a player looks
+                    // for while something is already going wrong, and it is
+                    // worth the width.
+                    children![
+                        icon(Icon::Support, type_scale::BODY, ink::GOLD),
+                        label("SUPPORT", type_scale::SMALL, ink::GOLD),
+                    ],
                 ),
                 // Three nodes with a real gap, not one string with spaces in
                 // it. The face is proportional, so runs of spaces collapse to
@@ -200,15 +239,15 @@ fn populate(mut commands: Commands, bars: Query<(Entity, &Region)>) {
             ],
         ))
         .with_children(|group| {
-            for (action, glyph) in [
-                (BarAction::Language, "LN"),
-                (BarAction::Screenshot, "PIC"),
-                (BarAction::MuteAudio, "AUD"),
-                (BarAction::MuteCombat, "CBT"),
-                (BarAction::Settings, "CFG"),
-                (BarAction::ToggleMaximise, "\u{25a1}"),
+            for (action, kind) in [
+                (BarAction::Language, Icon::Language),
+                (BarAction::Screenshot, Icon::Screenshot),
+                (BarAction::MuteAudio, Icon::Audio),
+                (BarAction::MuteCombat, Icon::Combat),
+                (BarAction::Settings, Icon::Settings),
+                (BarAction::ToggleMaximise, Icon::Maximise),
             ] {
-                group.spawn(icon_button(action, glyph));
+                group.spawn(icon_button(action, kind));
             }
         });
     });

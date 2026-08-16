@@ -51,28 +51,21 @@
         overflow: hidden;
       }
 
-      body {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
+      /* The canvas tracks the browser's content area, on first load and on
+         every resize. A fixed game rectangle centred in a black page wastes
+         whatever the player gave the window, and enlarging the browser then
+         only enlarges the black.
 
-      /* A window on the page, not the whole page — the same shape the reference
-         client presents, and the one the maximise control expands from.
+         Growing the canvas does not reveal more of the map: `ui::scale` keeps
+         the view at the size the interface was designed around and draws it
+         larger, so a bigger window is a bigger picture of the same scene.
 
          Sizing lives on this element rather than on the canvas because Bevy is
-         told to track its parent: it overwrites the canvas's own width and
-         height every resize, so any rule set there is lost on the first frame.
-
-         Clamped to the viewport so a small screen still fits without
-         scrollbars, which is the case the fixed 1280x832 canvas got wrong —
-         the character rail sat past the right-hand edge and the status bar was
-         cut in half. */
+         told to track its parent and overwrites the canvas's own width and
+         height every resize, so a rule set there is lost on the first frame. */
       #shell {
-        width: min(1280px, 100vw);
-        height: min(832px, 100vh);
-        border: 1px solid var(--panel-edge);
-        box-shadow: 0 0 0 1px #000, 0 18px 48px rgba(0, 0, 0, 0.75);
+        width: 100%;
+        height: 100%;
         overflow: hidden;
       }
 
