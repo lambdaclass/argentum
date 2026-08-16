@@ -232,10 +232,12 @@ fn apply_geometry(
     };
 
     let logical = Vec2::new(window.width(), window.height());
-    let geometry = layout::shell_geometry(logical);
-    // The world's own space, not the window's: scaling for room the rail is
-    // using would push the world off its own edge.
-    let resolved = scale::resolve(logical, geometry.world.size(), window.scale_factor());
+    // Resolved twice: the scale depends on how much room the world has, and how
+    // much room the world has depends on the rail's clamps, which scale. One
+    // pass to find the scale, a second to lay out with it.
+    let probe = layout::shell_geometry(logical);
+    let resolved = scale::resolve(logical, probe.world.size(), window.scale_factor());
+    let geometry = layout::shell_geometry_scaled(logical, resolved.ui);
     if geometry == applied.0 && resolved == *domains {
         return;
     }

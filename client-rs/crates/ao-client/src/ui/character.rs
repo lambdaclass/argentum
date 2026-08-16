@@ -107,6 +107,7 @@ fn rebuild_on_change(
     selected: Res<SelectedSlot>,
     drag: Res<DragState>,
     geometry: Res<super::shell::AppliedGeometry>,
+    ui_scale: Res<UiScale>,
     regions: Query<(Entity, &RailRegion)>,
     existing: Query<Entity, With<PanelContent>>,
     mut commands: Commands,
@@ -129,7 +130,11 @@ fn rebuild_on_change(
                 });
             }
             RailRegion::SlotGrid => {
-                let inner = grid_inner_width(geometry.0.rail.width());
+                // In the units the slots are declared in. Bevy multiplies every
+                // Val::Px by the UI scale, so a width measured in logical
+                // pixels would let six 43-unit slots be laid out into a space
+                // that is only three of them wide once scaled.
+                let inner = grid_inner_width(geometry.0.rail.width() / ui_scale.0.max(0.001));
                 commands.entity(entity).with_children(|parent| {
                     parent.spawn((
                         PanelContent,
@@ -578,6 +583,47 @@ mod tests {
             rarity: Rarity::Common,
             icon_grh: 1,
         })
+    }
+
+    #[test]
+    fn six_columns_fit_at_every_ui_scale_as_well_as_every_window_size() {
+        // The units bug, which cost two rounds of screenshots. Bevy multiplies
+        // every Val::Px by the UI scale, so a grid measured in logical pixels
+        // is laid out into a space only a fraction that size once scaled: at
+        // 2x the rail stayed 420 logical pixels while its slots became 86, and
+        // six columns silently became four with the rest spilling out of the
+        // panel.
+        use super::super::layout;
+
+        let columns = 6usize;
+        for window in
+            [Vec2::new(1280.0, 832.0), Vec2::new(2560.0, 1440.0), Vec2::new(3840.0, 2160.0)]
+        {
+            for ui in [1.0f32, 1.25, 1.5, 2.0] {
+                let geometry = layout::shell_geometry_scaled(window, ui);
+                if geometry.rail_mode != layout::RailMode::Full {
+                    continue;
+                }
+
+                // What the grid is declared in, which is what its children are.
+                let inner = grid_inner_width(geometry.rail.width() / ui);
+                let slot = slot_size(inner, columns);
+                let declared = slot * columns as f32 + space::GRID_GAP * (columns - 1) as f32;
+
+                assert!(
+                    declared <= inner,
+                    "{window:?} at {ui}x: the grid needs {declared} of {inner} declared units"
+                );
+                // And once Bevy scales it, still inside the rail it was laid
+                // out against.
+                assert!(
+                    declared * ui <= geometry.rail.width(),
+                    "{window:?} at {ui}x: the grid renders {} wide in a {} rail",
+                    declared * ui,
+                    geometry.rail.width()
+                );
+            }
+        }
     }
 
     #[test]

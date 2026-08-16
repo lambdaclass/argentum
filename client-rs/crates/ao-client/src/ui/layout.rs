@@ -172,11 +172,27 @@ impl ShellGeometry {
 /// world takes the remainder, so the two can never overlap or leave a gap the
 /// clear colour shows through.
 pub fn shell_geometry(size: Vec2) -> ShellGeometry {
+    shell_geometry_scaled(size, 1.0)
+}
+
+/// Lay out the shell when the interface is drawn at `ui_scale`.
+///
+/// The clamps are content-driven — the rail's minimum is six slots wide, the
+/// top bar is one row of text tall — so they have to grow with the content.
+/// Left in unscaled pixels while `UiScale` doubled everything inside them, the
+/// rail stayed 420 logical pixels while its slots became 86, and the
+/// six-column grid silently laid itself out as four with the remainder spilling
+/// out of the panel.
+///
+/// The regions themselves stay in logical pixels, because the camera viewport
+/// and the pointer both work in those and must agree with them exactly.
+pub fn shell_geometry_scaled(size: Vec2, ui_scale: f32) -> ShellGeometry {
+    let ui = if ui_scale.is_finite() && ui_scale > 0.0 { ui_scale } else { 1.0 };
     let width = size.x.max(0.0);
     let height = size.y.max(0.0);
 
     // The bar is fixed, but it cannot claim height the window does not have.
-    let top_bar_height = TOP_BAR_HEIGHT.min(height);
+    let top_bar_height = (TOP_BAR_HEIGHT * ui).min(height);
     let body_top = top_bar_height;
     let body_height = (height - top_bar_height).max(0.0);
 
@@ -184,9 +200,9 @@ pub fn shell_geometry(size: Vec2) -> ShellGeometry {
     // 281.6) makes the world's width fractional too, and the world's edge is a
     // camera viewport in *physical* pixels: 998.4 rounds to 998 at 1x but 1997
     // at 2x, so the seam between world and rail lands differently per display.
-    let preferred = (width * RAIL_FRACTION).clamp(RAIL_MIN_WIDTH, RAIL_MAX_WIDTH).round();
+    let preferred = (width * RAIL_FRACTION).clamp(RAIL_MIN_WIDTH * ui, RAIL_MAX_WIDTH * ui).round();
     let (rail_width, rail_mode) = if width - preferred < WORLD_MIN_WIDTH {
-        (RAIL_COMPACT_WIDTH, RailMode::Compact)
+        (RAIL_COMPACT_WIDTH * ui, RailMode::Compact)
     } else {
         (preferred, RailMode::Full)
     };
@@ -358,6 +374,67 @@ mod tests {
                 "world width {} is fractional",
                 g.world.width()
             );
+        }
+    }
+
+    #[test]
+    fn the_rail_holds_the_same_content_at_every_interface_scale() {
+        // The clamps are content-driven — the minimum is six slots wide — so
+        // they have to grow with the content. Left unscaled, a 2x interface got
+        // a rail still capped at 420 logical pixels while its slots had doubled
+        // to 86, and the six-column grid silently became four.
+        //
+        // The share of the window is *not* the invariant: the maximum clamp
+        // binds on a large display, which is deliberate and asserted elsewhere.
+        // What must hold is that the rail is always the same size measured in
+        // the units its contents are declared in.
+        //
+        // Scales come from the resolver rather than from a list, because the
+        // two are not independent: 1.5x in a 1280 window would need a rail
+        // wider than a third of the screen, and the resolver never asks for it.
+        for size in [
+            Vec2::new(1280.0, 832.0),
+            Vec2::new(1920.0, 1080.0),
+            Vec2::new(2560.0, 1440.0),
+            Vec2::new(3840.0, 2160.0),
+        ] {
+            let probe = shell_geometry(size);
+            let ui = super::super::scale::resolve(size, probe.world.size(), 1.0).ui;
+            let geometry = shell_geometry_scaled(size, ui);
+            if geometry.rail_mode != RailMode::Full {
+                continue;
+            }
+
+            let in_content_units = geometry.rail.width() / ui;
+            assert!(
+                (RAIL_MIN_WIDTH..=RAIL_MAX_WIDTH).contains(&in_content_units),
+                "{size:?} at {ui}x gave the rail {in_content_units} content units"
+            );
+            assert!(
+                geometry.rail.width() / size.x <= 0.23,
+                "{size:?} at {ui}x: the rail took {:.1}% of the width",
+                geometry.rail.width() / size.x * 100.0
+            );
+        }
+    }
+
+    #[test]
+    fn the_top_bar_grows_with_the_interface_scale() {
+        // It holds one row of text. If the text doubles and the bar does not,
+        // the text is clipped.
+        let size = Vec2::new(1920.0, 1080.0);
+        let one = shell_geometry_scaled(size, 1.0).top_bar.height();
+        let two = shell_geometry_scaled(size, 2.0).top_bar.height();
+
+        assert_eq!(two, one * 2.0);
+    }
+
+    #[test]
+    fn a_nonsense_ui_scale_lays_out_as_though_unscaled() {
+        // Resolved from a window that can report zero mid-restore.
+        for ui in [0.0, -1.0, f32::NAN] {
+            let geometry = shell_geometry_scaled(Vec2::new(1280.0, 832.0), ui);
+            assert_eq!(geometry, shell_geometry(Vec2::new(1280.0, 832.0)), "{ui} broke the layout");
         }
     }
 
