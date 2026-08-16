@@ -10,10 +10,12 @@
 //! Callers pass the clock in, which is what makes it testable and identical
 //! across targets.
 
+pub mod fixtures;
 pub mod mappack;
 pub mod movement;
 pub mod protocol;
 pub mod tiles;
+pub mod view;
 
 pub use mappack::{decode_map, PackedMap};
 pub use movement::{WalkGate, WalkGateConfig, WalkOutcome};
@@ -22,3 +24,4 @@ pub use protocol::{
     Direction, NewCharacter, ServerMessage,
 };
 pub use tiles::{is_walkable, TileFlags, TileKind};
+pub use view::{Intent, UiSnapshot};

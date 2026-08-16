@@ -11,6 +11,7 @@ pub mod layout;
 pub mod rail;
 pub mod scale;
 pub mod shell;
+pub mod state;
 pub mod tokens;
 pub mod topbar;
 
@@ -22,6 +23,7 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
+            state::UiStatePlugin,
             shell::ShellPlugin,
             topbar::TopBarPlugin,
             rail::RailPlugin,
