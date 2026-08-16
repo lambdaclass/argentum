@@ -1,862 +1,1364 @@
 # Rust/Bevy Client Roadmap
 
-Tracks remaining work for `client-rs`, the Bevy client targeting the browser
-(wasm/WebGL2) and native desktop from one codebase. It is an alternative to the
-TypeScript/Pixi client in `client/`, not a replacement — both speak to the same
-Elixir server.
+This is the active execution plan for `client-rs`, the Bevy client targeting
+browser/WASM and native desktop from one Rust codebase. It answers two different
+questions without confusing them:
 
-Phases can overlap, but they are ordered by what unblocks what. Browser tests,
-protocol fixtures and performance measurements start with the feature they
-protect; they are not deferred to a final QA pass.
+- the phase map says **what capabilities unlock the finished client**; and
+- the execution sequence says **what should be implemented next, in order**.
 
-Items are tagged **[server]**, **[client]** or **[client/design]**. Some of this
-work lives in `server/`, not here—it is tracked here because it exists to serve
-this client, and splitting it across two roadmaps would hide the dependency.
-Anything tagged **[server]** should also be reflected in the main `ROADMAP.md`
-when scheduled.
+The Rust client is an alternative to the TypeScript/Pixi client in `client/`,
+not its silent replacement. Both clients speak to the same authoritative Elixir
+server until a separately approved migration retires one.
 
-A claim in "Current state" is a claim about verified behaviour. Compiling,
-opening a socket or sending bytes is not evidence that a flow works; the
-evidence is a test that fails when the behaviour is removed.
+Canonical supporting documents:
 
-## UI architecture invariant
+- [Client changelog](CHANGELOG.md) owns completed work and dated evidence.
+- This roadmap owns active tasks, execution order and phase exit gates.
+- `scripts/check_roadmap.sh` enforces stable task identities, one sequence and
+  one exit gate per phase.
+
+## How to execute this roadmap
+
+Execution starts at the first active task in
+[Execution sequence](#execution-sequence) and continues in file order. The
+detailed task bodies are the only priority list; there is no summary queue to
+keep synchronized with them.
+
+Each active task has an immutable `W-NNNN` identity. IDs are never renumbered,
+reused or made to encode priority. New urgent work receives the next unused ID
+and is inserted explicitly at the correct point in the sequence. A commit,
+review or blocker should refer to the ID, not to “task 3” or a line number.
+
+Do not create a summary queue, phase-local queue, hidden priority list or second
+“urgent” sequence. If a task is blocked only on external or human input, record
+the blocker and continue with the next dependency-ready task in file order; do
+not invent an answer on the user’s behalf.
+
+Closed task bodies move to `CHANGELOG.md`. Keep only durable constraints
+and current work here. Replace a task’s status/evidence note rather than
+appending contradictory present-tense histories.
+
+### State vocabulary
+
+- `ready`: dependencies are satisfied and this is the next executable work.
+- `planned`: specified but waiting for earlier work in the sequence.
+- `active`: implementation is in progress on a named worktree/branch.
+- `blocked`: a concrete dependency or external decision prevents progress.
+- `research-gated`: a falsification probe or product decision is required
+  before implementation is authorized.
+- `closed`: all task and applicable phase gates passed; closed tasks live only
+  in the client changelog.
+
+“Implemented”, “compiles”, “green” and “packet sent” are observations, not
+closure states. A flow closes only with evidence that fails when its behavior is
+removed.
+
+### Task contract
+
+Every task must leave:
+
+- one bounded behavior or decision, small enough for an independently useful
+  commit;
+- its positive path plus relevant empty, rejection, interruption and cleanup
+  paths;
+- deterministic tests or fixtures at the lowest useful layer;
+- browser/native evidence where platform behavior is involved;
+- updated size, frame, memory or network measurements when it can move a
+  budget; and
+- current documentation with obsolete claims removed in the same change.
+
+Work estimated in weeks begins with a cheap falsification spike and explicit
+kill criteria. A killed experiment is useful evidence and belongs in the
+changelog, not a half-built production path.
+
+## Non-negotiable architecture
+
+### Bevy owns the application UI
 
 Every user-facing screen and interactive component inside `client-rs` is built,
-laid out, rendered and state-managed in Bevy on both WASM and native. This
-includes boot and recovery screens, authentication, registration, character
-creation/selection, rankings, HUD, chat, inventory, spells, minimap, commerce,
-settings, accessibility semantics and developer diagnostics.
-
-JavaScript and CSS are not an alternative UI layer. They are limited to the
-small host page that creates the canvas, an unavoidable pre-WASM fallback, and
-thin adapters for browser capabilities such as history, storage, clipboard,
-IME, fullscreen and external links. They must not implement application
-layouts, forms, panels, overlays, navigation state or gameplay state, and there
-must be no React/DOM version of a Bevy screen to keep in sync.
-
-The public marketing website is outside this client and may remain ordinary
-HTML/CSS. This invariant applies from the moment the game application starts.
-
-## Why this client exists
-
-Gameplay rules the server enforces were re-implemented independently in the web
-client. Two implementations of one rule in two languages must agree exactly, or
-the player is snapped backwards mid-step — a bug that proved very hard to
-diagnose from either side alone.
-
-`crates/ao-core` holds those rules once, as pure code with no platform or
-framework coupling, so the same logic can compile into the wasm client and into
-the Rustler NIF the server already loads. Today it carries tile walkability, the
-server's speed-hack accumulator, the map pack decoder and the wire protocol —
-31 tests, all runnable natively without a browser.
-
-## Current state
-
-Working: real map data from the server's `AOMP` pack, all four map layers drawn
-with real artwork, static NPCs and ground objects, a character with body/head
-composition, held-key movement gated by the server's walk formula, a WebSocket
-transport, a walk encoder and a `pos_update` decoder.
-
-Round-trip latency is measured on the game socket itself (ping 900 / pong 204)
-and shown in the status row beside FPS and the online count. Verified against a
-real listener over `:gen_tcp`, including before login completes.
-
-The session still does **not** log in end to end, but no longer for the reason
-recorded here previously. The packet names were wrong — the client called 74
-`LOGIN_EXISTING_CHAR` when the server defines 73 as `login_existing_char` and
-74 as `login_new_char` — and the creation fields at the tail of 74 were
-described as padding the server ignores, when in fact they decide the
-character it creates. Both are fixed, both encoders now exist, and their exact
-bytes are asserted against the server's own decoder by a shared fixture
-(`apps/ao_protocol/test/client_login_layout_test.exs`).
-
-What blocks login now is the response, not the request. After a successful WS
-login the server sends `world_pack_signature` (203) and `session_token` (200);
-the client's decoder recognises only `pos_update` (31) and `pong` (204). An
-unknown id cannot be skipped, because packet lengths are not on the wire, so
-the connection is failed rather than desynchronised. Handling those two frames
-is Phase 2 work.
-
-"Socket opened and bytes were sent" is not a successful session and must not be
-reported as one again.
-
-The trimmed build measures **19.2 MB raw and 5.5 MB gzip**. Transfer-size gates
-must use the compressed artifact players actually download; raw size remains a
-secondary diagnostic.
-
-## Phase 0: Responsive Bevy game shell and UI/UX prototype
-
-Build the interface players will inhabit before protocol breadth. This phase is
-fixture-backed and can start immediately with the existing Bevy renderer; it
-does not wait for login or authoritative gameplay. It establishes the exact UI
-contracts that Phase 3 will populate with live state.
-
-The primary composition follows the proven Argentum pattern documented in
-`research/argentumunited/README.md`: a thin global status bar, an expanding
-world viewport, a full-height character rail on the right, world messages in
-the upper-left and a hotbar centered against the world viewport—not against the
-entire application window. Use it as a layout reference, not as artwork to copy.
-
-1. **[client/design]** Build the fixed Bevy application shell first:
-   - top status bar for build, support, FPS, RTT, population and platform actions;
-   - world viewport occupying all space not reserved by the character rail;
-   - right rail containing character/XP, inventory/spells, selected details,
-     equipment, currency, vitals and bottom navigation;
-   - transient world messages in the viewport's upper-left; and
-   - numbered hotbar anchored to the viewport's bottom center.
-2. **[client/design]** Define responsive geometry. On normal/maximized desktop windows the
-   right rail targets 21–23% of the width, clamped to a readable logical minimum
-   and maximum; the world receives the remainder. Small windows use a deliberate
-   compact/collapsible rail instead of shrinking controls until they are
-   unusable. Nothing requires page scrolling.
-3. **[client]** Separate three scale domains: responsive logical UI scale, integer
-   nearest-neighbor world scale and physical device-pixel/DPI scale. Implement
-   resize, maximize, fullscreen/restore, browser zoom, DPI changes and ultrawide
-   behavior now. These events must never stretch sprites, introduce camera
-   shimmer, move the player, reveal an unauthorized world area or lose focused
-   input.
-4. **[client]** Define transport-independent view models and command intents for at least
-   `PlayerVitals`, `InventoryState`, `EquipmentState`, `SpellbookState`,
-   `HotbarState`, `TargetState`, `ChatState`, `SkillsState`, `ProgressionState`,
-   `SafetyState` and `ServiceState`. Bevy presentation reads these models and
-   emits intents; it never parses packets or calls a socket. Server feedback
-   crosses this boundary as stable semantic keys plus typed parameters, not
-   presentation-ready Spanish strings where the protocol can avoid them.
-5. **[client]** Supply deterministic fixture adapters first and an authoritative-session
-   adapter in Phase 3. Fixtures cover populated, empty, loading, disabled,
-   rejected, disconnected, dead/ghost and malformed-data states without
-   pretending that mock interactions are live gameplay.
-6. **[client/design]** Define the information architecture and persistent HUD regions: world
-   viewport, vitals, character/progression state, inventory/equipment, hotbar,
-   chat, minimap, notifications and contextual actions. Specify what is always
-   visible and what belongs in the fixed rail, a secondary window, tooltip or
-   temporary overlay.
-7. **[client/design]** Publish design tokens for typography, licensed fonts, colors, borders,
-   spacing, icon sizes, focus states, disabled/locked states, rarity/status
-   semantics and pixel-art scaling. Every token remains legible over bright and
-   dark maps and in supported color-sensitive modes.
-8. **[client/design]** Build a reusable Bevy component catalogue covering buttons, tabs,
-   slots, numeric status bars, lists, text/password fields, tooltips, context
-   menus, dialogs, notifications, drag ghosts, progress/cooldown indicators and
-   hotkey prompts. Components have one event, focus and state model across WASM
-   and native.
-9. **[client/design]** Specify interaction rules once: drag/drop and cancellation, quantity
-   splitting, click/double-click/right-click, tooltip timing, target modes,
-   cooldown/rejection feedback, keyboard shortcuts and suppression of world
-   commands while chat, text/password fields or modals own input.
-10. **[client/design]** After the fixed shell works, implement the Bevy secondary-window
-    manager: open/close/focus, z-order, modal behavior, moving, snapping/docking,
-    optional resizing, remembered positions, Escape handling and restoration
-    when the available viewport changes.
-11. **[client/design]** Prototype peaceful/exploration and combat variants at 720p, 1080p,
-    1440p, ultrawide and small-laptop sizes. Additional space benefits the
-    presentation without changing server-owned visibility or interaction rules.
-12. **[client/design]** Cover the playable HUD explicitly: HP, mana, stamina, hunger, thirst,
-    XP/level and skills; inventory/equipment; spellbook, requirements, hotbar and
-    cooldowns; current target; personal/party safe mode; chat channels; and
-    navigation/dead-state restrictions.
-13. **[client/design]** Design onboarding and contextual guidance for movement, interaction,
-    combat, inventory, spells, death and recovery. Include empty, loading,
-    disabled, rejected, disconnected and maintenance states—not only populated
-    happy-path screens.
-14. **[client/design]** Produce an interactive Bevy prototype/component gallery using
-    representative real game data and long ES/EN/PT strings. Core workflows are
-    testable from typed fixtures without a finished server implementation.
-15. **[client/design]** Run task-based usability sessions with veteran AO players and
-    newcomers. Measure whether they can find health/mana, use/equip an item,
-    cast a spell, trade, bank, change chat channel and recover from a rejected
-    action; record findings and revise the prototype.
-16. **[client/design]** Keep reference screenshots, fixture states and interaction
-    specifications versioned beside the client so implementation, component
-    gallery and golden tests share the same source of truth.
-
-`research/argentumunited/README.md` also records eight specific ideas worth
-taking, including numbers rendered inside status bars and locked inventory
-slots shown rather than hidden.
-
-Exit criteria:
-
-- The fixed Bevy shell matches the approved layout at every target resolution:
-  world expands, right rail remains readable, hotbar stays world-centered and
-  no application panel is implemented in DOM/CSS.
-- Windowed, maximized and fullscreen golden screenshots remain pixel-aligned at
-  supported device-pixel ratios; resize/DPI events do not alter gameplay state.
-- The fixture-backed Bevy prototype completes representative gameplay tasks
-  without clipped critical information, page scrolling or fractional world
-  scaling.
-- Keyboard/focus traversal, text composition and modal/chat ownership work in
-  browser and native builds; UI interaction never leaks an unintended world
-  command.
-- Every prototype state is driven through the same typed models and intents the
-  live adapter will use; no fixture-only widget API enters production.
-- Veteran/newcomer findings, resulting changes and remaining tradeoffs are
-  recorded with the approved reference screens.
-
-## Phase 1: Platform foundation
-
-Make the prototype honest and establish boundaries while the platform-specific
-surface is still small.
-
-1. ~~**[client]** Correct the packet-74 name and current-state reporting. Keep distinct
-   encoders for new-character login (74) and token-based existing-character
-   login (73).~~ **Done.** Both encoders exist and carry the creation fields the
-   server actually reads; a shared byte fixture asserts them against the
-   server's decoder in both languages.
-2. ~~**[client]** Replace hard-coded asset origin, gateway URL, character name, password and
-   client hash with runtime configuration. Production derives HTTPS/WSS
-   endpoints from the page origin; development overrides them explicitly.~~
-   **Done.** Layered as query string > page meta tags > page origin, with
-   `AO_*` environment variables natively. With nothing configured the client
-   reports what is missing instead of connecting; with no credentials it does
-   not log in, rather than creating a character for whoever opened the page.
-   `./build.sh` fails if any value configured in `web/index.html` is found
-   inside the built artifact.
-3. **[client]** Introduce Bevy application states:
-   `Boot -> Authenticate -> SelectCharacter -> LoadWorld -> Playing -> Handoff
-   -> Reconnecting`. Replace boolean lifecycle controls such as
-   `MapLoadReported`, `CharacterDrawn`, `SceneDirty`, `ScenePainted`,
-   `DrawnTiles` and `DrawnEntities` with scoped state, resources and events.
-
-   **Partly done, and the list of booleans needs correcting.** `AppState`
-   exists with `Boot -> LoadingWorld -> Playing`, and gameplay systems are
-   scoped to `Playing`. `MapLoadReported` is gone: it was doing two jobs at
-   once — apply-once and log-once — and running the system only while a load
-   is outstanding replaces both.
-
-   The remaining four are not lifecycle booleans and should not become states.
-   `DrawnTiles` and `DrawnEntities` are memos of what has already been spawned,
-   which is what makes painting incremental as texture sheets stream in;
-   `SceneDirty` and `CharacterDrawn` are redraw triggers. Turning any of them
-   into application states would conflate "where the client is" with "what has
-   been drawn" and would break incremental painting. They should become change
-   detection or events, which is a different task from this one.
-
-   `Authenticate`, `SelectCharacter`, `Handoff` and `Reconnecting` are also not
-   added yet, deliberately: none has a transition to make until real login
-   exists (Phase 2), and a state nothing ever enters is a comment that goes
-   stale rather than a state machine.
-
-   Note the split this establishes: `AppState` tracks the client's own
-   startup, and `Session` tracks the connection. The world is playable without
-   a session — map data arrives over HTTP and a client that failed to log in
-   still renders and walks. Gating gameplay on the socket would make a login
-   failure look like a dead renderer.
-4. **[client]** Define platform services for HTTP, WebSocket transport, persistent cache,
-   auth/token storage, audio, clipboard, IME/text composition, fullscreen and
-   external links. Provide browser and native implementations rather than
-   spreading `cfg(wasm32)` through gameplay systems.
-5. **[client]** Enforce the UI architecture invariant: make Bevy the single owner and
-   renderer of every user-facing application screen:
-   product shell, authentication, character creation/selection, rankings, HUD,
-   chat, panels, settings and diagnostics. Thin browser/native adapters may
-   expose platform APIs to Bevy, but must not create a second DOM/React UI tree
-   or a second source of UI state.
-6. **[client]** Fix the native build and move pure parsers/rules into `ao-core`, so both
-   targets compile and their platform-independent tests always run. Native HTTP
-   and WebSocket stubs must become real implementations before native can be
-   called supported.
-7. **[server]** Serve the client and runtime configuration from the game origin. The current
-   separate-port/CORS setup remains a development option only.
-8. **[client]** Keep the trimmed Bevy feature set. Record 5.5 MB gzip as the initial WASM
-   transfer baseline and fail CI on an unexplained regression greater than 5%;
-   any intentional budget increase must name the feature that caused it.
-9. **[client]** Establish a fixed browser/device/network benchmark profile and record
-   numeric ceilings for time to first interactive world, p95 frame time, draw
-   calls, WASM heap, estimated GPU memory and reconnect/handoff latency before
-   the phases that consume those budgets begin.
-10. **[client]** Probe capabilities before launching: WebGL2, maximum texture size, device
-   pixel ratio, audio support, persistent-storage availability/quota and memory
-   pressure indicators where the platform exposes them. Select a documented
-   low-resource profile or show an actionable unsupported-device result instead
-   of failing inside Bevy startup.
-
-Exit criteria:
-
-- `./build.sh check` passes for WASM and native, including `ao-client` and
-  `ao-core` tests.
-- No credentials or production hosts are compiled into the client.
-- All application UI is Bevy-owned on browser and native; platform adapters expose
-  capabilities without creating a parallel application or state tree.
-- Source and browser tests prove the host page contains no application forms,
-  panels or navigation implementation beyond the pre-WASM fallback and canvas.
-- Lifecycle transitions are represented by the state machine, not inferred
-  from unrelated booleans.
-- The compressed WASM size is produced and checked by CI.
-- Runtime performance budgets have a reproducible measurement command and
-  stored baseline, not an informal target.
-- Supported and deliberately unsupported capability profiles produce stable,
-  testable startup outcomes; the diagnostic report contains no identifying data.
-
-## Phase 2: Protocol and real authentication
-
-The first goal is one truthful, testable session—not broad gameplay.
-
-### Step zero: protocol governance
-
-`session_route_manifest.ex` classifies 202 packets with `vb6_ref` and
-`parity_status`. Decide and document the parity story before introducing a
-modern wire envelope. A length-framed WS protocol is an
-`:intentional_divergence`, requires manifest entries and byte-level fixtures,
-and must leave the legacy TCP/WS path working.
-
-1. **[server + client]** Negotiate a versioned, length-framed WebSocket protocol before
-   login, preferably through a WebSocket subprotocol/capability. Preserve the
-   existing AO packet bytes inside the frame. Modern clients can then skip an
-   unknown packet safely; legacy clients continue using the unframed stream.
-2. **[server + client]** Price the schema prerequisite honestly. There is no canonical
-   protocol schema today: the Elixir encoder/decoder is the source of truth.
-   Choose one governed path:
-   - author a machine-readable schema and prove it against Elixir golden bytes;
-   - build an Elixir-source extractor and still verify every result; or
-   - keep manual Rust codecs with paired byte fixtures.
-   Code generation begins only after one of those sources is trustworthy.
-3. **[client]** Decode packet 203 and validate the advertised map-pack
-   version/hash before entering the world. Then cover the complete login
-   bootstrap, explicit login success, and every login/error outcome.
-4. **[client]** Connect Phase 0's Bevy product shell to the real services. Preserve the
-   existing web client's registration, login/logout, character creation with
-   server-provided options and sprite preview, character selection, launch and
-   rankings flows. Use `/api/auth/login`, `/api/characters`,
-   `/api/meta/character-options` and the browser launch endpoint; enter the game
-   with packet 73's character ID and session token. Never send the account
-   password over the game protocol.
-5. **[client]** Add protocol breadth, with a byte fixture per packet:
-   - character create / move / remove / change
-   - chat and structured console messages
-   - stats, inventory and spells
-   - ground object create/remove
-   - weather and map change
-   - session token, intervals, build/version and errors
-6. **[client]** Implement connection lifecycle: heartbeat/RTT, meaningful close reasons,
-   exponential reconnect backoff and an explicit transition to `Playing` only
-   after the authoritative bootstrap completes.
-7. **[client]** Add a redacted packet-trace recorder and deterministic replay harness. A
-   trace contains inbound frames, outbound commands, timestamps, application
-   state transitions and build/world versions, but never passwords, launch
-   tokens or account cookies. Replays run without a live socket and can inject
-   fragmentation, delay and disconnect boundaries.
-8. **[client]** Bound network work and memory in both directions. Limit queued inbound
-   frames/decoded packets by bytes and count, process them with a per-frame time
-   or packet budget, observe WebSocket `bufferedAmount`, and cap pending outbound
-   commands. Overflow must disconnect/resynchronise explicitly—never grow an
-   unbounded `Vec`, silently discard authoritative state or freeze one render
-   frame while draining a burst.
-9. **[client]** Preserve browser product navigation semantics while Bevy owns the screens:
-   stable routes for lobby, rankings, character creation and play; reloadable
-   deep links; browser back/forward integration; and deterministic logout or
-   invalid-session recovery. Native builds expose the same flows through Bevy
-   navigation without pretending to have browser history.
-10. **[client]** Classify bootstrap and access failures into actionable Bevy states:
-    credentials rejected, banned, muted, server full, maintenance, token expired,
-    stale/incompatible world data, asset-index failure and scene-preload failure.
-    Retry assets, retry world data, reconnect and forget-session are independent
-    actions and never require a page reload as the only recovery path.
-
-Exit criteria:
-
-- A real account selects an existing character, decodes packet 203, completes
-  bootstrap and reaches `Playing` using packet 73.
-- Registration, character creation/preview, selection, launch, rankings,
-  logout, deep links and browser history work through Bevy-owned screens.
-- Packet 74 is used only for the deliberate character-creation flow.
-- Every normal-play packet is decoded, or safely ignored only inside the
-  negotiated framed protocol.
-- Elixir and Rust fixtures prove identical packet bytes, including fragmented
-  and concatenated delivery.
-- Framing and packet decoders survive fuzz/property tests for truncation,
-  hostile lengths and arbitrary unknown packet IDs without panic or desync.
-- A recorded login/bootstrap/gameplay trace replays to the same client-world
-  state deterministically, with secrets demonstrably redacted.
-- Sustained packet bursts and a deliberately stalled render loop stay within the
-  queue budgets, preserve critical ordering and recover through a fresh snapshot
-  after overflow.
-- Each classified bootstrap/access failure exposes the correct recovery action
-  without leaking credentials or leaving an invisible session alive.
-
-## Phase 3: Authoritative client state and live world
-
-Replace the static demonstration with server-owned state and adapt protocol
-events into Phase 0's typed UI models before polishing the presentation.
-
-1. **[client]** Take the initial map and position from the login bootstrap. Remove
-   `INITIAL_MAP` and the demo player's independent coordinates.
-2. **[client]** Represent players, NPCs and ground objects as live ECS entities keyed by
-   authoritative identity. Map-pack NPC/object records may guide asset preloads,
-   but must never be rendered as proof that the entity currently exists.
-3. **[client]** Apply character/object create, move, change and remove messages idempotently.
-   Unknown removes, duplicate creates and late packets must not leak or duplicate
-   entities.
-4. **[client]** Separate fixed-timestep movement intent, local prediction, authoritative
-   reconciliation and remote-entity interpolation. Reset `WalkGate` on login,
-   reconnect and map handoff; never treat shared client code as an anti-cheat
-   boundary—the server remains authoritative because WASM is user-controlled.
-5. **[server + client]** Define reconnect/resynchronisation semantics. A reconnect receives a
-   fresh snapshot/epoch, discards stale entities and inputs, and does not blindly
-   replay movement accumulated while disconnected or while the tab was asleep.
-6. **[client]** Split the current monolithic world systems into transport/session, world
-   model, presentation and UI layers before adding more packet handlers. Raw
-   packet types never become Bevy widget state.
-7. **[client]** Add a feature/build-gated Bevy developer overlay with redacted packet events,
-   authoritative versus predicted position, correction and movement-cadence
-   counters, tile inspection, renderer budgets and build/world identifiers.
-   Release builds keep the underlying bounded metrics without exposing private
-   operator tools to players.
-
-Exit criteria:
-
-- A player can log in, see other players and NPCs move, see objects appear and
-  disappear, chat, and survive a brief disconnect without stale entities.
-- Local prediction remains responsive under injected latency and converges to
-  the server without oscillation.
-- Entity churn and reconnect soak tests leave no duplicate or leaked entities.
-- The fixture and live adapters produce equivalent typed view-model snapshots
-  for the same recorded trace.
-
-## Phase 4: Core playable HUD vertical slice
-
-Decoding packets and drawing fixture-backed widgets is not gameplay. Connect the
-first complete set of Bevy workflows to authoritative server state before
-expanding breadth.
-
-1. **[client]** Wire Phase 3's authoritative adapters into Phase 0's HUD and command
-   intents. Vitals, XP/level, skills, selected target, safety state, inventory,
-   equipment, spellbook, hotbar and chat update without widgets reading packets.
-2. **[client]** Implement inventory/equipment end to end: select, move, use, drop and equip
-   every supported layer; quantities, locked slots, disabled/dead states and
-   authoritative rollback on rejection.
-3. **[client]** Implement magic end to end: spell selection and persistent hotbar, target
-   modes, cast/cancel, cooldown and interval feedback, mana/stamina/skill
-   requirements, staff/equipment masks, land/water restrictions, area radius,
-   maximum target level and whether the spell works on dead targets.
-4. **[client]** Implement targeting and world interaction: select characters, NPCs, objects
-   or tiles; face targets; use the world; pick up/drop items; and preserve server
-   range, visibility and navigation rules.
-5. **[client]** Implement combat: attack/weapon use, damage/block/status feedback, personal
-   safe mode, party safe mode, safe-zone restrictions, death/ghost command
-   gating and server rejection/correction. Full resurrection/recovery workflows
-   remain in Phase 5.
-6. **[client]** Implement public, private, party, clan and faction chat with channel filters,
-   bubbles and explicit server mute/moderation feedback. Input focus suppresses
-   movement, combat and hotkeys, and Unicode limits are applied consistently.
-7. **[client]** Keep typed fixtures for component and failure-state tests, but make every
-   exit criterion below exercise the real session/server path as well.
-
-Exit criteria:
-
-- One player can log in, fight, loot, move/equip/use/drop items, select and cast
-  constrained spells, assign/use hotkeys, change chat channels and toggle the
-  applicable safety modes through Bevy UI.
-- Inventory, combat, spell and chat flows each cover success, rejection,
-  interruption, death restrictions and reconnect where applicable.
-- The same recorded flow drives equivalent typed state in replay and live modes;
-  no Bevy UI system reads raw packet bytes or owns authoritative gameplay rules.
-- Existing web-client session/spellbook, status-overlay and relevant UI-parity
-  browser tests have Rust-client equivalents or an explicit retirement record.
-
-## Phase 5: Remaining gameplay parity
-
-Complete the AO workflows outside the core combat loop and prove feature
-migration rather than equating packet coverage with a finished client.
-
-1. **[client]** NPC dialogue and services: conversation, quests where supported, training,
-   healing, resurrection and other contextual service interactions.
-2. **[client]** Economy: NPC commerce, bank items/gold, player trade and every confirmation,
-   quantity, cancellation, insufficient-funds and disconnect path.
-3. **[client]** Social and faction workflows: party and clan membership/leadership, invites,
-   rosters, clan creation, block/mute/report and moderation feedback.
-4. **[client]** Finish death/resurrection and recovery flows, including ghost presentation,
-   allowed commands, lost/retained state and authoritative return to play.
-5. **[client]** Cover travel restrictions, hunger/thirst, rest, meditation, navigation and
-   other state that changes which commands the client may offer. Client gating
-   improves feedback but grants no trust; the server remains authoritative.
-6. **[client]** Preserve the old client's service/status command surface where the server
-   supports it: help, MOTD, uptime, information, rewards, account state,
-   position/stats/skills resynchronisation and punishment lookup with
-   permission-aware feedback.
-7. **[server + client]** Govern versioned gameplay metadata used for presentation—spell
-   definitions and requirements, XP thresholds, object/NPC definitions and
-   faction labels—so the Bevy client detects incompatible/stale data rather than
-   silently disagreeing with server rules.
-8. **[client + server]** Maintain a parity matrix mapping each supported workflow to client
-   commands, server packets, Rust handlers, Bevy UI surface, VB6/TypeScript
-   reference and an end-to-end test. "Packet decoded" alone is not a completed
-   row.
-
-Exit criteria:
-
-- A scripted character completes NPC service, commerce/bank, player trade,
-  party/clan, death/resurrection and progression/service-command flows end to
-  end.
-- Each workflow tests success, server rejection, interruption and reconnect.
-- The parity matrix has no unexplained gap for features exposed by Bevy UI and
-  detects incompatible gameplay metadata before entering `Playing`.
-- Packet-trace replay reproduces at least one regression from every major
-  workflow without a live server.
-- Every existing TypeScript/Pixi product/gameplay E2E test passes against the
-  Rust client, has an equivalent stronger test, or is intentionally retired with
-  its reason and replacement coverage recorded.
-
-## Phase 6: World fidelity and audio
-
-The authoritative world should now look and sound like Argentum.
-
-1. **[client]** Walk animation. Animated grhs resolve to frame 0; bodies carry multi-frame
-   walk cycles with a `velocidad` the renderer currently ignores.
-2. **[client]** Equipment layers: weapon, shield, helmet, cart and backpack, composed over
-   the body in the correct order.
-3. **[client]** Depth sorting. Characters draw in spawn order, so one standing behind another
-   can occlude it. Per-row containers avoid a full per-frame sort—the approach
-   `research/argentumunited` documents.
-4. **[server + client]** Roof hiding. Layer 4 draws unconditionally. Ship triggers in the map
-   format and implement the `trigger == 1` rule for the player and both clients.
-5. **[client]** Tile streaming that keeps up with long-distance movement, requests missing
-   sheets on demand and despawns material outside the retained window.
-6. **[client]** Tree fading, name labels, chat bubbles, combat text, weather, day/night and FX.
-7. **[client]** Music and positional sound with separate volume controls. Browser audio must
-   unlock from a user gesture, suspend cleanly in a background tab and resume
-   without overlapping tracks.
-8. **[client]** Profile the tile/entity renderer against the Phase 1 draw-call and frame-time
-   ceilings. Introduce chunked tile meshes, sprite batching or instancing only
-   where measurements require them; keep culling and entity cleanup observable.
-
-Exit criteria:
-
-- Walking, turning and fighting look like the VB6 client beside it.
-- Entering a building reveals its interior.
-- A 30-minute movement/combat capture stays inside the frame-time, entity and
-  texture-memory budgets.
-- Audio starts only after consent/gesture and respects mute/background state.
-- Golden screenshot tests cover representative outdoor, indoor, crowded and
-  equipment-layer scenes at supported scale factors.
-
-## Phase 7: Versioned assets and persistent cache
-
-This precedes seamless transitions: a transition cannot be hitch-free if the
-client first downloads or retains an unbounded 58.8 MB world pack.
-
-1. **[server + client]** Replace the monolithic sequential pack with per-map files or a
-   range-indexed format. Publish a small index first so one map can be fetched
-   without materialising the whole pack.
-2. **[server + client]** Publish a content-hashed manifest covering maps, indices, sprite
-   sheets and audio. Validate packet 203 against it and invalidate cache entries
-   atomically when versions change; never mix resources from two world builds.
-3. **[client]** Implement the persistent-cache platform service: Cache Storage/IndexedDB in
-   the browser and an application cache directory on native. Storage denial,
-   quota exhaustion and browser eviction fall back safely to network/memory.
-4. **[server]** Serve content-addressed resources with immutable cache headers and range
-   support where the chosen pack format requires it.
-5. **[client]** Track compressed cache bytes, decoded-map bytes and estimated RGBA/GPU bytes
-   separately. Texture eviction uses bytes, not entry count; compressed PNG size
-   is not a proxy for GPU allocation.
-6. **[client]** Build a map-to-assets dependency index and preload likely exits within a
-   separate megabyte allowance. Speculation stops before consuming the headroom
-   reserved for the next authoritative world.
-7. **[client]** Cache the app shell/service worker, while remaining honest that gameplay
-   still requires a live server. Install/activate a new worker atomically so an
-   open tab cannot combine an old WASM client with a partially updated shell.
-8. **[client]** Prepare assets within the frame budget. Decode off the main gameplay loop
-   where the platform permits, spread GPU texture uploads across frames, cancel
-   obsolete speculative work and cap uploads/decoded bytes per frame. A cache
-   hit is not allowed to become a visible decode/upload hitch.
-9. **[client]** Reject malformed or hostile resources with explicit size/dimension/count
-   limits. Fuzz the map pack, index and image-metadata parsers; integrity hashes
-   do not replace defensive parsing.
-
-Exit criteria:
-
-- Loading one map does not download or retain the full 58.8 MB pack.
-- A warm visit does not refetch unchanged maps or sprite sheets.
-- Corrupt, partial and mixed-version caches recover automatically.
-- CI reports cold/warm transferred bytes, cache hit rate, WASM heap and estimated
-  GPU texture memory on a fixed browser profile.
-- A fully cached destination can be decoded and uploaded without exceeding the
-  configured per-frame budget or producing a long task.
-
-## Phase 8: Seamless map transitions
-
-The player never sees a loading screen when changing maps. Requires coordinated
-server and client work; see the design discussion for full detail. Treat the
-remaining effort as roughly **40% server / 60% client**: the server work changes
-a core map/session API and the compatibility path, rather than merely adding two
-wire packets.
-
-Server:
-
-1. **[server]** `map_handoff_begin` / `map_handoff_end` framing a complete, ordered
-   destination snapshot.
-2. **[server]** `MapServer.enter/3` returns a structured snapshot instead of sending NPC
-   packets out-of-band. It currently does `send(caller_pid, {:send_raw, raw})`
-   (`arena/map/map_server.ex:1219`), which is exactly why an authoritative end
-   marker is not possible today.
-3. **[server]** A session-owned `world_epoch`, incremented per transfer. Char indices are
-   map-local and reused, so entities must be keyed `(epoch, char_index)` and
-   anything from an earlier epoch discarded.
-4. **[server]** Failure path: keep the player on the source map, send `map_handoff_failed`,
-   correct their position, resume input.
-
-**Before any of that**, decide the parity story. `session_route_manifest.ex`
-classifies 202 packets with a `vb6_ref` and a `parity_status`. These new packets
-have no VB6 ancestor and need `:intentional_divergence` entries plus fixtures,
-or the manifest test will reject them. This is step zero, not an afterthought.
-
-Also choose the compatibility migration before changing `MapServer.enter/3`:
-first make it return the structured snapshot through a session adapter that can
-still emit the existing TypeScript sequence. Only emit the framed sequence to a
-client that declares the capability, or teach the TypeScript decoder the new
-fixed-size frames first. `change_map` compatibility by itself does not protect
-the shared session path from the `enter/3` API change.
-
-Two further constraints the design must state explicitly:
-
-- The critical queue is FIFO, but normal snapshot members such as position and
-  stats are ordinarily coalesced and therefore flush after critical packets.
-  The handoff must be one ordered batch, or every packet from `begin` through
-  `end` must be forced through the critical FIFO by the session process. Add a
-  backpressure test that proves `begin < every snapshot packet < end`; merely
-  marking the boundary packets critical is insufficient.
-- The TypeScript client keeps running throughout. Legacy `change_map` covers the
-  wire, but the `enter/3` shape change touches the session path both clients use.
-- `Movement.do_move/8` deliberately emits no `pos_update` when
-  `transferring?` is true. The client therefore receives no authoritative
-  position confirmation during the current transfer window, another reason
-  bootstrap completion cannot be inferred from packet timing.
-
-Client:
-
-5. **[client]** `ActiveWorld` / `PendingWorld`, committing the swap in one ordered system
-   only when assets and snapshot are both ready.
-6. **[client]** `MapSceneRoot` per map so a scene is switched by toggling one root rather
-   than replacing thousands of entities.
-7. **[client]** Key every map-scoped entity by `(world_epoch, authoritative_id)` and reject
-   queued envelopes whose source map/epoch is no longer active.
-8. **[client]** Pause gameplay input at `begin`, clear held keys and `WalkGate`, retain the
-   old rendered world, then resume only after the atomic destination commit.
-9. **[client]** Use Phase 7's cache and exit dependency index to prepare destination maps and
-   textures without re-downloading or re-uploading shared resources.
-
-Exit criteria:
-
-- With destination loading deliberately delayed by two seconds, the old world
-  stays rendered, input is paused, and the destination appears atomically — no
-  black frame, no loading screen, no duplicated character, no stale entity.
-  This needs a delay-injection hook to be testable at all.
-- Under forced egress backpressure, packet capture proves that no handoff member
-  is dropped, coalesced, or delivered outside its `begin`/`end` boundaries.
-- Browser telemetry reports decoded-map, speculative-preload and estimated
-  GPU-texture bytes separately and stays within Phase 7's ceilings.
-- 1,000 repeated transitions leave no leaked entities or textures.
-- Destination failure, disconnect mid-transfer, stale source movement after
-  handoff, and transitions under backpressure all behave.
-
-## Phase 9: Complete Bevy UI, localization and accessibility
-
-Polish and complete Phase 0's Bevy design system after the Phase 4 and 5
-workflows are authoritative. There is one Bevy UI on WASM and native; platform
-services provide text composition, clipboard, storage and window capabilities
-without creating parallel DOM panels.
-
-1. **[client]** Complete and polish the core HUD, inventory/equipment, spellbook/hotbar,
-   skills/progression, target, chat and minimap surfaces delivered in Phase 4.
-2. **[client]** Complete NPC services, trade, bank, commerce, party, clan, faction,
-   death/recovery and service/status panels delivered in Phase 5.
-3. **[client]** Complete the stable-key localization system introduced with the Phase 0
-   models. Ship Spanish, English and Portuguese with fallback tests; avoid
-   embedding server-authored Spanish sentences where a semantic event plus
-   parameters will work.
-4. **[client]** Add settings for remappable keys, UI scale, chat size, master/music/effects
-   volume, reduced motion and color-sensitive effects. Persist them per account
-   or device as appropriate.
-5. **[client]** Support keyboard-only navigation and expose the Bevy focus/semantics tree to
-   platform accessibility APIs for authentication, chat, forms and gameplay
-   controls. Add gamepad support after keyboard parity; touch/mobile remains
-   research until the desktop/browser interaction model is solid.
-6. **[client]** Show truthful Bevy-owned staged boot progress—client, manifest,
-   authentication, map, assets and snapshot—with actionable retry/error states.
-   The host page may show only a minimal pre-WASM fallback and replaces it after
-   a Rust readiness signal, not merely because the module instantiated.
-7. **[client]** Harden Phase 0's responsive integer-scaling contract against the complete
-   game UI and supported platform matrix. Extend its automated small-window,
-   ultrawide, browser-zoom, device-pixel-ratio, orientation and OS-scaling tests
-   without accepting fractional camera shimmer or distorted aspect ratio.
-8. **[client]** Harden Phase 0's windowed, maximized and fullscreen behavior with persisted
-   preference, browser-permission failure handling and long-session/context-loss
-   coverage. Resize/fullscreen/DPI events still may not move the player, change
-   world visibility rules or lose focused text input.
-9. **[client]** Ship licensed fonts with explicit ES/EN/PT and game-symbol coverage. Treat
-   user text as Unicode grapheme clusters for cursor movement, selection,
-   truncation and length limits; define an emoji policy and neutralise malicious
-   bidirectional/control characters without corrupting legitimate accents or
-   copy/paste.
-10. **[client]** Version persistent settings and UI/cache metadata. Each release supplies a
-    tested forward migration; unknown, corrupt or newer schemas fall back safely
-    without retaining passwords or preventing startup. Downgrade behavior is
-    explicit rather than accidental.
-
-Exit criteria:
-
-- Every supported flow is usable in ES/EN/PT without clipped text or missing
-  fallback keys.
-- Authentication, character selection and chat work with keyboard navigation
-  and IME input, and their Bevy semantics are exposed to supported screen-reader
-  APIs without invisible duplicate controls.
-- Reloading preserves user settings without preserving passwords.
-- Automated resize tests cover supported aspect ratios and device-pixel ratios;
-  screenshots remain pixel-aligned in windowed and fullscreen modes.
-- Names and chat round-trip correctly through grapheme, font and bidi tests in
-  all supported languages.
-- Settings fixtures from every supported prior schema migrate deterministically;
-  corrupt/newer fixtures recover with documented defaults.
-
-## Phase 10: Production hardening and release
-
-1. **[client]** Handle browser lifecycle deliberately: focus loss clears held input, hidden
-   tabs suspend expensive presentation, long sleeps trigger resynchronisation,
-   stale callbacks from replaced sockets are ignored, and WebGL context loss
-   restores resources or shows a recoverable error.
-2. **[client + server]** Require HTTPS/WSS in production, short-lived launch tokens and
-   appropriate CSP/origin controls. The client is untrusted: asset encryption,
-   a client hash and browser-side checks are not security boundaries. Browser
-   TLS uses the browser trust store; do not promise application certificate
-   pinning for WASM.
-   Render player/chat content as text, never trusted HTML; define CSRF/session
-   handling for REST calls, maximum frame/decompressed-resource sizes, token
-   expiry, explicit logout and credential-free diagnostics.
-3. **[client]** Add structured, privacy-conscious diagnostics: build/world version, time to
-   first interactive world, FPS/frame time, RTT, reconnects, handoff latency,
-   cache hit rate and memory budgets. Never log credentials or launch tokens.
-4. **[client]** Run Playwright browser/server integration tests from earlier phases in
-   Chromium, Firefox and Safari/WebKit. Include throttled cold boot, fragmented
-   frames, disconnects, cache eviction, context loss and the two-second handoff
-   delay.
-5. **[client]** Implement native platform services and package signed/versioned builds for
-   Linux, macOS and Windows, with partial/content-addressed updates.
-6. **[client]** Display build identification in-client, automate reproducible release
-   artifacts and retain a tested rollback path.
-7. **[server + client]** Define rolling-upgrade compatibility. Negotiate minimum/maximum
-   supported protocol and content builds, show a recoverable upgrade-required
-   screen, and test old-client/new-server plus new-client/old-server during every
-   rollout. Service-worker activation and rollback must preserve one coherent
-   client/manifest pair.
-8. **[server + client]** Define multi-tab/session ownership. Launching the same character in
-   another tab or device must produce a deterministic handoff or rejection,
-   never two active authorities, token leakage or an unexplained disconnect.
-9. **[server + client]** Add versioned runtime feature flags with safe defaults and cached
-   fallback behavior. Roll out or disable protocol v2, seamless handoff,
-   speculative preloading, shaders/audio and optional telemetry independently.
-   A flag may reduce optional functionality but must never weaken server
-   authority, authentication or protocol validation.
-10. **[client]** Retain private debug/symbol artifacts for every stripped WASM/native build
-    and make crash reports resolvable by build ID. Let players copy a redacted
-    support bundle containing capabilities, recent state transitions, error
-    codes and resource/protocol versions—never tokens, account data or chat.
-11. **[server + client]** Model maintenance and capacity as explicit states: scheduled-restart
-    warning/countdown, draining, maintenance, server-full/queue position and
-    retry eligibility. Preserve or close sessions deliberately so operational
-    work appears as a useful message rather than a generic socket failure.
-12. **[client]** Gate releases on dependency vulnerability/license auditing, an SBOM,
-    reproducible dependency locks, third-party notices, asset/font/music
-    provenance and AGPL distribution obligations. A resource without confirmed
-    redistribution rights does not enter a release artifact.
-
-Exit criteria:
-
-- A player can download a desktop build or open the browser build and play the
-  same game.
-- A repeat visit starts without refetching unchanged assets.
-- Supported browsers pass the same login, gameplay, reconnect and handoff suite.
-- Release dashboards expose size, boot, frame, network and memory regressions
-  before rollout.
-- Rolling upgrade/rollback and duplicate-session tests pass without corrupting
-  character state or mixing client/resource versions.
-- Packet floods, unavailable flag configuration, simulated crashes, maintenance
-  drain and server-full responses all reach their bounded/recoverable UI states.
-- A release publishes its SBOM/notices and archives symbol artifacts keyed by
-  the exact build ID shown in the client.
-
-## Phase 11: Research and experiments
-
-Research produces measured proposals, not promises slipped into an active
-phase. Promote an idea into the roadmap only after documenting player value,
-protocol/server impact, memory/network cost, abuse cases and a falsifiable test.
-
-Candidates:
-
-- optional automatic chat translation, including consent, privacy, moderation,
-  latency, provider cost and whether it belongs in a subscription;
-- touch/mobile controls and small-screen HUDs;
-- WebGPU, WASM threads and advanced shaders, justified by profiling rather than
-  novelty;
-- multi-region worlds or explicit continent travel while preserving character
-  authority and market consistency;
+laid out, rendered and state-managed in Bevy on WASM and native. This includes
+boot and recovery, authentication, registration, character creation/selection,
+rankings, HUD, chat, inventory, spells, minimap, commerce, settings,
+accessibility semantics and developer diagnostics.
+
+JavaScript and CSS are limited to the canvas host, an unavoidable pre-WASM
+fallback and thin adapters for browser capabilities such as history, storage,
+clipboard, IME, fullscreen and external links. They do not implement panels,
+forms, navigation, overlays or gameplay state, and there is no parallel
+DOM/React version to synchronize. The public marketing site is outside this
+invariant.
+
+### The server remains authoritative
+
+WASM is controlled by the player. The client may predict, interpolate and hide
+invalid actions for responsiveness, but it grants no authority over movement,
+combat, inventory, spells, economy, visibility or identity. Shared `ao-core`
+code prevents accidental rule drift; it is not an anti-cheat boundary.
+
+### Protocol changes are governed
+
+New server/client packets first receive a parity decision in
+`session_route_manifest.ex`, byte-level fixtures and an explicit compatibility
+story. WS-only extensions without a VB6 ancestor are
+`:intentional_divergence`. The TypeScript client and legacy protocol remain
+operational unless a separate migration explicitly retires them.
+
+### UI and transport remain separate
+
+Bevy presentation reads typed view models and emits command intents. Widgets do
+not parse packets, call sockets or own authoritative rules. Fixture, replay and
+live adapters all cross the same boundary.
+
+## Current verified state
+
+The client renders real `AOMP` map data and artwork on all four layers, static
+NPC/object records and a composed player body/head. Held-key movement uses the
+server’s walk formula and emits real walk packets; `pos_update` applies server
+corrections. Direction follows the newest held key. Layers 0–1 render below the
+character and layers 2–3 above it; tall overlay art is prefetched beyond the
+visible rows and covering overlays fade to 35% over 0.12 seconds. This is a
+foundation for, not completion of, depth sorting and trigger-driven roofs.
+
+The game WebSocket measures RTT with client ping 900/server pong 204 once every
+five seconds. The client keeps one probe in flight and displays a bounded moving
+median beside FPS and population. The echo is verified against a real Ranch
+listener before login.
+
+Login requests are now honest: packet 73 is existing-character login and packet
+74 is new-character login, including the creation fields the server consumes.
+Shared Elixir/Rust fixtures pin their bytes. Runtime configuration resolves from
+query string, page metadata and page origin (or `AO_*` native variables), and a
+missing credential does not create a character.
+
+The session still does **not** log in end to end. After WS login the server sends
+`world_pack_signature` 203 and `session_token` 200, while the Rust decoder only
+handles `pos_update` 31 and `pong` 204. The unframed stream cannot skip an
+unknown ID safely, so the client correctly fails rather than desynchronizing.
+
+`AppState` currently covers `Boot -> LoadingWorld -> Playing`, with gameplay
+systems scoped to `Playing`. Draw memos such as `DrawnTiles`/`DrawnEntities` and
+redraw triggers such as `SceneDirty`/`CharacterDrawn` are not lifecycle states;
+they remain render bookkeeping until replaced by change detection/events.
+
+The last recorded transfer baseline is **19.2 MB raw / 5.5 MB gzip**. Compressed
+bytes are the player-facing budget; raw bytes remain a diagnostic. The next
+budget task must remeasure rather than silently treating this snapshot as
+current forever.
+
+## Capability unlock map
+
+This is an architecture map, not another work list. It explains why the single
+execution sequence is ordered as it is; agents do not select work from this
+table.
+
+| Phase | Capability unlocked | Depends on |
+| ---: | --- | --- |
+| 0 | Responsive, fixture-backed Bevy product shell | Current renderer |
+| 1 | Browser/native platform foundation with measured budgets | Phase 0 contracts |
+| 2 | Truthful authentication and governed protocol | Phase 1 |
+| 3 | Authoritative live world and reconciliation | Phase 2 |
+| 4 | Core combat/HUD vertical slice | Phases 0 and 3 |
+| 5 | Remaining AO workflow parity | Phase 4 |
+| 6 | World/audio fidelity within budgets | Phases 3–5 |
+| 7 | Versioned assets and bounded persistent cache | Phase 1; informs Phase 8 |
+| 8 | Seamless authoritative map handoff | Phases 3 and 7 |
+| 9 | Complete localization/accessibility/UI hardening | Phases 4–6 |
+| 10 | Staged, observable production releases | All production phases |
+| 11 | Measured experiments and future product ideas | Explicit research gates |
+
+## Execution sequence
+
+Execute the following task bodies from top to bottom. Phase 0 is intentionally
+UI-first and fixture-backed; Phase 1 makes the platform boundary real before
+protocol breadth. `W-0013` unlocks technical Phase 1 work. `W-0014` is required
+before Phase 0 is product-approved, but waiting for participant sessions does
+not stop dependency-ready platform work.
+
+## Phase 0 — Responsive Bevy game shell and UI/UX prototype
+
+Build the interface players inhabit before protocol breadth. It uses typed
+fixtures now and the same models with a live adapter later. The composition may
+learn from `research/argentumunited/README.md`—thin status bar, expanding world,
+full-height character rail and a world-centered hotbar—but must not copy its
+artwork.
+
+The reference layout contract is:
+
+```text
+┌──────────────────────────── global status bar ────────────────────────────┐
+│ ┌──────────────── world viewport ────────────────┐ ┌─ character rail ──┐ │
+│ │ world messages                                 │ │ identity + XP      │ │
+│ │                                                │ │ inventory/spells   │ │
+│ │      authoritative world and character        │ │ selected details   │ │
+│ │                                                │ │ equipment/currency │ │
+│ │              viewport-centered hotbar          │ │ vitals/navigation  │ │
+│ └────────────────────────────────────────────────┘ └────────────────────┘ │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+The world viewport grows when the window is maximized. The right rail remains
+readable rather than scaling every control proportionally, and the hotbar is
+centered within the world area—not beneath the rail. The layout borrows this
+information hierarchy from the reference screenshot, not its branded art,
+icons, fonts or exact decoration.
+
+### Task W-0001 — Fixed Bevy application shell
+
+- **State:** ready
+- **Phase:** 0
+- **Depends on:** none
+
+Build the top status bar, expanding world viewport, full-height right rail,
+upper-left world-message layer and viewport-centered numbered hotbar entirely
+in Bevy. Establish named layout regions and a fixture/demo mode without changing
+network behavior.
+
+### Task W-0084 — Honest FPS, focus and ping status
+
+- **State:** planned
+- **Phase:** 0
+- **Depends on:** W-0001
+
+Update the displayed FPS at most once per second from a stable foreground
+sample. When the window/tab is unfocused, hidden or browser-throttled, show an
+explicit background/paused state (or hold a clearly labelled last foreground
+sample) instead of reporting the throttle rate as game performance. Reset the
+sample window on focus restoration so background frames cannot produce a false
+10 FPS reading.
+
+Send game-socket ping 900 once every five seconds—not from the render/readout
+update—and keep at most one probe in flight. Background suspension or a long
+frame must not cause catch-up bursts; reconnect resets the timer and pending
+sample. Tests use a fake clock to prove display cadence, focus transitions,
+probe cadence and no-burst behavior.
+
+### Task W-0002 — Responsive geometry and visibility policy
+
+- **State:** planned
+- **Phase:** 0
+- **Depends on:** W-0001
+
+Make the rail target 21–23% of desktop width with readable logical clamps and a
+deliberate compact/collapsible mode for small windows. Define minimum supported
+size, ultrawide behavior and whether extra space shows cosmetic perimeter,
+larger UI or more world. It must never expand server-owned visibility or
+interaction range, and no application panel may require page scrolling.
+
+### Task W-0003 — Scaling, fullscreen, resize and DPI
+
+- **State:** planned
+- **Phase:** 0
+- **Depends on:** W-0002
+
+Separate responsive logical UI scale, integer nearest-neighbor world scale and
+physical device-pixel scale. Cover windowed/maximized/fullscreen restoration,
+browser zoom, monitor/DPI changes, aspect-ratio extremes and orientation. These
+events cannot stretch sprites, shimmer the camera, move the player, expose new
+authoritative tiles or lose focused input.
+
+### Task W-0004 — Typed UI models, intents and fixtures
+
+- **State:** planned
+- **Phase:** 0
+- **Depends on:** W-0001
+
+Define transport-independent models for player vitals, inventory, equipment,
+spellbook, hotbar, target, chat, skills, progression, safety and services, plus
+typed command intents. Supply deterministic populated, empty, loading,
+disabled, rejected, disconnected, dead/ghost and malformed-data fixtures.
+Server feedback crosses the boundary as stable semantic keys and parameters,
+not presentation-ready Spanish where the protocol can avoid it.
+
+### Task W-0005 — Design tokens and Bevy primitives
+
+- **State:** planned
+- **Phase:** 0
+- **Depends on:** W-0001
+
+Version typography/fonts, colors, borders, spacing, icon/slot sizes, focus,
+disabled/locked, rarity/status and pixel-scaling tokens. Build shared Bevy
+buttons, tabs, slots, bars, lists, text/password fields, tooltips, menus,
+dialogs, notifications, drag ghosts, progress/cooldown and hotkey controls with
+one focus/event/state model on WASM and native.
+
+### Task W-0006 — Character, vitals, inventory and equipment prototype
+
+- **State:** planned
+- **Phase:** 0
+- **Depends on:** W-0004, W-0005
+
+Implement fixture-backed character/XP, HP, mana, stamina, hunger, thirst,
+skills, currency, inventory, equipment, selected item detail, quantities and
+visible locked slots. Exercise selection, equip/use/drop intent, splitting,
+drag cancellation, insufficient state and authoritative rejection/rollback
+presentation without claiming mock actions are live gameplay.
+
+### Task W-0007 — Spellbook and hotbar prototype
+
+- **State:** planned
+- **Phase:** 0
+- **Depends on:** W-0004, W-0005
+
+Implement spells, requirements, target modes, cooldowns and persistent numbered
+hotbar assignment/use with fixtures. Cover insufficient mana/stamina/skill,
+equipment masks, land/water, target-level, area and dead-target restrictions as
+typed presentation states whose final authority remains server-side.
+
+### Task W-0008 — Chat, target, safety and feedback prototype
+
+- **State:** planned
+- **Phase:** 0
+- **Depends on:** W-0004, W-0005
+
+Implement world messages, chat channels, bubbles, current target, personal and
+party safety, navigation/dead restrictions, notifications and contextual
+actions. Define focus ownership so chat, IME, password fields and modals suppress
+movement/combat/hotkeys. Cover cooldown, mute, rejection and disconnect feedback.
+
+### Task W-0009 — Bevy product screens
+
+- **State:** planned
+- **Phase:** 0
+- **Depends on:** W-0004, W-0005
+
+Build fixture-driven boot/loading, login, registration, character selection,
+character creation with sprite preview, rankings, maintenance, reconnect,
+invalid-session and recovery screens. These are real Bevy navigation states,
+not DOM placeholders, and include empty/error/slow outcomes before Phase 2
+connects services.
+
+### Task W-0010 — Secondary windows and interaction ownership
+
+- **State:** planned
+- **Phase:** 0
+- **Depends on:** W-0005
+
+Implement open/close/focus, z-order, modal behavior, movement,
+snapping/docking, optional resize, remembered positions, Escape semantics and
+restoration after viewport changes. Specify click/double-click/right-click,
+drag/drop, quantity and tooltip timing once rather than per panel.
+
+### Task W-0011 — Settings, guidance and accessibility fixtures
+
+- **State:** planned
+- **Phase:** 0
+- **Depends on:** W-0006, W-0007, W-0008, W-0009, W-0010
+
+Prototype remappable input, UI/chat scale, audio, reduced motion and
+color-sensitive settings; keyboard focus/semantics; and contextual guidance for
+movement, interaction, combat, inventory, spells, death and recovery. Exercise
+long ES/EN/PT strings, Unicode composition, missing localization and unavailable
+capabilities.
+
+### Task W-0012 — Component gallery and deterministic visual harness
+
+- **State:** planned
+- **Phase:** 0
+- **Depends on:** W-0002, W-0003, W-0004, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0011
+
+Create a Bevy component gallery and scripted capture harness sharing the same
+fixtures as production UI. Pin fonts, seed, animation time, map/camera, locale,
+logical resolution, DPR and GPU tolerance. Store approved goldens for 720p,
+1080p, 1440p, ultrawide, small laptop, compact rail, maximized and fullscreen;
+include peaceful, combat, loading, empty and rejected states.
+
+### Task W-0013 — Phase 0 technical evidence
+
+- **State:** planned
+- **Phase:** 0
+- **Depends on:** W-0001, W-0002, W-0003, W-0004, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0011, W-0012
+
+Run the Phase 0 technical checklist, archive capture artifacts and correct every
+failed contract. This closes the engineering gate and unlocks Phase 1; it does
+not fabricate the human usability evidence owned by W-0014.
+
+### Task W-0014 — Veteran and newcomer usability validation
+
+- **State:** planned
+- **Phase:** 0
+- **Depends on:** W-0013 and recruited participants
+
+Run task-based sessions measuring whether veterans and newcomers can find
+health/mana, use/equip an item, cast a spell, trade, bank, change chat channel
+and recover from rejection. Record protocol, findings, resulting revisions and
+remaining tradeoffs. This is the Phase 0 product-approval gate but does not hold
+idle dependency-ready Phase 1 engineering.
+
+### Phase 0 exit gate
+
+`W-0013` owns the technical checks below and unlocks Phase 1. Participant checks
+close through `W-0014`; scheduling people does not idle ready technical work.
+
+- [ ] At 720p, 1080p, 1440p, ultrawide and small-laptop sizes, the world expands,
+      the rail remains usable, compact mode is deliberate and the hotbar stays
+      centered on the world viewport.
+- [ ] Windowed, maximized and fullscreen captures stay pixel-aligned across the
+      supported DPR/OS-scale matrix; world, UI and physical scale remain
+      separate.
+- [ ] Resize, zoom, DPI and fullscreen do not move the player, alter visibility,
+      stretch sprites, shimmer the camera or lose composing text.
+- [ ] FPS refreshes at most once per second; background throttling is labelled
+      background/paused and cannot overwrite the foreground sample as “10 FPS”.
+- [ ] Ping runs once per five seconds with one probe in flight, no per-frame
+      sends and no catch-up burst after suspension, focus or reconnect.
+- [ ] Product screens and HUD workflows are Bevy-owned and cover populated,
+      empty, loading, disabled, rejected, disconnected, dead/ghost and malformed
+      fixture states.
+- [ ] Focus, modal/chat ownership, drag cancellation, tooltips and IME never
+      leak unintended world commands.
+- [ ] Component gallery and production UI share models, intents, fixtures,
+      tokens and components; the deterministic golden matrix passes.
+- [ ] Source/browser checks find no DOM/CSS application panel, form, navigation
+      state or alternate HUD.
+- [ ] Veterans and newcomers complete the recorded usability protocol; findings,
+      revisions and deliberately rejected suggestions are documented.
+
+## Phase 1 — Platform foundation
+
+Make the prototype honest while the platform-specific surface is still small.
+Minimal platform interfaces are scheduled immediately after the Phase 0
+technical gate; Phase 0 may use deterministic adapters until then.
+
+### Task W-0015 — Platform-service traits and capabilities
+
+- **State:** planned
+- **Phase:** 1
+- **Depends on:** W-0004
+
+Define narrow services for HTTP, WebSocket, persistent cache, auth/token
+storage, audio, clipboard, IME/text composition, fullscreen/window, browser
+history and external links. Define capability results and failures without
+spreading `cfg(wasm32)` into gameplay or UI systems.
+
+### Task W-0016 — Browser adapters and host boundary
+
+- **State:** planned
+- **Phase:** 1
+- **Depends on:** W-0015
+
+Implement browser services, gesture-gated fullscreen/audio, resize/DPR/IME,
+storage denial/quota, history and external-link behavior. Source/browser tests
+must prove the host contains only canvas, pre-WASM fallback and thin adapters—no
+application forms, panels or duplicate state tree.
+
+### Task W-0017 — Native adapters and build parity
+
+- **State:** planned
+- **Phase:** 1
+- **Depends on:** W-0015
+
+Replace native HTTP/WebSocket and platform stubs with real implementations and
+provide cache, clipboard, text composition, window/fullscreen, audio and link
+services. Move pure parsers/rules into `ao-core`; both targets and all
+platform-independent tests remain green.
+
+### Task W-0018 — Honest lifecycle states
+
+- **State:** planned
+- **Phase:** 1
+- **Depends on:** W-0015
+
+Extend application/session state only when transitions exist:
+`Boot -> Authenticate -> SelectCharacter -> LoadWorld -> Playing`, plus
+`Reconnecting` in Phase 2 and `Handoff` in Phase 8. Keep render memos and redraw
+triggers as render concerns/change detection, not application states. Reset
+session-scoped resources explicitly at every transition.
+
+### Task W-0019 — Same-origin staging deployment
+
+- **State:** planned
+- **Phase:** 1
+- **Depends on:** W-0016
+
+Serve the WASM client and runtime configuration from the game origin while
+retaining explicit development overrides. Define a reproducible staging deploy,
+health check, cache headers, rollback and browser smoke path; no production host
+or credential is compiled into the artifact.
+
+### Task W-0020 — Budgets and capability profiles
+
+- **State:** planned
+- **Phase:** 1
+- **Depends on:** W-0016, W-0017
+
+Remeasure optimized raw/gzip WASM and enforce a documented 5% unexplained-
+regression threshold. Establish fixed browser/device/network profiles and
+numeric ceilings for first interactive world, p95 frame, draw calls, WASM heap,
+estimated GPU memory and reconnect/handoff. Probe WebGL2, texture size, DPR,
+audio, persistent storage/quota and memory signals; select a tested low-resource
+profile or actionable unsupported-device screen.
+
+### Phase 1 exit gate
+
+- [ ] `./build.sh check` passes for WASM and native, including both crates and
+      the roadmap gate.
+- [ ] Browser/native platform services share narrow contracts and no platform
+      conditionals leak into gameplay/UI.
+- [ ] No credential/production host is compiled in; the browser host contains
+      only canvas, fallback and thin adapters.
+- [ ] Lifecycle state is explicit and draw memos/redraw triggers remain render
+      concerns.
+- [ ] Same-origin staging deploy, health check, smoke test and rollback repeat.
+- [ ] CI publishes raw/gzip size and fixed startup/frame/draw/heap/GPU/network
+      budgets, failing unexplained regressions.
+- [ ] Supported, low-resource and unsupported capability profiles reach stable,
+      actionable outcomes without identifying diagnostics.
+
+## Phase 2 — Governed protocol and real authentication
+
+The first goal is one truthful session, not broad packet count.
+
+### Task W-0021 — Protocol-v2 parity decision
+
+- **State:** planned
+- **Phase:** 2
+- **Depends on:** W-0020
+
+Classify version/framing extensions in `session_route_manifest.ex`, reserve IDs,
+define legacy compatibility and add byte fixtures before implementation. Record
+why the divergence is necessary and how it is disabled or rolled back.
+
+### Task W-0022 — Negotiated length-framed WebSocket transport
+
+- **State:** planned
+- **Phase:** 2
+- **Depends on:** W-0021
+
+Negotiate a versioned WS subprotocol/capability that carries unchanged AO packet
+bytes inside a bounded length envelope. Modern clients safely skip unknown
+packets; legacy TCP/WS remains unframed. Test fragmentation, concatenation,
+unknown IDs, hostile lengths and downgrade behavior.
+
+### Task W-0023 — Canonical protocol schema decision
+
+- **State:** planned
+- **Phase:** 2
+- **Depends on:** W-0021
+
+Choose and prove one source: machine-readable schema checked against Elixir
+goldens, an Elixir-source extractor with verification, or manual Rust codecs
+with paired fixtures. Code generation begins only after its source is trusted.
+
+### Task W-0024 — Login bootstrap decoding
+
+- **State:** planned
+- **Phase:** 2
+- **Depends on:** W-0022, W-0023
+
+Decode session token 200, world-pack signature 203, explicit login success and
+all bootstrap/error responses. Validate content version/hash before entering
+the world and prove a real existing character reaches the authoritative
+bootstrap with packet 73.
+
+### Task W-0025 — Live Bevy account and character flows
+
+- **State:** planned
+- **Phase:** 2
+- **Depends on:** W-0009, W-0016, W-0024
+
+Connect Bevy registration, login/logout, server-provided character options,
+creation/preview, selection, launch and rankings to REST and the game socket.
+Use launch token plus character ID; never send account passwords over the game
+protocol. Preserve reloadable routes/history on web and equivalent navigation
+on native.
+
+### Task W-0026 — Normal-play packet coverage
+
+- **State:** planned
+- **Phase:** 2
+- **Depends on:** W-0023, W-0024
+
+Add paired fixtures and Rust handlers for entity create/move/change/remove,
+chat/structured console events, stats, inventory, spells, objects, weather, map
+change, intervals, build/version and errors. Unknown framed packets are counted
+and skipped; unknown legacy packets fail without desync.
+
+### Task W-0027 — Connection lifecycle and recovery
+
+- **State:** planned
+- **Phase:** 2
+- **Depends on:** W-0018, W-0024
+
+Implement meaningful close reasons, bounded heartbeat/RTT, exponential backoff,
+token expiry and explicit `Playing` only after bootstrap. Classify credentials,
+ban/mute, full, maintenance, stale world/assets and preload failures into Bevy
+states with independent retry/reconnect/forget-session actions.
+
+### Task W-0028 — Redacted trace and deterministic replay
+
+- **State:** planned
+- **Phase:** 2
+- **Depends on:** W-0022, W-0026
+
+Record bounded inbound/outbound frames, timestamps, state transitions and
+build/world versions without passwords, tokens, cookies or private account
+data. Replay without a socket and inject fragmentation, latency, reordering
+where legal and disconnect boundaries.
+
+### Task W-0029 — Bounded network queues
+
+- **State:** planned
+- **Phase:** 2
+- **Depends on:** W-0022
+
+Bound incoming frames/decoded packets and pending commands by bytes/count;
+budget processing per frame and observe WebSocket buffered amount. Overflow
+must disconnect/resnapshot explicitly, never grow forever, silently drop
+authoritative state or freeze one render frame.
+
+### Phase 2 exit gate
+
+- [ ] Protocol v2/new packets are classified and byte-pinned before use; legacy
+      streams remain compatible and framed streams skip unknown IDs safely.
+- [ ] Framing/codec fuzz tests survive truncation, concatenation, fragmentation,
+      hostile lengths and arbitrary unknown IDs without panic or desync.
+- [ ] A real existing character uses packet 73, validates packet 203, accepts
+      token 200 and completes authoritative bootstrap; packet 74 is creation-only.
+- [ ] Registration, preview/creation, selection, launch, rankings, logout, deep
+      links and history work through Bevy.
+- [ ] Redacted traces replay deterministically and contain no password, token,
+      cookie or account secret.
+- [ ] Network bursts stay bounded and every auth/bootstrap failure offers the
+      correct recovery without an invisible live session.
+
+## Phase 3 — Authoritative client state and live world
+
+### Task W-0030 — Bootstrap-owned world
+
+- **State:** planned
+- **Phase:** 3
+- **Depends on:** W-0024, W-0026
+
+Take map, position and identity from the login snapshot; remove demo coordinates
+and `INITIAL_MAP`. A pack record may preload art but never prove that an entity
+currently exists.
+
+### Task W-0031 — Authoritative ECS identity
+
+- **State:** planned
+- **Phase:** 3
+- **Depends on:** W-0030
+
+Represent players, NPCs and objects as live ECS entities keyed by authoritative
+identity. Apply create/move/change/remove idempotently and test duplicates,
+unknown removes, late packets and churn without leaks.
+
+### Task W-0032 — Prediction, interpolation and reconciliation
+
+- **State:** planned
+- **Phase:** 3
+- **Depends on:** W-0031
+
+Separate fixed-step intent, local prediction, authoritative correction and
+remote interpolation. Reset `WalkGate` on login/reconnect/handoff. Measure step
+interval distribution so camera or cadence pauses are diagnosed from data.
+
+### Task W-0033 — Reconnect/resnapshot contract
+
+- **State:** planned
+- **Phase:** 3
+- **Depends on:** W-0027, W-0031
+
+Define server/client resynchronization: a fresh epoch/snapshot replaces stale
+entities and inputs, and movement accumulated while disconnected or asleep is
+not blindly replayed.
+
+### Task W-0034 — Client architecture split
+
+- **State:** planned
+- **Phase:** 3
+- **Depends on:** W-0030
+
+Separate transport/session, authoritative model, presentation and Bevy UI before
+packet breadth causes another monolith. Raw packet structures never become
+widget resources.
+
+### Task W-0035 — Bounded developer diagnostics
+
+- **State:** planned
+- **Phase:** 3
+- **Depends on:** W-0032, W-0034
+
+Add feature/build-gated Bevy diagnostics for redacted packets, authoritative vs
+predicted position, corrections, cadence, tile inspection, budgets and
+build/world IDs. Release builds keep bounded metrics without private operator
+tools.
+
+### Phase 3 exit gate
+
+- [ ] Bootstrap is the only source of initial map, position and identity.
+- [ ] Entity create/change/move/remove is idempotent; duplicate, unknown, stale
+      and churn cases leak nothing.
+- [ ] Prediction stays responsive under injected latency and converges without
+      oscillation; interpolation never rewrites authority.
+- [ ] Login/reconnect/handoff reset `WalkGate`, held input and stale epoch state.
+- [ ] Reconnect obtains a fresh snapshot and never replays asleep/offline input.
+- [ ] Fixture, replay and live adapters produce equivalent typed snapshots; no
+      widget reads packets and release builds omit private diagnostics.
+
+## Phase 4 — Core playable HUD vertical slice
+
+### Task W-0036 — Live UI adapter
+
+- **State:** planned
+- **Phase:** 4
+- **Depends on:** W-0004, W-0034
+
+Drive the Phase 0 models/intents from authoritative state. Fixture, replay and
+live snapshots for the same trace must agree; widgets remain packet-blind.
+
+### Task W-0037 — Inventory and equipment end to end
+
+- **State:** planned
+- **Phase:** 4
+- **Depends on:** W-0036
+
+Select, move, use, split, drop and equip supported layers with quantities,
+locked/disabled/dead states and authoritative rollback after rejection,
+interruption or reconnect.
+
+### Task W-0038 — Magic and hotbar end to end
+
+- **State:** planned
+- **Phase:** 4
+- **Depends on:** W-0036
+
+Implement spell selection/assignment, target/cancel, cast, cooldown/interval,
+resource/skill/equipment/terrain/level/area/dead constraints and server
+correction through the live path.
+
+### Task W-0039 — Targeting and world interaction
+
+- **State:** planned
+- **Phase:** 4
+- **Depends on:** W-0036
+
+Select characters/NPCs/objects/tiles, face/use/pick up/drop and preserve server
+range, navigation and visibility. Cover target disappearance and map change.
+
+### Task W-0040 — Combat and safety end to end
+
+- **State:** planned
+- **Phase:** 4
+- **Depends on:** W-0038, W-0039
+
+Implement attack/weapon use, damage/block/status, personal/party safe modes,
+safe zones and death/ghost gating with rejection/correction evidence.
+
+### Task W-0041 — Chat end to end
+
+- **State:** planned
+- **Phase:** 4
+- **Depends on:** W-0036
+
+Implement public/private/party/clan/faction channels, filters, bubbles and
+mute/moderation feedback. Unicode limits are consistent and input focus cannot
+leak gameplay commands.
+
+### Phase 4 exit gate
+
+- [ ] A real character fights, loots, moves/equips/uses/drops items, casts
+      constrained spells, uses hotkeys, chats and toggles safety through Bevy.
+- [ ] Inventory, magic, targeting, combat and chat cover success, rejection,
+      interruption, death, map change and reconnect where applicable.
+- [ ] Server correction rolls back without duplicate items, cooldowns, targets
+      or commands.
+- [ ] Fixture/replay/live model states agree and UI owns no authoritative rule.
+- [ ] Relevant TypeScript E2E behavior has Rust coverage or an explicit,
+      reviewed retirement with a stronger replacement.
+
+## Phase 5 — Remaining gameplay parity
+
+### Task W-0042 — NPC dialogue and services
+
+- **State:** planned
+- **Phase:** 5
+- **Depends on:** W-0040
+
+Complete dialogue, training, healing, resurrection, quests where supported and
+other contextual services with success, rejection, cancel and reconnect.
+
+### Task W-0043 — Economy workflows
+
+- **State:** planned
+- **Phase:** 5
+- **Depends on:** W-0037
+
+Complete NPC commerce, bank item/gold and player trade, including quantities,
+confirmation, insufficient funds/capacity, cancellation and disconnect.
+
+### Task W-0044 — Social, clan and faction workflows
+
+- **State:** planned
+- **Phase:** 5
+- **Depends on:** W-0041
+
+Implement party/clan membership and leadership, invites, rosters, clan creation,
+block/mute/report and permission-aware faction/moderation feedback.
+
+### Task W-0045 — Death and recovery
+
+- **State:** planned
+- **Phase:** 5
+- **Depends on:** W-0040, W-0042
+
+Complete ghost presentation, allowed commands, lost/retained state,
+resurrection and authoritative return to play.
+
+### Task W-0046 — Travel, survival and service commands
+
+- **State:** planned
+- **Phase:** 5
+- **Depends on:** W-0042
+
+Cover travel restrictions, hunger/thirst, rest, meditation and navigation plus
+help, MOTD, uptime, rewards, account/position/stats/skills resync and punishment
+lookup where supported. Client gating improves feedback but grants no trust.
+
+### Task W-0047 — Versioned gameplay metadata
+
+- **State:** planned
+- **Phase:** 5
+- **Depends on:** W-0023
+
+Govern spell requirements, XP thresholds, object/NPC definitions and faction
+labels so incompatible/stale presentation data is rejected before `Playing`.
+
+### Task W-0048 — Workflow parity matrix
+
+- **State:** planned
+- **Phase:** 5
+- **Depends on:** W-0042, W-0043, W-0044, W-0045, W-0046, W-0047
+
+Map each supported workflow to commands, packets, Rust handlers, Bevy UI,
+VB6/TypeScript reference and end-to-end tests. “Packet decoded” is not a
+completed row. Every old E2E test receives Rust coverage or an explicit
+retirement reason and stronger replacement.
+
+### Phase 5 exit gate
+
+- [ ] Scripted characters complete NPC services, commerce/bank, player trade,
+      party/clan, death/recovery, travel/survival and service commands end to end.
+- [ ] Every workflow covers success, rejection, cancellation/interruption and
+      reconnect.
+- [ ] Incompatible spell, XP, object/NPC or faction metadata is rejected before
+      `Playing`.
+- [ ] The workflow parity matrix has no unexplained Bevy-exposed row.
+- [ ] Trace replay reproduces a regression from every major workflow and every
+      relevant legacy E2E test is covered, replaced or deliberately retired.
+
+## Phase 6 — World fidelity and audio
+
+### Task W-0049 — Character animation and equipment composition
+
+- **State:** planned
+- **Phase:** 6
+- **Depends on:** W-0031
+
+Resolve animated GRHs, body walk speeds/cycles and weapon, shield, helmet, cart
+and backpack layers in VB6-compatible order.
+
+### Task W-0050 — Depth sorting and trigger-driven roofs
+
+- **State:** planned
+- **Phase:** 6
+- **Depends on:** W-0031
+
+Replace spawn-order overlap with measured row/depth ownership and ship map
+triggers through server encoding. Implement trigger 1 building/roof visibility
+for both clients. Existing over-character layers and fade are supporting
+evidence, not closure.
+
+### Task W-0051 — Bounded tile and texture streaming
+
+- **State:** planned
+- **Phase:** 6
+- **Depends on:** W-0020, W-0030
+
+Request missing sheets ahead of movement, retain tall art and despawn material
+outside byte-budgeted windows without visible holes or unbounded GPU growth.
+
+### Task W-0052 — Labels, fades, weather and visual FX
+
+- **State:** planned
+- **Phase:** 6
+- **Depends on:** W-0050
+
+Complete tree/occluder fading, names, chat bubbles, combat text, weather,
+day/night and shaders with reduced-motion/color-sensitive alternatives. Preserve
+the existing overlay-fade behavior with deterministic coverage tests.
+
+### Task W-0053 — Music and positional audio
+
+- **State:** planned
+- **Phase:** 6
+- **Depends on:** W-0015
+
+Implement map music and positional effects with separate controls. Browser
+audio unlocks on gesture, suspends in background and resumes without overlap.
+
+### Task W-0054 — Renderer profiling and optimization
+
+- **State:** planned
+- **Phase:** 6
+- **Depends on:** W-0051, W-0052
+
+Measure against Phase 1 frame/draw/memory ceilings. Add chunk meshes, batching
+or instancing only when measurements demand them; keep culling, entity and
+texture cleanup observable.
+
+### Phase 6 exit gate
+
+- [ ] Walking, turning, equipment and fighting match the intended reference in
+      deterministic captures; overlap follows world depth, not spawn order.
+- [ ] Server triggers reveal building interiors in both clients without hiding
+      unrelated upper-layer art.
+- [ ] Long movement streams tiles/tall art without holes and releases old
+      entities/textures inside byte budgets.
+- [ ] A 30-minute movement/combat capture stays inside frame, draw, entity, heap
+      and GPU ceilings.
+- [ ] Audio obeys gesture, controls and background/resume behavior without
+      overlap; goldens cover indoor/outdoor/crowded/weather/equipment scenes.
+
+## Phase 7 — Versioned assets and persistent cache
+
+This precedes seamless handoff. A transition cannot be hitch-free if it first
+downloads or materializes the full 58.8 MB pack.
+
+### Task W-0055 — Indexed or per-map world format
+
+- **State:** planned
+- **Phase:** 7
+- **Depends on:** W-0020, W-0024
+
+Replace the monolithic sequential pack with per-map resources or a range-indexed
+format and small index. Define compressed transfer, decoded map and maximum
+hostile-size bounds before implementation.
+
+### Task W-0056 — Content-hashed resource manifest
+
+- **State:** planned
+- **Phase:** 7
+- **Depends on:** W-0055
+
+Version maps, indices, sprite sheets and audio; validate packet 203 and prevent
+mixed world builds through atomic activation/invalidation.
+
+### Task W-0057 — Persistent cache service
+
+- **State:** planned
+- **Phase:** 7
+- **Depends on:** W-0015, W-0056
+
+Implement Cache Storage/IndexedDB on web and application cache directories on
+native. Denial, quota exhaustion, eviction, corruption and partial versions
+fall back safely.
+
+### Task W-0058 — Immutable/range resource serving
+
+- **State:** planned
+- **Phase:** 7
+- **Depends on:** W-0055, W-0056
+
+Serve content-addressed assets with immutable headers and range support where
+the format requires it; prove warm visits do not refetch unchanged resources.
+
+### Task W-0059 — Byte-budgeted cache and preloading
+
+- **State:** planned
+- **Phase:** 7
+- **Depends on:** W-0057
+
+Track compressed, decoded-map, WASM-heap and estimated RGBA/GPU bytes
+separately. Evict by bytes, not entry count. Build a map-to-assets dependency
+index and give speculative exits a separate allowance below authoritative-world
+headroom.
+
+### Task W-0060 — Bounded decode and GPU upload
+
+- **State:** planned
+- **Phase:** 7
+- **Depends on:** W-0059
+
+Decode off the gameplay loop where possible, spread uploads across frames,
+cancel obsolete speculation and cap work/bytes per frame. Fuzz map/index/image
+metadata and reject hostile dimensions/counts even when hashes match.
+
+### Task W-0061 — Coherent app-shell updates
+
+- **State:** planned
+- **Phase:** 7
+- **Depends on:** W-0056, W-0057
+
+Cache the shell/service worker while remaining honest that play needs a server.
+Install/activate atomically so no tab combines old WASM with a partially updated
+manifest, including rollback.
+
+### Phase 7 exit gate
+
+- [ ] Loading one map neither downloads nor retains the complete 58.8 MB pack;
+      a small manifest activates atomically and prevents mixed builds.
+- [ ] Warm visits do not refetch unchanged maps, sheets or audio.
+- [ ] Storage denial/quota/eviction, corruption, partial downloads and rollback
+      recover automatically.
+- [ ] CI separates cold/warm transfer, cache hit, compressed/decoded/heap/GPU
+      bytes; eviction and speculation are megabyte-bounded.
+- [ ] Cached decode/upload stays under per-frame work/byte ceilings.
+- [ ] Resource fuzzing enforces size/dimension/count limits and service-worker
+      activation/rollback keeps one coherent shell/WASM/manifest set.
+
+## Phase 8 — Seamless authoritative map handoff
+
+Treat this as approximately 40% server/60% client. The server API and ordering
+changes are core work, not two free packets.
+
+### Task W-0062 — Handoff parity and compatibility contract
+
+- **State:** planned
+- **Phase:** 8
+- **Depends on:** W-0021, W-0033, W-0059
+
+Classify `map_handoff_begin/end/failed` as intentional divergences, assign
+fixtures and capability negotiation, and keep the TypeScript/legacy session
+path working throughout.
+
+### Task W-0063 — Structured MapServer snapshot adapter
+
+- **State:** planned
+- **Phase:** 8
+- **Depends on:** W-0062
+
+Refactor `MapServer.enter/3` to return a structured snapshot rather than send
+NPC bytes out of band. Introduce an adapter that can still emit the exact legacy
+TypeScript sequence before changing shared session behavior.
+
+### Task W-0064 — Epoch, failure and ordered batch
+
+- **State:** planned
+- **Phase:** 8
+- **Depends on:** W-0063
+
+Own a session `world_epoch`, increment per transfer and key map-local IDs by
+epoch. Keep the source world on failure, correct position and resume input.
+Guarantee `begin < every snapshot member < end` through one ordered batch or
+critical FIFO; normal coalescing may not escape the boundary.
+
+### Task W-0065 — Active/pending Bevy worlds
+
+- **State:** planned
+- **Phase:** 8
+- **Depends on:** W-0064, W-0060
+
+Maintain `ActiveWorld` and `PendingWorld` under separate `MapSceneRoot`s. Commit
+once, only when assets and complete snapshot are ready; reject queued envelopes
+from stale map/epoch.
+
+### Task W-0066 — Input and lifecycle handoff behavior
+
+- **State:** planned
+- **Phase:** 8
+- **Depends on:** W-0018, W-0065
+
+Enter real `Handoff`, pause gameplay, clear held inputs/`WalkGate`, retain the
+old rendered world and resume only after atomic commit. Do not infer completion
+from packet timing: transfer intentionally suppresses `pos_update` today.
+
+### Task W-0067 — Adversarial transition harness
+
+- **State:** planned
+- **Phase:** 8
+- **Depends on:** W-0065, W-0066
+
+Add delay injection and forced egress backpressure. Prove a two-second delayed
+destination leaves the old world visible and commits atomically; cover failure,
+mid-transfer disconnect, stale movement, packet ordering and 1,000-transition
+entity/texture cleanup.
+
+### Phase 8 exit gate
+
+- [ ] Handoff packets have parity entries, exact fixtures and capability-gated
+      legacy compatibility.
+- [ ] `MapServer.enter/3` returns a structured snapshot while an adapter
+      preserves the TypeScript sequence; no NPC packet remains out of band.
+- [ ] Backpressure capture proves `begin < every member < end` with no escaped,
+      coalesced or dropped member.
+- [ ] Epoch filtering prevents stale source entities/input from mutating the
+      destination.
+- [ ] A two-second delayed destination leaves the source visible, pauses input
+      and commits in one frame without black/loading/duplicate artifacts.
+- [ ] Failure and mid-transfer disconnect recover explicitly; 1,000 transitions
+      leak no scene root, entity, decoded map or texture.
+
+## Phase 9 — Complete localization, accessibility and UI hardening
+
+### Task W-0068 — Authoritative workflow polish
+
+- **State:** planned
+- **Phase:** 9
+- **Depends on:** W-0048
+
+Polish every Phase 4/5 HUD, service, commerce, social and recovery surface with
+the Phase 0 component system. Do not create a late second UI implementation.
+
+### Task W-0069 — Stable-key localization
+
+- **State:** planned
+- **Phase:** 9
+- **Depends on:** W-0047, W-0068
+
+Ship Spanish, English and Portuguese with fallback/missing-key tests and typed
+parameters. Avoid server-authored Spanish when a semantic event suffices.
+
+### Task W-0070 — Persisted settings and migrations
+
+- **State:** planned
+- **Phase:** 9
+- **Depends on:** W-0015, W-0069
+
+Persist per-device/account key, scale, chat, audio, motion and color settings.
+Version schemas; migrate old fixtures and recover safely from corrupt/newer
+data without passwords or startup failure.
+
+### Task W-0071 — Keyboard, semantics, gamepad and text correctness
+
+- **State:** planned
+- **Phase:** 9
+- **Depends on:** W-0011, W-0069
+
+Complete keyboard-only navigation and expose Bevy semantics to supported
+platform APIs. Add gamepad only after keyboard parity. Treat text as grapheme
+clusters, ship licensed ES/EN/PT fonts, define emoji policy and neutralize
+malicious bidi/control characters without corrupting accents or copy/paste.
+
+### Task W-0072 — Truthful boot and recovery progress
+
+- **State:** planned
+- **Phase:** 9
+- **Depends on:** W-0027, W-0057
+
+Expose client, manifest, authentication, map, assets and snapshot progress with
+independent recovery actions. Remove host fallback only after an explicit Rust
+readiness signal, not module instantiation.
+
+### Task W-0073 — Complete responsive/fullscreen hardening
+
+- **State:** planned
+- **Phase:** 9
+- **Depends on:** W-0003, W-0068
+
+Re-run small-window, ultrawide, zoom, DPR, orientation, OS scaling, fullscreen
+permission failure, long-session and context-loss matrices against complete UI.
+Events still cannot move the player, change visibility or lose composition.
+
+### Phase 9 exit gate
+
+- [ ] Every supported flow works in ES/EN/PT with fallback keys, licensed glyphs
+      and no clipped critical text.
+- [ ] Authentication, selection and chat work with keyboard/IME and expose Bevy
+      semantics without duplicate invisible controls.
+- [ ] Grapheme/emoji/bidi rules round-trip valid names/chat without corrupting
+      accents.
+- [ ] Settings preserve no password, migrate old schemas and recover from
+      corrupt/newer data.
+- [ ] Complete-UI resize/fullscreen/zoom/DPR/orientation/context-loss matrices
+      preserve pixel alignment, gameplay and input.
+- [ ] Boot progress distinguishes client, manifest, auth, map, assets and
+      snapshot, with an actionable recovery for each failure.
+
+## Phase 10 — Production hardening and release
+
+### Task W-0074 — Browser lifecycle and context recovery
+
+- **State:** planned
+- **Phase:** 10
+- **Depends on:** W-0033, W-0060
+
+Clear held input on focus loss, suspend expensive hidden-tab work, resnapshot
+after long sleeps, ignore stale socket callbacks and recover WebGL resources or
+show actionable failure.
+
+### Task W-0075 — Production transport and content security
+
+- **State:** planned
+- **Phase:** 10
+- **Depends on:** W-0019, W-0027
+
+Require HTTPS/WSS, short-lived launch tokens, CSP/origin and REST CSRF/session
+controls, bounded frames/resources and explicit logout. Render player content
+as text. Do not promise WASM certificate pinning or treat hashes/encryption as
+anti-cheat.
+
+### Task W-0076 — Privacy-conscious observability and support bundles
+
+- **State:** planned
+- **Phase:** 10
+- **Depends on:** W-0035, W-0075
+
+Report build/world, boot, frame, RTT, reconnect, handoff, cache and memory
+metrics without credentials/tokens/chat. Retain private symbols by build ID and
+let players export a redacted capability/state/error/version bundle.
+
+### Task W-0077 — Cross-browser and fault-injection release suite
+
+- **State:** planned
+- **Phase:** 10
+- **Depends on:** W-0067, W-0073, W-0074
+
+Run Chromium, Firefox and WebKit end to end with cold/throttled boot,
+fragmentation, disconnect, cache eviction, context loss and delayed handoff.
+
+### Task W-0078 — Native packaging and content-addressed updates
+
+- **State:** planned
+- **Phase:** 10
+- **Depends on:** W-0017, W-0061
+
+Produce signed/versioned Linux, macOS and Windows builds using the already-real
+native services. Implement partial/content-addressed updates without duplicating
+platform work from Phase 1.
+
+### Task W-0079 — Reproducible release, rollout and rollback
+
+- **State:** planned
+- **Phase:** 10
+- **Depends on:** W-0019, W-0076, W-0077, W-0078
+
+Show build identity, reproduce artifacts, stage/canary rollout and test rollback
+with one coherent client/manifest pair. Dashboard size, boot, frame, network and
+memory regressions before promotion.
+
+### Task W-0080 — Version and duplicate-session compatibility
+
+- **State:** planned
+- **Phase:** 10
+- **Depends on:** W-0022, W-0079
+
+Negotiate supported protocol/content ranges and test old/new client/server
+combinations. Define same-character multi-tab/device handoff or rejection so
+there are never two authorities or unexplained disconnects.
+
+### Task W-0081 — Feature flags and operational states
+
+- **State:** planned
+- **Phase:** 10
+- **Depends on:** W-0079
+
+Version flags with safe cached defaults for protocol v2, handoff, preloading,
+FX/audio and optional telemetry. Model restart countdown, draining, maintenance,
+server-full/queue and retry eligibility; flags may reduce optional behavior but
+never weaken authority/authentication/validation.
+
+### Task W-0082 — Supply-chain and release obligations
+
+- **State:** planned
+- **Phase:** 10
+- **Depends on:** W-0079
+
+Gate dependencies on vulnerability/license audit, SBOM, reproducible locks,
+third-party notices, asset/font/music provenance and AGPL distribution duties.
+Unlicensed resources do not ship.
+
+### Phase 10 exit gate
+
+- [ ] Chromium, Firefox and WebKit pass login/gameplay/reconnect/cache/handoff
+      under throttling, fragmentation, disconnect and context loss.
+- [ ] HTTPS/WSS, token expiry, CSP/origin, CSRF/session, size limits and logout
+      are exercised in staging.
+- [ ] Focus/hidden/sleep/stale-callback/context-loss paths are bounded and
+      recoverable.
+- [ ] Linux, macOS and Windows artifacts are signed/versioned as appropriate,
+      reproducible, self-identifying and retain symbols by build ID.
+- [ ] Canary promotion/rollback, old/new compatibility and duplicate-character
+      ownership are deterministic and corruption-free.
+- [ ] Flag outage, maintenance/drain/restart, capacity and packet floods reach
+      truthful Bevy recovery states.
+- [ ] Dashboards catch size/boot/frame/network/cache/memory regressions; support
+      bundles contain no secrets/chat; SBOM, notices, provenance and AGPL gates pass.
+
+## Phase 11 — Research and experiments
+
+### Task W-0083 — Governed research registry
+
+- **State:** research-gated
+- **Phase:** 11
+- **Depends on:** production evidence relevant to each proposal
+
+For every proposal, record player value, hypothesis, smallest falsification
+probe, kill criteria, protocol/server impact, abuse/privacy, compatibility and
+measured memory/network/operating cost. Accepted work graduates into new stable
+tasks with budgets and tests; rejected evidence stays in history.
+
+Candidate investigations:
+
+- optional automatic chat translation, consent, moderation, latency, provider
+  cost and whether a subscription is ethical/useful;
+- agent-rich gameplay when players can run uncontrolled LLMs: server authority,
+  bot-resistant social value, rate limits, provenance and player-created goals;
+- touch/mobile controls and a genuinely small-screen HUD;
+- WebGPU, WASM threads and shaders only where profiling supports them;
+- explicit continent travel or multi-region worlds with one character/market
+  authority;
 - dynamic zone instancing and population-aware placement;
-- variable-sized maps, coordinates wider than `u8`, chunks and truly continuous
-  geometry beyond seamless logical-map transitions;
-- deeper positional audio and map-specific music;
-- further ideas from Argentum United, the AO wiki, Patreon/community feedback
-  and live player telemetry.
+- variable-sized maps, coordinates wider than `u8`, chunks and continuous
+  geometry beyond seamless logical-map handoff;
+- quests, events, subscriptions and community benefits that avoid pay-to-win;
+- positional audio and map-specific music; and
+- further ideas from AO/Argentum United research, the wiki, community feedback
+  and privacy-conscious live telemetry.
 
-Exit criteria:
+### Phase 11 exit gate
 
-- Each accepted experiment graduates into a separately estimated phase with an
-  owner, compatibility plan, budgets and acceptance tests.
-- Rejected experiments retain their evidence so the same question is not
-  repeatedly reopened without new information.
+- [ ] The proposal states player value and a falsifiable hypothesis.
+- [ ] A cheap spike and kill criteria precede work measured in weeks.
+- [ ] Protocol/server, compatibility, authority, abuse, privacy, moderation,
+      memory, network and operating cost are measured.
+- [ ] Acceptance or rejection evidence remains in the changelog so the decision
+      is not reopened without new information.
+- [ ] Accepted experiments become estimated stable tasks with dependencies,
+      budgets and tests before production implementation.
 
-## Server work this client needs, in one place
+## Server dependency view
 
-Everything tagged **[server]** above, ordered by when it blocks:
+Server-tagged work is filed here because it blocks this client. Reflect it in
+the root roadmap when it enters active execution.
 
-| Phase | Change | Why |
-| --- | --- | --- |
-| 1 | Serve `client-rs` from the game origin | Removes the dev-only CORS arrangement |
-| 2 | Parity decision and negotiated length-framed WS protocol | Lets modern clients skip unknown packets without changing legacy TCP/WS |
-| 2 | Canonical schema/extractor decision plus cross-language fixtures | Code generation is unsafe until a source is proven against Elixir bytes |
-| 3 | Reconnect/resynchronisation snapshot contract | Prevents stale entities and replayed inputs after transport loss or tab sleep |
-| 4 | Core gameplay workflow end-to-end fixtures | Proves inventory, spell, combat, safety and chat success/rejection paths |
-| 5 | Remaining-workflow parity matrix and fixtures | Proves services, economy, social, recovery and progression—not only individual packets |
-| 5 | Versioned gameplay-metadata contract | Prevents spell, XP, object/NPC and faction presentation from drifting from the server |
-| 6 | Emit `triggers` in `encode_map` | Roof hiding is impossible without them; the TypeScript client needs this too |
-| 7 | Indexed/per-map asset format, hashes, range support and immutable headers | Avoids downloading/retaining 58.8 MB and enables safe persistent caching |
-| 8 | Parity entries for the new handoff packets | Unclassified intentional divergences fail the protocol gate |
-| 8 | `map_handoff_begin` / `end` + fixtures | Explicit snapshot boundary |
-| 8 | `MapServer.enter/3` returns a snapshot | NPCs currently sent out-of-band, so no end marker is authoritative |
-| 8 | Session `world_epoch` | Char indices are map-local and reused |
-| 8 | `map_handoff_failed` | Destination refusal must not strand the player |
-| 8 | Ordered critical snapshot batch | Boundary packets alone cannot contain normally coalesced members |
-| 10 | HTTPS/WSS, launch-token and origin policy | Makes the browser deployment boundary explicit and testable |
-| 10 | Protocol/build compatibility and upgrade-required response | Keeps cached old clients safe during rolling deploys and rollback |
-| 10 | Multi-tab/session ownership contract | Prevents two active authorities for one character |
-| 10 | Versioned feature-flag delivery with safe defaults | Supports staged rollout and emergency disablement without weakening authority |
-| 10 | Maintenance/drain/capacity state contract | Gives clients deterministic warnings, queues and retry behavior |
+| Client task | Server change |
+| --- | --- |
+| W-0019 | Serve the Rust client/runtime config from the game origin |
+| W-0021–W-0023 | Governed protocol-v2 negotiation and schema/fixture source |
+| W-0024–W-0029 | Bootstrap packets, failure semantics and bounded transport |
+| W-0033 | Fresh reconnect/resynchronization snapshot |
+| W-0042–W-0048 | Gameplay workflow fixtures and versioned metadata |
+| W-0050 | Emit map triggers for roof rules used by both clients |
+| W-0055–W-0058 | Indexed assets, hashes, range/immutable serving |
+| W-0062–W-0064 | Handoff parity, structured snapshot, epoch and FIFO batch |
+| W-0075, W-0080–W-0081 | Security, rollout compatibility, session ownership and operations |
 
-Map triggers, the asset format and immutable cache headers benefit the
-TypeScript client independently. Protocol v2 and handoff framing remain
-capability-gated until that client deliberately opts in.
+## Global definition of done
 
-## Definition of done for every phase
-
-- Update this roadmap's current-state and measurements in the same change; a
-  compile or packet send is not evidence of a working end-to-end flow.
-- Add native unit tests for pure code, WASM/browser integration tests for browser
-  behavior and cross-language fixtures for every flow-critical packet.
-- Implement every client-facing screen and control in Bevy. JavaScript/CSS may
-  expose platform capabilities but may not satisfy an application-UI acceptance
-  criterion or own application state.
-- For every relevant test in `client/tests/e2e`, add Rust-client coverage or a
-  reviewed retirement record naming the replacement behavior and test. A panel
-  existing in Bevy is not evidence that the old workflow survived migration.
-- Exercise the failure path and cleanup, not only the happy path.
-- Record changes to compressed transfer size, startup, frame time, network and
-  memory budgets; unexplained regressions fail the gate.
-- Keep the TypeScript client and legacy protocol operational unless a separate
-  migration explicitly retires them.
+- Every task assigned to the phase is closed or explicitly moved with a
+  documented dependency; no phase is called complete around an open task.
+- The task contract and applicable canonical phase checklist pass.
+- Pure logic has native tests; browser behavior has browser tests; flow-critical
+  packets have cross-language bytes and governed parity classification.
+- Every application screen/control is Bevy-owned; JavaScript/CSS cannot satisfy
+  an application-UI acceptance criterion.
+- Happy path, rejection, interruption and cleanup are exercised in proportion
+  to risk.
+- Rust coverage replaces or explicitly retires each relevant
+  `client/tests/e2e` behavior.
+- Compressed transfer, boot, frame, network and memory deltas are recorded where
+  affected; unexplained regressions fail their gates.
+- The TypeScript client and legacy protocol remain working until a deliberate
+  migration says otherwise.
+- `bash client-rs/scripts/check_roadmap.sh` passes, and completed task bodies and
+  dated evidence move to `client-rs/CHANGELOG.md`.
 
 ## Deliberately out of scope
 
-- Maps larger than 100x100 or variable-sized maps during the seamless-handoff
-  implementation. Server, NIF and wire coordinates use 100x100 maps with `u8`
-  tile coordinates; changing that is a separate Phase 11 research candidate.
-- Replacing the TypeScript client. Two clients against one server is a feature:
-  it keeps the protocol honest.
-- Treating client-side asset encryption, client hashes or WASM validation as
-  anti-cheat. The server owns all authoritative validation.
+- Variable or larger-than-100x100 maps during seamless handoff. Server, NIF and
+  current wire coordinates use `u8` tiles; that is W-0083 research.
+- Replacing the TypeScript client merely because the Rust client exists.
+- Client hashes, encrypted assets or WASM checks as an anti-cheat boundary.
+- DOM/React implementation of a Bevy application screen.

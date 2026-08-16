@@ -28,6 +28,9 @@ jobs:
         with:
           submodules: true
 
+      - name: Check Rust client roadmap structure
+        run: bash ../client-rs/scripts/check_roadmap.sh
+
       - name: Set up Elixir and Erlang
         uses: erlef/setup-beam@v1
         with:
