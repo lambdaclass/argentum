@@ -35,7 +35,7 @@ defmodule Arena.InventoryTest do
     end
 
     test "stacks stackable items on existing slot" do
-      stackable_id = find_stackable_item()
+      stackable_id = find_stackable_item(8)
 
       if stackable_id do
         {:ok, inv, slot1} = Inventory.add_item(@empty_inventory, stackable_id, 5)
@@ -194,11 +194,30 @@ defmodule Arena.InventoryTest do
 
   # --- Helpers to find real items from obj.dat ---
 
-  defp find_stackable_item do
+  # Lowest-numbered stackable item that can actually hold the amount a test
+  # wants to stack.
+  #
+  # This used to fold over the ETS table and take whichever stackable item came
+  # first. ETS iteration order is unspecified, so the chosen item varied between
+  # runs — and items carry a per-item stack limit (`max_hit`, capped by
+  # `add_stackable`). Whenever the run happened to pick an item with a limit
+  # below the test's target, adding to the stack correctly capped and the
+  # hardcoded expectation failed. That produced an intermittent failure with no
+  # relation to the code under test.
+  defp find_stackable_item(min_capacity) do
     :ets.foldl(
       fn
-        {{:item, id}, %{stackable: true}}, nil when id != 12 -> id
-        _, acc -> acc
+        {{:item, id}, %{stackable: true} = item}, acc when id != 12 ->
+          capacity =
+            case item do
+              %{max_hit: max_hit} when is_integer(max_hit) and max_hit > 0 -> max_hit
+              _ -> 10_000
+            end
+
+          if capacity >= min_capacity and (acc == nil or id < acc), do: id, else: acc
+
+        _, acc ->
+          acc
       end,
       nil,
       :arena_game_data
