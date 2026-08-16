@@ -20,6 +20,31 @@ const MAP_HEIGHT: i32 = 100;
 const VIEW_RADIUS_X: i32 = 22;
 const VIEW_RADIUS_Y: i32 = 15;
 
+/// Where the client is in its own startup, as distinct from where the
+/// connection is.
+///
+/// The two are deliberately separate. The world is playable before — and
+/// without — a session: map data comes over HTTP, and a client that failed to
+/// log in still renders and walks locally. Gating gameplay on the socket would
+/// make a login problem look like a dead renderer, which is the confusion this
+/// state machine exists to prevent. Connection state lives in `Session` and is
+/// surfaced in the status row.
+///
+/// `Authenticate`, `SelectCharacter`, `Handoff` and `Reconnecting` from the
+/// roadmap are not here yet: none of them has a transition to make until real
+/// login exists, and a state nothing enters is not a state machine, it is a
+/// comment that can go stale.
+#[derive(States, Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AppState {
+    /// Before the first frame has run. Capability probing will go here.
+    #[default]
+    Boot,
+    /// Map requested, not yet applied. The placeholder grid is on screen.
+    LoadingWorld,
+    /// A world exists — real or placeholder — and input is accepted.
+    Playing,
+}
+
 pub struct WorldPlugin;
 
 impl Plugin for WorldPlugin {
@@ -32,7 +57,7 @@ impl Plugin for WorldPlugin {
             .insert_resource(Graphics::default())
             .insert_resource(SheetTextures::default())
             .insert_resource(LoadedMap(None))
-            .insert_resource(MapLoadReported(false))
+            .insert_resource(MapLoadTimeout::default())
             .insert_resource(DrawnTiles::default())
             .insert_resource(CharacterDrawn(false))
             .insert_resource(DrawnEntities::default())
@@ -40,11 +65,17 @@ impl Plugin for WorldPlugin {
             .insert_resource(Motion::default())
             .insert_resource(Session::default())
             .insert_resource(SheetAtlases::default())
+            .init_state::<AppState>()
             .add_systems(Startup, (setup, start_map_load, connect_to_server))
+            .add_systems(Update, leave_boot.run_if(in_state(AppState::Boot)))
+            // Runs only while a load is outstanding, which is what makes the
+            // apply-once behaviour structural. It was previously a `reported`
+            // boolean that also served as the log-once guard, so the two
+            // concerns could not be changed independently.
+            .add_systems(Update, apply_loaded_map.run_if(in_state(AppState::LoadingWorld)))
             .add_systems(
                 Update,
                 (
-                    apply_loaded_map,
                     upload_sheets,
                     paint_scene,
                     paint_entities,
@@ -54,7 +85,8 @@ impl Plugin for WorldPlugin {
                     animate_character,
                     follow_camera,
                 )
-                    .chain(),
+                    .chain()
+                    .run_if(in_state(AppState::Playing)),
             );
     }
 }
@@ -288,10 +320,23 @@ fn follow_camera(
     }
 }
 
-/// Tracks whether the current load state has been logged, so polling does not
-/// spam the console every frame.
+/// How long to wait for map data before starting on the placeholder grid.
+///
+/// A fetch that fails resolves quickly and is handled. A fetch that never
+/// resolves — a hung proxy, a server that accepted the connection and then went
+/// quiet — has no error to report, and would otherwise hold the client in
+/// `LoadingWorld` forever with input disabled. That presents as a frozen client
+/// rather than as a network problem, which is the more expensive diagnosis.
+///
+/// A resource rather than a constant so the timeout path itself is testable.
 #[derive(Resource)]
-struct MapLoadReported(bool);
+struct MapLoadTimeout(f32);
+
+impl Default for MapLoadTimeout {
+    fn default() -> Self {
+        Self(15.0)
+    }
+}
 
 /// The decoded map, retained so the scene can be drawn once sheets arrive.
 #[derive(Resource)]
@@ -407,6 +452,13 @@ struct WorldEntity;
 /// Map loaded on boot. 1 is the newbie start map.
 const INITIAL_MAP: u16 = 1;
 
+/// Boot lasts exactly one frame today: `Startup` has run, so the map request is
+/// already in flight. It exists as the seam for capability probing, which must
+/// happen before anything touches the GPU.
+fn leave_boot(mut next: ResMut<NextState<AppState>>) {
+    next.set(AppState::LoadingWorld);
+}
+
 fn start_map_load(loader: Res<MapLoader>, config: Res<ClientConfig>) {
     info!("fetching map {INITIAL_MAP} from {}", config.asset_origin);
     loader.start(config.asset_origin.clone(), INITIAL_MAP);
@@ -417,21 +469,19 @@ fn start_map_load(loader: Res<MapLoader>, config: Res<ClientConfig>) {
 fn apply_loaded_map(
     loader: Res<MapLoader>,
     graphics: Res<Graphics>,
-    mut reported: ResMut<MapLoadReported>,
     mut blockmap: ResMut<Blockmap>,
     mut loaded: ResMut<LoadedMap>,
     mut commands: Commands,
     tiles: Query<Entity, With<TileSprite>>,
     player: Res<LocalPlayer>,
     config: Res<ClientConfig>,
+    mut next: ResMut<NextState<AppState>>,
+    time: Res<Time>,
+    timeout: Res<MapLoadTimeout>,
+    mut waited: Local<f32>,
 ) {
     match loader.state() {
         LoadState::Ready(map) => {
-            if reported.0 {
-                return;
-            }
-            reported.0 = true;
-
             info!(
                 "map {} \"{}\" {}x{} loaded: {} ground tiles, {} npcs, {} objects",
                 map.map_id,
@@ -469,14 +519,25 @@ fn apply_loaded_map(
             start_graphics_load(graphics.clone(), config.asset_origin.clone(), wanted);
 
             loaded.0 = Some(map);
+            next.set(AppState::Playing);
         }
         LoadState::Failed(message) => {
-            if !reported.0 {
-                reported.0 = true;
-                error!("map load failed: {message} — keeping the generated map");
+            // Still playable: the generated grid stays, and the player can move
+            // around it. A failed map fetch must not leave a frozen window with
+            // no explanation.
+            error!("map load failed: {message} — keeping the generated map");
+            next.set(AppState::Playing);
+        }
+        LoadState::Fetching(_) | LoadState::Idle => {
+            *waited += time.delta_secs();
+            if *waited >= timeout.0 {
+                error!(
+                    "map data did not arrive within {}s — starting on the generated map",
+                    timeout.0
+                );
+                next.set(AppState::Playing);
             }
         }
-        LoadState::Fetching(_) | LoadState::Idle => {}
     }
 }
 
@@ -1069,5 +1130,131 @@ fn animate_character(
                 atlas.index = cycle.frames[0];
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::state::app::StatesPlugin;
+
+    fn headless() -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, StatesPlugin));
+        app.init_state::<AppState>();
+        app
+    }
+
+    #[test]
+    fn the_client_starts_in_boot() {
+        // Not Playing: input must not be accepted before a world exists, and
+        // the default is what decides that.
+        let app = headless();
+        assert_eq!(*app.world().resource::<State<AppState>>().get(), AppState::Boot);
+    }
+
+    /// Advance far enough for a queued state change to be applied.
+    ///
+    /// `NextState` is consumed by the `StateTransition` schedule, which runs
+    /// before `Update` — so a system that queues a change during frame N sees
+    /// it take effect at the start of frame N+1, not within its own frame.
+    fn step(app: &mut App) {
+        app.update();
+        app.update();
+    }
+
+    #[test]
+    fn boot_hands_over_to_loading() {
+        let mut app = headless();
+        app.add_systems(Update, leave_boot.run_if(in_state(AppState::Boot)));
+
+        step(&mut app);
+        assert_eq!(*app.world().resource::<State<AppState>>().get(), AppState::LoadingWorld);
+
+        // And does not run again: leaving Boot is not something to repeat.
+        step(&mut app);
+        assert_eq!(*app.world().resource::<State<AppState>>().get(), AppState::LoadingWorld);
+    }
+
+    #[test]
+    fn a_failed_map_load_still_reaches_playing() {
+        // The generated grid remains, so the player can move. Staying in
+        // LoadingWorld would present a frozen window with no explanation, and
+        // would also stop input, which is how a map-server problem gets
+        // mistaken for a dead client.
+        let mut app = headless();
+        app.insert_resource(MapLoader::default())
+            .insert_resource(Graphics::default())
+            .insert_resource(Blockmap::demo())
+            .insert_resource(LoadedMap(None))
+            .insert_resource(LocalPlayer::default())
+            .insert_resource(MapLoadTimeout(f32::MAX))
+            .insert_resource(ClientConfig {
+                asset_origin: "http://test".into(),
+                gateway_url: "ws://test/ao".into(),
+                credentials: None,
+                client_hash: "test".into(),
+            })
+            .add_systems(Update, apply_loaded_map.run_if(in_state(AppState::LoadingWorld)));
+        app.insert_state(AppState::LoadingWorld);
+
+        // A long deadline, so reaching Playing can only be the failure path.
+        app.world().resource::<MapLoader>().fail_for_test("no route to host");
+        step(&mut app);
+
+        assert_eq!(*app.world().resource::<State<AppState>>().get(), AppState::Playing);
+    }
+
+    #[test]
+    fn an_outstanding_load_stays_in_loading_world() {
+        // Idle and Fetching are not decisions. Transitioning on either would
+        // start accepting input against a world that is not there yet.
+        let mut app = headless();
+        app.insert_resource(MapLoader::default())
+            .insert_resource(Graphics::default())
+            .insert_resource(Blockmap::demo())
+            .insert_resource(LoadedMap(None))
+            .insert_resource(LocalPlayer::default())
+            .insert_resource(MapLoadTimeout(f32::MAX))
+            .insert_resource(ClientConfig {
+                asset_origin: "http://test".into(),
+                gateway_url: "ws://test/ao".into(),
+                credentials: None,
+                client_hash: "test".into(),
+            })
+            .add_systems(Update, apply_loaded_map.run_if(in_state(AppState::LoadingWorld)));
+        app.insert_state(AppState::LoadingWorld);
+
+        step(&mut app);
+        step(&mut app);
+
+        assert_eq!(*app.world().resource::<State<AppState>>().get(), AppState::LoadingWorld);
+    }
+
+    #[test]
+    fn a_load_that_never_resolves_gives_up_and_starts_anyway() {
+        // A hung fetch produces no error to react to. Without a deadline the
+        // client stays in LoadingWorld with input disabled, which reads as a
+        // frozen client rather than as a network problem.
+        let mut app = headless();
+        app.insert_resource(MapLoader::default())
+            .insert_resource(Graphics::default())
+            .insert_resource(Blockmap::demo())
+            .insert_resource(LoadedMap(None))
+            .insert_resource(LocalPlayer::default())
+            .insert_resource(MapLoadTimeout(0.0))
+            .insert_resource(ClientConfig {
+                asset_origin: "http://test".into(),
+                gateway_url: "ws://test/ao".into(),
+                credentials: None,
+                client_hash: "test".into(),
+            })
+            .add_systems(Update, apply_loaded_map.run_if(in_state(AppState::LoadingWorld)));
+        app.insert_state(AppState::LoadingWorld);
+
+        // The loader never leaves Idle.
+        step(&mut app);
+
+        assert_eq!(*app.world().resource::<State<AppState>>().get(), AppState::Playing);
     }
 }

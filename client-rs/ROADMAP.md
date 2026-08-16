@@ -90,6 +90,31 @@ surface is still small.
    -> Reconnecting`. Replace boolean lifecycle controls such as
    `MapLoadReported`, `CharacterDrawn`, `SceneDirty`, `ScenePainted`,
    `DrawnTiles` and `DrawnEntities` with scoped state, resources and events.
+
+   **Partly done, and the list of booleans needs correcting.** `AppState`
+   exists with `Boot -> LoadingWorld -> Playing`, and gameplay systems are
+   scoped to `Playing`. `MapLoadReported` is gone: it was doing two jobs at
+   once — apply-once and log-once — and running the system only while a load
+   is outstanding replaces both.
+
+   The remaining four are not lifecycle booleans and should not become states.
+   `DrawnTiles` and `DrawnEntities` are memos of what has already been spawned,
+   which is what makes painting incremental as texture sheets stream in;
+   `SceneDirty` and `CharacterDrawn` are redraw triggers. Turning any of them
+   into application states would conflate "where the client is" with "what has
+   been drawn" and would break incremental painting. They should become change
+   detection or events, which is a different task from this one.
+
+   `Authenticate`, `SelectCharacter`, `Handoff` and `Reconnecting` are also not
+   added yet, deliberately: none has a transition to make until real login
+   exists (Phase 1), and a state nothing ever enters is a comment that goes
+   stale rather than a state machine.
+
+   Note the split this establishes: `AppState` tracks the client's own
+   startup, and `Session` tracks the connection. The world is playable without
+   a session — map data arrives over HTTP and a client that failed to log in
+   still renders and walks. Gating gameplay on the socket would make a login
+   failure look like a dead renderer.
 4. **[client]** Define platform services for HTTP, WebSocket transport, persistent cache,
    auth/token storage, audio, clipboard, IME/text composition, fullscreen and
    external links. Provide browser and native implementations rather than

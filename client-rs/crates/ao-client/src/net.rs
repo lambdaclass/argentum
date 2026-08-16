@@ -262,3 +262,14 @@ pub fn start_graphics_load(graphics: Graphics, origin: String, grh_ids: Vec<i32>
 pub fn start_graphics_load(graphics: Graphics, _origin: String, _grh_ids: Vec<i32>) {
     graphics.fail("native graphics fetch not implemented yet".into());
 }
+
+#[cfg(test)]
+impl MapLoader {
+    /// Drive the loader into a terminal failure, as a fetch error would.
+    ///
+    /// Exists so the state machine can be tested against the real
+    /// `apply_loaded_map` rather than a copy of its logic in a test.
+    pub fn fail_for_test(&self, message: &str) {
+        self.set(LoadState::Failed(message.to_owned()));
+    }
+}
