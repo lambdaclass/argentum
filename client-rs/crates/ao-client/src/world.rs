@@ -20,6 +20,33 @@ const MAP_HEIGHT: i32 = 100;
 const VIEW_RADIUS_X: i32 = 22;
 const VIEW_RADIUS_Y: i32 = 15;
 
+/// Tiles painted beyond the visible window.
+///
+/// The window is only 2 tiles wider than the viewport, which is not enough
+/// lead: content was created at the screen edge and read as popping into
+/// existence. Painting a margin means it already exists by the time it scrolls
+/// in.
+const SPAWN_MARGIN: i32 = 8;
+
+/// Extra rows painted below the window.
+///
+/// Tall art is anchored at its base and reaches north, so a tree or a house
+/// roof whose tile is below the screen can still have most of its height on
+/// screen. Culling by that tile alone hides it until the base scrolls in,
+/// which is what made roofs and canopies appear late even with a margin.
+const TALL_ART_TILES: i32 = 6;
+
+/// Whether a tile belongs in the painted window for a player at `(px, py)`.
+///
+/// Asymmetric on purpose: north needs no allowance because art never hangs
+/// below its tile.
+fn within_paint_window(x: i32, y: i32, px: i32, py: i32) -> bool {
+    let dy = y - py;
+    (x - px).abs() <= VIEW_RADIUS_X + SPAWN_MARGIN
+        && dy >= -(VIEW_RADIUS_Y + SPAWN_MARGIN)
+        && dy <= VIEW_RADIUS_Y + SPAWN_MARGIN + TALL_ART_TILES
+}
+
 /// Where the client is in its own startup, as distinct from where the
 /// connection is.
 ///
@@ -84,6 +111,7 @@ impl Plugin for WorldPlugin {
                     apply_server_messages,
                     handle_input,
                     animate_character,
+                    fade_overlays,
                     follow_camera,
                 )
                     .chain()
@@ -282,14 +310,24 @@ fn handle_input(
     let Some(facing) = held.current() else { return };
     let (dx, dy) = heading_delta(facing);
 
-    // Face the way we are trying to go, even if the step is refused. VB6 turns
-    // on a blocked step rather than ignoring the key.
-    if facing != player.heading {
+    let now_ms = time.elapsed_secs_f64() * 1000.0;
+    let now_f32 = now_ms as f32;
+
+    // Turning is a claim about which way the body is travelling, so it cannot
+    // happen while a step is still in flight: the interpolation is already
+    // carrying the character the old way, and flipping the sprite makes it face
+    // one direction while sliding in another — a moonwalk lasting until the
+    // step lands.
+    //
+    // Standing still there is nothing to contradict, so turn at once. That
+    // keeps VB6's turn-in-place: walking into a wall faces it rather than
+    // ignoring the key. A turn deferred here is not lost — it happens either
+    // when the step commits below, or on the first frame after the slide ends.
+    if facing != player.heading && !motion.is_moving(now_f32) {
         player.heading = facing;
         character.0 = false;
     }
 
-    let now_ms = time.elapsed_secs_f64() * 1000.0;
     match walk.gate.evaluate(now_ms, player.speed) {
         // Silently ignored by the server; nothing to do and no correction comes.
         WalkOutcome::TooEarly => return,
@@ -322,9 +360,17 @@ fn handle_input(
         session.next_walk_count(),
     ));
 
+    // The step is committed, so the body now genuinely travels this way and the
+    // sprite must match it. This is where a turn deferred above lands, and it
+    // lands on the same frame the new slide starts — so facing and movement
+    // never disagree, not even for one frame.
+    if facing != player.heading {
+        player.heading = facing;
+        character.0 = false;
+    }
+
     // Slide from wherever the sprite currently is — not from the old tile — so
     // steps taken back-to-back chain smoothly instead of jerking.
-    let now_f32 = now_ms as f32;
     let interval = walk.gate.min_interval_ms(player.speed) as f32;
     let from = if motion.duration_ms > 0.0 {
         motion.sample(now_f32)
@@ -414,6 +460,116 @@ struct SheetAtlases {
 /// Tiles drawn from the real graphics, as opposed to the placeholder grid.
 #[derive(Component)]
 struct SceneTile;
+
+/// Depth of the character. Map layers sit either side of it.
+const CHARACTER_Z: f32 = 10.0;
+
+/// Base depth for map layers drawn above the character.
+///
+/// Layers 0 and 1 are ground and ground detail; 2 and 3 are the things that
+/// stand up out of the world — tree canopies, walls, roofs — and belong in
+/// front of a character standing behind them. The web client splits them the
+/// same way, into `belowCharactersLayer` and `overlayLayer`.
+const OVERLAY_Z: f32 = 20.0;
+
+/// First map layer drawn above the character.
+const FIRST_OVERLAY_LAYER: usize = 2;
+
+/// Opacity of an overlay the character is standing behind.
+///
+/// Enough to keep the canopy readable as a canopy, little enough to find
+/// yourself under it. Fully hiding the player is what the web client does, and
+/// it is the reason you can walk into a forest and lose track of where you are.
+const OVERLAY_FADED_ALPHA: f32 = 0.35;
+
+/// Seconds to cross between clear and faded.
+///
+/// Instant switching pops distractingly when walking along a treeline, where
+/// coverage flickers on and off tile by tile.
+const OVERLAY_FADE_SECS: f32 = 0.12;
+
+/// A map sprite drawn above the character, with the world box it covers.
+///
+/// The box is computed once at spawn: these sprites never move, and recomputing
+/// an anchor-relative rect for every overlay on screen every frame would be
+/// pure waste.
+#[derive(Component)]
+struct Overlay {
+    bounds: Rect,
+}
+
+/// World-space box of a sprite placed by `tile_to_world` with `aa_anchor`.
+///
+/// Bevy's `Anchor` names the point *inside* the sprite that sits on the
+/// transform, so the centre is the translation less the anchor offset. Getting
+/// this backwards puts the box on the wrong side of the tile — which still
+/// looks plausible for a 1x1 tile and only goes visibly wrong for the tall art
+/// that actually matters here.
+fn sprite_bounds(tile_x: i32, tile_y: i32, size: Vec2) -> Rect {
+    let centre = tile_to_world(tile_x, tile_y) - aa_anchor(size) * size;
+    Rect::from_center_size(centre, size)
+}
+
+/// Anchor placing a sprite's bottom centre on its tile.
+///
+/// Tall art (trees, buildings) hangs above and left of its tile, so the tile
+/// marks the sprite's bottom centre rather than its middle. This is
+/// `applyAoAnchor` from the web client, converted between coordinate systems:
+/// Pixi anchors run 0..1 from the top-left with y down, Bevy's run -0.5..0.5
+/// from the centre with y up, so x shifts by half and y both flips and shifts.
+fn aa_anchor(size: Vec2) -> Vec2 {
+    Vec2::new((size.x - TILE_SIZE) / (2.0 * size.x) - 0.5, 0.5 - (size.y - TILE_SIZE) / size.y)
+}
+
+/// How tall the character is, for deciding what covers them.
+///
+/// Two tiles, not one: a canopy hanging above head height hides the character
+/// while their feet are still clear of it, and fading only on foot overlap
+/// would leave the head behind a tree.
+const BODY_HEIGHT: f32 = TILE_SIZE * 2.0;
+
+/// The character's box in world space, from their drawn position.
+///
+/// Uses the interpolated position rather than the logical tile, so a fade
+/// begins as the character slides under a canopy instead of snapping when the
+/// step lands.
+fn body_bounds(feet: Vec2) -> Rect {
+    // `feet` is the tile's top-left, and world y grows upward, so the tile
+    // spans downward from it.
+    Rect::from_corners(
+        Vec2::new(feet.x, feet.y - TILE_SIZE),
+        Vec2::new(feet.x + TILE_SIZE, feet.y - TILE_SIZE + BODY_HEIGHT),
+    )
+}
+
+/// Fade overlays the character is standing behind.
+fn fade_overlays(
+    time: Res<Time>,
+    motion: Res<Motion>,
+    player: Res<LocalPlayer>,
+    mut overlays: Query<(&Overlay, &mut Sprite)>,
+) {
+    let now_ms = time.elapsed_secs_f64() as f32 * 1000.0;
+    let feet = if motion.duration_ms > 0.0 {
+        motion.sample_snapped(now_ms)
+    } else {
+        tile_to_world(player.x, player.y)
+    };
+    let body = body_bounds(feet);
+
+    // Frame-rate independent, and clamped so a long frame cannot overshoot into
+    // a flash of the wrong opacity.
+    let step = (time.delta_secs() / OVERLAY_FADE_SECS).clamp(0.0, 1.0);
+
+    for (overlay, mut sprite) in &mut overlays {
+        let covered = !overlay.bounds.intersect(body).is_empty();
+        let target = if covered { OVERLAY_FADED_ALPHA } else { 1.0 };
+        let current = sprite.color.alpha();
+        if (current - target).abs() > f32::EPSILON {
+            sprite.color.set_alpha(current + (target - current) * step);
+        }
+    }
+}
 
 /// Whether the player's body and head sprites are current. Cleared when the
 /// heading changes so the character is redrawn facing the new way.
@@ -560,9 +716,10 @@ fn apply_loaded_map(
             for layer in &map.layers {
                 for tile in layer {
                     let (x, y) = (tile.x as i32, tile.y as i32);
-                    if (x - player.x).abs() <= VIEW_RADIUS_X + 2
-                        && (y - player.y).abs() <= VIEW_RADIUS_Y + 2
-                    {
+                    // The same window the painter uses: a tile it is willing to
+                    // spawn but whose sheet was never requested stays invisible
+                    // until something else happens to pull that sheet in.
+                    if within_paint_window(x, y, player.x, player.y) {
                         wanted.push(tile.grh);
                     }
                 }
@@ -666,7 +823,7 @@ fn paint_scene(
             }
 
             let (x, y) = (tile.x as i32, tile.y as i32);
-            if (x - player.x).abs() > VIEW_RADIUS_X || (y - player.y).abs() > VIEW_RADIUS_Y {
+            if !within_paint_window(x, y, player.x, player.y) {
                 continue;
             }
 
@@ -706,31 +863,27 @@ fn paint_scene(
             };
 
             let size = Vec2::new(grh.width, grh.height);
-            commands.spawn((
+            // Layers 0 and 1 are ground; 2 and 3 stand up out of the world and
+            // belong in front of a character standing behind them.
+            let overlay = depth >= FIRST_OVERLAY_LAYER;
+            let z = if overlay { OVERLAY_Z + depth as f32 * 0.1 } else { depth as f32 * 0.1 };
+
+            let position = tile_to_world(x, y);
+            let mut entity = commands.spawn((
                 Sprite {
                     image: image.clone(),
                     texture_atlas: Some(TextureAtlas { layout: layout_handle, index: atlas_index }),
                     custom_size: Some(size),
                     ..default()
                 },
-                // Tall art (trees, buildings) hangs above and left of its tile,
-                // so the tile marks the sprite's bottom centre rather than its
-                // middle. This is applyAoAnchor from the web client, converted
-                // between coordinate systems: Pixi anchors run 0..1 from the
-                // top-left with y down, Bevy's run -0.5..0.5 from the centre
-                // with y up, so x shifts by half and y both flips and shifts.
-                Anchor(Vec2::new(
-                    (size.x - TILE_SIZE) / (2.0 * size.x) - 0.5,
-                    0.5 - (size.y - TILE_SIZE) / size.y,
-                )),
-                // Tiles are addressed from 1, so tile (1,1) sits at the origin.
-                Transform::from_xyz(
-                    (x - 1) as f32 * TILE_SIZE,
-                    -((y - 1) as f32) * TILE_SIZE,
-                    depth as f32 * 0.1,
-                ),
+                Anchor(aa_anchor(size)),
+                Transform::from_xyz(position.x, position.y, z),
                 SceneTile,
             ));
+
+            if overlay {
+                entity.insert(Overlay { bounds: sprite_bounds(x, y, size) });
+            }
 
             drawn.0.insert(key);
             painted += 1;
@@ -794,8 +947,8 @@ fn paint_character(
 
     // Body first (with its walk cycle), then head at the body's offHead point.
     for (grh_id, offset, z, animated) in [
-        (body.for_heading(heading), Vec2::ZERO, 10.0f32, true),
-        (head.for_heading(heading), body.head_offset, 10.1f32, false),
+        (body.for_heading(heading), Vec2::ZERO, CHARACTER_Z, true),
+        (head.for_heading(heading), body.head_offset, CHARACTER_Z + 0.1, false),
     ] {
         let Some(grh) = index.resolve(grh_id) else {
             continue;
@@ -984,7 +1137,7 @@ fn paint_entities(
                 continue;
             }
             let (x, y) = (npc.x as i32, npc.y as i32);
-            if (x - player.x).abs() > VIEW_RADIUS_X || (y - player.y).abs() > VIEW_RADIUS_Y {
+            if !within_paint_window(x, y, player.x, player.y) {
                 continue;
             }
             let Some(look) = looks.get(&(npc.npc_id as i32)) else {
@@ -1044,7 +1197,7 @@ fn paint_entities(
                 continue;
             }
             let (x, y) = (object.x as i32, object.y as i32);
-            if (x - player.x).abs() > VIEW_RADIUS_X || (y - player.y).abs() > VIEW_RADIUS_Y {
+            if !within_paint_window(x, y, player.x, player.y) {
                 continue;
             }
             let Some(grh) =
@@ -1190,6 +1343,7 @@ fn animate_character(
 mod tests {
     use super::*;
     use bevy::state::app::StatesPlugin;
+    use std::time::Duration;
 
     fn headless() -> App {
         let mut app = App::new();
@@ -1205,6 +1359,397 @@ mod tests {
     fn frame(keys: &mut ButtonInput<KeyCode>, held: &mut HeldDirections) {
         held.update(keys);
         keys.clear();
+    }
+
+    /// An app with just the resources `handle_input` needs.
+    ///
+    /// No plugins, so `Time` is ours to advance: a walk gate and a slide
+    /// duration are both times, and a test that cannot control the clock
+    /// cannot tell "mid-step" from "step finished".
+    fn input_app() -> App {
+        let mut app = App::new();
+        app.insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(Time::<()>::default())
+            .insert_resource(Blockmap::demo())
+            .insert_resource(LocalPlayer::default())
+            .insert_resource(Walk::default())
+            .insert_resource(HeldDirections::default())
+            .insert_resource(CharacterDrawn(false))
+            .insert_resource(SceneDirty::default())
+            .insert_resource(Motion::default())
+            .insert_resource(Session::default())
+            .add_systems(Update, handle_input);
+        app
+    }
+
+    fn advance(app: &mut App, ms: u64) {
+        app.world_mut().resource_mut::<Time<()>>().advance_by(Duration::from_millis(ms));
+    }
+
+    fn press(app: &mut App, code: KeyCode) {
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(code);
+    }
+
+    fn release(app: &mut App, code: KeyCode) {
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().release(code);
+    }
+
+    /// One frame: run the system, then clear the press edges as the schedule
+    /// does.
+    fn tick(app: &mut App, ms: u64) {
+        advance(app, ms);
+        app.update();
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().clear();
+    }
+
+    fn heading(app: &App) -> Heading {
+        app.world().resource::<LocalPlayer>().heading
+    }
+
+    fn tile(app: &App) -> (i32, i32) {
+        let player = app.world().resource::<LocalPlayer>();
+        (player.x, player.y)
+    }
+
+    #[test]
+    fn turning_mid_step_does_not_face_one_way_while_sliding_another() {
+        // The moonwalk. Facing flipped as soon as the key changed, but the
+        // interpolation was still carrying the body along the previous step,
+        // so the character slid sideways in a full walk animation until the
+        // slide finished.
+        let mut app = input_app();
+
+        press(&mut app, KeyCode::ArrowUp);
+        tick(&mut app, 16);
+        assert_eq!(heading(&app), Heading::North);
+        let after_first_step = tile(&app);
+
+        // Part-way through the slide, ask for a new direction.
+        release(&mut app, KeyCode::ArrowUp);
+        press(&mut app, KeyCode::ArrowLeft);
+        tick(&mut app, 16);
+
+        let now = app.world().resource::<Time<()>>().elapsed_secs_f64() as f32 * 1000.0;
+        assert!(
+            app.world().resource::<Motion>().is_moving(now),
+            "test is meaningless unless the step is still in flight"
+        );
+        assert_eq!(
+            heading(&app),
+            Heading::North,
+            "sprite must keep facing the way the body is actually travelling"
+        );
+        assert_eq!(tile(&app), after_first_step, "no second step while the first is in flight");
+    }
+
+    #[test]
+    fn the_deferred_turn_lands_exactly_when_the_new_step_starts() {
+        // Deferring must not lose the turn, and the sprite must face the new
+        // way on the same frame the new slide begins — not one frame later,
+        // which would be a one-frame moonwalk.
+        let mut app = input_app();
+
+        press(&mut app, KeyCode::ArrowUp);
+        tick(&mut app, 16);
+        let after_first_step = tile(&app);
+
+        release(&mut app, KeyCode::ArrowUp);
+        press(&mut app, KeyCode::ArrowLeft);
+        tick(&mut app, 16);
+        assert_eq!(heading(&app), Heading::North);
+
+        // Long enough for both the slide and the walk gate.
+        tick(&mut app, 1_000);
+
+        assert_eq!(heading(&app), Heading::West);
+        assert_eq!(
+            tile(&app),
+            (after_first_step.0 - 1, after_first_step.1),
+            "the step that turned us should be the westward one"
+        );
+    }
+
+    #[test]
+    fn standing_still_turns_at_once() {
+        // VB6 turns in place rather than ignoring the key, and there is no
+        // movement to contradict, so deferring here would just feel unresponsive.
+        let mut app = input_app();
+        assert_eq!(heading(&app), Heading::South);
+
+        press(&mut app, KeyCode::ArrowLeft);
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().clear();
+        // Run without advancing past the gate: the turn must not need a step.
+        app.world_mut().resource_mut::<HeldDirections>().press(Heading::West);
+        app.update();
+
+        assert_eq!(heading(&app), Heading::West);
+    }
+
+    #[test]
+    fn facing_and_travel_never_disagree_while_walking_a_circuit() {
+        // The invariant the moonwalk broke, checked every frame across many
+        // turns rather than at one hand-picked moment.
+        let mut app = input_app();
+        let keys = [KeyCode::ArrowUp, KeyCode::ArrowLeft, KeyCode::ArrowDown, KeyCode::ArrowRight];
+
+        let mut previous = tile(&app);
+        for (turn, key) in keys.iter().cycle().take(12).enumerate() {
+            for code in keys {
+                release(&mut app, code);
+            }
+            press(&mut app, *key);
+
+            for _ in 0..20 {
+                tick(&mut app, 16);
+
+                let current = tile(&app);
+                if current != previous {
+                    let moved = (current.0 - previous.0, current.1 - previous.1);
+                    assert_eq!(
+                        moved,
+                        heading_delta(heading(&app)),
+                        "turn {turn}: stepped {moved:?} while facing {:?}",
+                        heading(&app)
+                    );
+                    previous = current;
+                }
+            }
+        }
+    }
+
+    /// Half the viewport in tiles — what the camera can actually show.
+    ///
+    /// Derived from the window resolution in `main.rs` at a 1:1 pixel scale.
+    const VISIBLE_HALF_X: i32 = 1280 / 2 / TILE_SIZE as i32;
+    const VISIBLE_HALF_Y: i32 = 832 / 2 / TILE_SIZE as i32;
+
+    #[test]
+    fn everything_on_screen_is_painted() {
+        // The floor: nothing visible may be culled.
+        for dy in -VISIBLE_HALF_Y..=VISIBLE_HALF_Y {
+            for dx in -VISIBLE_HALF_X..=VISIBLE_HALF_X {
+                assert!(
+                    within_paint_window(50 + dx, 50 + dy, 50, 50),
+                    "({dx}, {dy}) is on screen but would not be painted"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn tiles_are_painted_well_before_they_scroll_into_view() {
+        // The pop-in. The window used to be two tiles wider than the viewport,
+        // so art was created at the screen edge; walking toward it, it appeared
+        // rather than arrived.
+        const LEAD: i32 = 4;
+
+        for edge in [
+            (VISIBLE_HALF_X + LEAD, 0),
+            (-VISIBLE_HALF_X - LEAD, 0),
+            (0, VISIBLE_HALF_Y + LEAD),
+            (0, -VISIBLE_HALF_Y - LEAD),
+        ] {
+            assert!(
+                within_paint_window(50 + edge.0, 50 + edge.1, 50, 50),
+                "{edge:?} is {LEAD} tiles off screen and should already exist"
+            );
+        }
+    }
+
+    #[test]
+    fn tall_art_below_the_screen_is_painted_because_its_top_is_visible() {
+        // Art is anchored at its base and reaches north, so a roof or canopy
+        // whose tile is off the bottom of the screen still has height on it.
+        // Culling by that tile alone is what made roofs appear late.
+        // A literal height, not TALL_ART_TILES: a test parameterised by the
+        // constant it guards passes for every value of it, including zero.
+        const ART_HEIGHT_TILES: i32 = 5;
+        let base_below_screen = VISIBLE_HALF_Y + ART_HEIGHT_TILES - 1;
+
+        assert!(
+            within_paint_window(50, 50 + base_below_screen, 50, 50),
+            "a {ART_HEIGHT_TILES}-tile sprite based {base_below_screen} south still reaches the screen"
+        );
+    }
+
+    #[test]
+    fn the_window_stays_bounded() {
+        // A margin large enough to hide pop-in must not quietly become "paint
+        // the whole map": every painted tile is a sprite entity.
+        assert!(!within_paint_window(50, 50 + 60, 50, 50));
+        assert!(!within_paint_window(50 + 60, 50, 50, 50));
+        assert!(!within_paint_window(50, 50 - 60, 50, 50));
+    }
+
+    #[test]
+    fn a_one_tile_sprite_covers_exactly_its_own_tile() {
+        // The anchor is expressed relative to the sprite, so the centre is the
+        // translation *less* the anchor offset. Reversing that still looks
+        // right for a 1x1 tile and only goes wrong for tall art, so pin the
+        // simple case as the reference point.
+        let bounds = sprite_bounds(5, 7, Vec2::splat(TILE_SIZE));
+        let origin = tile_to_world(5, 7);
+
+        assert_eq!(bounds.min, Vec2::new(origin.x, origin.y - TILE_SIZE));
+        assert_eq!(bounds.max, Vec2::new(origin.x + TILE_SIZE, origin.y));
+    }
+
+    #[test]
+    fn tall_art_hangs_above_its_tile_and_is_centred_on_it() {
+        // A tree: two tiles wide, three tall. Its base sits on the tile and the
+        // canopy reaches north, which is the whole reason it can cover someone.
+        let size = Vec2::new(TILE_SIZE * 2.0, TILE_SIZE * 3.0);
+        let bounds = sprite_bounds(10, 10, size);
+        let origin = tile_to_world(10, 10);
+
+        // Bottom flush with the tile's bottom edge.
+        assert_eq!(bounds.min.y, origin.y - TILE_SIZE);
+        // Reaches two tiles above the tile's top edge.
+        assert_eq!(bounds.max.y, origin.y + TILE_SIZE * 2.0);
+        // Centred horizontally on the tile, overhanging half a tile each side.
+        assert_eq!(bounds.min.x, origin.x - TILE_SIZE * 0.5);
+        assert_eq!(bounds.max.x, origin.x + TILE_SIZE * 1.5);
+    }
+
+    #[test]
+    fn a_canopy_covers_someone_standing_north_of_the_trunk() {
+        // The case the feature exists for. The trunk tile is usually blocked,
+        // so the player stands behind it and the canopy is what hides them.
+        let canopy = sprite_bounds(10, 10, Vec2::new(TILE_SIZE * 2.0, TILE_SIZE * 3.0));
+
+        let behind = body_bounds(tile_to_world(10, 9));
+        assert!(!canopy.intersect(behind).is_empty(), "the tile north of the trunk is under it");
+
+        let far = body_bounds(tile_to_world(10, 5));
+        assert!(canopy.intersect(far).is_empty(), "four tiles north is clear of it");
+    }
+
+    #[test]
+    fn a_tree_one_tile_north_still_covers_the_characters_head() {
+        // Why the body box is two tiles tall rather than one. Art is
+        // tile-aligned, so a canopy never begins half-way up a tile and the
+        // "feet clear, head covered" case cannot arise within a single tile.
+        // It arises between tiles: the character's head reaches above their own
+        // tile into the one in front, so a tree standing directly north of them
+        // draws over their head. A one-tile test box would leave it opaque.
+        let canopy = sprite_bounds(10, 9, Vec2::new(TILE_SIZE, TILE_SIZE * 3.0));
+
+        let feet_only = Rect::from_corners(
+            tile_to_world(10, 10) - Vec2::new(0.0, TILE_SIZE),
+            tile_to_world(10, 10) + Vec2::new(TILE_SIZE, 0.0),
+        );
+        assert!(canopy.intersect(feet_only).is_empty(), "the character's own tile is clear");
+        assert!(
+            !canopy.intersect(body_bounds(tile_to_world(10, 10))).is_empty(),
+            "but their head is not"
+        );
+    }
+
+    #[test]
+    fn ground_layers_stay_below_the_character_and_overlays_above() {
+        // Nothing can be stood behind unless it draws in front. Layers 0 and 1
+        // are ground and must not, which is the split the web client makes
+        // between belowCharactersLayer and overlayLayer.
+        for depth in 0..FIRST_OVERLAY_LAYER {
+            assert!(depth as f32 * 0.1 < CHARACTER_Z, "layer {depth} must stay below");
+        }
+        for depth in FIRST_OVERLAY_LAYER..4 {
+            assert!(OVERLAY_Z + depth as f32 * 0.1 > CHARACTER_Z, "layer {depth} must be above");
+        }
+    }
+
+    /// An app running only the overlay fade.
+    fn fade_app(bounds: Rect) -> App {
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default())
+            .insert_resource(Motion::default())
+            .insert_resource(LocalPlayer::default())
+            .add_systems(Update, fade_overlays);
+        app.world_mut().spawn((Overlay { bounds }, Sprite::from_color(Color::WHITE, Vec2::ONE)));
+        app
+    }
+
+    fn alpha(app: &mut App) -> f32 {
+        app.world_mut().query::<&Sprite>().iter(app.world()).next().unwrap().color.alpha()
+    }
+
+    /// Run frames until the fade settles, so a test asserts the resting value
+    /// rather than a point on the ramp.
+    fn settle(app: &mut App) {
+        for _ in 0..200 {
+            app.world_mut().resource_mut::<Time<()>>().advance_by(Duration::from_millis(16));
+            app.update();
+        }
+    }
+
+    #[test]
+    fn an_overlay_covering_the_character_fades_but_stays_visible() {
+        // Faded, not hidden: the canopy has to still read as a canopy.
+        let player = LocalPlayer::default();
+        let mut app = fade_app(body_bounds(tile_to_world(player.x, player.y)));
+
+        settle(&mut app);
+
+        let settled = alpha(&mut app);
+        assert!(
+            (settled - OVERLAY_FADED_ALPHA).abs() < 0.01,
+            "expected roughly {OVERLAY_FADED_ALPHA}, got {settled}"
+        );
+        assert!(settled > 0.0, "a fully invisible tree is worse than an opaque one");
+    }
+
+    #[test]
+    fn an_overlay_elsewhere_stays_opaque() {
+        let mut app = fade_app(sprite_bounds(2, 2, Vec2::splat(TILE_SIZE)));
+
+        settle(&mut app);
+
+        assert!((alpha(&mut app) - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn the_fade_is_gradual_rather_than_a_pop() {
+        // Walking along a treeline flips coverage tile by tile, and switching
+        // instantly flickers.
+        let player = LocalPlayer::default();
+        let mut app = fade_app(body_bounds(tile_to_world(player.x, player.y)));
+
+        app.world_mut().resource_mut::<Time<()>>().advance_by(Duration::from_millis(16));
+        app.update();
+
+        let after_one_frame = alpha(&mut app);
+        assert!(
+            after_one_frame < 1.0 && after_one_frame > OVERLAY_FADED_ALPHA,
+            "one frame should move part of the way, got {after_one_frame}"
+        );
+    }
+
+    #[test]
+    fn walking_out_from_under_an_overlay_restores_it() {
+        let player = LocalPlayer::default();
+        let mut app = fade_app(body_bounds(tile_to_world(player.x, player.y)));
+        settle(&mut app);
+        assert!(alpha(&mut app) < 0.5);
+
+        // Step well clear.
+        app.world_mut().resource_mut::<LocalPlayer>().y -= 10;
+        settle(&mut app);
+
+        assert!((alpha(&mut app) - 1.0).abs() < 0.01, "got {}", alpha(&mut app));
+    }
+
+    #[test]
+    fn a_long_frame_cannot_overshoot_the_target() {
+        // The fade step is clamped. Without that a stalled frame produces an
+        // alpha past the target — a visible flash of the wrong opacity.
+        let player = LocalPlayer::default();
+        let mut app = fade_app(body_bounds(tile_to_world(player.x, player.y)));
+
+        app.world_mut().resource_mut::<Time<()>>().advance_by(Duration::from_secs(5));
+        app.update();
+
+        let settled = alpha(&mut app);
+        assert!((OVERLAY_FADED_ALPHA..=1.0).contains(&settled), "alpha left its range: {settled}");
     }
 
     #[test]
