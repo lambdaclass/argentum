@@ -19,6 +19,24 @@ A claim in "Current state" is a claim about verified behaviour. Compiling,
 opening a socket or sending bytes is not evidence that a flow works; the
 evidence is a test that fails when the behaviour is removed.
 
+## UI architecture invariant
+
+Every user-facing screen and interactive component inside `client-rs` is built,
+laid out, rendered and state-managed in Bevy on both WASM and native. This
+includes boot and recovery screens, authentication, registration, character
+creation/selection, rankings, HUD, chat, inventory, spells, minimap, commerce,
+settings, accessibility semantics and developer diagnostics.
+
+JavaScript and CSS are not an alternative UI layer. They are limited to the
+small host page that creates the canvas, an unavoidable pre-WASM fallback, and
+thin adapters for browser capabilities such as history, storage, clipboard,
+IME, fullscreen and external links. They must not implement application
+layouts, forms, panels, overlays, navigation state or gameplay state, and there
+must be no React/DOM version of a Bevy screen to keep in sync.
+
+The public marketing website is outside this client and may remain ordinary
+HTML/CSS. This invariant applies from the moment the game application starts.
+
 ## Why this client exists
 
 Gameplay rules the server enforces were re-implemented independently in the web
@@ -57,7 +75,7 @@ login the server sends `world_pack_signature` (203) and `session_token` (200);
 the client's decoder recognises only `pos_update` (31) and `pong` (204). An
 unknown id cannot be skipped, because packet lengths are not on the wire, so
 the connection is failed rather than desynchronised. Handling those two frames
-is Phase 1 work.
+is Phase 2 work.
 
 "Socket opened and bytes were sent" is not a successful session and must not be
 reported as one again.
@@ -66,7 +84,115 @@ The trimmed build measures **19.2 MB raw and 5.5 MB gzip**. Transfer-size gates
 must use the compressed artifact players actually download; raw size remains a
 secondary diagnostic.
 
-## Phase 0: Platform foundation
+## Phase 0: Responsive Bevy game shell and UI/UX prototype
+
+Build the interface players will inhabit before protocol breadth. This phase is
+fixture-backed and can start immediately with the existing Bevy renderer; it
+does not wait for login or authoritative gameplay. It establishes the exact UI
+contracts that Phase 3 will populate with live state.
+
+The primary composition follows the proven Argentum pattern documented in
+`research/argentumunited/README.md`: a thin global status bar, an expanding
+world viewport, a full-height character rail on the right, world messages in
+the upper-left and a hotbar centered against the world viewport—not against the
+entire application window. Use it as a layout reference, not as artwork to copy.
+
+1. **[client/design]** Build the fixed Bevy application shell first:
+   - top status bar for build, support, FPS, RTT, population and platform actions;
+   - world viewport occupying all space not reserved by the character rail;
+   - right rail containing character/XP, inventory/spells, selected details,
+     equipment, currency, vitals and bottom navigation;
+   - transient world messages in the viewport's upper-left; and
+   - numbered hotbar anchored to the viewport's bottom center.
+2. **[client/design]** Define responsive geometry. On normal/maximized desktop windows the
+   right rail targets 21–23% of the width, clamped to a readable logical minimum
+   and maximum; the world receives the remainder. Small windows use a deliberate
+   compact/collapsible rail instead of shrinking controls until they are
+   unusable. Nothing requires page scrolling.
+3. **[client]** Separate three scale domains: responsive logical UI scale, integer
+   nearest-neighbor world scale and physical device-pixel/DPI scale. Implement
+   resize, maximize, fullscreen/restore, browser zoom, DPI changes and ultrawide
+   behavior now. These events must never stretch sprites, introduce camera
+   shimmer, move the player, reveal an unauthorized world area or lose focused
+   input.
+4. **[client]** Define transport-independent view models and command intents for at least
+   `PlayerVitals`, `InventoryState`, `EquipmentState`, `SpellbookState`,
+   `HotbarState`, `TargetState`, `ChatState`, `SkillsState`, `ProgressionState`,
+   `SafetyState` and `ServiceState`. Bevy presentation reads these models and
+   emits intents; it never parses packets or calls a socket. Server feedback
+   crosses this boundary as stable semantic keys plus typed parameters, not
+   presentation-ready Spanish strings where the protocol can avoid them.
+5. **[client]** Supply deterministic fixture adapters first and an authoritative-session
+   adapter in Phase 3. Fixtures cover populated, empty, loading, disabled,
+   rejected, disconnected, dead/ghost and malformed-data states without
+   pretending that mock interactions are live gameplay.
+6. **[client/design]** Define the information architecture and persistent HUD regions: world
+   viewport, vitals, character/progression state, inventory/equipment, hotbar,
+   chat, minimap, notifications and contextual actions. Specify what is always
+   visible and what belongs in the fixed rail, a secondary window, tooltip or
+   temporary overlay.
+7. **[client/design]** Publish design tokens for typography, licensed fonts, colors, borders,
+   spacing, icon sizes, focus states, disabled/locked states, rarity/status
+   semantics and pixel-art scaling. Every token remains legible over bright and
+   dark maps and in supported color-sensitive modes.
+8. **[client/design]** Build a reusable Bevy component catalogue covering buttons, tabs,
+   slots, numeric status bars, lists, text/password fields, tooltips, context
+   menus, dialogs, notifications, drag ghosts, progress/cooldown indicators and
+   hotkey prompts. Components have one event, focus and state model across WASM
+   and native.
+9. **[client/design]** Specify interaction rules once: drag/drop and cancellation, quantity
+   splitting, click/double-click/right-click, tooltip timing, target modes,
+   cooldown/rejection feedback, keyboard shortcuts and suppression of world
+   commands while chat, text/password fields or modals own input.
+10. **[client/design]** After the fixed shell works, implement the Bevy secondary-window
+    manager: open/close/focus, z-order, modal behavior, moving, snapping/docking,
+    optional resizing, remembered positions, Escape handling and restoration
+    when the available viewport changes.
+11. **[client/design]** Prototype peaceful/exploration and combat variants at 720p, 1080p,
+    1440p, ultrawide and small-laptop sizes. Additional space benefits the
+    presentation without changing server-owned visibility or interaction rules.
+12. **[client/design]** Cover the playable HUD explicitly: HP, mana, stamina, hunger, thirst,
+    XP/level and skills; inventory/equipment; spellbook, requirements, hotbar and
+    cooldowns; current target; personal/party safe mode; chat channels; and
+    navigation/dead-state restrictions.
+13. **[client/design]** Design onboarding and contextual guidance for movement, interaction,
+    combat, inventory, spells, death and recovery. Include empty, loading,
+    disabled, rejected, disconnected and maintenance states—not only populated
+    happy-path screens.
+14. **[client/design]** Produce an interactive Bevy prototype/component gallery using
+    representative real game data and long ES/EN/PT strings. Core workflows are
+    testable from typed fixtures without a finished server implementation.
+15. **[client/design]** Run task-based usability sessions with veteran AO players and
+    newcomers. Measure whether they can find health/mana, use/equip an item,
+    cast a spell, trade, bank, change chat channel and recover from a rejected
+    action; record findings and revise the prototype.
+16. **[client/design]** Keep reference screenshots, fixture states and interaction
+    specifications versioned beside the client so implementation, component
+    gallery and golden tests share the same source of truth.
+
+`research/argentumunited/README.md` also records eight specific ideas worth
+taking, including numbers rendered inside status bars and locked inventory
+slots shown rather than hidden.
+
+Exit criteria:
+
+- The fixed Bevy shell matches the approved layout at every target resolution:
+  world expands, right rail remains readable, hotbar stays world-centered and
+  no application panel is implemented in DOM/CSS.
+- Windowed, maximized and fullscreen golden screenshots remain pixel-aligned at
+  supported device-pixel ratios; resize/DPI events do not alter gameplay state.
+- The fixture-backed Bevy prototype completes representative gameplay tasks
+  without clipped critical information, page scrolling or fractional world
+  scaling.
+- Keyboard/focus traversal, text composition and modal/chat ownership work in
+  browser and native builds; UI interaction never leaks an unintended world
+  command.
+- Every prototype state is driven through the same typed models and intents the
+  live adapter will use; no fixture-only widget API enters production.
+- Veteran/newcomer findings, resulting changes and remaining tradeoffs are
+  recorded with the approved reference screens.
+
+## Phase 1: Platform foundation
 
 Make the prototype honest and establish boundaries while the platform-specific
 surface is still small.
@@ -107,7 +233,7 @@ surface is still small.
 
    `Authenticate`, `SelectCharacter`, `Handoff` and `Reconnecting` are also not
    added yet, deliberately: none has a transition to make until real login
-   exists (Phase 1), and a state nothing ever enters is a comment that goes
+   exists (Phase 2), and a state nothing ever enters is a comment that goes
    stale rather than a state machine.
 
    Note the split this establishes: `AppState` tracks the client's own
@@ -119,8 +245,8 @@ surface is still small.
    auth/token storage, audio, clipboard, IME/text composition, fullscreen and
    external links. Provide browser and native implementations rather than
    spreading `cfg(wasm32)` through gameplay systems.
-5. **[client]** Make Bevy the single owner and renderer of every user-facing application
-   screen:
+5. **[client]** Enforce the UI architecture invariant: make Bevy the single owner and
+   renderer of every user-facing application screen:
    product shell, authentication, character creation/selection, rankings, HUD,
    chat, panels, settings and diagnostics. Thin browser/native adapters may
    expose platform APIs to Bevy, but must not create a second DOM/React UI tree
@@ -151,6 +277,8 @@ Exit criteria:
 - No credentials or production hosts are compiled into the client.
 - All application UI is Bevy-owned on browser and native; platform adapters expose
   capabilities without creating a parallel application or state tree.
+- Source and browser tests prove the host page contains no application forms,
+  panels or navigation implementation beyond the pre-WASM fallback and canvas.
 - Lifecycle transitions are represented by the state machine, not inferred
   from unrelated booleans.
 - The compressed WASM size is produced and checked by CI.
@@ -159,7 +287,7 @@ Exit criteria:
 - Supported and deliberately unsupported capability profiles produce stable,
   testable startup outcomes; the diagnostic report contains no identifying data.
 
-## Phase 1: Protocol and real authentication
+## Phase 2: Protocol and real authentication
 
 The first goal is one truthful, testable session—not broad gameplay.
 
@@ -185,8 +313,8 @@ and must leave the legacy TCP/WS path working.
 3. **[client]** Decode packet 203 and validate the advertised map-pack
    version/hash before entering the world. Then cover the complete login
    bootstrap, explicit login success, and every login/error outcome.
-4. **[client]** Build the Bevy product shell now, not in the later polish phase. Preserve
-   the existing web client's registration, login/logout, character creation with
+4. **[client]** Connect Phase 0's Bevy product shell to the real services. Preserve the
+   existing web client's registration, login/logout, character creation with
    server-provided options and sprite preview, character selection, launch and
    rankings flows. Use `/api/auth/login`, `/api/characters`,
    `/api/meta/character-options` and the browser launch endpoint; enter the game
@@ -245,91 +373,10 @@ Exit criteria:
 - Each classified bootstrap/access failure exposes the correct recovery action
   without leaking credentials or leaving an invisible session alive.
 
-## Phase 2: Bevy UI system and interaction prototype
-
-Define how Argentum looks, behaves and exchanges typed state before wiring
-dozens of packet handlers directly to widgets. The direction is recognisably
-classic AO—dense, tactile and readable—modernised without becoming a generic
-dashboard. This phase can proceed beside Phase 1 once Phase 0's Bevy/platform
-boundary exists.
-
-1. **[client]** Define transport-independent view models and command intents for at least
-   `PlayerVitals`, `InventoryState`, `EquipmentState`, `SpellbookState`,
-   `HotbarState`, `TargetState`, `ChatState`, `SkillsState`, `ProgressionState`,
-   `SafetyState` and `ServiceState`. Bevy presentation reads these models and
-   emits intents; it never parses packets or calls a socket. Server feedback
-   crosses this boundary as stable semantic keys plus typed parameters, not
-   presentation-ready Spanish strings where the protocol can avoid them.
-2. **[client]** Supply deterministic fixture adapters first and an authoritative-session
-   adapter in Phase 3. Fixtures cover populated, empty, loading, disabled,
-   rejected, disconnected, dead/ghost and malformed-data states without
-   pretending that mock interactions are live gameplay.
-3. **[client/design]** Define the information architecture and persistent HUD regions: world
-   viewport, vitals, character/progression state, inventory/equipment, hotbar,
-   chat, minimap, notifications and contextual actions. Specify what is always
-   visible and what belongs in a window, tooltip or temporary overlay.
-4. **[client/design]** Publish design tokens for typography, licensed fonts, colors, borders,
-   spacing, icon sizes, focus states, disabled/locked states, rarity/status
-   semantics and pixel-art scaling. Every token remains legible over bright and
-   dark maps and in supported color-sensitive modes.
-5. **[client/design]** Build a reusable Bevy component catalogue covering buttons, tabs,
-   slots, numeric status bars, lists, text/password fields, tooltips, context
-   menus, dialogs, notifications, drag ghosts, progress/cooldown indicators and
-   hotkey prompts. Components have one event, focus and state model across WASM
-   and native.
-6. **[client/design]** Implement the Bevy window manager: open/close/focus, z-order, modal
-   behavior, moving, snapping/docking, optional resizing, remembered positions,
-   Escape handling and restoration when the available viewport changes.
-7. **[client/design]** Specify interaction rules once: drag/drop and cancellation, quantity
-   splitting, click/double-click/right-click, tooltip timing, target modes,
-   cooldown/rejection feedback, keyboard shortcuts and suppression of world
-   commands while chat, text/password fields or modals own input.
-8. **[client/design]** Prototype distinct peaceful/exploration and combat layouts, plus
-   responsive breakpoints for 720p, 1080p, ultrawide and small-laptop windows.
-   Include UI scaling, integer-scaled world presentation and a constrained
-   layout for insufficient space.
-9. **[client/design]** Cover the playable HUD explicitly: HP, mana, stamina, hunger, thirst,
-   XP/level and skills; inventory/equipment; spellbook, requirements, hotbar and
-   cooldowns; current target; personal/party safe mode; chat channels; and
-   navigation/dead-state restrictions.
-10. **[client/design]** Design onboarding and contextual guidance for movement, interaction,
-    combat, inventory, spells, death and recovery. Include empty, loading,
-    disabled, rejected, disconnected and maintenance states—not only populated
-    happy-path screens.
-11. **[client/design]** Produce an interactive Bevy prototype/component gallery using
-    representative real game data and long ES/EN/PT strings. Core workflows are
-    testable from typed fixtures without a finished server implementation.
-12. **[client/design]** Run task-based usability sessions with veteran AO players and
-    newcomers. Measure whether they can find health/mana, use/equip an item,
-    cast a spell, trade, bank, change chat channel and recover from a rejected
-    action; record findings and revise the prototype.
-13. **[client/design]** Keep reference screenshots, fixture states and interaction
-    specifications versioned beside the client so implementation, component
-    gallery and golden tests share the same source of truth.
-
-`research/argentumunited/README.md` documents a working AO client's layout and
-eight specific ideas worth taking, including numbers rendered inside status bars
-and locked inventory slots shown rather than hidden.
-
-Exit criteria:
-
-- Tokens, component states, window behavior and platform-service boundaries are
-  explicit enough that two implementers produce compatible Bevy controls.
-- The fixture-backed Bevy prototype completes representative gameplay tasks at
-  all target resolutions without clipped critical information or fractional
-  world scaling.
-- Keyboard/focus traversal, text composition and modal/chat ownership work in
-  browser and native builds; UI interaction never leaks an unintended world
-  command.
-- Every prototype state is driven through the same typed models and intents the
-  live adapter will use; no fixture-only widget API enters production.
-- Veteran/newcomer findings, resulting changes and remaining tradeoffs are
-  recorded with the approved reference screens.
-
 ## Phase 3: Authoritative client state and live world
 
 Replace the static demonstration with server-owned state and adapt protocol
-events into Phase 2's typed UI models before polishing the presentation.
+events into Phase 0's typed UI models before polishing the presentation.
 
 1. **[client]** Take the initial map and position from the login bootstrap. Remove
    `INITIAL_MAP` and the demo player's independent coordinates.
@@ -371,7 +418,7 @@ Decoding packets and drawing fixture-backed widgets is not gameplay. Connect the
 first complete set of Bevy workflows to authoritative server state before
 expanding breadth.
 
-1. **[client]** Wire Phase 3's authoritative adapters into Phase 2's HUD and command
+1. **[client]** Wire Phase 3's authoritative adapters into Phase 0's HUD and command
    intents. Vitals, XP/level, skills, selected target, safety state, inventory,
    equipment, spellbook, hotbar and chat update without widgets reading packets.
 2. **[client]** Implement inventory/equipment end to end: select, move, use, drop and equip
@@ -468,7 +515,7 @@ The authoritative world should now look and sound like Argentum.
 7. **[client]** Music and positional sound with separate volume controls. Browser audio must
    unlock from a user gesture, suspend cleanly in a background tab and resume
    without overlapping tracks.
-8. **[client]** Profile the tile/entity renderer against the Phase 0 draw-call and frame-time
+8. **[client]** Profile the tile/entity renderer against the Phase 1 draw-call and frame-time
    ceilings. Introduce chunked tile meshes, sprite batching or instancing only
    where measurements require them; keep culling and entity cleanup observable.
 
@@ -603,7 +650,7 @@ Exit criteria:
 
 ## Phase 9: Complete Bevy UI, localization and accessibility
 
-Polish and complete Phase 2's Bevy design system after the Phase 4 and 5
+Polish and complete Phase 0's Bevy design system after the Phase 4 and 5
 workflows are authoritative. There is one Bevy UI on WASM and native; platform
 services provide text composition, clipboard, storage and window capabilities
 without creating parallel DOM panels.
@@ -612,7 +659,7 @@ without creating parallel DOM panels.
    skills/progression, target, chat and minimap surfaces delivered in Phase 4.
 2. **[client]** Complete NPC services, trade, bank, commerce, party, clan, faction,
    death/recovery and service/status panels delivered in Phase 5.
-3. **[client]** Complete the stable-key localization system introduced with the Phase 2
+3. **[client]** Complete the stable-key localization system introduced with the Phase 0
    models. Ship Spanish, English and Portuguese with fallback tests; avoid
    embedding server-authored Spanish sentences where a semantic event plus
    parameters will work.
@@ -627,14 +674,14 @@ without creating parallel DOM panels.
    authentication, map, assets and snapshot—with actionable retry/error states.
    The host page may show only a minimal pre-WASM fallback and replaces it after
    a Rust readiness signal, not merely because the module instantiated.
-7. **[client]** Implement responsive integer scaling for the pixel-art viewport. Define
-   behavior for small windows, ultrawide displays, browser zoom, device-pixel
-   ratios, orientation changes and OS scaling without fractional camera shimmer
-   or distorted aspect ratio.
-8. **[client]** Support windowed, maximized and fullscreen modes with a reliable return path,
-   persisted preference and browser-permission failure handling. Recompute the
-   viewport on every resize/fullscreen/DPI event without moving the player,
-   changing world visibility rules or losing focused text input.
+7. **[client]** Harden Phase 0's responsive integer-scaling contract against the complete
+   game UI and supported platform matrix. Extend its automated small-window,
+   ultrawide, browser-zoom, device-pixel-ratio, orientation and OS-scaling tests
+   without accepting fractional camera shimmer or distorted aspect ratio.
+8. **[client]** Harden Phase 0's windowed, maximized and fullscreen behavior with persisted
+   preference, browser-permission failure handling and long-session/context-loss
+   coverage. Resize/fullscreen/DPI events still may not move the player, change
+   world visibility rules or lose focused text input.
 9. **[client]** Ship licensed fonts with explicit ES/EN/PT and game-symbol coverage. Treat
    user text as Unicode grapheme clusters for cursor movement, selection,
    truncation and length limits; define an emoji policy and neutralise malicious
@@ -761,9 +808,9 @@ Everything tagged **[server]** above, ordered by when it blocks:
 
 | Phase | Change | Why |
 | --- | --- | --- |
-| 0 | Serve `client-rs` from the game origin | Removes the dev-only CORS arrangement |
-| 1 | Parity decision and negotiated length-framed WS protocol | Lets modern clients skip unknown packets without changing legacy TCP/WS |
-| 1 | Canonical schema/extractor decision plus cross-language fixtures | Code generation is unsafe until a source is proven against Elixir bytes |
+| 1 | Serve `client-rs` from the game origin | Removes the dev-only CORS arrangement |
+| 2 | Parity decision and negotiated length-framed WS protocol | Lets modern clients skip unknown packets without changing legacy TCP/WS |
+| 2 | Canonical schema/extractor decision plus cross-language fixtures | Code generation is unsafe until a source is proven against Elixir bytes |
 | 3 | Reconnect/resynchronisation snapshot contract | Prevents stale entities and replayed inputs after transport loss or tab sleep |
 | 4 | Core gameplay workflow end-to-end fixtures | Proves inventory, spell, combat, safety and chat success/rejection paths |
 | 5 | Remaining-workflow parity matrix and fixtures | Proves services, economy, social, recovery and progression—not only individual packets |
@@ -792,6 +839,9 @@ capability-gated until that client deliberately opts in.
   compile or packet send is not evidence of a working end-to-end flow.
 - Add native unit tests for pure code, WASM/browser integration tests for browser
   behavior and cross-language fixtures for every flow-critical packet.
+- Implement every client-facing screen and control in Bevy. JavaScript/CSS may
+  expose platform capabilities but may not satisfy an application-UI acceptance
+  criterion or own application state.
 - For every relevant test in `client/tests/e2e`, add Rust-client coverage or a
   reviewed retirement record naming the replacement behavior and test. A panel
   existing in Bevy is not evidence that the old workflow survived migration.
