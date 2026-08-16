@@ -6,6 +6,7 @@
 //! of any screen here, and therefore no second source of UI state to keep in
 //! sync with this one.
 
+pub mod character;
 pub mod controls;
 pub mod hotbar;
 pub mod layout;
@@ -28,6 +29,7 @@ impl Plugin for UiPlugin {
             shell::ShellPlugin,
             topbar::TopBarPlugin,
             rail::RailPlugin,
+            character::CharacterPanelPlugin,
             hotbar::HotbarPlugin,
         ));
     }
