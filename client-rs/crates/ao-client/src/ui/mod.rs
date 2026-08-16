@@ -13,6 +13,7 @@ pub mod layout;
 pub mod rail;
 pub mod scale;
 pub mod shell;
+pub mod spells;
 pub mod state;
 pub mod tokens;
 pub mod topbar;
@@ -30,6 +31,7 @@ impl Plugin for UiPlugin {
             topbar::TopBarPlugin,
             rail::RailPlugin,
             character::CharacterPanelPlugin,
+            spells::SpellPanelPlugin,
             hotbar::HotbarPlugin,
         ));
     }

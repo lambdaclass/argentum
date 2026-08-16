@@ -221,14 +221,67 @@ impl EquipmentState {
 /// Why a spell cannot be cast right now.
 ///
 /// An enum rather than a boolean, because "greyed out" is not feedback: a
-/// player needs to know whether to drink a potion or train a skill.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// player needs to know whether to drink a potion, train a skill, put down a
+/// shield or step off the water.
+///
+/// The client decides all of these for *presentation* only. Final authority is
+/// the server's, and it re-checks every one — a client that treats its own
+/// judgement as final desynchronises the moment a rule changes on one side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SpellBlocker {
+    /// The character is a ghost. Nothing else matters.
+    Dead,
     InsufficientMana,
+    InsufficientStamina,
+    /// The skill is below the spell's requirement, which training fixes.
     InsufficientSkill,
     OnCooldown,
+    /// Wants a target and has none.
     NoTarget,
-    Dead,
+    /// The target is a corpse.
+    TargetDead,
+    /// The target is below the level this spell may be used on, which is the
+    /// newbie protection rule.
+    TargetLevelTooLow,
+    /// Held equipment forbids it: a shield or a two-handed weapon.
+    EquipmentMask,
+    /// Wrong terrain — casting from water, or at a land-only target.
+    WrongTerrain,
+    /// A safe zone refuses hostile actions.
+    ForbiddenHere,
+}
+
+impl SpellBlocker {
+    /// The one to show when several apply.
+    ///
+    /// Ordered by what the player can act on soonest. Being dead subsumes
+    /// everything; a cooldown resolves by waiting; a skill requirement takes
+    /// days. Showing the wrong one sends a player to train a skill when they
+    /// only had to sheathe a shield.
+    pub fn most_actionable(blockers: &[SpellBlocker]) -> Option<SpellBlocker> {
+        blockers.iter().min().copied()
+    }
+}
+
+/// What a spell needs pointed at it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TargetMode {
+    /// Affects the caster; no selection step.
+    #[default]
+    SelfCast,
+    /// Needs a selected entity.
+    Entity,
+    /// Needs a tile.
+    Ground,
+    /// Centred on the caster, no selection.
+    Area,
+}
+
+impl TargetMode {
+    /// Whether choosing this spell should arm a targeting cursor.
+    pub fn needs_selection(self) -> bool {
+        matches!(self, TargetMode::Entity | TargetMode::Ground)
+    }
 }
 
 /// A spell in the book.
@@ -237,8 +290,10 @@ pub struct SpellView {
     pub spell_id: i32,
     pub name_key: String,
     pub mana_cost: i32,
+    pub stamina_cost: i32,
     pub required_skill: i32,
     pub icon_grh: i32,
+    pub target_mode: TargetMode,
     /// Empty when the spell is ready.
     pub blockers: Vec<SpellBlocker>,
 }
@@ -246,6 +301,11 @@ pub struct SpellView {
 impl SpellView {
     pub fn is_castable(&self) -> bool {
         self.blockers.is_empty()
+    }
+
+    /// The reason to show, when there are several.
+    pub fn primary_blocker(&self) -> Option<SpellBlocker> {
+        SpellBlocker::most_actionable(&self.blockers)
     }
 }
 

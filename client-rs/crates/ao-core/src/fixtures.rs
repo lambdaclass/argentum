@@ -175,16 +175,30 @@ fn populated() -> UiSnapshot {
                     spell_id: 1,
                     name_key: "spell.missile".to_string(),
                     mana_cost: 12,
+                    stamina_cost: 0,
                     required_skill: 5,
                     icon_grh: 2001,
+                    target_mode: TargetMode::Entity,
                     blockers: Vec::new(),
                 },
                 SpellView {
                     spell_id: 2,
                     name_key: "spell.heal".to_string(),
                     mana_cost: 25,
+                    stamina_cost: 0,
                     required_skill: 10,
                     icon_grh: 2002,
+                    target_mode: TargetMode::SelfCast,
+                    blockers: Vec::new(),
+                },
+                SpellView {
+                    spell_id: 3,
+                    name_key: "spell.tremor".to_string(),
+                    mana_cost: 40,
+                    stamina_cost: 15,
+                    required_skill: 22,
+                    icon_grh: 2003,
+                    target_mode: TargetMode::Ground,
                     blockers: Vec::new(),
                 },
             ],
@@ -256,8 +270,13 @@ fn disabled() -> UiSnapshot {
     snapshot.vitals.mana = Gauge::new(2, 150);
     snapshot.vitals.stamina = Gauge::new(0, 60);
     snapshot.hotbar = hotbar(3, Some(0));
+    // Several at once, deliberately: the panel has to choose which to show.
     for spell in &mut snapshot.spellbook.spells {
-        spell.blockers = vec![SpellBlocker::InsufficientMana];
+        spell.blockers = vec![
+            SpellBlocker::InsufficientMana,
+            SpellBlocker::EquipmentMask,
+            SpellBlocker::InsufficientSkill,
+        ];
     }
     snapshot.safety = SafetyState { safe_mode: true, party_safe: true, secure_trade: true };
     snapshot
@@ -346,8 +365,12 @@ fn malformed() -> UiSnapshot {
                 spell_id: -1,
                 name_key: String::new(),
                 mana_cost: -5,
+                stamina_cost: i32::MIN,
                 required_skill: i32::MIN,
                 icon_grh: -1,
+                target_mode: TargetMode::Entity,
+                // The same blocker twice, which a naive "first blocker" lookup
+                // would report as two separate reasons.
                 blockers: vec![SpellBlocker::OnCooldown, SpellBlocker::OnCooldown],
             }],
         },
