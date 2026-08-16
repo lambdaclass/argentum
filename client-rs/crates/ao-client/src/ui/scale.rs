@@ -114,11 +114,12 @@ pub fn resolve(logical_size: Vec2, world_region: Vec2, device_pixel_ratio: f32) 
 
 /// The view the interface is designed around, in tiles.
 ///
-/// Measured from the windowed layout at 1280x832, which is the size every
-/// proportion in the shell was taken from. Larger displays are expected to show
-/// *this* view larger, not a wider one.
-pub const DESIGN_TILES_X: f32 = 31.0;
-pub const DESIGN_TILES_Y: f32 = 24.0;
+/// Measured from the default windowed host — 1200x704 logical pixels, less the
+/// top bar and the character rail. That is the density Argentum is played at,
+/// and a maximised or fullscreen host is expected to show *this* view larger
+/// rather than a wider one.
+pub const DESIGN_TILES_X: f32 = 28.0;
+pub const DESIGN_TILES_Y: f32 = 21.0;
 
 /// Whole logical pixels per world pixel.
 ///
@@ -159,10 +160,13 @@ pub fn world_scale(world_region: Vec2) -> u32 {
     if !fit.is_finite() {
         return 1;
     }
-    // Rounded rather than floored: at 1.8x of the design size, drawing at 1x
-    // wastes most of the screen, and 2x overshoots by less than floor
-    // undershoots.
-    (fit.round() as i32).max(1) as u32
+    // Floored, not rounded. Rounding doubled the world at 1080p, where the
+    // region is only about 1.6x the design size, and the rail's minimum then
+    // needed 29% of the width — past the band it is allowed. Flooring also
+    // gives maximising its intended effect at ordinary sizes: the world keeps
+    // its scale and receives the additional space, and only a genuinely
+    // doubled display draws the world twice as large.
+    (fit.floor() as i32).max(1) as u32
 }
 
 /// Continuous multiplier for text and controls.

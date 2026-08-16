@@ -63,24 +63,72 @@ pub enum BarAction {
     MuteAudio,
     MuteCombat,
     Settings,
-    /// Enter and leave fullscreen.
+    /// Expand the host to the whole browser content area, and back.
     ///
-    /// The client presents as a window on the page by default, like the
-    /// reference client does; this takes over the whole display rather than
-    /// merely filling the browser tab. Bevy cannot put its own host element
-    /// into fullscreen, so this is the one action that has to reach the page —
-    /// through a capability adapter, not by growing a second UI tree there.
+    /// Distinct from fullscreen: the browser's tabs and address bar stay
+    /// visible. Bevy cannot resize its own host element, so this reaches the
+    /// page through a capability adapter.
     ToggleMaximise,
+    /// Take over the display through the platform's fullscreen capability.
+    ///
+    /// Separate from maximise because they are different things to a player,
+    /// and because this one needs a user gesture and can be refused.
+    ToggleFullscreen,
 }
 
-/// Whether the client is currently fullscreen.
+/// Which host mode the client is in.
 ///
-/// Mirrored here so the button can render its state without asking the page
-/// every frame. The page stays authoritative, and this is re-read from it
-/// periodically — a player can leave fullscreen with Escape, which the client
-/// never hears about otherwise and would then show the wrong state forever.
+/// The host is authoritative; this is a mirror so the buttons can render their
+/// state without asking the page every frame, re-read periodically because a
+/// player can leave fullscreen with Escape and the page never says so.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum HostMode {
+    /// A bounded, centred game window.
+    #[default]
+    Windowed,
+    /// The whole browser content area, with the browser's own chrome visible.
+    Maximized,
+    /// The whole display.
+    Fullscreen,
+}
+
+impl HostMode {
+    /// The name the page uses.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            HostMode::Windowed => "windowed",
+            HostMode::Maximized => "maximized",
+            HostMode::Fullscreen => "fullscreen",
+        }
+    }
+
+    pub fn from_str(name: &str) -> Self {
+        match name {
+            "maximized" => HostMode::Maximized,
+            "fullscreen" => HostMode::Fullscreen,
+            _ => HostMode::Windowed,
+        }
+    }
+
+    /// What pressing maximise should ask for: it toggles back to windowed.
+    pub fn toggled_maximize(self) -> Self {
+        match self {
+            HostMode::Maximized => HostMode::Windowed,
+            _ => HostMode::Maximized,
+        }
+    }
+
+    /// What pressing fullscreen should ask for.
+    pub fn toggled_fullscreen(self) -> Self {
+        match self {
+            HostMode::Fullscreen => HostMode::Windowed,
+            _ => HostMode::Fullscreen,
+        }
+    }
+}
+
 #[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Maximised(pub bool);
+pub struct Maximised(pub HostMode);
 
 /// How often the page is asked whether it is still fullscreen.
 ///
@@ -139,6 +187,7 @@ fn bar_tab_index(action: BarAction) -> u32 {
         BarAction::MuteCombat => 5,
         BarAction::Settings => 6,
         BarAction::ToggleMaximise => 7,
+        BarAction::ToggleFullscreen => 8,
     }
 }
 
@@ -246,6 +295,7 @@ fn populate(mut commands: Commands, bars: Query<(Entity, &Region)>) {
                 (BarAction::MuteCombat, Icon::Combat),
                 (BarAction::Settings, Icon::Settings),
                 (BarAction::ToggleMaximise, Icon::Maximise),
+                (BarAction::ToggleFullscreen, Icon::Fullscreen),
             ] {
                 group.spawn(icon_button(action, kind));
             }
@@ -309,10 +359,15 @@ fn handle_bar_clicks(
         if *interaction != Interaction::Pressed {
             continue;
         }
-        if *action == BarAction::ToggleMaximise {
-            maximised.0 = !maximised.0;
-            set_page_maximised(maximised.0);
-        }
+        let wanted = match action {
+            BarAction::ToggleMaximise => maximised.0.toggled_maximize(),
+            BarAction::ToggleFullscreen => maximised.0.toggled_fullscreen(),
+            _ => continue,
+        };
+        // Optimistic, then corrected by the poll below: the page may refuse
+        // fullscreen, and it is the page that knows.
+        maximised.0 = wanted;
+        request_host_mode(wanted);
     }
 }
 
@@ -328,40 +383,42 @@ fn refresh_maximised(time: Res<Time>, mut since: Local<f32>, mut maximised: ResM
     }
     *since = 0.0;
 
-    let actual = page_is_maximised();
+    let actual = page_host_mode();
     if actual != maximised.0 {
         maximised.0 = actual;
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn page_is_maximised() -> bool {
+fn page_host_mode() -> HostMode {
     use wasm_bindgen::JsValue;
 
     let Some(window) = web_sys::window() else {
-        return false;
+        return HostMode::Windowed;
     };
     let Ok(adapter) = js_sys::Reflect::get(&window, &JsValue::from_str("aoWindow")) else {
-        return false;
+        return HostMode::Windowed;
     };
-    let Ok(getter) = js_sys::Reflect::get(&adapter, &JsValue::from_str("isMaximized")) else {
-        return false;
+    let Ok(getter) = js_sys::Reflect::get(&adapter, &JsValue::from_str("getMode")) else {
+        return HostMode::Windowed;
     };
     getter
         .dyn_ref::<js_sys::Function>()
         .and_then(|f| f.call0(&adapter).ok())
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
+        .and_then(|v| v.as_string())
+        .map(|name| HostMode::from_str(&name))
+        .unwrap_or(HostMode::Windowed)
 }
 
+/// Native windows are managed by the desktop, not by the client.
 #[cfg(not(target_arch = "wasm32"))]
-fn page_is_maximised() -> bool {
-    false
+fn page_host_mode() -> HostMode {
+    HostMode::Windowed
 }
 
-/// Ask the page to enter or leave fullscreen.
+/// Ask the page for a host mode.
 #[cfg(target_arch = "wasm32")]
-fn set_page_maximised(on: bool) {
+fn request_host_mode(mode: HostMode) {
     use wasm_bindgen::JsValue;
 
     let Some(window) = web_sys::window() else {
@@ -370,17 +427,16 @@ fn set_page_maximised(on: bool) {
     let Ok(adapter) = js_sys::Reflect::get(&window, &JsValue::from_str("aoWindow")) else {
         return;
     };
-    let Ok(setter) = js_sys::Reflect::get(&adapter, &JsValue::from_str("setMaximized")) else {
+    let Ok(setter) = js_sys::Reflect::get(&adapter, &JsValue::from_str("setMode")) else {
         return;
     };
     if let Some(setter) = setter.dyn_ref::<js_sys::Function>() {
-        let _ = setter.call1(&adapter, &JsValue::from_bool(on));
+        let _ = setter.call1(&adapter, &JsValue::from_str(mode.as_str()));
     }
 }
 
-/// Native windows are maximised by the desktop, not by the client.
 #[cfg(not(target_arch = "wasm32"))]
-fn set_page_maximised(_on: bool) {}
+fn request_host_mode(_mode: HostMode) {}
 
 #[cfg(test)]
 mod tests {
@@ -475,6 +531,54 @@ mod tests {
         }
 
         assert_eq!(shown_values(&mut app, row)[0], "--", "a background rate was reported");
+    }
+
+    #[test]
+    fn maximise_and_fullscreen_are_different_actions() {
+        // They are different things to a player: one keeps the browser's tabs
+        // and address bar, the other takes the display. A single control that
+        // did both could not express either.
+        assert_ne!(BarAction::ToggleMaximise, BarAction::ToggleFullscreen);
+        assert_ne!(
+            bar_tab_index(BarAction::ToggleMaximise),
+            bar_tab_index(BarAction::ToggleFullscreen)
+        );
+    }
+
+    #[test]
+    fn each_control_toggles_back_to_windowed() {
+        // Pressing maximise while maximised restores, rather than doing
+        // nothing or requiring the player to find a different button.
+        assert_eq!(HostMode::Windowed.toggled_maximize(), HostMode::Maximized);
+        assert_eq!(HostMode::Maximized.toggled_maximize(), HostMode::Windowed);
+
+        assert_eq!(HostMode::Windowed.toggled_fullscreen(), HostMode::Fullscreen);
+        assert_eq!(HostMode::Fullscreen.toggled_fullscreen(), HostMode::Windowed);
+    }
+
+    #[test]
+    fn maximise_from_fullscreen_leaves_fullscreen() {
+        // Otherwise the two controls fight: the class says maximised while the
+        // browser is still fullscreen, and restoring needs both.
+        assert_eq!(HostMode::Fullscreen.toggled_maximize(), HostMode::Maximized);
+        assert_eq!(HostMode::Maximized.toggled_fullscreen(), HostMode::Fullscreen);
+    }
+
+    #[test]
+    fn host_mode_names_round_trip() {
+        // The page is authoritative and communicates in these strings; a typo
+        // silently reads as windowed forever.
+        for mode in [HostMode::Windowed, HostMode::Maximized, HostMode::Fullscreen] {
+            assert_eq!(HostMode::from_str(mode.as_str()), mode);
+        }
+    }
+
+    #[test]
+    fn an_unknown_host_mode_reads_as_windowed() {
+        // A future page could answer something this build does not know, and
+        // the bounded window is the safe interpretation.
+        assert_eq!(HostMode::from_str("something-else"), HostMode::Windowed);
+        assert_eq!(HostMode::from_str(""), HostMode::Windowed);
     }
 
     #[test]

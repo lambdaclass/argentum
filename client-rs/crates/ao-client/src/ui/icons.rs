@@ -47,6 +47,8 @@ pub enum Icon {
     Minimise,
     /// Maximise: an open frame.
     Maximise,
+    /// Fullscreen: arrows pushing out of a frame's corners.
+    Fullscreen,
     /// Close: an X.
     Close,
 }
@@ -67,6 +69,7 @@ impl Icon {
             Icon::Support => "action.support",
             Icon::Minimise => "action.minimise",
             Icon::Maximise => "action.maximise",
+            Icon::Fullscreen => "action.fullscreen",
             Icon::Close => "action.close",
         }
     }
@@ -116,6 +119,15 @@ impl Icon {
             Icon::Support => vec![Stroke::ring(0.5, 0.5, 0.44), Stroke::ring(0.5, 0.5, 0.18)],
             Icon::Minimise => vec![Stroke::bar(0.5, 0.74, 0.62, 0.14)],
             Icon::Maximise => vec![Stroke::frame(0.5, 0.5, 0.66, 0.66)],
+            // Distinct from maximise at a glance: a smaller frame with marks
+            // pushing out of two corners, rather than the frame alone.
+            Icon::Fullscreen => vec![
+                Stroke::frame(0.5, 0.5, 0.46, 0.46),
+                Stroke::bar(0.19, 0.19, 0.26, 0.14),
+                Stroke::bar(0.19, 0.19, 0.14, 0.26),
+                Stroke::bar(0.81, 0.81, 0.26, 0.14),
+                Stroke::bar(0.81, 0.81, 0.14, 0.26),
+            ],
             Icon::Close => vec![
                 Stroke::diagonal(0.5, 0.5, 0.72, 0.14, true),
                 Stroke::diagonal(0.5, 0.5, 0.72, 0.14, false),
@@ -349,7 +361,7 @@ pub fn tooltip_text(name: &str) -> impl Bundle {
 mod tests {
     use super::*;
 
-    const ALL: [Icon; 9] = [
+    const ALL: [Icon; 10] = [
         Icon::Language,
         Icon::Screenshot,
         Icon::Audio,
@@ -358,6 +370,7 @@ mod tests {
         Icon::Support,
         Icon::Minimise,
         Icon::Maximise,
+        Icon::Fullscreen,
         Icon::Close,
     ];
 

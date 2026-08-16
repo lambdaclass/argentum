@@ -57,38 +57,37 @@
         justify-content: center;
       }
 
-      /* The client is a window on the page, bounded to a comfortable playing
-         size and centred, with fullscreen available from the top bar.
+      /* Three host modes, and the canvas always follows the host.
+         `ui::shell` recomputes the Bevy layout and the camera viewport from
+         whatever rectangle it is given; nothing here stretches anything.
 
-         It tracks the content area whenever the content area is *smaller* than
-         that bound, so a laptop or a half-width browser gets the whole of it
-         with no scrollbars. What it does not do is grow without limit: on a
-         2000-pixel browser an unbounded canvas made every element enormous
-         while showing the same scene, which is worse than the surround it
-         replaced.
-
-         Sizing lives on this element rather than on the canvas because Bevy is
-         told to track its parent and overwrites the canvas's own width and
-         height every resize, so a rule set there is lost on the first frame. */
+         Windowed is the default: a bounded, centred game window at roughly the
+         density Argentum is played at. It shrinks to fit a smaller viewport, so
+         "bounded by default" never means "broken on a laptop", and it does not
+         grow just because the monitor is large — an unbounded canvas on a
+         2000-pixel browser made every element enormous while showing the same
+         scene. */
       #shell {
-        width: min(1280px, 100vw);
-        height: min(832px, 100vh);
+        width: min(1200px, 100vw);
+        height: min(704px, 100vh);
         border: 1px solid var(--panel-edge);
         box-shadow: 0 0 0 1px #000, 0 18px 48px rgba(0, 0, 0, 0.75);
         overflow: hidden;
       }
 
-      /* Real fullscreen. The browser sizes the element to the display, so
-         only the window chrome has to go. */
-      #shell:fullscreen {
+      /* Maximized: the whole browser content area, tabs and address bar still
+         visible. Deliberately distinct from fullscreen, which takes the
+         display. */
+      #shell.maximized {
         width: 100vw;
         height: 100vh;
         border: none;
         box-shadow: none;
       }
 
-      /* Fallback for when fullscreen is refused — see aoWindow.setMaximized. */
-      #shell.maximized {
+      /* Fullscreen: the browser sizes the element to the display, so only the
+         window chrome has to go. */
+      #shell:fullscreen {
         width: 100vw;
         height: 100vh;
         border: none;
@@ -198,30 +197,45 @@
       // it cannot resize its own host element, so this exposes the one thing
       // only the page can do. Deliberately tiny and stateless-ish: the shell is
       // still the single source of truth for whether it is maximised.
+      // Browser-capability adapter, not application UI. Bevy owns every screen
+      // and cannot resize or fullscreen its own host element; this exposes the
+      // two things only the page can do.
+      //
+      // The host is authoritative about which mode it is in. Bevy mirrors it
+      // and re-reads it, because Escape leaves fullscreen without telling
+      // anyone.
       window.aoWindow = {
-        async setMaximized(on) {
+        /// "windowed" | "maximized" | "fullscreen"
+        getMode() {
+          if (document.fullscreenElement) return "fullscreen";
           const shell = document.getElementById("shell");
-          try {
-            if (on && !document.fullscreenElement) {
-              await shell.requestFullscreen();
-            } else if (!on && document.fullscreenElement) {
-              await document.exitFullscreen();
-            }
-            // Real fullscreen sizes the element itself, so the fallback class
-            // must come off or the two fight over the restore.
-            shell?.classList.remove("maximized");
-            return;
-          } catch {
-            // Fullscreen can be refused: the browser requires a recent user
-            // gesture, and an automated capture has none. Filling the tab is
-            // the honest fallback — the control still does something visible
-            // rather than appearing broken.
-            shell?.classList.toggle("maximized", !!on);
-          }
+          return shell?.classList.contains("maximized") ? "maximized" : "windowed";
         },
-        isMaximized() {
-          if (document.fullscreenElement) return true;
-          return !!document.getElementById("shell")?.classList.contains("maximized");
+
+        /// Returns the mode actually reached, which may not be the one asked
+        /// for: fullscreen needs a recent user gesture and can be refused.
+        async setMode(mode) {
+          const shell = document.getElementById("shell");
+          if (!shell) return "windowed";
+
+          try {
+            if (mode === "fullscreen") {
+              if (!document.fullscreenElement) await shell.requestFullscreen();
+              shell.classList.remove("maximized");
+              return "fullscreen";
+            }
+
+            if (document.fullscreenElement) await document.exitFullscreen();
+            shell.classList.toggle("maximized", mode === "maximized");
+            return mode;
+          } catch (error) {
+            // Denied or unsupported. Fall back to maximized so the control
+            // still does something visible, and report what actually happened
+            // rather than letting the client believe it succeeded.
+            console.warn("aoWindow.setMode refused", error);
+            shell.classList.add("maximized");
+            return "maximized";
+          }
         },
       };
     </script>

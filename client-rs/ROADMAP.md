@@ -237,15 +237,21 @@ the rendered browser and native window, rather than only in layout helpers.
 
 Required behavior:
 
-- The WASM canvas tracks the browser content area on first load and every
-  resize, bounded by a comfortable playing size (1280x832) beyond which the
-  client is a centred window with fullscreen available from the top bar. A
-  browser narrower or shorter than that bound gets the whole of it with no
-  scrollbars. This bound was added after an unbounded canvas was tried on a
-  2000-pixel browser: because the world holds its designed view and scales up
-  rather than revealing more map, filling the width made every element enormous
-  without showing anything more, which is worse than the surround it replaced.
-  What remains forbidden is a *fixed* rectangle that ignores a smaller window.
+- The canvas follows the current host rectangle. In default desktop mode the
+  host is a bounded, centered approximately 1200x704 logical-pixel game window
+  that shrinks to fit smaller viewports. Explicit maximize expands the host to
+  the browser content viewport; fullscreen expands it through the platform
+  fullscreen capability. Restore returns to the bounded centered host. Every
+  transition recomputes Bevy layout and camera viewports without CSS
+  stretching, world-scale changes, clipping or input-coordinate drift.
+- Maximize and fullscreen are separate controls. Maximize keeps the browser's
+  tabs and address bar; fullscreen takes the display, requires a user gesture
+  and can be refused, in which case the client reports what actually happened
+  rather than assuming it succeeded. Escape leaves fullscreen without notifying
+  the client, so the host mode is re-read rather than remembered.
+- Restore preserves player position, camera center, UI scale, selected item,
+  focused control and composing text, and leaves no scrollbars, clipping or
+  stale pointer coordinates.
 - The native window remains resizable. In both targets, top bar, world, rail and
   hotbar are derived from the same current window dimensions and partition the
   usable viewport without clipping or overlap.
