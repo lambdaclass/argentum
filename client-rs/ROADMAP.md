@@ -622,6 +622,54 @@ party/social, clan/faction, map and settings plus an explicit session/logout
 action. Unimplemented destinations are visibly disabled with a reason; the
 production UI never ships a `navigation — not yet wired` text panel.
 
+### Task W-0090 — Atomic first-scene reveal
+
+- **State:** planned
+- **Phase:** 0
+- **Depends on:** W-0001, W-0003, W-0004, W-0009
+
+Keep the Bevy loading/recovery screen fully visible until the first playable
+scene can be presented as one complete frame. Do not expose the world camera,
+partially populated rail, checkerboard, missing sprites or progressively
+appearing map layers while required first-scene work is still downloading,
+decoding, spawning or uploading to the GPU.
+
+Define a versioned `FirstSceneRevealSet` rather than interpreting “everything”
+as the entire game archive. At minimum it contains validated current-map data;
+every texture sheet and tall-overlay dependency intersecting the initial
+viewport plus its bounded prefetch margin; local-player body/head/equipment;
+required fallback sprites; primary font and HUD/icon atlases; initial typed HUD
+snapshot; shader/pipeline readiness where observable; and completion of the
+GPU uploads needed by the first frame. Unrelated maps, optional music and assets
+outside the reveal set may continue through bounded background loading after
+reveal, but an asset already required by the visible scene may not pop in later.
+
+Stage the candidate under a monotonically increasing load generation in a
+hidden/pending scene root. Commit visibility on one frame boundary only after
+all reveal-set members are ready and one complete candidate frame passes its
+readiness check. A retry, character switch, reconnect, resize or newer map/load
+generation cancels the stale candidate and its work; late completions cannot
+reveal an obsolete scene. Gameplay input and world intents remain disabled
+until commit, while the network/session continues processing within its normal
+bounds.
+
+Progress is truthful and monotonic within one generation: report named map,
+asset, decode/GPU and snapshot stages plus known bytes/items, never infer 100%
+from request dispatch or asset-handle creation. Required failure, timeout,
+corruption, unsupported texture size and memory-budget rejection stay on an
+actionable loading/error screen with retry/back/logout choices. An explicitly
+approved visible fallback may satisfy a missing optional visual; silently
+revealing a partial world may not.
+
+Close with deterministic loader tests that shuffle completion order and delay
+one required texture by two seconds: every frame before readiness contains the
+loading screen and no world pixel, and the next visible world frame contains
+all reveal-set layers, character composition and HUD. Repeat with warm cache,
+one failed asset, stale-generation completion, resize/maximize/fullscreen and
+1,000 load/cancel/retry cycles while checking entity, texture, listener and
+memory cleanup. Record time-to-complete-first-frame separately from time to
+download the full optional asset set.
+
 ### Task W-0010 — Secondary windows and interaction ownership
 
 - **State:** planned
@@ -690,7 +738,7 @@ fails monotonic entity or memory growth.
 
 - **State:** planned
 - **Phase:** 0
-- **Depends on:** W-0002, W-0003, W-0004, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0011, W-0085, W-0087, W-0088, W-0089
+- **Depends on:** W-0002, W-0003, W-0004, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0011, W-0085, W-0087, W-0088, W-0089, W-0090
 
 Create a Bevy component gallery and scripted capture harness sharing the same
 fixtures as production UI. Pin fonts, seed, animation time, map/camera, locale,
@@ -706,14 +754,15 @@ captures.
 
 - **State:** planned
 - **Phase:** 0
-- **Depends on:** W-0002, W-0003, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0012, W-0085, W-0087, W-0088, W-0089
+- **Depends on:** W-0002, W-0003, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0012, W-0085, W-0087, W-0088, W-0089, W-0090
 
 Run the production Bevy tree through repeated lifecycle changes rather than
 testing each layout once. A scripted test performs 250 alternating resizes
 across minimum, 720p, 1080p and ultrawide bounds; 1,000 panel open/close cycles;
 1,000 inventory/spell tab switches; 1,000 Tab-map open/close cycles with bounded
-pan/zoom/filter changes; repeated maximize/fullscreen restoration; and a
-zero-sized/minimized canvas followed by restoration.
+pan/zoom/filter changes; repeated first-scene load/cancel/retry cycles; repeated
+maximize/fullscreen restoration; and a zero-sized/minimized canvas followed by
+restoration.
 
 After every settled transition there is exactly one shell root, top bar, world
 camera, rail and hotbar. Hidden or removed controls cannot retain focus; no drag,
@@ -731,7 +780,7 @@ native and a real browser, not only against pure layout functions.
 
 - **State:** planned
 - **Phase:** 0
-- **Depends on:** W-0001, W-0002, W-0003, W-0004, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0011, W-0012, W-0085, W-0086, W-0087, W-0088, W-0089
+- **Depends on:** W-0001, W-0002, W-0003, W-0004, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0011, W-0012, W-0085, W-0086, W-0087, W-0088, W-0089, W-0090
 
 Run the Phase 0 technical checklist, archive capture artifacts and correct every
 failed contract. This closes the engineering gate and unlocks Phase 1; it does
@@ -784,6 +833,14 @@ close through `W-0014`; scheduling people does not idle ready technical work.
 - [ ] Product screens and HUD workflows are Bevy-owned and cover populated,
       empty, loading, disabled, rejected, disconnected, dead/ghost and malformed
       fixture states.
+- [ ] Initial load keeps the complete loading screen visible until the named
+      first-scene reveal set, authoritative snapshot and required GPU uploads
+      are ready; one frame-boundary commit reveals a complete map, character
+      and HUD with no partial layers or progressive visible pop-in.
+- [ ] A two-second delayed required texture, shuffled completion, stale load,
+      warm cache, failure and cancellation keep progress truthful and cleanup
+      bounded. Background loading after reveal contains only assets not required
+      by the already visible scene.
 - [ ] In gameplay context, one Tab press opens a whole-world map inside the
       world viewport while preserving the rail; Tab/Escape closes it. Fit,
       pan, zoom, reset, player recenter and merchant/quest/dungeon/POI filters
@@ -1058,11 +1115,12 @@ authoritative state or freeze one render frame.
 
 - **State:** planned
 - **Phase:** 3
-- **Depends on:** W-0024, W-0026
+- **Depends on:** W-0024, W-0026, W-0090
 
 Take map, position and identity from the login snapshot; remove demo coordinates
-and `INITIAL_MAP`. A pack record may preload art but never prove that an entity
-currently exists.
+and `INITIAL_MAP`. Feed the authoritative snapshot and map dependency set into
+the W-0090 reveal barrier; a pack record may preload art but never prove that an
+entity currently exists or that the first scene is ready.
 
 ### Task W-0031 — Authoritative ECS identity
 
@@ -1316,6 +1374,9 @@ evidence, not closure.
 
 Request missing sheets ahead of movement, retain tall art and despawn material
 outside byte-budgeted windows without visible holes or unbounded GPU growth.
+Every dependency in the initial visible window belongs to W-0090's reveal set;
+post-reveal streaming may not use ordinary movement into an unloaded visible
+tile as an excuse for pop-in.
 
 ### Task W-0052 — Labels, fades, weather and visual FX
 
@@ -1490,7 +1551,9 @@ critical FIFO; normal coalescing may not escape the boundary.
 
 Maintain `ActiveWorld` and `PendingWorld` under separate `MapSceneRoot`s. Commit
 once, only when assets and complete snapshot are ready; reject queued envelopes
-from stale map/epoch.
+from stale map/epoch. Reuse the W-0090 reveal-set/readiness contract so initial
+login and later handoff cannot develop different definitions of a complete
+first destination frame.
 
 ### Task W-0066 — Input and lifecycle handoff behavior
 
@@ -1573,11 +1636,13 @@ malicious bidi/control characters without corrupting accents or copy/paste.
 
 - **State:** planned
 - **Phase:** 9
-- **Depends on:** W-0027, W-0057
+- **Depends on:** W-0027, W-0057, W-0090
 
 Expose client, manifest, authentication, map, assets and snapshot progress with
-independent recovery actions. Remove host fallback only after an explicit Rust
-readiness signal, not module instantiation.
+independent recovery actions. Report known bytes/items plus decode/GPU work,
+never 100% at request dispatch or Bevy handle creation. Remove host fallback
+only after an explicit Rust readiness signal, not module instantiation, and
+keep the Bevy loading screen until the atomic first-scene reveal commits.
 
 ### Task W-0073 — Complete responsive/fullscreen hardening
 
