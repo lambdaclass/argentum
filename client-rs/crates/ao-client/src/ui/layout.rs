@@ -49,6 +49,96 @@ pub const RAIL_COMPACT_WIDTH: f32 = 56.0;
 /// that deliberately becomes an icon strip. The roadmap picks the second.
 pub const WORLD_MIN_WIDTH: f32 = 640.0;
 
+/// The server's area of interest, as a tile radius around the player.
+///
+/// Mirrors `:arena, :aoi_range_x/y` (`Arena.Map.Helpers`). The server sends
+/// entities only within this rectangle, so it is the exact bound on what a
+/// client can legitimately know about other players, NPCs and ground items.
+///
+/// Duplicated rather than negotiated because it is a *bound*, not a setting:
+/// the client enforces it on itself so a wider window cannot become a
+/// spyglass, and `aoi_matches_server` in the server test suite fails if the
+/// two ever drift apart.
+pub const AOI_RADIUS_X: i32 = 11;
+pub const AOI_RADIUS_Y: i32 = 9;
+
+/// Largest world area rendered, in tiles, regardless of window size.
+///
+/// A performance ceiling, not an aesthetic one. Every visible tile on every
+/// layer is a sprite entity, so an unbounded viewport on a 7680px ultrawide
+/// renders tens of thousands of them for no benefit. Sized so that every
+/// target in the roadmap's list — up to 4K — renders edge to edge with no
+/// perimeter at all; only genuinely extreme displays see a frame.
+///
+/// Terrain is public: the whole map pack is downloaded, so filling a large
+/// screen with it gains a player nothing. Entities are a different matter and
+/// are bounded by [`AOI_RADIUS_X`]/[`AOI_RADIUS_Y`], never by this.
+pub const MAX_WORLD_TILES_X: i32 = 120;
+pub const MAX_WORLD_TILES_Y: i32 = 72;
+
+/// One tile, in logical pixels. Matches `world::TILE_SIZE`.
+pub const TILE_SIZE: f32 = 32.0;
+
+/// Smallest window the client claims to support.
+///
+/// Derived, not chosen: it is the size at which the whole area of interest is
+/// still on screen beside a compact rail. Below it a player could be attacked
+/// from a tile the server told them about but the client never drew, which is
+/// a fairness problem rather than a cosmetic one.
+pub fn minimum_supported_size() -> Vec2 {
+    Vec2::new(
+        (AOI_RADIUS_X * 2 + 1) as f32 * TILE_SIZE + RAIL_COMPACT_WIDTH,
+        (AOI_RADIUS_Y * 2 + 1) as f32 * TILE_SIZE + TOP_BAR_HEIGHT,
+    )
+}
+
+/// Whether a tile is inside the area of interest around `(px, py)`.
+///
+/// The client's own bound on entity rendering. The server already refuses to
+/// send anything outside it, so this is defence in depth: a stale entity, a
+/// fixture, or a future prediction path must not be able to draw something the
+/// server would not have told a player about.
+pub fn within_area_of_interest(x: i32, y: i32, px: i32, py: i32) -> bool {
+    (x - px).abs() <= AOI_RADIUS_X && (y - py).abs() <= AOI_RADIUS_Y
+}
+
+/// How much world is drawn, and where.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WorldView {
+    /// Tiles visible across and down, after the cap.
+    pub tiles: IVec2,
+    /// The area actually filled with world, centred in the world region.
+    pub rect: Rect,
+    /// True when the cap left space that is decoration rather than world.
+    pub has_perimeter: bool,
+}
+
+/// Decide the drawn world area for a given world region.
+pub fn world_view(world: Rect) -> WorldView {
+    let available = world.size();
+
+    let tiles = IVec2::new(
+        ((available.x / TILE_SIZE).floor() as i32).clamp(0, MAX_WORLD_TILES_X),
+        ((available.y / TILE_SIZE).floor() as i32).clamp(0, MAX_WORLD_TILES_Y),
+    );
+
+    // Only the capped axes are inset; an uncapped axis keeps every pixel it
+    // has, so the common case has no perimeter at all.
+    let filled = Vec2::new(
+        if tiles.x >= MAX_WORLD_TILES_X { tiles.x as f32 * TILE_SIZE } else { available.x },
+        if tiles.y >= MAX_WORLD_TILES_Y { tiles.y as f32 * TILE_SIZE } else { available.y },
+    );
+
+    let inset = ((available - filled) * 0.5).max(Vec2::ZERO).floor();
+    let min = world.min + inset;
+
+    WorldView {
+        tiles,
+        rect: Rect::from_corners(min, min + filled),
+        has_perimeter: inset.x > 0.0 || inset.y > 0.0,
+    }
+}
+
 /// How the rail is presenting itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RailMode {
@@ -126,6 +216,119 @@ mod tests {
         ("ultrawide", Vec2::new(3440.0, 1440.0)),
         ("4k", Vec2::new(3840.0, 2160.0)),
     ];
+
+    #[test]
+    fn the_area_of_interest_matches_the_servers() {
+        // The server's `:arena, :aoi_range_x/y`. If these drift the client
+        // either hides entities the server sent — attacked from an empty
+        // tile — or reserves space for entities that never arrive.
+        assert_eq!(AOI_RADIUS_X, 11);
+        assert_eq!(AOI_RADIUS_Y, 9);
+    }
+
+    #[test]
+    fn the_area_of_interest_is_a_rectangle_not_a_circle() {
+        // The server tests each axis separately, so the corners are included.
+        // A radial client bound would drop entities the server did send.
+        assert!(within_area_of_interest(50 + AOI_RADIUS_X, 50 + AOI_RADIUS_Y, 50, 50));
+        assert!(!within_area_of_interest(50 + AOI_RADIUS_X + 1, 50, 50, 50));
+        assert!(!within_area_of_interest(50, 50 + AOI_RADIUS_Y + 1, 50, 50));
+    }
+
+    #[test]
+    fn a_larger_window_does_not_widen_the_area_of_interest() {
+        // The fairness property: the bound is a constant, so no window size,
+        // rail mode or scale factor can turn a wide monitor into a spyglass.
+        for size in [Vec2::new(800.0, 600.0), Vec2::new(3840.0, 2160.0), Vec2::new(5120.0, 1440.0)]
+        {
+            let geometry = shell_geometry(size);
+            let view = world_view(geometry.world);
+            // The viewport may show more *terrain*, which is public.
+            assert!(view.tiles.x > 0);
+            // It never shows an entity further away.
+            assert!(!within_area_of_interest(50 + AOI_RADIUS_X + 1, 50, 50, 50));
+        }
+    }
+
+    #[test]
+    fn the_minimum_supported_size_shows_the_whole_area_of_interest() {
+        // Derived rather than chosen. Below this a player can be attacked from
+        // a tile the server told the client about but the client never drew.
+        let minimum = minimum_supported_size();
+        let geometry = shell_geometry(minimum);
+        let view = world_view(geometry.world);
+
+        assert!(
+            view.tiles.x >= AOI_RADIUS_X * 2 + 1,
+            "only {} tiles wide, need {}",
+            view.tiles.x,
+            AOI_RADIUS_X * 2 + 1
+        );
+        assert!(
+            view.tiles.y >= AOI_RADIUS_Y * 2 + 1,
+            "only {} tiles tall, need {}",
+            view.tiles.y,
+            AOI_RADIUS_Y * 2 + 1
+        );
+    }
+
+    #[test]
+    fn every_supported_target_shows_the_whole_area_of_interest() {
+        for (name, size) in TARGETS {
+            let view = world_view(shell_geometry(size).world);
+            assert!(
+                view.tiles.x >= AOI_RADIUS_X * 2 + 1 && view.tiles.y >= AOI_RADIUS_Y * 2 + 1,
+                "{name} shows {}x{} tiles, less than the area of interest",
+                view.tiles.x,
+                view.tiles.y
+            );
+        }
+    }
+
+    #[test]
+    fn ordinary_windows_have_no_cosmetic_perimeter() {
+        // The cap only exists for extreme displays. A letterbox at 1080p would
+        // be a self-inflicted wound.
+        for (name, size) in TARGETS {
+            let view = world_view(shell_geometry(size).world);
+            assert!(!view.has_perimeter, "{name} ({size:?}) was letterboxed");
+        }
+    }
+
+    #[test]
+    fn an_extreme_ultrawide_is_capped_and_the_remainder_is_decoration() {
+        // Unbounded, a 5120px ultrawide renders an absurd area for no benefit.
+        let view = world_view(shell_geometry(Vec2::new(7680.0, 2160.0)).world);
+
+        assert_eq!(view.tiles.x, MAX_WORLD_TILES_X);
+        assert!(view.has_perimeter);
+        assert!(view.rect.width() <= MAX_WORLD_TILES_X as f32 * TILE_SIZE);
+    }
+
+    #[test]
+    fn the_world_view_stays_inside_its_region() {
+        // A view wider than its region would draw world under the rail.
+        for size in [Vec2::new(800.0, 600.0), Vec2::new(1920.0, 1080.0), Vec2::new(7680.0, 2160.0)]
+        {
+            let geometry = shell_geometry(size);
+            let view = world_view(geometry.world);
+            assert!(view.rect.min.x >= geometry.world.min.x - 0.5);
+            assert!(view.rect.max.x <= geometry.world.max.x + 0.5);
+            assert!(view.rect.min.y >= geometry.world.min.y - 0.5);
+            assert!(view.rect.max.y <= geometry.world.max.y + 0.5);
+        }
+    }
+
+    #[test]
+    fn a_capped_world_is_centred_in_its_region() {
+        // Off-centre perimeter reads as a rendering bug rather than a frame.
+        let geometry = shell_geometry(Vec2::new(7680.0, 2160.0));
+        let view = world_view(geometry.world);
+
+        let left = view.rect.min.x - geometry.world.min.x;
+        let right = geometry.world.max.x - view.rect.max.x;
+        assert!((left - right).abs() <= 1.0, "perimeter is {left} left and {right} right");
+    }
 
     #[test]
     fn the_window_is_partitioned_exactly() {

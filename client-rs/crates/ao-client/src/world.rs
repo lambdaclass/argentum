@@ -6,6 +6,7 @@ use crate::graphics::{make_image, Graphics, Heading, SheetTextures};
 use crate::net::{start_graphics_load, LoadState, MapLoader};
 use crate::net::{DEFAULT_BODY, DEFAULT_HEAD};
 use crate::session::{ConnectionState, Session};
+use crate::ui::layout::within_area_of_interest;
 use ao_core::{is_walkable, TileFlags, WalkGate, WalkGateConfig, WalkOutcome};
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
@@ -15,10 +16,24 @@ pub const TILE_SIZE: f32 = 32.0;
 const MAP_WIDTH: i32 = 100;
 const MAP_HEIGHT: i32 = 100;
 
-/// How far the camera can see, in tiles. Only this window is spawned; a full
-/// 100x100 map of individual sprites is 10,000 entities for no benefit.
-const VIEW_RADIUS_X: i32 = 22;
-const VIEW_RADIUS_Y: i32 = 15;
+/// How far the camera can see, in tiles, when nothing has measured the window
+/// yet. Replaced on the first frame by the real viewport size.
+///
+/// These were fixed constants, which meant a window wider than ~45 tiles drew
+/// black beyond them: the painted area did not follow the viewport, so a large
+/// screen showed a void where the world should be.
+const DEFAULT_VIEW_RADIUS_X: i32 = 22;
+const DEFAULT_VIEW_RADIUS_Y: i32 = 15;
+
+/// Half the visible world, in tiles, as last measured from the window.
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ViewRadius(pub IVec2);
+
+impl Default for ViewRadius {
+    fn default() -> Self {
+        Self(IVec2::new(DEFAULT_VIEW_RADIUS_X, DEFAULT_VIEW_RADIUS_Y))
+    }
+}
 
 /// Tiles painted beyond the visible window.
 ///
@@ -40,11 +55,11 @@ const TALL_ART_TILES: i32 = 6;
 ///
 /// Asymmetric on purpose: north needs no allowance because art never hangs
 /// below its tile.
-fn within_paint_window(x: i32, y: i32, px: i32, py: i32) -> bool {
+fn within_paint_window(x: i32, y: i32, px: i32, py: i32, radius: IVec2) -> bool {
     let dy = y - py;
-    (x - px).abs() <= VIEW_RADIUS_X + SPAWN_MARGIN
-        && dy >= -(VIEW_RADIUS_Y + SPAWN_MARGIN)
-        && dy <= VIEW_RADIUS_Y + SPAWN_MARGIN + TALL_ART_TILES
+    (x - px).abs() <= radius.x + SPAWN_MARGIN
+        && dy >= -(radius.y + SPAWN_MARGIN)
+        && dy <= radius.y + SPAWN_MARGIN + TALL_ART_TILES
 }
 
 /// Where the client is in its own startup, as distinct from where the
@@ -86,6 +101,7 @@ impl Plugin for WorldPlugin {
             .insert_resource(SheetTextures::default())
             .insert_resource(LoadedMap(None))
             .insert_resource(MapLoadTimeout::default())
+            .insert_resource(ViewRadius::default())
             .insert_resource(DrawnTiles::default())
             .insert_resource(CharacterDrawn(false))
             .insert_resource(DrawnEntities::default())
@@ -688,6 +704,7 @@ fn apply_loaded_map(
     player: Res<LocalPlayer>,
     config: Res<ClientConfig>,
     mut next: ResMut<NextState<AppState>>,
+    radius: Res<ViewRadius>,
     time: Res<Time>,
     timeout: Res<MapLoadTimeout>,
     mut waited: Local<f32>,
@@ -722,7 +739,7 @@ fn apply_loaded_map(
                     // The same window the painter uses: a tile it is willing to
                     // spawn but whose sheet was never requested stays invisible
                     // until something else happens to pull that sheet in.
-                    if within_paint_window(x, y, player.x, player.y) {
+                    if within_paint_window(x, y, player.x, player.y, radius.0) {
                         wanted.push(tile.grh);
                     }
                 }
@@ -757,8 +774,8 @@ fn apply_loaded_map(
 /// Spawn the tiles around the player. Only the visible window is created; a
 /// full 100x100 map would be 10,000 entities for no visual gain.
 fn spawn_tile_window(commands: &mut Commands, player: &LocalPlayer, blockmap: &Blockmap) {
-    for dy in -VIEW_RADIUS_Y..=VIEW_RADIUS_Y {
-        for dx in -VIEW_RADIUS_X..=VIEW_RADIUS_X {
+    for dy in -DEFAULT_VIEW_RADIUS_Y..=DEFAULT_VIEW_RADIUS_Y {
+        for dx in -DEFAULT_VIEW_RADIUS_X..=DEFAULT_VIEW_RADIUS_X {
             let (x, y) = (player.x + dx, player.y + dy);
             let value = blockmap.value_at(x, y);
             let color = match ao_core::TileKind::from_value(value) {
@@ -807,6 +824,7 @@ fn paint_scene(
     mut atlases: ResMut<SheetAtlases>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
     mut drawn: ResMut<DrawnTiles>,
+    radius: Res<ViewRadius>,
     mut commands: Commands,
 ) {
     if sheets.0.is_empty() {
@@ -826,7 +844,7 @@ fn paint_scene(
             }
 
             let (x, y) = (tile.x as i32, tile.y as i32);
-            if !within_paint_window(x, y, player.x, player.y) {
+            if !within_paint_window(x, y, player.x, player.y, radius.0) {
                 continue;
             }
 
@@ -1140,7 +1158,11 @@ fn paint_entities(
                 continue;
             }
             let (x, y) = (npc.x as i32, npc.y as i32);
-            if !within_paint_window(x, y, player.x, player.y) {
+            // Entities, not terrain: bounded by the server's area of interest
+            // rather than by the paint window. Terrain is public map-pack data
+            // and may fill the screen; an entity outside the AoI is something
+            // the server never told this player about.
+            if !within_area_of_interest(x, y, player.x, player.y) {
                 continue;
             }
             let Some(look) = looks.get(&(npc.npc_id as i32)) else {
@@ -1200,7 +1222,9 @@ fn paint_entities(
                 continue;
             }
             let (x, y) = (object.x as i32, object.y as i32);
-            if !within_paint_window(x, y, player.x, player.y) {
+            // Ground items are entities too, and a wider window must not
+            // reveal loot the server has not sent.
+            if !within_area_of_interest(x, y, player.x, player.y) {
                 continue;
             }
             let Some(grh) =
@@ -1532,7 +1556,7 @@ mod tests {
         for dy in -VISIBLE_HALF_Y..=VISIBLE_HALF_Y {
             for dx in -VISIBLE_HALF_X..=VISIBLE_HALF_X {
                 assert!(
-                    within_paint_window(50 + dx, 50 + dy, 50, 50),
+                    within_paint_window(50 + dx, 50 + dy, 50, 50, ViewRadius::default().0),
                     "({dx}, {dy}) is on screen but would not be painted"
                 );
             }
@@ -1553,7 +1577,7 @@ mod tests {
             (0, -VISIBLE_HALF_Y - LEAD),
         ] {
             assert!(
-                within_paint_window(50 + edge.0, 50 + edge.1, 50, 50),
+                within_paint_window(50 + edge.0, 50 + edge.1, 50, 50, ViewRadius::default().0),
                 "{edge:?} is {LEAD} tiles off screen and should already exist"
             );
         }
@@ -1570,7 +1594,7 @@ mod tests {
         let base_below_screen = VISIBLE_HALF_Y + ART_HEIGHT_TILES - 1;
 
         assert!(
-            within_paint_window(50, 50 + base_below_screen, 50, 50),
+            within_paint_window(50, 50 + base_below_screen, 50, 50, ViewRadius::default().0),
             "a {ART_HEIGHT_TILES}-tile sprite based {base_below_screen} south still reaches the screen"
         );
     }
@@ -1579,9 +1603,9 @@ mod tests {
     fn the_window_stays_bounded() {
         // A margin large enough to hide pop-in must not quietly become "paint
         // the whole map": every painted tile is a sprite entity.
-        assert!(!within_paint_window(50, 50 + 60, 50, 50));
-        assert!(!within_paint_window(50 + 60, 50, 50, 50));
-        assert!(!within_paint_window(50, 50 - 60, 50, 50));
+        assert!(!within_paint_window(50, 50 + 60, 50, 50, ViewRadius::default().0));
+        assert!(!within_paint_window(50 + 60, 50, 50, 50, ViewRadius::default().0));
+        assert!(!within_paint_window(50, 50 - 60, 50, 50, ViewRadius::default().0));
     }
 
     #[test]
@@ -1907,6 +1931,7 @@ mod tests {
             .insert_resource(Blockmap::demo())
             .insert_resource(LoadedMap(None))
             .insert_resource(LocalPlayer::default())
+            .insert_resource(ViewRadius::default())
             .insert_resource(MapLoadTimeout(f32::MAX))
             .insert_resource(ClientConfig {
                 asset_origin: "http://test".into(),
@@ -1934,6 +1959,7 @@ mod tests {
             .insert_resource(Blockmap::demo())
             .insert_resource(LoadedMap(None))
             .insert_resource(LocalPlayer::default())
+            .insert_resource(ViewRadius::default())
             .insert_resource(MapLoadTimeout(f32::MAX))
             .insert_resource(ClientConfig {
                 asset_origin: "http://test".into(),
@@ -1961,6 +1987,7 @@ mod tests {
             .insert_resource(Blockmap::demo())
             .insert_resource(LoadedMap(None))
             .insert_resource(LocalPlayer::default())
+            .insert_resource(ViewRadius::default())
             .insert_resource(MapLoadTimeout(0.0))
             .insert_resource(ClientConfig {
                 asset_origin: "http://test".into(),

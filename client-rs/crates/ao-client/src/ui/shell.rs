@@ -10,7 +10,7 @@
 //! reads its rectangle back from a solved flex tree lags the layout by a frame —
 //! visible on resize as a stale strip down the edge of the world.
 
-use super::layout::{self, RailMode, ShellGeometry};
+use super::layout::{self, RailMode, ShellGeometry, WorldView};
 use super::tokens::{focus, ink, size, space, surface, type_scale};
 use bevy::camera::Viewport;
 use bevy::prelude::*;
@@ -179,6 +179,7 @@ fn apply_geometry(
     mut applied: ResMut<AppliedGeometry>,
     mut regions: Query<(&Region, &mut Node)>,
     mut cameras: Query<&mut Camera, With<WorldCamera>>,
+    mut radius: ResMut<crate::world::ViewRadius>,
 ) {
     let Ok(window) = windows.single() else {
         return;
@@ -206,9 +207,20 @@ fn apply_geometry(
     // The camera viewport is in physical pixels; everything above is logical.
     // This is the single place device pixel ratio is applied.
     let scale = window.scale_factor();
+    let view = layout::world_view(geometry.world);
     for mut camera in &mut cameras {
-        camera.viewport = world_viewport(geometry, scale);
+        camera.viewport = view_viewport(view, scale);
     }
+
+    // Painting follows the viewport. It used to follow a constant, so a window
+    // wider than the constant drew black beyond it.
+    radius.0 = view_radius_tiles(view);
+}
+
+/// Half the visible world in tiles, rounded up so a partially visible edge tile
+/// is still painted rather than clipped to black.
+pub fn view_radius_tiles(view: WorldView) -> IVec2 {
+    IVec2::new((view.tiles.x + 1) / 2, (view.tiles.y + 1) / 2)
 }
 
 /// Physical-pixel viewport for the world camera.
@@ -216,8 +228,13 @@ fn apply_geometry(
 /// `None` when the world has no area — wgpu rejects a zero-sized viewport, and
 /// a browser reports a zero-sized window while a tab is being restored.
 pub fn world_viewport(geometry: ShellGeometry, scale_factor: f32) -> Option<Viewport> {
-    let physical_position = (geometry.world.min * scale_factor).round();
-    let physical_size = (geometry.world.size() * scale_factor).round();
+    view_viewport(layout::world_view(geometry.world), scale_factor)
+}
+
+/// Physical-pixel viewport for a resolved world view.
+pub fn view_viewport(view: WorldView, scale_factor: f32) -> Option<Viewport> {
+    let physical_position = (view.rect.min * scale_factor).round();
+    let physical_size = (view.rect.size() * scale_factor).round();
 
     if physical_size.x < 1.0 || physical_size.y < 1.0 {
         return None;
