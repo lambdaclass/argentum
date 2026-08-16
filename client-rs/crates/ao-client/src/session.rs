@@ -245,7 +245,15 @@ mod wasm {
                 let session = self.clone();
                 let socket = socket.clone();
                 Closure::<dyn FnMut()>::new(move || {
-                    let login = protocol::encode_login_new_char(&name, &password, &client_hash);
+                    // Packet 74: creates the character if it does not exist.
+                    // Once there is a login screen this becomes 73 with a
+                    // server-issued session token and a character id.
+                    let login = protocol::encode_login_new_char(
+                        &name,
+                        &password,
+                        &client_hash,
+                        protocol::NewCharacter::default(),
+                    );
                     if let Err(e) = socket.send_with_u8_array(&login) {
                         session.set_state(ConnectionState::Failed(format!("login send: {e:?}")));
                         return;

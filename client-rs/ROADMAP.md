@@ -15,6 +15,10 @@ this client, and splitting it across two roadmaps would hide the dependency.
 Anything tagged **[server]** should also be reflected in the main `ROADMAP.md`
 when scheduled.
 
+A claim in "Current state" is a claim about verified behaviour. Compiling,
+opening a socket or sending bytes is not evidence that a flow works; the
+evidence is a test that fails when the behaviour is removed.
+
 ## Why this client exists
 
 Gameplay rules the server enforces were re-implemented independently in the web
@@ -26,7 +30,7 @@ diagnose from either side alone.
 framework coupling, so the same logic can compile into the wasm client and into
 the Rustler NIF the server already loads. Today it carries tile walkability, the
 server's speed-hack accumulator, the map pack decoder and the wire protocol —
-25 tests, all runnable natively without a browser.
+31 tests, all runnable natively without a browser.
 
 ## Current state
 
@@ -35,13 +39,28 @@ with real artwork, static NPCs and ground objects, a character with body/head
 composition, held-key movement gated by the server's walk formula, a WebSocket
 transport, a walk encoder and a `pos_update` decoder.
 
-The session does **not** currently log in end to end. The client labels packet
-74 as `LOGIN_EXISTING_CHAR`, but the server defines 73 as `login_existing_char`
-and 74 as `login_new_char`. It sends the new-character-shaped packet copied
-from BotArmy, then fails on the server's first WS response:
-`world_pack_signature` (203), because the decoder only recognises
-`pos_update` (31). "Socket opened and bytes were sent" is not a successful
-session and must not be reported as one again.
+Round-trip latency is measured on the game socket itself (ping 900 / pong 204)
+and shown in the status row beside FPS and the online count. Verified against a
+real listener over `:gen_tcp`, including before login completes.
+
+The session still does **not** log in end to end, but no longer for the reason
+recorded here previously. The packet names were wrong — the client called 74
+`LOGIN_EXISTING_CHAR` when the server defines 73 as `login_existing_char` and
+74 as `login_new_char` — and the creation fields at the tail of 74 were
+described as padding the server ignores, when in fact they decide the
+character it creates. Both are fixed, both encoders now exist, and their exact
+bytes are asserted against the server's own decoder by a shared fixture
+(`apps/ao_protocol/test/client_login_layout_test.exs`).
+
+What blocks login now is the response, not the request. After a successful WS
+login the server sends `world_pack_signature` (203) and `session_token` (200);
+the client's decoder recognises only `pos_update` (31) and `pong` (204). An
+unknown id cannot be skipped, because packet lengths are not on the wire, so
+the connection is failed rather than desynchronised. Handling those two frames
+is Phase 1 work.
+
+"Socket opened and bytes were sent" is not a successful session and must not be
+reported as one again.
 
 The trimmed build measures **19.2 MB raw and 5.5 MB gzip**. Transfer-size gates
 must use the compressed artifact players actually download; raw size remains a
@@ -52,9 +71,11 @@ secondary diagnostic.
 Make the prototype honest and establish boundaries while the platform-specific
 surface is still small.
 
-1. **[client]** Correct the packet-74 name and current-state reporting. Keep distinct
+1. ~~**[client]** Correct the packet-74 name and current-state reporting. Keep distinct
    encoders for new-character login (74) and token-based existing-character
-   login (73).
+   login (73).~~ **Done.** Both encoders exist and carry the creation fields the
+   server actually reads; a shared byte fixture asserts them against the
+   server's decoder in both languages.
 2. **[client]** Replace hard-coded asset origin, gateway URL, character name, password and
    client hash with runtime configuration. Production derives HTTPS/WSS
    endpoints from the page origin; development overrides them explicitly.

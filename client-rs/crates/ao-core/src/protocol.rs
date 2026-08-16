@@ -36,21 +36,77 @@ fn put_string(out: &mut Vec<u8>, value: &str) {
     out.extend_from_slice(value.as_bytes());
 }
 
-/// Log in as an existing character.
+/// Protocol version this client reports: major, minor, build.
+const CLIENT_VERSION: [u8; 3] = [1, 0, 0];
+
+/// The choices made when a character is created.
 ///
-/// Field order mirrors `BotArmy.Bot.build_login/1`: password, name, three
-/// version bytes, the client hash, then five trailing fields the server reads
-/// but does not act on for an existing character.
-pub fn encode_login_new_char(name: &str, password: &str, client_hash: &str) -> Vec<u8> {
+/// These are not decoration: the server reads every one of them and they
+/// determine the character it creates. An earlier port described them as
+/// trailing fields the server ignores, which is why they were left as literals
+/// copied out of `BotArmy`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NewCharacter {
+    pub race: u8,
+    pub gender: u8,
+    pub class: u8,
+    pub head: i16,
+    pub home_city: u8,
+}
+
+impl Default for NewCharacter {
+    /// Human male warrior from Ullathorpe — the combination `BotArmy` uses, and
+    /// the one guaranteed to be valid on a stock server.
+    fn default() -> Self {
+        Self { race: 1, gender: 1, class: 6, head: 1, home_city: 1 }
+    }
+}
+
+/// Create a character and log in as it (packet 74).
+///
+/// Layout, from `AoProtocol.Client.Decoder.decode_packet/2`: session token,
+/// username, three version bytes, client hash, then race, gender, class, head
+/// and home city.
+///
+/// This is what `BotArmy` sends, which is exactly why it was mistaken for
+/// ordinary login while porting. A real client only wants it once per
+/// character; every later session uses [`encode_login_existing_char`].
+pub fn encode_login_new_char(
+    username: &str,
+    session_token: &str,
+    client_hash: &str,
+    character: NewCharacter,
+) -> Vec<u8> {
     let mut out = Vec::with_capacity(64);
     put_i16(&mut out, client::LOGIN_NEW_CHAR);
-    put_string(&mut out, password);
-    put_string(&mut out, name);
-    out.extend_from_slice(&[1, 0, 0]);
+    put_string(&mut out, session_token);
+    put_string(&mut out, username);
+    out.extend_from_slice(&CLIENT_VERSION);
     put_string(&mut out, client_hash);
-    out.extend_from_slice(&[1, 1, 6]);
-    put_i16(&mut out, 1);
-    out.push(1);
+    out.push(character.race);
+    out.push(character.gender);
+    out.push(character.class);
+    put_i16(&mut out, character.head);
+    out.push(character.home_city);
+    out
+}
+
+/// Log in as an already-created character (packet 73).
+///
+/// Layout: session token, character id, three version bytes, client hash.
+/// Distinct from packet 74 in more than field order — this one identifies an
+/// existing character by id and creates nothing, so sending 74 for a returning
+/// player is not a slower path to the same place, it is a different operation.
+///
+/// The session token comes from the server's `session_token` packet (id 200),
+/// which is issued after a successful login.
+pub fn encode_login_existing_char(session_token: &str, char_id: i32, client_hash: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(48);
+    put_i16(&mut out, client::LOGIN_EXISTING_CHAR);
+    put_string(&mut out, session_token);
+    out.extend_from_slice(&char_id.to_le_bytes());
+    out.extend_from_slice(&CLIENT_VERSION);
+    put_string(&mut out, client_hash);
     out
 }
 
@@ -154,36 +210,103 @@ mod tests {
     use super::*;
 
     #[test]
-    fn login_matches_the_reference_layout() {
-        let bytes = encode_login_new_char("Bot_1", "pass", "hash");
+    fn new_character_login_matches_the_servers_decoder() {
+        // Field order and widths come from AoProtocol.Client.Decoder; the
+        // integration test in client_handler_integration_test.exs sends the
+        // same shape over a real socket.
+        let character = NewCharacter { race: 1, gender: 1, class: 6, head: 1, home_city: 1 };
+        let bytes = encode_login_new_char("Bot_1", "tok", "hash", character);
 
-        // id
         assert_eq!(i16::from_le_bytes([bytes[0], bytes[1]]), 74);
-        // password, length-prefixed with an i16 — not a byte
-        assert_eq!(i16::from_le_bytes([bytes[2], bytes[3]]), 4);
-        assert_eq!(&bytes[4..8], b"pass");
-        // name follows
-        assert_eq!(i16::from_le_bytes([bytes[8], bytes[9]]), 5);
-        assert_eq!(&bytes[10..15], b"Bot_1");
-        // three version bytes
-        assert_eq!(&bytes[15..18], &[1, 0, 0]);
-        // client hash
-        assert_eq!(i16::from_le_bytes([bytes[18], bytes[19]]), 4);
-        assert_eq!(&bytes[20..24], b"hash");
-        assert_eq!(&bytes[24..27], &[1, 1, 6]);
-        assert_eq!(i16::from_le_bytes([bytes[27], bytes[28]]), 1);
-        assert_eq!(bytes[29], 1);
-        assert_eq!(bytes.len(), 30);
+        // Session token, length-prefixed with an i16 — not a byte, despite the
+        // server calling the helper `read_string8`.
+        assert_eq!(i16::from_le_bytes([bytes[2], bytes[3]]), 3);
+        assert_eq!(&bytes[4..7], b"tok");
+        // Username follows.
+        assert_eq!(i16::from_le_bytes([bytes[7], bytes[8]]), 5);
+        assert_eq!(&bytes[9..14], b"Bot_1");
+        assert_eq!(&bytes[14..17], &CLIENT_VERSION);
+        assert_eq!(i16::from_le_bytes([bytes[17], bytes[18]]), 4);
+        assert_eq!(&bytes[19..23], b"hash");
+        // race, gender, class, head (i16), home city
+        assert_eq!(&bytes[23..26], &[1, 1, 6]);
+        assert_eq!(i16::from_le_bytes([bytes[26], bytes[27]]), 1);
+        assert_eq!(bytes[28], 1);
+        assert_eq!(bytes.len(), 29);
     }
 
     #[test]
-    fn login_uses_the_new_character_packet_and_says_so() {
+    fn creation_choices_reach_the_wire_rather_than_being_hardcoded() {
+        // These were previously literals copied from BotArmy, described as
+        // fields the server ignores. It does not ignore them.
+        let character = NewCharacter { race: 3, gender: 2, class: 4, head: 260, home_city: 5 };
+        let bytes = encode_login_new_char("N", "t", "h", character);
+        let tail = &bytes[bytes.len() - 6..];
+
+        assert_eq!(tail[0..3], [3, 2, 4]);
+        assert_eq!(i16::from_le_bytes([tail[3], tail[4]]), 260);
+        assert_eq!(tail[5], 5);
+    }
+
+    #[test]
+    fn existing_character_login_identifies_a_character_by_id() {
+        let bytes = encode_login_existing_char("session", 4242, "hash");
+
+        assert_eq!(i16::from_le_bytes([bytes[0], bytes[1]]), 73);
+        assert_eq!(i16::from_le_bytes([bytes[2], bytes[3]]), 7);
+        assert_eq!(&bytes[4..11], b"session");
+        assert_eq!(i32::from_le_bytes([bytes[11], bytes[12], bytes[13], bytes[14]]), 4242);
+        assert_eq!(&bytes[15..18], &CLIENT_VERSION);
+        assert_eq!(i16::from_le_bytes([bytes[18], bytes[19]]), 4);
+        assert_eq!(&bytes[20..24], b"hash");
+        assert_eq!(bytes.len(), 24);
+    }
+
+    // Exact bytes for the shared cross-language fixture. The identical arrays
+    // are asserted against the server's own decoder in
+    // `apps/ao_protocol/test/client_login_layout_test.exs`. Changing an
+    // encoder here without changing that file is what a silent protocol
+    // divergence looks like, so both must be edited together.
+    const NEW_CHAR_FIXTURE: &[u8] = &[
+        74, 0, // packet id
+        3, 0, b't', b'o', b'k', // session token
+        5, 0, b'B', b'o', b't', b'_', b'1', // username
+        1, 0, 0, // version
+        4, 0, b'h', b'a', b's', b'h', // client hash
+        1, 1, 6, // race, gender, class
+        1, 0, // head
+        1, // home city
+    ];
+
+    const EXISTING_CHAR_FIXTURE: &[u8] = &[
+        73, 0, // packet id
+        7, 0, b's', b'e', b's', b's', b'i', b'o', b'n', // session token
+        0x92, 0x10, 0, 0, // char id 4242
+        1, 0, 0, // version
+        4, 0, b'h', b'a', b's', b'h', // client hash
+    ];
+
+    #[test]
+    fn login_bytes_match_the_shared_cross_language_fixture() {
+        assert_eq!(
+            encode_login_new_char("Bot_1", "tok", "hash", NewCharacter::default()),
+            NEW_CHAR_FIXTURE
+        );
+        assert_eq!(encode_login_existing_char("session", 4242, "hash"), EXISTING_CHAR_FIXTURE);
+    }
+
+    #[test]
+    fn the_two_logins_are_different_operations_not_aliases() {
         // 74 creates a character; 73 logs an existing one in. Naming the
-        // constant after the wrong one is how this was got wrong before.
+        // constant after the wrong one is how this was got wrong before, and
+        // it cost a session that "connected" without ever logging in.
         assert_eq!(client::LOGIN_NEW_CHAR, 74);
         assert_eq!(client::LOGIN_EXISTING_CHAR, 73);
-        let bytes = encode_login_new_char("a", "b", "c");
-        assert_eq!(i16::from_le_bytes([bytes[0], bytes[1]]), 74);
+
+        let new = encode_login_new_char("a", "b", "c", NewCharacter::default());
+        let existing = encode_login_existing_char("b", 1, "c");
+        assert_ne!(new[0..2], existing[0..2]);
+        assert_ne!(new, existing);
     }
 
     #[test]

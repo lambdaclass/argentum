@@ -18,6 +18,7 @@ pub mod tiles;
 pub use mappack::{decode_map, PackedMap};
 pub use movement::{WalkGate, WalkGateConfig, WalkOutcome};
 pub use protocol::{
-    decode, encode_login_new_char, encode_ping, encode_walk, Decoded, Direction, ServerMessage,
+    decode, encode_login_existing_char, encode_login_new_char, encode_ping, encode_walk, Decoded,
+    Direction, NewCharacter, ServerMessage,
 };
 pub use tiles::{is_walkable, TileFlags, TileKind};
