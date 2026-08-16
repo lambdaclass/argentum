@@ -28,7 +28,11 @@ keep synchronized with them.
 Each active task has an immutable `W-NNNN` identity. IDs are never renumbered,
 reused or made to encode priority. New urgent work receives the next unused ID
 and is inserted explicitly at the correct point in the sequence. A commit,
-review or blocker should refer to the ID, not to “task 3” or a line number.
+review or blocker should refer to the ID, not to “task 3” or a line number. A
+task ID in a commit title records work toward that task; it does not close the
+task. Closure happens only when the task contract and applicable phase gate
+pass, the active body is removed from this file and a dated `Completed Task`
+entry is added to `CHANGELOG.md` in the same change.
 
 Do not create a summary queue, phase-local queue, hidden priority list or second
 “urgent” sequence. If a task is blocked only on external or human input, record
@@ -67,6 +71,13 @@ Every task must leave:
 - updated size, frame, memory or network measurements when it can move a
   budget; and
 - current documentation with obsolete claims removed in the same change.
+
+Tests must exercise the layer that owns the claim. Pure geometry, focus-order or
+intent-mapping tests are necessary but cannot prove that the browser resized the
+canvas, Bevy applied the intended layout, a pointer activated a control, a
+resource avoided a change tick or a rendered panel stayed visible. Those claims
+need Bevy app/ECS, browser or capture evidence. Production UI types that are
+reachable only from tests are scaffolding, not an implemented interaction.
 
 Work estimated in weeks begins with a cheap falsification spike and explicit
 kill criteria. A killed experiment is useful evidence and belongs in the
@@ -209,10 +220,35 @@ icons, fonts or exact decoration.
 - **Phase:** 0
 - **Depends on:** none
 
-Build the top status bar, expanding world viewport, full-height right rail,
-upper-left world-message layer and viewport-centered numbered hotbar entirely
-in Bevy. Establish named layout regions and a fixture/demo mode without changing
-network behavior.
+The Bevy region scaffold, top bar, world region, rail root and numbered hotbar
+exist. This task remains open until they form one complete application shell in
+the rendered browser and native window, rather than only in layout helpers.
+
+Required behavior:
+
+- The WASM canvas tracks the browser content area on first load and every
+  resize. Maximizing the browser expands the canvas instead of enlarging a black
+  host page around a fixed game rectangle.
+- The native window remains resizable. In both targets, top bar, world, rail and
+  hotbar are derived from the same current window dimensions and partition the
+  usable viewport without clipping or overlap.
+- The top bar spans the full shell width; the rail is full-height below it; the
+  entire hotbar remains inside and centered on the world viewport. Any unused
+  perimeter is an explicit layout result, not an accidental black rectangle.
+- The host DOM contains only the canvas and pre-WASM/error fallback. Movement
+  guidance, status, panels and gameplay controls live in Bevy.
+- Fixture/demo mode uses the production Bevy tree and does not alter network
+  behavior.
+
+Closure evidence:
+
+- A browser integration test resizes the viewport and asserts the canvas CSS
+  size follows `window.innerWidth/innerHeight` within one pixel, with no page
+  scrollbars.
+- Bevy app tests inspect the resolved top-bar/world/rail/hotbar bounds and prove
+  they are non-negative, non-overlapping and within the window.
+- Captures at 1280×720 and 1920×1080 show the full top bar, rail and hotbar;
+  neither capture may clip the status bar, rail or bottom of the hotbar.
 
 ### Task W-0084 — Honest FPS, focus and ping status
 
@@ -233,17 +269,42 @@ frame must not cause catch-up bursts; reconnect resets the timer and pending
 sample. Tests use a fake clock to prove display cadence, focus transitions,
 probe cadence and no-burst behavior.
 
+Closure evidence must prove these exact boundaries: no second FPS rewrite before
+one foreground second; a hidden/background interval never becomes a foreground
+FPS sample; restoration starts a fresh sample; no ping before five seconds;
+exactly one ping when five seconds elapse; and a 30-second suspension produces
+at most one resumed probe, never six catch-up probes. Visible-but-unfocused
+native windows continue measuring actual rendered FPS instead of switching to a
+10 Hz event-driven loop.
+
 ### Task W-0002 — Responsive geometry and visibility policy
 
 - **State:** planned
 - **Phase:** 0
 - **Depends on:** W-0001
 
-Make the rail target 21–23% of desktop width with readable logical clamps and a
-deliberate compact/collapsible mode for small windows. Define minimum supported
-size, ultrawide behavior and whether extra space shows cosmetic perimeter,
-larger UI or more world. It must never expand server-owned visibility or
-interaction range, and no application panel may require page scrolling.
+The pure geometry policy exists. Connect it to the rendered Bevy tree and make
+each mode honest:
+
+- The desktop rail targets 21–23% of width within named minimum/maximum logical
+  clamps. The world receives the remaining usable width and the hotbar centers
+  on that world rectangle.
+- The compact transition has one documented breakpoint plus hysteresis so a
+  one-pixel resize cannot oscillate modes.
+- Compact mode visibly renders the promised vital slivers and usable navigation
+  controls. An enum saying those regions survive is not evidence if the compact
+  Bevy node is empty.
+- Minimum-size, short-window, ultrawide and cosmetic-perimeter behavior are
+  explicit. No application panel requires page scrolling and no rail region is
+  replaced by an unexplained black well.
+- Rendering more public terrain never expands the server-owned entity area of
+  interest, targetability, interaction or command range.
+
+Close with Bevy computed-layout tests for full and compact trees, including a
+query that finds at least one visible vital and one navigation control in
+compact mode. Add captures at the breakpoint minus/plus one pixel, the minimum
+supported size and ultrawide. Server/client contract tests must fail if the
+authoritative entity AoI is widened.
 
 ### Task W-0003 — Scaling, fullscreen, resize and DPI
 
@@ -252,10 +313,32 @@ interaction range, and no application panel may require page scrolling.
 - **Depends on:** W-0002
 
 Separate responsive logical UI scale, integer nearest-neighbor world scale and
-physical device-pixel scale. Cover windowed/maximized/fullscreen restoration,
-browser zoom, monitor/DPI changes, aspect-ratio extremes and orientation. These
-events cannot stretch sprites, shimmer the camera, move the player, expose new
-authoritative tiles or lose focused input.
+physical device-pixel scale, and prove the separation in Bevy rather than only
+in arithmetic helpers.
+
+Implementation constraints:
+
+- Shell rectangles and the world camera viewport share one coordinate source.
+  Do not apply global `UiScale` to absolute shell `Val::Px` bounds while leaving
+  the camera viewport unscaled. Scale child controls/text in an isolated UI
+  subtree, compensate the shell coordinates explicitly, or use another tested
+  design whose computed bounds agree.
+- A DPR-only change must not change logical camera framing or visible tile
+  count. Test DPR 1.0, 1.25, 1.5, 1.75 and 2.0; rounding DPR to an integer world
+  scale may not make the player alternately see materially more and less world.
+  Use an integer render target, symmetric crop/letterbox or another measured
+  pixel-stable solution when fractional DPR makes direct scaling impossible.
+- Browser resize, zoom, maximize, fullscreen enter/exit and monitor/DPI changes
+  update the backing store and Bevy window exactly once per event without CSS
+  resampling.
+- Restoring windowed/fullscreen state preserves focused control, composing text,
+  player position and camera center. It cannot stretch sprites, shimmer while
+  moving or expand authoritative entity visibility.
+
+Close with a Bevy layout integration test that compares `ComputedNode` physical
+bounds against the camera viewport at UI scale 1.0 and greater than 1.0, plus
+browser captures for the DPR matrix. Pure `ScaleDomains` tests alone do not
+close this task.
 
 ### Task W-0004 — Typed UI models, intents and fixtures
 
@@ -270,6 +353,20 @@ disabled, rejected, disconnected, dead/ghost and malformed-data fixtures.
 Server feedback crosses the boundary as stable semantic keys and parameters,
 not presentation-ready Spanish where the protocol can avoid it.
 
+Snapshot updates use semantic, allocation-bounded equality or versioning; they
+must not compare whole snapshots by formatting `Debug`. An identical snapshot
+does not mark `UiState` changed or rebuild the rail, including through an actual
+`ResMut<UiState>` call. Normalize or compare malformed floating-point values so
+NaN data settles deterministically. Add a Bevy app test with a rebuild counter:
+the first snapshot rebuilds once, twenty identical writes rebuild zero times,
+and one changed field rebuilds exactly once.
+
+Intent filtering and consumers use explicit system ordering. A dead-player
+intent is rejected before any session consumer can observe it; allowed chat
+still crosses the boundary. Closure requires an app-level producer/filter/
+consumer test rather than inspection of the message buffer after an unordered
+schedule.
+
 ### Task W-0005 — Design tokens and Bevy primitives
 
 - **State:** planned
@@ -281,6 +378,25 @@ disabled/locked, rarity/status and pixel-scaling tokens. Build shared Bevy
 buttons, tabs, slots, bars, lists, text/password fields, tooltips, menus,
 dialogs, notifications, drag ghosts, progress/cooldown and hotkey controls with
 one focus/event/state model on WASM and native.
+
+Register a `ControlsPlugin` that connects real Bevy pointer/interaction and
+keyboard input to the shared model:
+
+- hover, press, release, disabled and focused states update rendered controls;
+- Tab and Shift+Tab traverse enabled controls deterministically; Enter/Space
+  activate the focused control exactly once; removed or hidden controls cannot
+  retain focus;
+- text/password fields accept editing input, caret motion and masking without
+  leaking gameplay hotkeys; IME composition crosses the platform boundary
+  defined later without creating a second DOM field;
+- buttons, tabs, slots and dialog actions emit one shared typed activation
+  message rather than panel-specific polling; and
+- WASM and native run the same focus/state/activation systems.
+
+Add Bevy app tests that inject pointer and keyboard input and observe the
+rendered state plus emitted activation. The production control path must be
+reachable outside `#[cfg(test)]`; unused `Control`, `FocusOwner`, builders or
+text-field warnings mean the interaction model is not integrated.
 
 ### Task W-0006 — Character, vitals, inventory and equipment prototype
 
@@ -294,6 +410,24 @@ visible locked slots. Exercise selection, equip/use/drop intent, splitting,
 drag cancellation, insufficient state and authoritative rejection/rollback
 presentation without claiming mock actions are live gameplay.
 
+Connect rendered slots to the W-0005 interaction system. Single click selects,
+double click emits exactly one use/equip intent, Shift-click opens or applies an
+explicit split/drop quantity rule, and drag/drop emits a move only for a valid
+distinct destination. Escape, pointer leaving the window, focus loss, panel
+close and grid rebuild all cancel a drag and remove its ghost.
+
+Do not infer item behavior from stack quantity. Item action/category metadata
+in the view model decides whether activation equips, uses or opens an item;
+tests cover a single-use consumable and a non-stackable piece of equipment.
+Render item GRH icons and quantities, visible locked slots, selection and
+pending/rejected state in the actual rail. The fixture snapshot changes only
+after simulated authority accepts an intent; rejection leaves the authoritative
+item in place and shows semantic feedback.
+
+Close with Bevy interaction tests that click and drag spawned slot entities and
+assert `IntentMessage` output and cleanup. Testing an intent-mapping helper or
+`DragState` alone does not prove that the interface is operable.
+
 ### Task W-0007 — Spellbook and hotbar prototype
 
 - **State:** planned
@@ -304,6 +438,24 @@ Implement spells, requirements, target modes, cooldowns and persistent numbered
 hotbar assignment/use with fixtures. Cover insufficient mana/stamina/skill,
 equipment masks, land/water, target-level, area and dead-target restrictions as
 typed presentation states whose final authority remains server-side.
+
+Complete the rendered flow:
+
+- inventory/spell tabs switch visible content with keyboard and pointer input;
+- clicking a ready self/area spell emits one cast intent; an entity/ground spell
+  arms visibly, consumes the next valid world target and disarms on cast,
+  Escape, death, disconnect or authoritative rejection;
+- spell rows and hotbar slots display GRH icon, cost, disabled reason, cooldown
+  overlay and focus/selection state; semantic keys are localized by the UI
+  boundary rather than shown raw to players;
+- number keys and pointer clicks share one hotbar activation path, are suppressed
+  while text owns focus and never fire a cooling or empty slot; and
+- assignment, replacement, removal and page controls are usable and persist in
+  the fixture adapter without pretending the server accepted them.
+
+Close with Bevy app tests that interact with spawned spell/hotbar entities and
+observe intents, armed state and rendered blockers. Pure spell-activation and
+hotbar-intent tests do not prove that the interface is operable.
 
 ### Task W-0008 — Chat, target, safety and feedback prototype
 
@@ -373,6 +525,14 @@ Run the Phase 0 technical checklist, archive capture artifacts and correct every
 failed contract. This closes the engineering gate and unlocks Phase 1; it does
 not fabricate the human usability evidence owned by W-0014.
 
+Run formatting, clippy, WASM/native checks and tests from the pinned Nix
+toolchain. Phase 0 UI code has no unused imports; production interaction types
+must not be dead code. Record client/core test counts, optimized raw+gzip size,
+browser engine/version, GPU/backend and the full capture matrix. Before moving
+any body to the changelog, verify its closure evidence exercises the claimed
+layer and add the dated commit plus evidence to `CHANGELOG.md`; a green
+structural roadmap count is not task-completion evidence.
+
 ### Task W-0014 — Veteran and newcomer usability validation
 
 - **State:** planned
@@ -393,9 +553,16 @@ close through `W-0014`; scheduling people does not idle ready technical work.
 - [ ] At 720p, 1080p, 1440p, ultrawide and small-laptop sizes, the world expands,
       the rail remains usable, compact mode is deliberate and the hotbar stays
       centered on the world viewport.
+- [ ] The browser canvas follows the content viewport on load, resize and
+      maximize within one pixel, creates no page scrollbar and leaves no
+      accidental host-page perimeter; the host contains no persistent gameplay
+      hint or application panel.
 - [ ] Windowed, maximized and fullscreen captures stay pixel-aligned across the
-      supported DPR/OS-scale matrix; world, UI and physical scale remain
-      separate.
+      DPR 1.0/1.25/1.5/1.75/2.0 and supported OS-scale matrix; world, UI and
+      physical scale remain separate.
+- [ ] At UI scale 1.0 and greater than 1.0, Bevy `ComputedNode` bounds for the
+      top bar, world and rail agree with the world-camera viewport. A DPR-only
+      change preserves logical camera framing and visible tile count.
 - [ ] Resize, zoom, DPI and fullscreen do not move the player, alter visibility,
       stretch sprites, shimmer the camera or lose composing text.
 - [ ] FPS refreshes at most once per second; background throttling is labelled
@@ -405,12 +572,27 @@ close through `W-0014`; scheduling people does not idle ready technical work.
 - [ ] Product screens and HUD workflows are Bevy-owned and cover populated,
       empty, loading, disabled, rejected, disconnected, dead/ghost and malformed
       fixture states.
+- [ ] Full and compact rail trees contain visible, usable content; compact mode
+      includes at least one vital indicator and one navigation control, and no
+      rail mode degrades to an unexplained empty black rectangle.
+- [ ] Pointer and keyboard input traverse, focus and activate real spawned Bevy
+      controls. Inventory/spell/hotbar interactions emit typed intents through
+      the shared control path; no production control model exists only in tests.
+- [ ] Twenty identical snapshot writes produce no Bevy change tick or UI
+      rebuild; one semantic change produces exactly one rebuild; malformed NaN
+      data settles without whole-snapshot debug formatting.
 - [ ] Focus, modal/chat ownership, drag cancellation, tooltips and IME never
       leak unintended world commands.
 - [ ] Component gallery and production UI share models, intents, fixtures,
       tokens and components; the deterministic golden matrix passes.
 - [ ] Source/browser checks find no DOM/CSS application panel, form, navigation
       state or alternate HUD.
+- [ ] Pinned-toolchain format, clippy, WASM/native and test gates pass with no
+      unused imports and no unexplained dead production UI path. Recorded
+      evidence includes test counts, browser/GPU details and raw+gzip size.
+- [ ] Every closed Phase 0 task has exactly one dated `Completed Task W-NNNN`
+      changelog entry with commit and evidence, and no closed body remains in
+      the active execution sequence.
 - [ ] Veterans and newcomers complete the recorded usability protocol; findings,
       revisions and deliberately rejected suggestions are documented.
 
