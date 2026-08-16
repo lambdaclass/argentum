@@ -260,6 +260,7 @@ defmodule AoTcpGateway.SessionRouteManifest do
     help: %{group: :info, dispatch: {@session, :handle_command}, vb6_ref: "Protocol_GmCommands.bas:56:HandleHelp", parity_status: :simplified},
     request_motd: %{group: :info, dispatch: {@session, :handle_command}, vb6_ref: "Protocol_GmCommands.bas:76:HandleRequestMOTD", parity_status: :exact},
     uptime: %{group: :info, dispatch: {@session, :handle_command}, vb6_ref: "Protocol_GmCommands.bas:86:HandleUpTime", parity_status: :exact},
+    ping: %{group: :info, dispatch: {@session, :handle_command}, vb6_ref: "none:extension:Ping", parity_status: :intentional_divergence},
 
     # ── Support ────────────────────────────────────────────────────────
     question_gm: %{group: :support, dispatch: {@session, :handle_command}, vb6_ref: "Protocol_GmCommands.bas:3342:HandleQuestionGM", parity_status: :simplified},

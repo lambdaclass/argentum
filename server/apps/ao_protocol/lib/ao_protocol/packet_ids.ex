@@ -100,6 +100,21 @@ defmodule AoProtocol.PacketIds do
     def quest_details_request, do: 261
     def quest_abandon, do: 262
 
+    # Extension range: 900-999, reserved for packets with no VB6 ancestor.
+    #
+    # There is no "safely above VB6" region — inherited client ids already
+    # include chat_color (421) and quest_accept (500) — so extensions need a
+    # declared band rather than a large number. `packet_ids_test.exs` asserts
+    # the band is respected and that no id is used twice.
+    #
+    # ping (900) — transport-independent, not WS-only: the native client needs
+    # latency measurement too. Carries an opaque 8-byte token the server echoes
+    # verbatim, so neither side needs to agree on a clock.
+    def ping, do: 900
+
+    @doc "Ids reserved for non-VB6 extensions."
+    def extension_range, do: 900..999
+
     # GM chat color (VB6: eChatColor = 421, PacketId.bas:438, /CHATCOLOR)
     def chat_color, do: 421
 
@@ -286,5 +301,16 @@ defmodule AoProtocol.PacketIds do
     # world_pack_signature (203) — WS-only extension carrying the expected
     # browser world-pack version/hash for this login/bootstrap.
     def world_pack_signature, do: 203
+
+    # pong (204) — extension, not in VB6, alongside world_pack_signature (203).
+    # Echoes the client's ping token unchanged; the server never interprets it.
+    #
+    # Server ids are a separate space from client ids and the inherited range
+    # tops out well below 200, so extensions sit at 200+ here rather than in the
+    # client's 900+ band.
+    def pong, do: 204
+
+    @doc "Ids reserved for non-VB6 extensions."
+    def extension_range, do: 200..299
   end
 end

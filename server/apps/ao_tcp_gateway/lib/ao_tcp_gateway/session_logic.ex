@@ -643,6 +643,32 @@ defmodule AoTcpGateway.SessionLogic do
     {state, []}
   end
 
+  @doc """
+  Latency probe. Echoes the client's token unchanged.
+
+  The token is opaque: only the client interprets it, so neither side needs to
+  agree on a clock and the measurement cannot drift with clock skew.
+
+  **What this measures, precisely.** The reply travels the ordinary command
+  path — `handle_command/2` returns packets and the gateway encodes them into
+  reply frames — so the number covers network, gateway decode and session
+  scheduling. It does **not** cover egress: packets pushed to a player from a
+  map, such as the `pos_update` confirming a step, go through `Effects.send`
+  and can queue or shed under backpressure.
+
+  That is the right choice for a latency display, which should answer "is the
+  network or server slow", not "am I being shed". What a step actually costs
+  is a separate question, answered by walk -> pos_update timing the way
+  `scripts/bench_walk_latency.exs` does it. Do not conflate the two.
+
+  Answered in the session rather than the map server for the same reason: map
+  scheduling is not part of what this is asking about. No `character_id` guard,
+  so a client can show latency before login completes.
+  """
+  def handle_command(state, {:ping, %{token: token}}) do
+    {state, [{:pong, %{token: token}}]}
+  end
+
   def handle_command(state, {:quest_list_request, _}) when state.character_id != nil do
     Arena.Map.MapServer.quest_list_request(state.map_id, state.character_id)
     {state, []}

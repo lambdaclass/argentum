@@ -10,13 +10,21 @@
 
 /// Packets this client sends.
 pub mod client {
-    pub const LOGIN_EXISTING_CHAR: i16 = 74;
+    /// Creates a character on login. This is what BotArmy uses, which is why it
+    /// was mistaken for existing-character login while porting.
+    pub const LOGIN_NEW_CHAR: i16 = 74;
+    /// Logs in an already-created character. This is the one a real client wants.
+    pub const LOGIN_EXISTING_CHAR: i16 = 73;
     pub const WALK: i16 = 78;
+    /// Extension (900-999 band): latency probe, no VB6 ancestor.
+    pub const PING: i16 = 900;
 }
 
 /// Packets this client understands. Everything else is skipped.
 pub mod server {
     pub const POS_UPDATE: i16 = 31;
+    /// Extension (200-299 band): echo of a ping token.
+    pub const PONG: i16 = 204;
 }
 
 fn put_i16(out: &mut Vec<u8>, value: i16) {
@@ -33,9 +41,9 @@ fn put_string(out: &mut Vec<u8>, value: &str) {
 /// Field order mirrors `BotArmy.Bot.build_login/1`: password, name, three
 /// version bytes, the client hash, then five trailing fields the server reads
 /// but does not act on for an existing character.
-pub fn encode_login(name: &str, password: &str, client_hash: &str) -> Vec<u8> {
+pub fn encode_login_new_char(name: &str, password: &str, client_hash: &str) -> Vec<u8> {
     let mut out = Vec::with_capacity(64);
-    put_i16(&mut out, client::LOGIN_EXISTING_CHAR);
+    put_i16(&mut out, client::LOGIN_NEW_CHAR);
     put_string(&mut out, password);
     put_string(&mut out, name);
     out.extend_from_slice(&[1, 0, 0]);
@@ -43,6 +51,19 @@ pub fn encode_login(name: &str, password: &str, client_hash: &str) -> Vec<u8> {
     out.extend_from_slice(&[1, 1, 6]);
     put_i16(&mut out, 1);
     out.push(1);
+    out
+}
+
+/// Latency probe.
+///
+/// The token is opaque to the server, which echoes it unchanged. Keeping the
+/// meaning entirely client-side is what makes the measurement immune to clock
+/// skew: no shared time base is ever needed. Exactly 8 bytes, matching the
+/// server decoder.
+pub fn encode_ping(token: [u8; 8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(10);
+    put_i16(&mut out, client::PING);
+    out.extend_from_slice(&token);
     out
 }
 
@@ -72,6 +93,8 @@ pub fn encode_walk(direction: Direction, count: i32) -> Vec<u8> {
 pub enum ServerMessage {
     /// Authoritative position for our own character.
     PosUpdate { x: u8, y: u8 },
+    /// Echo of a ping token, for round-trip timing.
+    Pong { token: [u8; 8] },
 }
 
 /// Pull the next message from `buffer`.
@@ -97,6 +120,14 @@ pub fn decode(buffer: &[u8]) -> Decoded {
     let id = i16::from_le_bytes([buffer[0], buffer[1]]);
 
     match id {
+        server::PONG => {
+            if buffer.len() < 10 {
+                return Decoded::Incomplete;
+            }
+            let mut token = [0u8; 8];
+            token.copy_from_slice(&buffer[2..10]);
+            Decoded::Message(ServerMessage::Pong { token }, 10)
+        }
         server::POS_UPDATE => {
             if buffer.len() < 4 {
                 return Decoded::Incomplete;
@@ -107,13 +138,24 @@ pub fn decode(buffer: &[u8]) -> Decoded {
     }
 }
 
+impl core::fmt::Debug for Decoded {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Decoded::Message(m, used) => write!(f, "Message({m:?}, {used})"),
+            Decoded::Ignored(used) => write!(f, "Ignored({used})"),
+            Decoded::Incomplete => write!(f, "Incomplete"),
+            Decoded::Unknown(id) => write!(f, "Unknown({id})"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn login_matches_the_reference_layout() {
-        let bytes = encode_login("Bot_1", "pass", "hash");
+        let bytes = encode_login_new_char("Bot_1", "pass", "hash");
 
         // id
         assert_eq!(i16::from_le_bytes([bytes[0], bytes[1]]), 74);
@@ -132,6 +174,55 @@ mod tests {
         assert_eq!(i16::from_le_bytes([bytes[27], bytes[28]]), 1);
         assert_eq!(bytes[29], 1);
         assert_eq!(bytes.len(), 30);
+    }
+
+    #[test]
+    fn login_uses_the_new_character_packet_and_says_so() {
+        // 74 creates a character; 73 logs an existing one in. Naming the
+        // constant after the wrong one is how this was got wrong before.
+        assert_eq!(client::LOGIN_NEW_CHAR, 74);
+        assert_eq!(client::LOGIN_EXISTING_CHAR, 73);
+        let bytes = encode_login_new_char("a", "b", "c");
+        assert_eq!(i16::from_le_bytes([bytes[0], bytes[1]]), 74);
+    }
+
+    #[test]
+    fn ping_carries_an_opaque_eight_byte_token() {
+        let token = [1u8, 2, 3, 4, 5, 6, 7, 8];
+        let bytes = encode_ping(token);
+        assert_eq!(i16::from_le_bytes([bytes[0], bytes[1]]), 900);
+        assert_eq!(&bytes[2..], &token);
+        assert_eq!(bytes.len(), 10);
+    }
+
+    #[test]
+    fn decodes_a_pong_and_round_trips_the_token() {
+        let token = [9u8, 8, 7, 6, 5, 4, 3, 2];
+        let mut bytes = vec![204u8, 0];
+        bytes.extend_from_slice(&token);
+
+        match decode(&bytes) {
+            Decoded::Message(ServerMessage::Pong { token: got }, used) => {
+                assert_eq!(got, token);
+                assert_eq!(used, 10);
+            }
+            other => panic!("expected a pong, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_truncated_pong_asks_for_more_data() {
+        for width in 2..10 {
+            let bytes: Vec<u8> = std::iter::once(204u8)
+                .chain(std::iter::once(0u8))
+                .chain(std::iter::repeat(0u8))
+                .take(width)
+                .collect();
+            assert!(
+                matches!(decode(&bytes), Decoded::Incomplete),
+                "width {width} should be incomplete"
+            );
+        }
     }
 
     #[test]
@@ -165,16 +256,5 @@ mod tests {
         // Packet lengths are not on the wire, so a client cannot skip an
         // unknown packet without losing sync with everything after it.
         assert!(matches!(decode(&[99, 0, 1, 2, 3]), Decoded::Unknown(99)));
-    }
-}
-
-impl core::fmt::Debug for Decoded {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Decoded::Message(m, used) => write!(f, "Message({m:?}, {used})"),
-            Decoded::Ignored(used) => write!(f, "Ignored({used})"),
-            Decoded::Incomplete => write!(f, "Incomplete"),
-            Decoded::Unknown(id) => write!(f, "Unknown({id})"),
-        }
     }
 }

@@ -18,6 +18,19 @@ pub enum ConnectionState {
     Failed(String),
 }
 
+/// A ping awaiting its echo.
+struct Outstanding {
+    token: [u8; 8],
+    sent_at_ms: f64,
+}
+
+/// How long to wait before treating a ping as lost.
+const PING_TIMEOUT_MS: f64 = 10_000.0;
+
+/// Samples kept for the median. Small enough to react to a real change,
+/// large enough that one unlucky packet does not move the number.
+const PING_SAMPLES: usize = 5;
+
 #[derive(Default)]
 struct SessionInner {
     state: Option<ConnectionState>,
@@ -28,6 +41,12 @@ struct SessionInner {
     socket: Option<web_sys::WebSocket>,
     /// Anti-cheat requires a strictly increasing counter per command.
     walk_count: i32,
+    /// At most one ping is ever in flight: pings must not accumulate if the
+    /// server stops answering, or a stalled link would queue an unbounded
+    /// backlog and then report a burst of meaningless samples.
+    outstanding_ping: Option<Outstanding>,
+    ping_samples: Vec<u32>,
+    next_ping_token: u64,
 }
 
 #[derive(Resource, Clone)]
@@ -43,11 +62,7 @@ impl Default for Session {
 
 impl Session {
     pub fn state(&self) -> ConnectionState {
-        self.inner
-            .lock()
-            .ok()
-            .and_then(|s| s.state.clone())
-            .unwrap_or(ConnectionState::Offline)
+        self.inner.lock().ok().and_then(|s| s.state.clone()).unwrap_or(ConnectionState::Offline)
     }
 
     fn set_state(&self, state: ConnectionState) {
@@ -56,12 +71,24 @@ impl Session {
         }
     }
 
+    /// Note that the server has placed us in the world.
+    ///
+    /// The AO20 handshake has no "login accepted" packet: the server signals
+    /// success by simply starting to send world state. The first position
+    /// update is therefore the only evidence login worked, and it is what ends
+    /// `Authenticating`. Only that transition is allowed here — a later
+    /// position update must not resurrect a connection that has since failed.
+    pub fn mark_playing(&self) {
+        if let Ok(mut s) = self.inner.lock() {
+            if s.state == Some(ConnectionState::Authenticating) {
+                s.state = Some(ConnectionState::Playing);
+            }
+        }
+    }
+
     /// Drain everything decoded since the last call.
     pub fn drain(&self) -> Vec<ServerMessage> {
-        self.inner
-            .lock()
-            .map(|mut s| std::mem::take(&mut s.inbox))
-            .unwrap_or_default()
+        self.inner.lock().map(|mut s| std::mem::take(&mut s.inbox)).unwrap_or_default()
     }
 
     /// Feed received bytes and decode whole packets out of them.
@@ -73,8 +100,9 @@ impl Session {
     /// Only the wasm socket callbacks call this today; native transport is not
     /// implemented yet.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    fn ingest(&self, bytes: &[u8]) {
+    fn ingest(&self, bytes: &[u8], now_ms: f64) {
         let mut failure = None;
+        let mut pongs = Vec::new();
 
         if let Ok(mut s) = self.inner.lock() {
             s.buffer.extend_from_slice(bytes);
@@ -83,7 +111,12 @@ impl Session {
                 match protocol::decode(&s.buffer) {
                     Decoded::Message(message, used) => {
                         s.buffer.drain(..used);
-                        s.inbox.push(message);
+                        match message {
+                            // Latency is session bookkeeping, not gameplay, so
+                            // it never reaches the inbox.
+                            ServerMessage::Pong { token } => pongs.push(token),
+                            other => s.inbox.push(other),
+                        }
                     }
                     Decoded::Ignored(used) => {
                         s.buffer.drain(..used);
@@ -100,8 +133,73 @@ impl Session {
             }
         }
 
+        for token in pongs {
+            self.record_pong(token, now_ms);
+        }
+
         if let Some(message) = failure {
             self.set_state(ConnectionState::Failed(message));
+        }
+    }
+
+    /// Median of recent round trips, or None until a ping is answered.
+    pub fn ping_ms(&self) -> Option<u32> {
+        let mut samples = self.inner.lock().ok()?.ping_samples.clone();
+        if samples.is_empty() {
+            return None;
+        }
+        samples.sort_unstable();
+        Some(samples[samples.len() / 2])
+    }
+
+    /// Build the next ping, or None if one is already in flight.
+    ///
+    /// Returns the bytes to send rather than sending them, so the caller can
+    /// decide whether the connection is in a state worth probing.
+    pub fn next_ping(&self, now_ms: f64) -> Option<Vec<u8>> {
+        let mut inner = self.inner.lock().ok()?;
+
+        if let Some(pending) = &inner.outstanding_ping {
+            if now_ms - pending.sent_at_ms < PING_TIMEOUT_MS {
+                return None;
+            }
+            // Timed out. Drop it rather than counting it as a sample: a lost
+            // ping says nothing about latency, only about loss.
+            inner.outstanding_ping = None;
+        }
+
+        inner.next_ping_token = inner.next_ping_token.wrapping_add(1);
+        let token = inner.next_ping_token.to_le_bytes();
+        inner.outstanding_ping = Some(Outstanding { token, sent_at_ms: now_ms });
+        Some(ao_core::encode_ping(token))
+    }
+
+    /// Record a pong, ignoring anything we did not ask for.
+    fn record_pong(&self, token: [u8; 8], now_ms: f64) {
+        if let Ok(mut inner) = self.inner.lock() {
+            // A replayed or stale token must not produce a sample; only the
+            // ping we are actually waiting on counts.
+            let matched =
+                inner.outstanding_ping.as_ref().is_some_and(|pending| pending.token == token);
+            if !matched {
+                return;
+            }
+
+            let sent_at = inner.outstanding_ping.take().map(|p| p.sent_at_ms).unwrap_or(now_ms);
+            let rtt = (now_ms - sent_at).max(0.0).round() as u32;
+            inner.ping_samples.push(rtt);
+            if inner.ping_samples.len() > PING_SAMPLES {
+                inner.ping_samples.remove(0);
+            }
+        }
+    }
+
+    /// Forget latency history. Called on reconnect: samples from a previous
+    /// connection describe a link that no longer exists.
+    pub fn reset_latency(&self) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.outstanding_ping = None;
+            inner.ping_samples.clear();
         }
     }
 
@@ -127,6 +225,11 @@ mod wasm {
         /// Open the socket and log in once it is ready.
         pub fn connect(&self, url: &str, name: String, password: String, client_hash: String) {
             self.set_state(ConnectionState::Connecting);
+            // Latency samples describe a link that no longer exists once the
+            // socket is replaced, and a ping left in flight from the previous
+            // connection would otherwise block the first probe on the new one
+            // until it timed out.
+            self.reset_latency();
 
             let socket = match web_sys::WebSocket::new(url) {
                 Ok(socket) => socket,
@@ -142,7 +245,7 @@ mod wasm {
                 let session = self.clone();
                 let socket = socket.clone();
                 Closure::<dyn FnMut()>::new(move || {
-                    let login = protocol::encode_login(&name, &password, &client_hash);
+                    let login = protocol::encode_login_new_char(&name, &password, &client_hash);
                     if let Err(e) = socket.send_with_u8_array(&login) {
                         session.set_state(ConnectionState::Failed(format!("login send: {e:?}")));
                         return;
@@ -160,7 +263,7 @@ mod wasm {
                     move |event: web_sys::MessageEvent| {
                         if let Ok(buffer) = event.data().dyn_into::<js_sys::ArrayBuffer>() {
                             let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
-                            session.ingest(&bytes);
+                            session.ingest(&bytes, js_sys::Date::now());
                         }
                     },
                 )
@@ -210,10 +313,152 @@ mod wasm {
 #[cfg(not(target_arch = "wasm32"))]
 impl Session {
     pub fn connect(&self, _url: &str, _name: String, _password: String, _hash: String) {
-        self.set_state(ConnectionState::Failed(
-            "native networking not implemented yet".into(),
-        ));
+        self.set_state(ConnectionState::Failed("native networking not implemented yet".into()));
     }
 
     pub fn send(&self, _bytes: &[u8]) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Drive a full ping/pong round trip and return the token that was sent.
+    fn ping_token(session: &Session, at_ms: f64) -> [u8; 8] {
+        let bytes = session.next_ping(at_ms).expect("a ping should be issued");
+        let mut token = [0u8; 8];
+        token.copy_from_slice(&bytes[2..10]);
+        token
+    }
+
+    #[test]
+    fn playing_is_only_entered_from_authenticating() {
+        // There is no login-accepted packet: the first position update is the
+        // acknowledgement. But a position update arriving after the socket
+        // died must not resurrect the connection.
+        let session = Session::default();
+
+        session.mark_playing();
+        assert_eq!(session.state(), ConnectionState::Offline);
+
+        session.set_state(ConnectionState::Authenticating);
+        session.mark_playing();
+        assert_eq!(session.state(), ConnectionState::Playing);
+
+        session.set_state(ConnectionState::Failed("socket closed".into()));
+        session.mark_playing();
+        assert_eq!(session.state(), ConnectionState::Failed("socket closed".into()));
+    }
+
+    #[test]
+    fn only_one_ping_is_in_flight_at_a_time() {
+        let session = Session::default();
+        ping_token(&session, 0.0);
+        // A second probe before the first is answered would let a stalled link
+        // queue an unbounded backlog.
+        assert!(session.next_ping(1_000.0).is_none());
+    }
+
+    #[test]
+    fn a_timed_out_ping_is_replaced_and_not_counted() {
+        let session = Session::default();
+        let first = ping_token(&session, 0.0);
+
+        let second = ping_token(&session, PING_TIMEOUT_MS + 1.0);
+        assert_ne!(first, second, "a fresh token is needed to tell the replies apart");
+        // The lost ping says nothing about latency, so it must leave no sample.
+        assert_eq!(session.ping_ms(), None);
+    }
+
+    #[test]
+    fn a_late_reply_to_a_timed_out_ping_is_discarded() {
+        let session = Session::default();
+        let stale = ping_token(&session, 0.0);
+        ping_token(&session, PING_TIMEOUT_MS + 1.0);
+
+        // Timing this against the new ping's send time would report a wildly
+        // wrong RTT for a reply that belongs to a probe we already abandoned.
+        session.record_pong(stale, PING_TIMEOUT_MS + 2.0);
+        assert_eq!(session.ping_ms(), None);
+    }
+
+    #[test]
+    fn an_unsolicited_pong_produces_no_sample() {
+        let session = Session::default();
+        session.record_pong([9, 9, 9, 9, 9, 9, 9, 9], 50.0);
+        assert_eq!(session.ping_ms(), None);
+    }
+
+    #[test]
+    fn a_matched_pong_records_the_round_trip() {
+        let session = Session::default();
+        let token = ping_token(&session, 100.0);
+        session.record_pong(token, 142.0);
+        assert_eq!(session.ping_ms(), Some(42));
+    }
+
+    #[test]
+    fn the_reported_latency_is_a_median_over_a_bounded_window() {
+        let session = Session::default();
+        // One 900ms outlier among fast samples must not move the number.
+        for (i, rtt) in [10.0, 12.0, 900.0, 11.0, 13.0].iter().enumerate() {
+            let at = i as f64 * 10_000.0;
+            let token = ping_token(&session, at);
+            session.record_pong(token, at + rtt);
+        }
+        assert_eq!(session.ping_ms(), Some(12));
+
+        // The window slides, so old samples stop counting.
+        for i in 5..5 + PING_SAMPLES {
+            let at = i as f64 * 10_000.0;
+            let token = ping_token(&session, at);
+            session.record_pong(token, at + 100.0);
+        }
+        assert_eq!(session.ping_ms(), Some(100));
+    }
+
+    #[test]
+    fn reconnecting_forgets_the_previous_links_latency() {
+        let session = Session::default();
+        let token = ping_token(&session, 0.0);
+        session.record_pong(token, 30.0);
+        assert_eq!(session.ping_ms(), Some(30));
+
+        session.reset_latency();
+        assert_eq!(session.ping_ms(), None);
+        // The in-flight slot is cleared too, so the next probe is not blocked
+        // waiting on a reply that can never arrive.
+        assert!(session.next_ping(1.0).is_some());
+    }
+
+    #[test]
+    fn pongs_are_bookkeeping_and_never_reach_gameplay() {
+        let session = Session::default();
+        let token = ping_token(&session, 0.0);
+
+        let mut bytes = vec![204u8, 0];
+        bytes.extend_from_slice(&token);
+        bytes.extend_from_slice(&[31u8, 0, 50, 60]);
+        session.ingest(&bytes, 25.0);
+
+        assert_eq!(session.drain(), vec![ServerMessage::PosUpdate { x: 50, y: 60 }]);
+        assert_eq!(session.ping_ms(), Some(25));
+    }
+
+    #[test]
+    fn an_unknown_packet_id_fails_the_connection_rather_than_desynchronising() {
+        let session = Session::default();
+        session.ingest(&[99u8, 0, 1, 2], 0.0);
+
+        assert!(matches!(session.state(), ConnectionState::Failed(_)));
+        assert!(session.drain().is_empty());
+    }
+
+    #[test]
+    fn walk_counters_strictly_increase() {
+        // The server's anti-cheat disconnects on a repeated or lower counter.
+        let session = Session::default();
+        let counts: Vec<i32> = (0..5).map(|_| session.next_walk_count()).collect();
+        assert_eq!(counts, vec![1, 2, 3, 4, 5]);
+    }
 }

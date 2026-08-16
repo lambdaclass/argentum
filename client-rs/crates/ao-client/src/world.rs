@@ -2,9 +2,9 @@
 //! the shared `ao-core` walk gate.
 
 use crate::graphics::{make_image, Graphics, Heading, SheetTextures};
+use crate::net::{start_graphics_load, LoadState, MapLoader};
 use crate::net::{DEFAULT_BODY, DEFAULT_HEAD, SERVER_ORIGIN};
 use crate::session::{ConnectionState, Session};
-use crate::net::{start_graphics_load, LoadState, MapLoader};
 use ao_core::{is_walkable, TileFlags, WalkGate, WalkGateConfig, WalkOutcome};
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
@@ -85,11 +85,7 @@ impl Blockmap {
 
     /// Build from a decoded server map. Pack coordinates are 1-based.
     pub fn from_packed(map: &ao_core::PackedMap) -> Self {
-        Self {
-            width: map.width as i32,
-            height: map.height as i32,
-            values: map.tiles.clone(),
-        }
+        Self { width: map.width as i32, height: map.height as i32, values: map.tiles.clone() }
     }
 
     /// Tile value at a **1-based** coordinate, as the game and the map pack
@@ -98,10 +94,7 @@ impl Blockmap {
         if x < 1 || y < 1 || x > self.width || y > self.height {
             return 1;
         }
-        self.values
-            .get(((y - 1) * self.width + (x - 1)) as usize)
-            .copied()
-            .unwrap_or(1)
+        self.values.get(((y - 1) * self.width + (x - 1)) as usize).copied().unwrap_or(1)
     }
 }
 
@@ -263,15 +256,11 @@ fn handle_input(
     player.y = ny;
     // The painted window is relative to the player, so moving exposes new tiles.
     scene.0 = true;
-
 }
 
 /// World-space position of a 1-based tile coordinate.
 fn tile_to_world(x: i32, y: i32) -> Vec2 {
-    Vec2::new(
-        (x - 1) as f32 * TILE_SIZE,
-        -((y - 1) as f32) * TILE_SIZE,
-    )
+    Vec2::new((x - 1) as f32 * TILE_SIZE, -((y - 1) as f32) * TILE_SIZE)
 }
 
 /// Follow the character's *drawn* position, not its logical tile.
@@ -297,7 +286,6 @@ fn follow_camera(
         transform.translation.y = position.y;
     }
 }
-
 
 /// Tracks whether the current load state has been logged, so polling does not
 /// spam the console every frame.
@@ -476,7 +464,7 @@ fn apply_loaded_map(
             }
             wanted.sort_unstable();
             wanted.dedup();
-                    start_graphics_load(graphics.clone(), SERVER_ORIGIN.to_string(), wanted);
+            start_graphics_load(graphics.clone(), SERVER_ORIGIN.to_string(), wanted);
 
             loaded.0 = Some(map);
         }
@@ -489,7 +477,6 @@ fn apply_loaded_map(
         LoadState::Fetching(_) | LoadState::Idle => {}
     }
 }
-
 
 /// Spawn the tiles around the player. Only the visible window is created; a
 /// full 100x100 map would be 10,000 entities for no visual gain.
@@ -517,7 +504,6 @@ fn spawn_tile_window(commands: &mut Commands, player: &LocalPlayer, blockmap: &B
         }
     }
 }
-
 
 /// Move decoded sheets onto the GPU as they arrive.
 fn upload_sheets(
@@ -607,10 +593,7 @@ fn paint_scene(
             commands.spawn((
                 Sprite {
                     image: image.clone(),
-                    texture_atlas: Some(TextureAtlas {
-                        layout: layout_handle,
-                        index: atlas_index,
-                    }),
+                    texture_atlas: Some(TextureAtlas { layout: layout_handle, index: atlas_index }),
                     custom_size: Some(size),
                     ..default()
                 },
@@ -642,7 +625,6 @@ fn paint_scene(
 
     let _ = painted;
 }
-
 
 /// Replace the placeholder box with the real body and head artwork.
 ///
@@ -692,10 +674,7 @@ fn paint_character(
         commands.entity(entity).despawn();
     }
 
-    let base = Vec2::new(
-        (player.x - 1) as f32 * TILE_SIZE,
-        -((player.y - 1) as f32) * TILE_SIZE,
-    );
+    let base = Vec2::new((player.x - 1) as f32 * TILE_SIZE, -((player.y - 1) as f32) * TILE_SIZE);
 
     // Body first (with its walk cycle), then head at the body's offHead point.
     for (grh_id, offset, z, animated) in [
@@ -719,10 +698,7 @@ fn paint_character(
         // never an asset mutation mid-frame.
         let mut frame_indices = Vec::new();
         let frames = if animated {
-            index
-                .animation(grh_id)
-                .map(|a| a.frames)
-                .unwrap_or_else(|| vec![grh.clone()])
+            index.animation(grh_id).map(|a| a.frames).unwrap_or_else(|| vec![grh.clone()])
         } else {
             vec![grh.clone()]
         };
@@ -785,7 +761,6 @@ fn paint_character(
 
     done.0 = true;
 }
-
 
 /// Spawn one grh at a tile, with AO anchoring and atlas bookkeeping.
 ///
@@ -907,8 +882,16 @@ fn paint_entities(
             if let Some(body) = bodies.get(&look.body) {
                 if let Some(grh) = char_index.resolve(body.for_heading(heading)) {
                     placed |= spawn_grh(
-                        &mut commands, &sheets, &mut atlases, &mut layouts, grh, x, y, 5.0,
-                        Vec2::ZERO, WorldEntity,
+                        &mut commands,
+                        &sheets,
+                        &mut atlases,
+                        &mut layouts,
+                        grh,
+                        x,
+                        y,
+                        5.0,
+                        Vec2::ZERO,
+                        WorldEntity,
                     );
                 }
                 // head 0 means the body art already includes a head.
@@ -916,8 +899,16 @@ fn paint_entities(
                     if let Some(head) = heads.get(&look.head) {
                         if let Some(grh) = char_index.resolve(head.for_heading(heading)) {
                             spawn_grh(
-                                &mut commands, &sheets, &mut atlases, &mut layouts, grh, x, y,
-                                5.1, body.head_offset, WorldEntity,
+                                &mut commands,
+                                &sheets,
+                                &mut atlases,
+                                &mut layouts,
+                                grh,
+                                x,
+                                y,
+                                5.1,
+                                body.head_offset,
+                                WorldEntity,
                             );
                         }
                     }
@@ -940,15 +931,22 @@ fn paint_entities(
             if (x - player.x).abs() > VIEW_RADIUS_X || (y - player.y).abs() > VIEW_RADIUS_Y {
                 continue;
             }
-            let Some(grh) = objects
-                .get(&(object.obj_id as i32))
-                .and_then(|grh| index.resolve(*grh))
+            let Some(grh) =
+                objects.get(&(object.obj_id as i32)).and_then(|grh| index.resolve(*grh))
             else {
                 drawn.0.insert(key);
                 continue;
             };
             if spawn_grh(
-                &mut commands, &sheets, &mut atlases, &mut layouts, grh, x, y, 4.0, Vec2::ZERO,
+                &mut commands,
+                &sheets,
+                &mut atlases,
+                &mut layouts,
+                grh,
+                x,
+                y,
+                4.0,
+                Vec2::ZERO,
                 WorldEntity,
             ) {
                 drawn.0.insert(key);
@@ -966,7 +964,6 @@ fn heading_from_id(id: i32) -> Heading {
         _ => Heading::South,
     }
 }
-
 
 /// WebSocket gateway. Same endpoint the web client uses.
 const GATEWAY_URL: &str = "ws://127.0.0.1:7667/ao";
@@ -1010,9 +1007,12 @@ fn apply_server_messages(
     for message in session.drain() {
         match message {
             ao_core::ServerMessage::PosUpdate { x, y } => {
+                // First position update is the server's only acknowledgement
+                // that login succeeded; there is no explicit accept packet.
+                session.mark_playing();
                 let (x, y) = (x as i32, y as i32);
                 if (player.x, player.y) != (x, y) {
-                        player.x = x;
+                    player.x = x;
                     player.y = y;
                     scene.0 = true;
                     // Move the sprite by retargeting the interpolation, never by
@@ -1022,10 +1022,11 @@ fn apply_server_messages(
                     *motion = Motion { from: to, to, started_at: 0.0, duration_ms: 0.0 };
                 }
             }
+            // Latency is handled inside the session; it never reaches gameplay.
+            ao_core::ServerMessage::Pong { .. } => {}
         }
     }
 }
-
 
 /// Slide the character between tiles and advance its walk cycle.
 ///

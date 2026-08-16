@@ -5,25 +5,33 @@
 //! They are cheap trust signals — a player can see at a glance whether a
 //! stutter is their machine, the network, or the server.
 
-use crate::net::SERVER_ORIGIN;
+use crate::session::{ConnectionState, Session};
 use bevy::prelude::*;
 use std::sync::{Arc, Mutex};
 
-/// How often latency and the player count are refreshed. Frequent enough to be
-/// useful, rare enough that the status row is not itself a load source.
-const POLL_INTERVAL_SECS: f32 = 5.0;
+/// How often latency is sampled. Frequent enough to track a change, rare enough
+/// that the probe is not itself a load source.
+const PING_INTERVAL_SECS: f32 = 3.0;
+
+/// The player count changes slowly and costs an HTTP round trip, so it is
+/// polled far less often than latency.
+const ONLINE_INTERVAL_SECS: f32 = 15.0;
 
 pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(HudStats::default())
-            .insert_resource(PollTimer(Timer::from_seconds(
-                POLL_INTERVAL_SECS,
+            .insert_resource(PingTimer(Timer::from_seconds(
+                PING_INTERVAL_SECS,
+                TimerMode::Repeating,
+            )))
+            .insert_resource(OnlineTimer(Timer::from_seconds(
+                ONLINE_INTERVAL_SECS,
                 TimerMode::Repeating,
             )))
             .add_systems(Startup, spawn_hud)
-            .add_systems(Update, (poll_server, update_hud));
+            .add_systems(Update, (send_ping, poll_online, update_hud));
     }
 }
 
@@ -47,10 +55,7 @@ impl Default for HudStats {
 
 impl HudStats {
     fn read(&self) -> (Option<u32>, Option<u32>) {
-        self.inner
-            .lock()
-            .map(|s| (s.ping_ms, s.online))
-            .unwrap_or((None, None))
+        self.inner.lock().map(|s| (s.ping_ms, s.online)).unwrap_or((None, None))
     }
 
     fn write(&self, ping_ms: Option<u32>, online: Option<u32>) {
@@ -66,7 +71,10 @@ impl HudStats {
 }
 
 #[derive(Resource)]
-struct PollTimer(Timer);
+struct PingTimer(Timer);
+
+#[derive(Resource)]
+struct OnlineTimer(Timer);
 
 #[derive(Component)]
 struct HudText;
@@ -98,6 +106,7 @@ fn spawn_hud(mut commands: Commands) {
 fn update_hud(
     time: Res<Time>,
     stats: Res<HudStats>,
+    session: Res<Session>,
     mut query: Query<(&mut Text, &mut FpsAverage), With<HudText>>,
 ) {
     let dt = time.delta_secs();
@@ -115,44 +124,89 @@ fn update_hud(
             average.0 * 0.9 + instant * 0.1
         };
 
-        let (ping, online) = stats.read();
-        let ping = ping.map(|v| format!("{v}ms")).unwrap_or_else(|| "--".into());
+        let (_http_ping, online) = stats.read();
+        // Game-socket RTT when the session is up; nothing rather than a
+        // misleading HTTP number when it is not.
+        let ping = session.ping_ms().map(|v| format!("{v}ms")).unwrap_or_else(|| "--".into());
         let online = online.map(|v| v.to_string()).unwrap_or_else(|| "--".into());
 
         text.0 = format!("FPS {}   PING {}   ON {}", average.0.round() as u32, ping, online);
     }
 }
 
-fn poll_server(time: Res<Time>, mut timer: ResMut<PollTimer>, stats: Res<HudStats>) {
+/// Probe game-socket latency.
+///
+/// This measures the game socket, not HTTP: it is the path a player's input
+/// actually travels. It excludes egress queueing, so it answers "is the network
+/// or server slow" rather than "am I being shed" — walk-to-confirmation is the
+/// measure for the latter.
+fn send_ping(time: Res<Time>, mut timer: ResMut<PingTimer>, session: Res<Session>) {
     if !timer.0.tick(time.delta()).just_finished() {
+        return;
+    }
+    // Nothing to measure unless the socket is up, and probing a dead socket
+    // would only accumulate timeouts.
+    if !matches!(session.state(), ConnectionState::Authenticating | ConnectionState::Playing) {
+        return;
+    }
+    // Paused while the tab is hidden: a backgrounded tab is throttled, so any
+    // sample taken there measures the browser's scheduler, not the network.
+    if document_hidden() {
+        return;
+    }
+
+    if let Some(ping) = session.next_ping(now_ms()) {
+        session.send(&ping);
+    }
+}
+
+fn poll_online(time: Res<Time>, mut timer: ResMut<OnlineTimer>, stats: Res<HudStats>) {
+    if !timer.0.tick(time.delta()).just_finished() {
+        return;
+    }
+    if document_hidden() {
         return;
     }
     poll(stats.clone());
 }
 
-/// Measure latency to the server and read the player count in one request.
-///
-/// This is HTTP round-trip, not game-socket latency. Once the session survives
-/// login, walk -> pos_update is the better measure because it reflects what the
-/// player actually feels; until then this is honest about what it timed.
+#[cfg(target_arch = "wasm32")]
+fn now_ms() -> f64 {
+    js_sys::Date::now()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn now_ms() -> f64 {
+    0.0
+}
+
+#[cfg(target_arch = "wasm32")]
+fn document_hidden() -> bool {
+    web_sys::window().and_then(|w| w.document()).map(|d| d.hidden()).unwrap_or(false)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn document_hidden() -> bool {
+    false
+}
+
+/// Read the player count.
 #[cfg(target_arch = "wasm32")]
 fn poll(stats: HudStats) {
+    use crate::net::SERVER_ORIGIN;
+
     wasm_bindgen_futures::spawn_local(async move {
-        let started = js_sys::Date::now();
         match crate::net::fetch_text_public(&format!("{SERVER_ORIGIN}/api/meta/online")).await {
             Ok(body) => {
-                let elapsed = (js_sys::Date::now() - started).round() as u32;
-                let online = body
-                    .split("\"online\":")
-                    .nth(1)
-                    .and_then(|rest| {
-                        let digits: String =
-                            rest.chars().skip_while(|c| !c.is_ascii_digit())
-                                .take_while(|c| c.is_ascii_digit())
-                                .collect();
-                        digits.parse::<u32>().ok()
-                    });
-                stats.write(Some(elapsed), online);
+                let online = body.split("\"online\":").nth(1).and_then(|rest| {
+                    let digits: String = rest
+                        .chars()
+                        .skip_while(|c| !c.is_ascii_digit())
+                        .take_while(|c| c.is_ascii_digit())
+                        .collect();
+                    digits.parse::<u32>().ok()
+                });
+                stats.write(None, online);
             }
             Err(_) => stats.write(None, None),
         }

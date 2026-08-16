@@ -386,6 +386,14 @@ defmodule AoProtocol.Server.Encoder do
     Writer.build_packet(PacketIds.Server.world_pack_signature(), payload)
   end
 
+  # pong (ID 204) — extension, not in VB6 protocol. Echoes the client's ping
+  # token unchanged. The width is fixed at 8 bytes and enforced here: the
+  # client decoder requires exactly 8, so emitting any other length would hand
+  # it a packet it cannot parse and desynchronise everything after it.
+  def encode({:pong, %{token: token}}) when is_binary(token) and byte_size(token) == 8 do
+    Writer.build_packet(PacketIds.Server.pong(), token)
+  end
+
   # eCharSwing (ID 19) — charindex(Int16)
   def encode({:char_swing, %{char_index: char_index}}) do
     payload = Writer.write_int16(char_index)

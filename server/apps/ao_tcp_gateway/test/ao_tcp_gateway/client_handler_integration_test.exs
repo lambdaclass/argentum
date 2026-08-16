@@ -105,6 +105,11 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
 
   defp next_counter, do: :erlang.unique_integer([:monotonic, :positive])
 
+  defp send_ping(socket, token) when byte_size(token) == 8 do
+    packet = Writer.build_packet(900, token)
+    :ok = :gen_tcp.send(socket, packet)
+  end
+
   defp send_walk(socket, heading) do
     payload = Writer.write_int8(heading) <> Writer.write_int32(next_counter())
     packet = Writer.build_packet(78, payload)
@@ -451,6 +456,8 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
   # update_mana (26): Int16 = 2 bytes (already decoded via Reader)
   # update_sta (25): Int16 = 2 bytes (already decoded via Reader)
   # update_gold (28): Int32 + Int32 = 8 bytes (already decoded via Reader)
+
+  defp decode_server_packet(204, <<token::binary-size(8), rest::binary>>), do: {:ok, %{token: token}, rest}
 
   defp decode_server_packet(_id, _rest), do: :incomplete
 
@@ -1223,6 +1230,62 @@ defmodule AoTcpGateway.ClientHandlerIntegrationTest do
           assert map.map_id == expected_map
         end)
       end
+    end
+  end
+
+  describe "latency probe" do
+    test "server echoes a ping token back over the real socket", %{port: port} do
+      {socket, _login_packets, _char_id} = login_and_setup(port, unique_name())
+      token = <<1, 2, 3, 4, 5, 6, 7, 8>>
+
+      send_ping(socket, token)
+      packets = decode_all_packets(recv_quick(socket))
+
+      assert {204, %{token: ^token}} = find_packet(packets, 204),
+             "expected a pong echoing the token, got: #{inspect(packets)}"
+    end
+
+    test "each ping is answered with its own token, in order", %{port: port} do
+      {socket, _login_packets, _char_id} = login_and_setup(port, unique_name())
+      first = <<1, 1, 1, 1, 1, 1, 1, 1>>
+      second = <<2, 2, 2, 2, 2, 2, 2, 2>>
+
+      send_ping(socket, first)
+      send_ping(socket, second)
+      packets = decode_all_packets(recv_quick(socket))
+
+      # The client matches replies by token, so a swapped or dropped echo would
+      # silently produce a wrong round-trip time rather than an error.
+      tokens = for {204, %{token: t}} <- packets, do: t
+      assert tokens == [first, second]
+    end
+
+    test "a ping does not desynchronise the packets around it", %{port: port} do
+      {socket, _login_packets, _char_id} = login_and_setup(port, unique_name())
+
+      send_ping(socket, <<9, 9, 9, 9, 9, 9, 9, 9>>)
+      send_walk(socket, 3)
+      packets = decode_all_packets(recv_quick(socket))
+
+      # The probe rides the ordinary command path, so the risk it carries is
+      # losing stream sync for everything that follows it.
+      assert find_packet(packets, 204) != nil, "pong missing: #{inspect(packets)}"
+      assert find_packet(packets, 31) != nil, "walk was not confirmed: #{inspect(packets)}"
+    end
+
+    test "latency can be measured before login completes", %{port: port} do
+      # SessionLogic.handle_command/2 has no character_id guard for ping, so a
+      # client can show latency on the connection screen. This asserts that is
+      # actually true of the routed path, not just of the handler in isolation.
+      socket = connect(port)
+      on_exit(fn -> :gen_tcp.close(socket) end)
+      token = <<7, 7, 7, 7, 7, 7, 7, 7>>
+
+      send_ping(socket, token)
+      packets = decode_all_packets(recv_quick(socket))
+
+      assert {204, %{token: ^token}} = find_packet(packets, 204),
+             "expected a pong before login, got: #{inspect(packets)}"
     end
   end
 end

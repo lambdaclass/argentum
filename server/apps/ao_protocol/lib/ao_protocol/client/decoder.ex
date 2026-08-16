@@ -1306,6 +1306,17 @@ defmodule AoProtocol.Client.Decoder do
   # Quest (ID 258) — talk to quest NPC, no payload
   defp decode_packet(258, rest), do: {:ok, {:quest, %{}}, rest}
 
+  # Ping (ID 900) — extension. token(8 bytes, opaque).
+  #
+  # The token is echoed back untouched. Treating it as opaque is what keeps the
+  # measurement free of clock synchronisation: only the client interprets it.
+  defp decode_packet(900, rest) do
+    case rest do
+      <<token::binary-size(8), rest::binary>> -> {:ok, {:ping, %{token: token}}, rest}
+      _ -> :incomplete
+    end
+  end
+
   # QuestListRequest (ID 260) — no payload
   defp decode_packet(260, rest), do: {:ok, {:quest_list_request, %{}}, rest}
 
