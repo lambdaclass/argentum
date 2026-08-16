@@ -238,8 +238,14 @@ the rendered browser and native window, rather than only in layout helpers.
 Required behavior:
 
 - The WASM canvas tracks the browser content area on first load and every
-  resize. Maximizing the browser expands the canvas instead of enlarging a black
-  host page around a fixed game rectangle.
+  resize, bounded by a comfortable playing size (1280x832) beyond which the
+  client is a centred window with fullscreen available from the top bar. A
+  browser narrower or shorter than that bound gets the whole of it with no
+  scrollbars. This bound was added after an unbounded canvas was tried on a
+  2000-pixel browser: because the world holds its designed view and scales up
+  rather than revealing more map, filling the width made every element enormous
+  without showing anything more, which is worse than the surround it replaced.
+  What remains forbidden is a *fixed* rectangle that ignores a smaller window.
 - The native window remains resizable. In both targets, top bar, world, rail and
   hotbar are derived from the same current window dimensions and partition the
   usable viewport without clipping or overlap.
