@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 /// How often latency is sampled. Frequent enough to track a change, rare enough
 /// that the probe is not itself a load source.
-const PING_INTERVAL_SECS: f32 = 3.0;
+const PING_INTERVAL_SECS: f32 = 5.0;
 
 /// The player count changes slowly and costs an HTTP round trip, so it is
 /// polled far less often than latency.
@@ -126,12 +126,30 @@ fn update_hud(
         };
 
         let (_http_ping, online) = stats.read();
-        // Game-socket RTT when the session is up; nothing rather than a
-        // misleading HTTP number when it is not.
-        let ping = session.ping_ms().map(|v| format!("{v}ms")).unwrap_or_else(|| "--".into());
+        let ping = ping_label(&session.state(), session.ping_ms());
         let online = online.map(|v| v.to_string()).unwrap_or_else(|| "--".into());
 
         text.0 = format!("FPS {}   PING {}   ON {}", average.0.round() as u32, ping, online);
+    }
+}
+
+/// What to show for latency.
+///
+/// "--" used to mean two unrelated things: no session to measure, and a session
+/// that has not answered yet. Since the socket currently dies on the first
+/// server frame it cannot decode, and the server only sends that frame when
+/// login *succeeded*, whether a number ever appeared depended on how login went
+/// — so the field looked random. They are now distinct: a reading, a wait, or
+/// an explicit statement that there is nothing to measure.
+fn ping_label(state: &ConnectionState, ping_ms: Option<u32>) -> String {
+    match (state, ping_ms) {
+        // A stale reading from a dead socket is worse than no reading.
+        (ConnectionState::Offline | ConnectionState::Failed(_), _) => "--".into(),
+        (_, Some(rtt)) => format!("{rtt}ms"),
+        // Connected, nothing back yet. One probe every few seconds, so this is
+        // the normal state for the first moments of a session.
+        (ConnectionState::Connecting, None) => "...".into(),
+        (_, None) => "...".into(),
     }
 }
 
@@ -219,3 +237,43 @@ fn poll(stats: HudStats, asset_origin: String) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn poll(_stats: HudStats, _asset_origin: String) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_dead_socket_reports_nothing_to_measure() {
+        // Not a stale number: the previous reading described a link that no
+        // longer exists.
+        assert_eq!(ping_label(&ConnectionState::Offline, None), "--");
+        assert_eq!(ping_label(&ConnectionState::Failed("closed".into()), Some(12)), "--");
+    }
+
+    #[test]
+    fn a_live_session_awaiting_its_first_reply_is_distinct_from_a_dead_one() {
+        // The reported confusion. Both used to print "--", so a session that
+        // had quietly died looked the same as one that simply had not been
+        // probed yet, and the field appeared to flicker at random.
+        assert_eq!(ping_label(&ConnectionState::Authenticating, None), "...");
+        assert_eq!(ping_label(&ConnectionState::Playing, None), "...");
+        assert_ne!(
+            ping_label(&ConnectionState::Playing, None),
+            ping_label(&ConnectionState::Offline, None)
+        );
+    }
+
+    #[test]
+    fn a_measured_round_trip_is_shown_in_milliseconds() {
+        assert_eq!(ping_label(&ConnectionState::Playing, Some(8)), "8ms");
+        assert_eq!(ping_label(&ConnectionState::Authenticating, Some(140)), "140ms");
+    }
+
+    #[test]
+    fn probing_is_rare_enough_not_to_be_a_load_source() {
+        // Every connected client sends these, so the interval is a server-side
+        // cost as much as a client one.
+        assert!(PING_INTERVAL_SECS >= 5.0, "at most one probe per five seconds");
+        assert!(ONLINE_INTERVAL_SECS > PING_INTERVAL_SECS, "population moves slower than latency");
+    }
+}
