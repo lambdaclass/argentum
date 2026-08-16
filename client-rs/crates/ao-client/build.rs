@@ -13,23 +13,36 @@ fn main() {
         return;
     }
 
-    // `describe --always --dirty` rather than a bare SHA: a build made before
-    // its changes are committed would otherwise be stamped with the *previous*
-    // commit, which is worse than no stamp because it looks authoritative. The
-    // `-dirty` suffix says "this commit plus uncommitted work".
-    let short_sha = Command::new("git")
-        .args(["describe", "--always", "--dirty", "--abbrev=7"])
+    let Some(sha) = run(&["rev-parse", "--short=7", "HEAD"]) else {
+        return;
+    };
+
+    // Dirtiness is scoped to what actually goes into this binary. Using a bare
+    // `git describe --dirty` made the stamp flip whenever any file in the
+    // repository was edited — a note in the roadmap was enough — so a verified
+    // build would fail its own check moments later for a change that could not
+    // possibly be in it.
+    let sources = ["crates", "assets", "Cargo.toml", "Cargo.lock"];
+    let mut args = vec!["status", "--porcelain", "--"];
+    args.extend_from_slice(&sources);
+    let dirty = run(&args).map(|out| !out.is_empty()).unwrap_or(false);
+
+    let stamp = if dirty { format!("{sha}-dirty") } else { sha };
+    println!("cargo:rustc-env=AO_BUILD={stamp}");
+
+    // Rebuild when HEAD moves, or the stamp goes stale and starts lying.
+    println!("cargo:rerun-if-changed=../../../.git/HEAD");
+    println!("cargo:rerun-if-changed=../../../.git/refs/heads");
+}
+
+/// Run a git command from the client directory, or `None` if it fails.
+fn run(args: &[&str]) -> Option<String> {
+    Command::new("git")
+        .args(args)
+        .current_dir("../..")
         .output()
         .ok()
         .filter(|out| out.status.success())
         .and_then(|out| String::from_utf8(out.stdout).ok())
-        .map(|sha| sha.trim().to_string())
-        .filter(|sha| !sha.is_empty());
-
-    if let Some(sha) = short_sha {
-        println!("cargo:rustc-env=AO_BUILD={sha}");
-        // Rebuild when HEAD moves, or the stamp goes stale and starts lying.
-        println!("cargo:rerun-if-changed=../../../.git/HEAD");
-        println!("cargo:rerun-if-changed=../../../.git/refs/heads");
-    }
+        .map(|text| text.trim().to_string())
 }

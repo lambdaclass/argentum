@@ -55,10 +55,21 @@ assert_build_stamp() {
   echo "    stamped $expected"
 }
 
-# What the client should be claiming. Dirty trees are stamped as such, so the
-# stamp never silently attributes uncommitted work to the last commit.
+# What the client should be claiming. Mirrors crates/ao-client/build.rs exactly:
+# the commit, plus "-dirty" only when a file that goes into the binary has
+# uncommitted changes.
+#
+# Scoped rather than repository-wide because an edit to a document elsewhere in
+# the tree would otherwise change the expected stamp, and a build verified a
+# moment earlier would fail its own check for a change that cannot be in it.
 build_stamp_expected() {
-  git describe --always --dirty --abbrev=7 2>/dev/null || true
+  local sha
+  sha="$(git rev-parse --short=7 HEAD 2>/dev/null)" || return 0
+  if [ -n "$(git status --porcelain -- crates assets Cargo.toml Cargo.lock 2>/dev/null)" ]; then
+    printf '%s-dirty' "$sha"
+  else
+    printf '%s' "$sha"
+  fi
 }
 
 size_mb() { awk '{printf "%.1f MB\n", $1/1048576}' <<<"$(stat -c %s "$1")"; }
