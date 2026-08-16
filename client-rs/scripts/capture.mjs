@@ -47,8 +47,11 @@ const VIEWPORTS = [
 ];
 
 function headStamp() {
+  // The same rule build.sh uses, from the same script — computing it a third
+  // time here is how the capture harness starts disagreeing with the build it
+  // is supposed to be verifying.
   try {
-    return execFileSync("git", ["describe", "--always", "--dirty", "--abbrev=7"], {
+    return execFileSync("bash", [join(here, "build-stamp.sh")], {
       cwd: clientDir,
       encoding: "utf8",
     }).trim();
