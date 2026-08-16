@@ -7,9 +7,14 @@ questions without confusing them:
 - the phase map says **what capabilities unlock the finished client**; and
 - the execution sequence says **what should be implemented next, in order**.
 
-The Rust client is an alternative to the TypeScript/Pixi client in `client/`,
-not its silent replacement. Both clients speak to the same authoritative Elixir
-server until a separately approved migration retires one.
+The Rust/Bevy client is the sole actively developed game client and the intended
+production successor. The TypeScript/Pixi client in `client/` is frozen,
+non-gating reference material: do not spend roadmap time preserving, testing or
+repairing its compatibility, and allow cleaner server/protocol architecture to
+break it. Retain useful traces, fixtures and behavioral references only until
+their Rust/server replacements exist; removal of the obsolete tree and its
+deploy surface is the bounded cleanup task W-0091, not incidental work inside
+an unrelated task.
 
 Canonical supporting documents:
 
@@ -112,8 +117,11 @@ code prevents accidental rule drift; it is not an anti-cheat boundary.
 New server/client packets first receive a parity decision in
 `session_route_manifest.ex`, byte-level fixtures and an explicit compatibility
 story. WS-only extensions without a VB6 ancestor are
-`:intentional_divergence`. The TypeScript client and legacy protocol remain
-operational unless a separate migration explicitly retires them.
+`:intentional_divergence`. TypeScript compatibility is not part of that story.
+Any retained VB6/unframed protocol behavior must be named explicitly by the
+owning task and remains governed until separately retired; historical frontend
+behavior never overrides server authority, bounded parsing or a cleaner
+negotiated Rust protocol.
 
 ### UI and transport remain separate
 
@@ -1261,8 +1269,9 @@ leak gameplay commands.
 - [ ] Server correction rolls back without duplicate items, cooldowns, targets
       or commands.
 - [ ] Fixture/replay/live model states agree and UI owns no authoritative rule.
-- [ ] Relevant TypeScript E2E behavior has Rust coverage or an explicit,
-      reviewed retirement with a stronger replacement.
+- [ ] Every supported workflow has Rust-owned app/browser evidence. Historical
+      TypeScript tests or traces may inform cases but are not compatibility,
+      coverage or release gates.
 
 ## Phase 5 — Remaining gameplay parity
 
@@ -1328,9 +1337,10 @@ labels so incompatible/stale presentation data is rejected before `Playing`.
 - **Depends on:** W-0042, W-0043, W-0044, W-0045, W-0046, W-0047
 
 Map each supported workflow to commands, packets, Rust handlers, Bevy UI,
-VB6/TypeScript reference and end-to-end tests. “Packet decoded” is not a
-completed row. Every old E2E test receives Rust coverage or an explicit
-retirement reason and stronger replacement.
+VB6/server behavior where still governed, and Rust end-to-end tests. “Packet
+decoded” is not a completed row. Consult old TypeScript E2E tests only when they
+provide useful behavioral evidence; do not reproduce obsolete frontend
+behavior or require one-for-one test migration.
 
 ### Phase 5 exit gate
 
@@ -1341,8 +1351,8 @@ retirement reason and stronger replacement.
 - [ ] Incompatible spell, XP, object/NPC or faction metadata is rejected before
       `Playing`.
 - [ ] The workflow parity matrix has no unexplained Bevy-exposed row.
-- [ ] Trace replay reproduces a regression from every major workflow and every
-      relevant legacy E2E test is covered, replaced or deliberately retired.
+- [ ] Trace replay reproduces a regression from every major workflow and the
+      supported Rust workflows have independent end-to-end coverage.
 
 ## Phase 6 — World fidelity and audio
 
@@ -1363,8 +1373,8 @@ and backpack layers in VB6-compatible order.
 
 Replace spawn-order overlap with measured row/depth ownership and ship map
 triggers through server encoding. Implement trigger 1 building/roof visibility
-for both clients. Existing over-character layers and fade are supporting
-evidence, not closure.
+for the Rust client. Existing over-character layers and fade are supporting
+evidence, not closure; the TypeScript renderer is not a compatibility target.
 
 ### Task W-0051 — Bounded tile and texture streaming
 
@@ -1411,8 +1421,8 @@ texture cleanup observable.
 
 - [ ] Walking, turning, equipment and fighting match the intended reference in
       deterministic captures; overlap follows world depth, not spawn order.
-- [ ] Server triggers reveal building interiors in both clients without hiding
-      unrelated upper-layer art.
+- [ ] Server triggers reveal building interiors in the Rust client without
+      hiding unrelated upper-layer art.
 - [ ] Long movement streams tiles/tall art without holes and releases old
       entities/textures inside byte budgets.
 - [ ] A 30-minute movement/combat capture stays inside frame, draw, entity, heap
@@ -1519,8 +1529,9 @@ changes are core work, not two free packets.
 - **Depends on:** W-0021, W-0033, W-0059
 
 Classify `map_handoff_begin/end/failed` as intentional divergences, assign
-fixtures and capability negotiation, and keep the TypeScript/legacy session
-path working throughout.
+fixtures and capability negotiation, and state the behavior of retained
+VB6/unframed sessions explicitly. Do not build or preserve a TypeScript-specific
+handoff path.
 
 ### Task W-0063 — Structured MapServer snapshot adapter
 
@@ -1529,8 +1540,9 @@ path working throughout.
 - **Depends on:** W-0062
 
 Refactor `MapServer.enter/3` to return a structured snapshot rather than send
-NPC bytes out of band. Introduce an adapter that can still emit the exact legacy
-TypeScript sequence before changing shared session behavior.
+NPC bytes out of band. If the governed unframed protocol still requires the
+traditional packet sequence, isolate it behind a protocol adapter; exact
+TypeScript behavior is not an acceptance criterion.
 
 ### Task W-0064 — Epoch, failure and ordered batch
 
@@ -1578,10 +1590,10 @@ entity/texture cleanup.
 
 ### Phase 8 exit gate
 
-- [ ] Handoff packets have parity entries, exact fixtures and capability-gated
-      legacy compatibility.
-- [ ] `MapServer.enter/3` returns a structured snapshot while an adapter
-      preserves the TypeScript sequence; no NPC packet remains out of band.
+- [ ] Handoff packets have parity entries, exact fixtures and explicit
+      capability behavior for any retained unframed protocol.
+- [ ] `MapServer.enter/3` returns a structured snapshot and no NPC packet
+      remains out of band; no TypeScript-specific adapter is required.
 - [ ] Backpressure capture proves `begin < every member < end` with no escaped,
       coalesced or dropped member.
 - [ ] Epoch filtering prevents stale source entities/input from mutating the
@@ -1762,6 +1774,30 @@ Gate dependencies on vulnerability/license audit, SBOM, reproducible locks,
 third-party notices, asset/font/music provenance and AGPL distribution duties.
 Unlicensed resources do not ship.
 
+### Task W-0091 — Retire the TypeScript client surface
+
+- **State:** planned
+- **Phase:** 10
+- **Depends on:** W-0079
+
+After the Rust/Bevy production route and rollback are proven, inventory every
+remaining build, deploy, route, CI, documentation, fixture and operational
+dependency on `client/`. Extract only historical traces, protocol examples or
+behavioral fixtures that still provide unique value into maintained Rust/server
+ownership with provenance; old TypeScript tests themselves are not gates.
+
+Remove the TypeScript client from production routing, CI/release matrices,
+deployment artifacts and active documentation, then archive or delete its
+source and dependencies in one reviewable cleanup. Remove TypeScript-specific
+server adapters that have no VB6/unframed or Rust consumer. Do not use this task
+to weaken server authority, packet classification, byte fixtures, rollback or
+the separately governed legacy protocol.
+
+Close with repository/deployment searches proving no production or CI path
+builds or serves the obsolete frontend, a Rust staging/rollback smoke test, and
+dependency/license scans proving its package ecosystem no longer ships. Record
+which reference artifacts were retained and why.
+
 ### Phase 10 exit gate
 
 - [ ] Chromium, Firefox and WebKit pass login/gameplay/reconnect/cache/handoff
@@ -1778,6 +1814,9 @@ Unlicensed resources do not ship.
       truthful Bevy recovery states.
 - [ ] Dashboards catch size/boot/frame/network/cache/memory regressions; support
       bundles contain no secrets/chat; SBOM, notices, provenance and AGPL gates pass.
+- [ ] Rust/Bevy is the only production game frontend; TypeScript build, deploy,
+      routing and CI surfaces are removed, with any retained reference artifact
+      owned by a maintained Rust/server test or document.
 
 ## Phase 11 — Research and experiments
 
@@ -1833,7 +1872,7 @@ the root roadmap when it enters active execution.
 | W-0024–W-0029 | Bootstrap packets, failure semantics and bounded transport |
 | W-0033 | Fresh reconnect/resynchronization snapshot |
 | W-0042–W-0048 | Gameplay workflow fixtures and versioned metadata |
-| W-0050 | Emit map triggers for roof rules used by both clients |
+| W-0050 | Emit map triggers consumed by the Rust world renderer |
 | W-0055–W-0058 | Indexed assets, hashes, range/immutable serving |
 | W-0062–W-0064 | Handoff parity, structured snapshot, epoch and FIFO batch |
 | W-0075, W-0080–W-0081 | Security, rollout compatibility, session ownership and operations |
@@ -1849,12 +1888,12 @@ the root roadmap when it enters active execution.
   an application-UI acceptance criterion.
 - Happy path, rejection, interruption and cleanup are exercised in proportion
   to risk.
-- Rust coverage replaces or explicitly retires each relevant
-  `client/tests/e2e` behavior.
+- Every supported workflow has Rust-owned tests. Historical
+  `client/tests/e2e` cases may inform coverage but never block or define it.
 - Compressed transfer, boot, frame, network and memory deltas are recorded where
   affected; unexplained regressions fail their gates.
-- The TypeScript client and legacy protocol remain working until a deliberate
-  migration says otherwise.
+- TypeScript compatibility is not a gate. Any retained VB6/unframed protocol
+  behavior is explicit, fixture-pinned and independently governed.
 - `bash client-rs/scripts/check_roadmap.sh` passes, and completed task bodies and
   dated evidence move to `client-rs/CHANGELOG.md`.
 
@@ -1862,6 +1901,8 @@ the root roadmap when it enters active execution.
 
 - Variable or larger-than-100x100 maps during seamless handoff. Server, NIF and
   current wire coordinates use `u8` tiles; that is W-0083 research.
-- Replacing the TypeScript client merely because the Rust client exists.
+- Preserving or extending the TypeScript client. Incidental deletion during
+  unrelated work is also excluded; W-0091 owns its bounded retirement after
+  Rust production rollout and reference extraction.
 - Client hashes, encrypted assets or WASM checks as an anti-cheat boundary.
 - DOM/React implementation of a Bevy application screen.

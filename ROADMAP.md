@@ -121,8 +121,8 @@ Work:
 13. Add a versioned protocol compatibility contract.
     - One manifest for packet IDs, binary layouts, direction, and support
       status
-    - Shared Elixir and TypeScript fixtures generated from or checked against
-      the manifest
+    - Shared Elixir and Rust fixtures generated from or checked against the
+      manifest
     - Explicit backward-compatibility and packet-deprecation rules
     - Defined handling for unknown, unsupported, and retired packets
 
