@@ -9,8 +9,7 @@
 use super::state::{IntentMessage, UiState};
 use super::tokens::{focus, ink, size, space, surface, type_scale};
 use ao_core::view::{
-    HotbarBinding, HotbarSlotState, Intent, SpellBlocker, SpellView, TargetMode, TargetState,
-    UiSnapshot,
+    HotbarSlotState, Intent, SpellBlocker, SpellView, TargetMode, TargetState, UiSnapshot,
 };
 use bevy::prelude::*;
 
@@ -227,7 +226,7 @@ pub fn shows_page_control(snapshot: &UiSnapshot) -> bool {
 mod tests {
     use super::*;
     use ao_core::fixtures::{self, Scenario};
-    use ao_core::view::{ChatState, Gauge, TargetKind};
+    use ao_core::view::{ChatState, Gauge, HotbarBinding, TargetKind};
 
     fn spell(target_mode: TargetMode, blockers: Vec<SpellBlocker>) -> SpellView {
         SpellView {

@@ -9,6 +9,7 @@
 //! this module reads what it published.
 
 use super::shell::{label, Region};
+use super::telemetry::{fps_label, FpsAverage};
 use super::tokens::{ink, size, space, surface, type_scale};
 use crate::hud::{ping_label, HudStats};
 use crate::session::Session;
@@ -32,55 +33,21 @@ fn build_stamp() -> String {
     }
 }
 
-/// How often the telemetry text is rewritten.
-///
-/// Not every frame. A per-frame reciprocal swings over a wide range and the
-/// number becomes an unreadable blur; at 144Hz it is also 144 string
-/// allocations and text re-layouts a second to convey one value.
-const READOUT_REFRESH_SECS: f32 = 1.0;
-
-/// Frames and time since the readout was last rewritten.
-///
-/// Counting frames over a full second is the honest measurement: it is exactly
-/// "frames per second", where a smoothed per-frame reciprocal sampled once a
-/// second is an estimate that can miss a stutter entirely.
-#[derive(Component, Default)]
-pub struct FpsAverage {
-    frames: u32,
-    /// Accumulated in f64. Summing 60 f32 frame times of 1/60 lands just under
-    /// one second, so an exact `< 1.0` comparison withholds the refresh for a
-    /// whole extra frame and the counter reads one low forever.
-    elapsed: f64,
-    /// Last value shown, so the text survives between refreshes.
-    pub last: u32,
-}
-
-/// Slack on the refresh boundary, in seconds.
-///
-/// Frame times never sum to a round number. A microsecond is far below
-/// anything a once-a-second display refresh cares about, and without it the
-/// boundary depends on which way the last float happened to round.
-const REFRESH_EPSILON: f64 = 1e-6;
-
-impl FpsAverage {
-    /// Record a frame. Returns the new rate when a refresh is due.
-    pub fn tick(&mut self, dt: f32) -> Option<u32> {
-        self.frames += 1;
-        self.elapsed += dt as f64;
-        if self.elapsed + REFRESH_EPSILON < READOUT_REFRESH_SECS as f64 {
-            return None;
-        }
-        let rate = (self.frames as f64 / self.elapsed).round() as u32;
-        self.frames = 0;
-        self.elapsed = 0.0;
-        self.last = rate;
-        Some(rate)
-    }
-}
-
 /// The telemetry readout, updated every frame.
 #[derive(Component)]
 struct StatusReadout;
+
+/// Whether the browser tab is hidden. Always false natively, where the window
+/// being unfocused is the equivalent signal and Bevy reports it directly.
+#[cfg(target_arch = "wasm32")]
+fn document_hidden() -> bool {
+    web_sys::window().and_then(|w| w.document()).map(|d| d.hidden()).unwrap_or(false)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn document_hidden() -> bool {
+    false
+}
 
 /// A platform action in the bar's right group.
 ///
@@ -241,24 +208,46 @@ fn update_readout(
     time: Res<Time>,
     stats: Res<HudStats>,
     session: Res<Session>,
-    mut readout: Query<(&mut Text, &mut FpsAverage), With<StatusReadout>>,
+    windows: Query<&Window>,
+    mut rows: Query<(&mut FpsAverage, &Children), With<StatusReadout>>,
+    fields: Query<&Children>,
+    mut values: Query<&mut Text, With<ReadoutValue>>,
 ) {
-    let dt = time.delta_secs();
+    let dt = time.delta_secs_f64();
     if dt <= 0.0 {
         return;
     }
+    // A hidden or unfocused window is throttled by the platform, and reporting
+    // that rate as performance tells a player their machine is failing when it
+    // is idle.
+    let foreground = windows.iter().any(|window| window.focused) && !document_hidden();
 
-    for (mut text, mut average) in &mut readout {
+    for (mut average, row) in &mut rows {
+        average.set_foreground(foreground);
+
         // Every frame counts toward the rate, but the text is only rewritten
-        // when a full second of them has been measured.
-        let Some(fps) = average.tick(dt) else {
+        // when a full foreground second of them has been measured.
+        let Some(reading) = average.tick(dt) else {
             continue;
         };
 
-        let ping = ping_label(&session.state(), session.ping_ms());
-        let online = stats.online().map(|v| v.to_string()).unwrap_or_else(|| String::from("--"));
+        // Same order as `populate` spawns them.
+        let next = [
+            fps_label(reading),
+            ping_label(&session.state(), session.ping_ms()),
+            stats.online().map(|v| v.to_string()).unwrap_or_else(|| String::from("--")),
+        ];
 
-        text.0 = format!("FPS {fps}   PING {ping}   ON {online}");
+        for (field, value) in row.iter().zip(next) {
+            let Ok(children) = fields.get(field) else {
+                continue;
+            };
+            for child in children.iter() {
+                if let Ok(mut text) = values.get_mut(child) {
+                    text.0 = value.clone();
+                }
+            }
+        }
     }
 }
 
@@ -306,6 +295,97 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_readout_actually_replaces_its_values() {
+        // Regression: splitting one string into three labelled fields left the
+        // update writing to nothing, so the bar showed "FPS -- PING -- ON --"
+        // forever. Compiling and laying out correctly is not the same as
+        // updating, and only a test that runs the system can tell them apart.
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default())
+            .init_resource::<HudStats>()
+            .init_resource::<Session>()
+            .add_systems(Update, update_readout);
+
+        // The readout only measures a foreground window, so there has to be
+        // one: a throttled background rate is not a frame rate.
+        app.world_mut().spawn(Window { focused: true, ..Default::default() });
+
+        let row = app
+            .world_mut()
+            .spawn((StatusReadout, FpsAverage::default()))
+            .with_children(|row| {
+                for (name, value) in [("FPS", "--"), ("PING", "--"), ("ON", "--")] {
+                    row.spawn(readout_field(name, value));
+                }
+            })
+            .id();
+
+        // Enough frames to cross the one-second refresh boundary.
+        for _ in 0..70 {
+            app.world_mut()
+                .resource_mut::<Time<()>>()
+                .advance_by(std::time::Duration::from_millis(16));
+            app.update();
+        }
+
+        let shown = shown_values(&mut app, row);
+        assert_eq!(shown.len(), 3, "expected three fields, got {shown:?}");
+        assert_ne!(shown[0], "--", "the frame rate never updated");
+    }
+
+    /// The value half of each readout field, in order.
+    fn shown_values(app: &mut App, row: Entity) -> Vec<String> {
+        let fields: Vec<Entity> =
+            app.world().get::<Children>(row).map(|c| c.iter().collect()).unwrap_or_default();
+
+        let mut shown = Vec::new();
+        for field in fields {
+            let children: Vec<Entity> =
+                app.world().get::<Children>(field).map(|c| c.iter().collect()).unwrap_or_default();
+            for child in children {
+                if app.world().get::<ReadoutValue>(child).is_some() {
+                    if let Some(text) = app.world().get::<Text>(child) {
+                        shown.push(text.0.clone());
+                    }
+                }
+            }
+        }
+        shown
+    }
+
+    #[test]
+    fn an_unfocused_window_does_not_report_a_frame_rate() {
+        // A throttled window's rate is the platform's scheduling, not the
+        // machine's performance, and showing it tells a player their computer
+        // is failing when it is idle.
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default())
+            .init_resource::<HudStats>()
+            .init_resource::<Session>()
+            .add_systems(Update, update_readout);
+        app.world_mut().spawn(Window { focused: false, ..Default::default() });
+
+        let row = app
+            .world_mut()
+            .spawn((StatusReadout, FpsAverage::default()))
+            .with_children(|row| {
+                for (name, value) in [("FPS", "--"), ("PING", "--"), ("ON", "--")] {
+                    row.spawn(readout_field(name, value));
+                }
+            })
+            .id();
+
+        for _ in 0..70 {
+            app.world_mut()
+                .resource_mut::<Time<()>>()
+                .advance_by(std::time::Duration::from_millis(16));
+            app.update();
+        }
+
+        assert_eq!(shown_values(&mut app, row)[0], "--", "a background rate was reported");
+    }
+
+    #[test]
     fn a_local_build_does_not_claim_a_build_number() {
         // The stamp is a trust signal. A local build reporting "build 1" is
         // worse than one saying it is local, because it looks authoritative.
@@ -316,53 +396,6 @@ mod tests {
             assert!(stamp.starts_with("build "));
             assert!(stamp.len() > "build ".len(), "an empty build stamp is worse than none");
         }
-    }
-
-    #[test]
-    fn the_readout_is_rewritten_at_most_once_a_second() {
-        // At 144Hz a per-frame rewrite is 144 string allocations and text
-        // re-layouts a second, and the number is an unreadable blur.
-        let mut average = FpsAverage::default();
-        let frame = 1.0 / 144.0;
-
-        // An exact frame count, not an accumulated float clock: the loop
-        // condition would otherwise carry the same rounding error the code
-        // under test has to tolerate.
-        let refreshes = (0..144 * 3).filter(|_| average.tick(frame).is_some()).count();
-
-        assert_eq!(refreshes, 3, "expected one refresh per second over three seconds");
-    }
-
-    #[test]
-    fn the_rate_is_counted_rather_than_estimated() {
-        // Exactly "frames per second": a smoothed reciprocal sampled once a
-        // second is an estimate that can miss a stutter entirely.
-        let mut average = FpsAverage::default();
-        for _ in 0..59 {
-            assert_eq!(average.tick(1.0 / 60.0), None);
-        }
-        assert_eq!(average.tick(1.0 / 60.0), Some(60));
-    }
-
-    #[test]
-    fn a_severe_stutter_is_reported_rather_than_smoothed_away() {
-        // One 500ms frame in a second is the thing a player wants to see.
-        let mut average = FpsAverage::default();
-        average.tick(0.5);
-        let rate = average.tick(0.5);
-        assert_eq!(rate, Some(2), "two frames in one second is 2 fps");
-    }
-
-    #[test]
-    fn the_last_value_survives_between_refreshes() {
-        // Otherwise the number blanks for a second at a time.
-        let mut average = FpsAverage::default();
-        for _ in 0..60 {
-            average.tick(1.0 / 60.0);
-        }
-        assert_eq!(average.last, 60);
-        average.tick(1.0 / 60.0);
-        assert_eq!(average.last, 60, "still showing the previous second's rate");
     }
 
     #[test]

@@ -16,6 +16,7 @@ pub mod scale;
 pub mod shell;
 pub mod spells;
 pub mod state;
+pub mod telemetry;
 pub mod tokens;
 pub mod topbar;
 

@@ -6,12 +6,9 @@
 
 use crate::config::ClientConfig;
 use crate::session::{ConnectionState, Session};
+use crate::ui::telemetry::PingSchedule;
 use bevy::prelude::*;
 use std::sync::{Arc, Mutex};
-
-/// How often latency is sampled. Frequent enough to track a change, rare enough
-/// that the probe is not itself a load source.
-const PING_INTERVAL_SECS: f32 = 5.0;
 
 /// The player count changes slowly and costs an HTTP round trip, so it is
 /// polled far less often than latency.
@@ -22,10 +19,7 @@ pub struct HudPlugin;
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(HudStats::default())
-            .insert_resource(PingTimer(Timer::from_seconds(
-                PING_INTERVAL_SECS,
-                TimerMode::Repeating,
-            )))
+            .init_resource::<PingSchedule>()
             .insert_resource(OnlineTimer(Timer::from_seconds(
                 ONLINE_INTERVAL_SECS,
                 TimerMode::Repeating,
@@ -75,9 +69,6 @@ impl HudStats {
 }
 
 #[derive(Resource)]
-struct PingTimer(Timer);
-
-#[derive(Resource)]
 struct OnlineTimer(Timer);
 
 /// What to show for latency.
@@ -105,8 +96,15 @@ pub fn ping_label(state: &ConnectionState, ping_ms: Option<u32>) -> String {
 /// actually travels. It excludes egress queueing, so it answers "is the network
 /// or server slow" rather than "am I being shed" — walk-to-confirmation is the
 /// measure for the latter.
-fn send_ping(time: Res<Time>, mut timer: ResMut<PingTimer>, session: Res<Session>) {
-    if !timer.0.tick(time.delta()).just_finished() {
+fn send_ping(time: Res<Time>, mut schedule: ResMut<PingSchedule>, session: Res<Session>) {
+    // Scheduled on its own clock, not from the readout's refresh: tying the
+    // probe to a display update makes its rate a function of the frame rate,
+    // so a struggling client probes less exactly when latency matters most.
+    //
+    // The schedule fires at most once per call however long the frame was, so
+    // a suspended tab resuming after thirty seconds sends one probe rather
+    // than the six a catch-up timer would owe.
+    if !schedule.tick(time.delta_secs_f64()) {
         return;
     }
     // Nothing to measure unless the socket is up, and probing a dead socket
@@ -116,6 +114,8 @@ fn send_ping(time: Res<Time>, mut timer: ResMut<PingTimer>, session: Res<Session
     }
     // Paused while the tab is hidden: a backgrounded tab is throttled, so any
     // sample taken there measures the browser's scheduler, not the network.
+    // The schedule has already been reset by the tick above, so resuming does
+    // not immediately fire a held-over probe either.
     if document_hidden() {
         return;
     }
@@ -218,8 +218,15 @@ mod tests {
     #[test]
     fn probing_is_rare_enough_not_to_be_a_load_source() {
         // Every connected client sends these, so the interval is a server-side
-        // cost as much as a client one.
+        // cost as much as a client one. The cadence itself is proved in
+        // `ui::telemetry`; this only pins the relationship between the two
+        // polls, which live in different modules and could drift apart.
+        use crate::ui::telemetry::PING_INTERVAL_SECS;
+
         assert!(PING_INTERVAL_SECS >= 5.0, "at most one probe per five seconds");
-        assert!(ONLINE_INTERVAL_SECS > PING_INTERVAL_SECS, "population moves slower than latency");
+        assert!(
+            f64::from(ONLINE_INTERVAL_SECS) > PING_INTERVAL_SECS,
+            "population moves slower than latency and must be polled less often"
+        );
     }
 }
