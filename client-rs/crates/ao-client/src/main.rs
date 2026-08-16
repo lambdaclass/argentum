@@ -19,7 +19,8 @@ use bevy::prelude::*;
 use bevy::window::{PresentMode, WindowResolution};
 use bevy::winit::{UpdateMode, WinitSettings};
 
-/// Logical viewport, matching the web client so both show the same area.
+/// Initial window size. On the web the canvas immediately grows to its parent;
+/// this is only the native default and the pre-resize frame.
 const VIEWPORT_WIDTH: u32 = 1280;
 const VIEWPORT_HEIGHT: u32 = 832;
 
@@ -56,11 +57,15 @@ fn main() {
                         present_mode: PresentMode::AutoVsync,
                         #[cfg(target_arch = "wasm32")]
                         canvas: Some(CANVAS_SELECTOR.into()),
-                        // Keep the logical viewport fixed. Letting the canvas
-                        // grow to its parent stretches the world and defeats
-                        // integer pixel scaling.
+                        // Track the element. The shell lays out against the
+                        // whole window — top bar, world viewport, character
+                        // rail — so a window narrower than the page puts the
+                        // rail off the right-hand edge and clips the status
+                        // bar. Stretching is not a risk here: `ui::scale`
+                        // keeps the world on a whole-number pixel grid
+                        // independently of the window size.
                         #[cfg(target_arch = "wasm32")]
-                        fit_canvas_to_parent: false,
+                        fit_canvas_to_parent: true,
                         // The browser's own shortcuts stay usable.
                         #[cfg(target_arch = "wasm32")]
                         prevent_default_event_handling: false,

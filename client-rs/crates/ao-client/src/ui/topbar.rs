@@ -13,11 +13,18 @@ use super::tokens::{ink, size, space, surface, type_scale};
 use crate::hud::{ping_label, HudStats};
 use crate::session::Session;
 use bevy::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
 
 /// Build identity shown in the bar.
 ///
-/// `AO_BUILD` is stamped by CI; a local build says so rather than claiming a
-/// build number it does not have.
+/// The commit this binary was built from, stamped by `build.rs`. It is here so
+/// a screenshot can be matched to a commit: without it, "this is how it looks
+/// now" and "I just fixed that" cannot be lined up, which has already cost more
+/// than one round trip.
+///
+/// A build with no git available says so rather than claiming an identity it
+/// does not have.
 fn build_stamp() -> String {
     match option_env!("AO_BUILD") {
         Some(build) => format!("build {build}"),
@@ -87,19 +94,37 @@ pub enum BarAction {
     MuteAudio,
     MuteCombat,
     Settings,
+    /// Expand the client to fill the page, and back.
+    ///
+    /// The client presents as a window on the page by default, like the
+    /// reference client does. Bevy cannot resize its own host element, so this
+    /// is the one action that has to reach the page — through a capability
+    /// adapter, not by growing a second UI tree there.
+    ToggleMaximise,
 }
+
+/// Whether the host page is currently maximised.
+///
+/// Mirrored here so the button can render its state without asking the page
+/// every frame. The page remains authoritative; this is refreshed from it.
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Maximised(pub bool);
 
 pub struct TopBarPlugin;
 
 impl Plugin for TopBarPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, populate.after(super::shell::spawn_shell))
-            .add_systems(Update, update_readout);
+        app.init_resource::<Maximised>()
+            .add_systems(Startup, populate.after(super::shell::spawn_shell))
+            .add_systems(Update, (update_readout, handle_bar_clicks));
     }
 }
 
 fn icon_button(action: BarAction, glyph: &'static str) -> impl Bundle {
     (
+        // Buttons opt back in to picking; the shell root ignores it so clicks
+        // meant for the world are not swallowed by a transparent overlay.
+        Button,
         Node {
             width: Val::Px(size::ICON_BUTTON),
             height: Val::Px(size::ICON_BUTTON),
@@ -164,6 +189,7 @@ fn populate(mut commands: Commands, bars: Query<(Entity, &Region)>) {
                 (BarAction::MuteAudio, "AUD"),
                 (BarAction::MuteCombat, "CBT"),
                 (BarAction::Settings, "CFG"),
+                (BarAction::ToggleMaximise, "\u{25a1}"),
             ] {
                 group.spawn(icon_button(action, glyph));
             }
@@ -196,6 +222,45 @@ fn update_readout(
     }
 }
 
+/// Act on a pressed bar button.
+fn handle_bar_clicks(
+    buttons: Query<(&Interaction, &BarAction), Changed<Interaction>>,
+    mut maximised: ResMut<Maximised>,
+) {
+    for (interaction, action) in &buttons {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        if *action == BarAction::ToggleMaximise {
+            maximised.0 = !maximised.0;
+            set_page_maximised(maximised.0);
+        }
+    }
+}
+
+/// Ask the page to grow or shrink the client.
+#[cfg(target_arch = "wasm32")]
+fn set_page_maximised(on: bool) {
+    use wasm_bindgen::JsValue;
+
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Ok(adapter) = js_sys::Reflect::get(&window, &JsValue::from_str("aoWindow")) else {
+        return;
+    };
+    let Ok(setter) = js_sys::Reflect::get(&adapter, &JsValue::from_str("setMaximized")) else {
+        return;
+    };
+    if let Some(setter) = setter.dyn_ref::<js_sys::Function>() {
+        let _ = setter.call1(&adapter, &JsValue::from_bool(on));
+    }
+}
+
+/// Native windows are maximised by the desktop, not by the client.
+#[cfg(not(target_arch = "wasm32"))]
+fn set_page_maximised(_on: bool) {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,6 +274,7 @@ mod tests {
             assert_eq!(stamp, "dev build");
         } else {
             assert!(stamp.starts_with("build "));
+            assert!(stamp.len() > "build ".len(), "an empty build stamp is worse than none");
         }
     }
 

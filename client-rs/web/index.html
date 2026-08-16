@@ -51,27 +51,48 @@
         overflow: hidden;
       }
 
-      #shell {
-        height: 100%;
+      body {
         display: flex;
-        flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 14px;
       }
 
-      /* The canvas is pixel art. Integer scaling matters: at a fractional scale
-         nearest-neighbour duplicates some source pixels and not others, and as
-         the camera pans that duplication pattern shifts across the whole
-         viewport, which reads as the entire image shimmering. Bevy sizes the
-         backing store; this keeps the presented size honest. */
+      /* A window on the page, not the whole page — the same shape the reference
+         client presents, and the one the maximise control expands from.
+
+         Sizing lives on this element rather than on the canvas because Bevy is
+         told to track its parent: it overwrites the canvas's own width and
+         height every resize, so any rule set there is lost on the first frame.
+
+         Clamped to the viewport so a small screen still fits without
+         scrollbars, which is the case the fixed 1280x832 canvas got wrong —
+         the character rail sat past the right-hand edge and the status bar was
+         cut in half. */
+      #shell {
+        width: min(1280px, 100vw);
+        height: min(832px, 100vh);
+        border: 1px solid var(--panel-edge);
+        box-shadow: 0 0 0 1px #000, 0 18px 48px rgba(0, 0, 0, 0.75);
+        overflow: hidden;
+      }
+
+      #shell.maximized {
+        width: 100vw;
+        height: 100vh;
+        border: none;
+        box-shadow: none;
+      }
+
+      /* Pixel art: never let the browser resample it. Bevy owns the backing
+         store and applies the device pixel ratio itself, so the presented size
+         must match the element exactly — CSS scaling here would put the world
+         back on a fractional pixel grid. */
       #ao-canvas {
         display: block;
+        width: 100%;
+        height: 100%;
         image-rendering: pixelated;
         background: #000;
-        border: 1px solid var(--panel-edge);
-        border-radius: 3px;
-        box-shadow: 0 0 0 1px #000, 0 18px 48px rgba(0, 0, 0, 0.75);
         outline: none;
       }
 
@@ -136,14 +157,6 @@
         white-space: pre-wrap;
       }
 
-      #hint {
-        font-size: 11px;
-        letter-spacing: 0.08em;
-        color: var(--ink-dim);
-      }
-
-      #hint b { color: var(--gold-soft); font-weight: 600; }
-
       @media (prefers-reduced-motion: reduce) {
         .bar span { animation: none; width: 100%; }
       }
@@ -151,8 +164,14 @@
   </head>
   <body>
     <div id="shell">
-      <canvas id="ao-canvas" width="736" height="608" tabindex="0"></canvas>
-      <p id="hint">Move with <b>WASD</b> or the <b>arrow keys</b></p>
+      <!-- Bevy resizes this to the element. The attributes are only what the
+           browser shows for the instant before the module loads.
+
+           Nothing else lives in here: guidance, status and every panel are
+           Bevy-owned, which is the architecture invariant the roadmap sets. A
+           movement hint used to sit below the canvas and was exactly the kind
+           of second UI tree that later disagrees with the first. -->
+      <canvas id="ao-canvas" width="1280" height="832" tabindex="0"></canvas>
     </div>
 
     <div id="boot">
@@ -161,6 +180,21 @@
       <div class="bar"><span></span></div>
       <p class="err" id="boot-error" hidden></p>
     </div>
+
+    <script>
+      // Browser-capability adapter, not application UI. Bevy owns every screen;
+      // it cannot resize its own host element, so this exposes the one thing
+      // only the page can do. Deliberately tiny and stateless-ish: the shell is
+      // still the single source of truth for whether it is maximised.
+      window.aoWindow = {
+        setMaximized(on) {
+          document.getElementById("shell")?.classList.toggle("maximized", !!on);
+        },
+        isMaximized() {
+          return !!document.getElementById("shell")?.classList.contains("maximized");
+        },
+      };
+    </script>
 
     <script type="module">
       import init from "./pkg/ao-client.js";

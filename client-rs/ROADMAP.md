@@ -398,6 +398,31 @@ rendered state plus emitted activation. The production control path must be
 reachable outside `#[cfg(test)]`; unused `Control`, `FocusOwner`, builders or
 text-field warnings mean the interaction model is not integrated.
 
+### Task W-0085 — Pointer and hit-test coordinate integrity
+
+- **State:** planned
+- **Phase:** 0
+- **Depends on:** W-0003, W-0005
+
+Define one coordinate pipeline from browser/native pointer position through the
+canvas, Bevy UI and world camera. Apply CSS presentation size, backing-store
+size, DPR, UI scale, camera viewport offset and world projection exactly once.
+The control that is visibly under the pointer must be the control that receives
+the event, and UI interception must prevent the same click from reaching the
+world.
+
+Exercise DPR 1.0, 1.25, 1.5, 1.75 and 2.0 at windowed, maximized and fullscreen
+sizes. For representative inventory, spell, hotbar, tab and dialog controls,
+click the center, every edge one pixel inside and one pixel outside; assert the
+expected entity activates exactly once. Click the center and four edges of the
+world viewport and prove the selected tile matches the rendered tile without an
+off-by-one error. Repeat after resize, browser zoom and DPR change.
+
+Pointer capture must survive an in-progress drag while the pointer remains in
+the window and cancel cleanly on focus loss, pointer exit, panel removal or an
+invalidating resize. Close with browser-driven input tests plus Bevy app tests;
+screenshots and pure coordinate arithmetic alone are insufficient.
+
 ### Task W-0006 — Character, vitals, inventory and equipment prototype
 
 - **State:** planned
@@ -503,11 +528,38 @@ movement, interaction, combat, inventory, spells, death and recovery. Exercise
 long ES/EN/PT strings, Unicode composition, missing localization and unavailable
 capabilities.
 
+### Task W-0087 — Worst-case UI data and fallback fixtures
+
+- **State:** planned
+- **Phase:** 0
+- **Depends on:** W-0004, W-0006, W-0007, W-0008, W-0009, W-0011
+
+Add one deterministic stress fixture using the server/protocol maximum for every
+bounded collection: all inventory and equipment slots occupied, the maximum
+spellbook and hotbar pages, the retained chat-message limit, the longest valid
+character/item/spell labels and the largest supported numeric values. If a
+maximum is not currently defined, define and document a named client display or
+retention cap before constructing the fixture; do not choose a silent arbitrary
+number.
+
+Add independent failure variants for an unknown/missing GRH icon, unavailable
+primary font, missing localization key, oversized translated label and malformed
+numeric value. Each produces a stable visible fallback, preserves layout and
+remains actionable where safe. Player-facing screens must not expose a raw
+semantic key, collapse a slot to zero size or replace a whole panel with an
+empty black rectangle.
+
+Record spawned UI entity count, rebuild count and p95 frame time while the
+fixture is visible for ten seconds. Reapplying an identical fixture performs no
+rebuild; switching away and back returns to the same bounded entity count. W-0020
+sets production budgets later, but this task records the Phase 0 baseline and
+fails monotonic entity or memory growth.
+
 ### Task W-0012 — Component gallery and deterministic visual harness
 
 - **State:** planned
 - **Phase:** 0
-- **Depends on:** W-0002, W-0003, W-0004, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0011
+- **Depends on:** W-0002, W-0003, W-0004, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0011, W-0085, W-0087
 
 Create a Bevy component gallery and scripted capture harness sharing the same
 fixtures as production UI. Pin fonts, seed, animation time, map/camera, locale,
@@ -515,11 +567,35 @@ logical resolution, DPR and GPU tolerance. Store approved goldens for 720p,
 1080p, 1440p, ultrawide, small laptop, compact rail, maximized and fullscreen;
 include peaceful, combat, loading, empty and rejected states.
 
+### Task W-0086 — Resize and UI lifecycle stress
+
+- **State:** planned
+- **Phase:** 0
+- **Depends on:** W-0002, W-0003, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0012, W-0085, W-0087
+
+Run the production Bevy tree through repeated lifecycle changes rather than
+testing each layout once. A scripted test performs 250 alternating resizes
+across minimum, 720p, 1080p and ultrawide bounds; 1,000 panel open/close cycles;
+1,000 inventory/spell tab switches; repeated maximize/fullscreen restoration;
+and a zero-sized/minimized canvas followed by restoration.
+
+After every settled transition there is exactly one shell root, top bar, world
+camera, rail and hotbar. Hidden or removed controls cannot retain focus; no drag,
+tooltip, modal, armed spell or captured pointer survives the transition that
+invalidates it. A zero-sized surface produces no panic, NaN, enormous viewport
+or world command, and restoration produces a correctly laid-out frame within
+two rendered frames.
+
+Record entity count, active browser listeners/observers and WASM/native memory
+before and after the run. Counts return to the documented baseline except for
+explicit bounded caches; they cannot grow once per cycle. Run the stress path in
+native and a real browser, not only against pure layout functions.
+
 ### Task W-0013 — Phase 0 technical evidence
 
 - **State:** planned
 - **Phase:** 0
-- **Depends on:** W-0001, W-0002, W-0003, W-0004, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0011, W-0012
+- **Depends on:** W-0001, W-0002, W-0003, W-0004, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0011, W-0012, W-0085, W-0086, W-0087
 
 Run the Phase 0 technical checklist, archive capture artifacts and correct every
 failed contract. This closes the engineering gate and unlocks Phase 1; it does
@@ -578,11 +654,23 @@ close through `W-0014`; scheduling people does not idle ready technical work.
 - [ ] Pointer and keyboard input traverse, focus and activate real spawned Bevy
       controls. Inventory/spell/hotbar interactions emit typed intents through
       the shared control path; no production control model exists only in tests.
+- [ ] At every supported DPR and after resize/zoom/fullscreen changes, clicks at
+      control centers and boundaries activate exactly the rendered control;
+      world clicks resolve to the rendered tile and intercepted UI clicks emit
+      no world command.
 - [ ] Twenty identical snapshot writes produce no Bevy change tick or UI
       rebuild; one semantic change produces exactly one rebuild; malformed NaN
       data settles without whole-snapshot debug formatting.
+- [ ] The named worst-case fixture renders bounded maximum inventory, equipment,
+      spells, hotbar and chat data plus longest labels. Missing GRH/font/key and
+      malformed-value variants remain stable, legible and free of raw semantic
+      keys; entity/rebuild/frame baselines are recorded.
 - [ ] Focus, modal/chat ownership, drag cancellation, tooltips and IME never
       leak unintended world commands.
+- [ ] The native/browser lifecycle stress run completes 250 resizes, 1,000 panel
+      cycles and 1,000 tab switches. Shell/camera roots remain unique, invalid
+      transient state is cleared and entity/listener/memory counts do not grow
+      once per cycle.
 - [ ] Component gallery and production UI share models, intents, fixtures,
       tokens and components; the deterministic golden matrix passes.
 - [ ] Source/browser checks find no DOM/CSS application panel, form, navigation

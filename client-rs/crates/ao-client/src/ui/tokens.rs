@@ -18,16 +18,23 @@ use bevy::prelude::*;
 pub mod surface {
     use super::*;
 
-    /// Behind everything. Only visible in the letterbox on odd aspect ratios.
-    pub const VOID: Color = Color::srgb(0.024, 0.028, 0.035);
+    // These were all roughly half as bright, and on a real screen the whole
+    // rail rendered as a single black rectangle: the panel, the wells inside
+    // it and the borders between them were within a few percent of each other
+    // and of the page background. Every surface here now has to be separable
+    // from its neighbour, which the `panel_surfaces_are_separable` test holds
+    // them to.
+
+    /// Behind everything. Only visible in the perimeter on capped displays.
+    pub const VOID: Color = Color::srgb(0.012, 0.010, 0.009);
     /// The top bar and rail body.
-    pub const PANEL: Color = Color::srgb(0.075, 0.063, 0.051);
+    pub const PANEL: Color = Color::srgb(0.250, 0.204, 0.147);
     /// Inset areas inside a panel: slot grids, list backgrounds.
-    pub const WELL: Color = Color::srgb(0.043, 0.036, 0.030);
+    pub const WELL: Color = Color::srgb(0.155, 0.127, 0.098);
     /// A raised element inside a panel: an unfilled slot, a button face.
-    pub const RAISED: Color = Color::srgb(0.110, 0.094, 0.075);
+    pub const RAISED: Color = Color::srgb(0.320, 0.262, 0.186);
     /// Panel edges and separators.
-    pub const EDGE: Color = Color::srgb(0.180, 0.145, 0.094);
+    pub const EDGE: Color = Color::srgb(0.450, 0.360, 0.225);
 }
 
 /// Text and iconography.
@@ -156,6 +163,51 @@ mod tests {
     const AA_TEXT: f32 = 4.5;
     /// WCAG AA for large text and for meaningful non-text elements.
     const AA_LARGE: f32 = 3.0;
+
+    #[test]
+    fn panel_surfaces_are_separable_from_each_other() {
+        // The whole rail once rendered as one black rectangle: panel, well,
+        // raised and edge were within a few percent of each other, so none of
+        // the structure was visible. Each pair has to be distinguishable.
+        let surfaces = [
+            ("void", surface::VOID),
+            ("panel", surface::PANEL),
+            ("well", surface::WELL),
+            ("raised", surface::RAISED),
+            ("edge", surface::EDGE),
+        ];
+
+        for (i, (a_name, a)) in surfaces.iter().enumerate() {
+            for (b_name, b) in &surfaces[i + 1..] {
+                let ratio = contrast_ratio(*a, *b);
+                assert!(
+                    ratio >= 1.25,
+                    "{a_name} and {b_name} are only {ratio:.2}:1 apart — the boundary is invisible"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_panel_is_visible_against_the_page_behind_it() {
+        // The client presents as a window on a dark page. A panel that matches
+        // the page has no edge, and the interface looks like it is floating in
+        // nothing.
+        let page = Color::srgb(0.027, 0.035, 0.051);
+        assert!(contrast_ratio(surface::PANEL, page) >= 1.5);
+    }
+
+    #[test]
+    fn a_border_is_visible_against_both_surfaces_it_separates() {
+        // A border only doing its job on one side still leaves slots looking
+        // like one continuous well.
+        for (name, against) in
+            [("panel", surface::PANEL), ("well", surface::WELL), ("raised", surface::RAISED)]
+        {
+            let ratio = contrast_ratio(surface::EDGE, against);
+            assert!(ratio >= 1.3, "the edge is only {ratio:.2}:1 against {name}");
+        }
+    }
 
     #[test]
     fn body_text_is_legible_on_every_surface_it_is_drawn_on() {
