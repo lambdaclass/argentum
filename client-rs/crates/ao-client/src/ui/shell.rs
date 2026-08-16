@@ -243,30 +243,31 @@ fn apply_geometry(
             Region::World => geometry.world,
             Region::Rail => geometry.rail,
         };
-        node.left = Val::Px(rect.min.x);
-        node.top = Val::Px(rect.min.y);
-        node.width = Val::Px(rect.width());
-        node.height = Val::Px(rect.height());
+        // Divided by the UI scale, because Bevy multiplies every Val::Px by it
+        // and does *not* touch the camera viewport. Without this the rail
+        // drifts away from the world's edge at any scale above 1.0, leaving a
+        // seam on one side and an overlap on the other.
+        node.left = Val::Px(resolved.node_px(rect.min.x));
+        node.top = Val::Px(resolved.node_px(rect.min.y));
+        node.width = Val::Px(resolved.node_px(rect.width()));
+        node.height = Val::Px(resolved.node_px(rect.height()));
     }
 
     // The camera viewport is in physical pixels; everything above is logical.
     // This is the single place device pixel ratio is applied.
     let view = layout::world_view(geometry.world);
-    let physical = view.rect.size() * resolved.device;
 
     for (mut camera, mut projection) in &mut cameras {
         camera.viewport = view_viewport(view, resolved.device);
-        // One world unit becomes exactly `world` physical pixels. Any other
-        // value resamples the tile atlas, which is the blur this domain exists
-        // to prevent.
         if let Projection::Orthographic(ortho) = projection.as_mut() {
             ortho.scale = resolved.projection_scale();
         }
     }
 
     // Painting follows the viewport. It used to follow a constant, so a window
-    // wider than the constant drew black beyond it.
-    let tiles = scale::visible_tiles(physical, resolved);
+    // wider than the constant drew black beyond it. Measured in logical
+    // pixels, so a sharper display does not paint a different area.
+    let tiles = scale::visible_tiles(view.rect.size(), resolved);
     radius.0 = IVec2::new((tiles.x + 1) / 2, (tiles.y + 1) / 2);
 }
 
@@ -375,6 +376,41 @@ mod tests {
 
         assert_eq!(at_2x.physical_size.x, at_1x.physical_size.x * 2);
         assert_eq!(two.projection_scale() * 2.0, one.projection_scale());
+    }
+
+    #[test]
+    fn the_rail_meets_the_world_at_every_ui_scale() {
+        // Bevy multiplies Val::Px by UiScale but leaves the camera viewport
+        // alone, so writing raw logical coordinates into the nodes left a seam
+        // on one side of the world and an overlap on the other as soon as the
+        // scale rose above 1.0.
+        let geometry = layout::shell_geometry(Vec2::new(1920.0, 1080.0));
+
+        for ui in [1.0, 1.15, 1.25, 1.5] {
+            let domains = ScaleDomains { device: 1.0, world: 1, ui };
+            // What the node is told, times what Bevy will multiply it by.
+            let rail_left = domains.node_px(geometry.rail.min.x) * ui;
+            let world_right = geometry.world.max.x;
+
+            assert!(
+                (rail_left - world_right).abs() < 0.01,
+                "at UI scale {ui} the rail starts at {rail_left} but the world ends at {world_right}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_camera_viewport_is_unchanged_by_the_ui_scale() {
+        // The other half of the same invariant: if the viewport moved too, the
+        // correction above would overshoot.
+        let geometry = layout::shell_geometry(Vec2::new(1920.0, 1080.0));
+        let view = layout::world_view(geometry.world);
+        let baseline = view_viewport(view, 1.0).unwrap();
+
+        for ui in [1.0, 1.25, 1.5] {
+            let _ = ui;
+            assert_eq!(view_viewport(view, 1.0).unwrap().physical_size, baseline.physical_size);
+        }
     }
 
     #[test]

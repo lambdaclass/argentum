@@ -549,6 +549,47 @@ impl UiSnapshot {
     }
 }
 
+impl UiSnapshot {
+    /// Whether two snapshots describe the same state, treating equal NaNs as
+    /// equal.
+    ///
+    /// `PartialEq` cannot do this and should not: NaN really is not equal to
+    /// itself. But a *snapshot* carrying one is still the same snapshot, and
+    /// change detection written on `PartialEq` would rebuild the entire
+    /// interface every frame for as long as a malformed cooldown was on
+    /// screen.
+    ///
+    /// Only the fields that can carry a float need the special case; the rest
+    /// compare normally, which keeps this far cheaper than formatting both
+    /// values and comparing the strings.
+    pub fn same_state_as(&self, other: &Self) -> bool {
+        self.progression == other.progression
+            && self.vitals == other.vitals
+            && self.inventory == other.inventory
+            && self.equipment == other.equipment
+            && self.spellbook == other.spellbook
+            && self.target == other.target
+            && self.chat == other.chat
+            && self.skills == other.skills
+            && self.safety == other.safety
+            && self.service == other.service
+            && self.feedback == other.feedback
+            && self.loading == other.loading
+            && hotbars_match(&self.hotbar, &other.hotbar)
+    }
+}
+
+/// Compare hotbars, treating two NaN cooldowns as the same.
+fn hotbars_match(a: &HotbarState, b: &HotbarState) -> bool {
+    a.page == b.page
+        && a.page_count == b.page_count
+        && a.slots.len() == b.slots.len()
+        && a.slots.iter().zip(&b.slots).all(|(x, y)| {
+            x.binding == y.binding
+                && (x.cooldown == y.cooldown || (x.cooldown.is_nan() && y.cooldown.is_nan()))
+        })
+}
+
 /// Something the player asked for.
 ///
 /// The interface emits these and nothing else. It cannot send a packet, so it
@@ -786,6 +827,49 @@ mod tests {
         assert!(!snapshot.text_input_has_focus());
         snapshot.chat.composing = true;
         assert!(snapshot.text_input_has_focus());
+    }
+
+    #[test]
+    fn a_snapshot_carrying_nan_still_recognises_itself() {
+        // Change detection written on PartialEq would rebuild the whole
+        // interface every frame for as long as a malformed cooldown was on
+        // screen, because NaN is not equal to itself.
+        let mut snapshot = UiSnapshot::default();
+        snapshot.hotbar.slots = vec![HotbarSlotState { binding: None, cooldown: f32::NAN }];
+
+        assert_ne!(snapshot, snapshot.clone(), "PartialEq still behaves correctly");
+        assert!(snapshot.same_state_as(&snapshot.clone()), "but the state is unchanged");
+    }
+
+    #[test]
+    fn a_real_change_is_still_detected_alongside_a_nan() {
+        // The comparison must not be so forgiving that it misses an update.
+        let mut a = UiSnapshot::default();
+        a.hotbar.slots = vec![HotbarSlotState { binding: None, cooldown: f32::NAN }];
+        let mut b = a.clone();
+        b.vitals.health = Gauge::new(1, 10);
+
+        assert!(!a.same_state_as(&b));
+    }
+
+    #[test]
+    fn a_changed_cooldown_is_detected() {
+        let mut a = UiSnapshot::default();
+        a.hotbar.slots = vec![HotbarSlotState { binding: None, cooldown: 0.5 }];
+        let mut b = a.clone();
+        b.hotbar.slots[0].cooldown = 0.4;
+
+        assert!(!a.same_state_as(&b));
+        assert!(a.same_state_as(&a.clone()));
+    }
+
+    #[test]
+    fn a_hotbar_that_gained_a_slot_is_a_change() {
+        let a = UiSnapshot::default();
+        let mut b = a.clone();
+        b.hotbar.slots.push(HotbarSlotState::default());
+
+        assert!(!a.same_state_as(&b));
     }
 
     #[test]

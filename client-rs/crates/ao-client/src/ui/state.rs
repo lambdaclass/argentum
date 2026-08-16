@@ -28,19 +28,37 @@ impl UiState {
 
     /// Replace the snapshot. The only way it changes.
     ///
-    /// Bevy's change detection fires on any call, including one that writes an
-    /// identical value. Filtering here rather than at each reader means a
-    /// future live adapter polling at 20Hz does not rebuild the whole rail 20
-    /// times a second for nothing.
+    /// Bevy's change detection fires on any call that takes `ResMut`, including
+    /// one that writes an identical value. Filtering here rather than at each
+    /// reader means a live adapter polling at 20Hz does not rebuild the whole
+    /// rail twenty times a second for nothing.
     ///
-    /// The comparison is on the formatted value, not `PartialEq`: a snapshot
-    /// carrying a NaN — which malformed server data can produce — is never
-    /// equal to itself and would defeat the filter entirely.
+    /// `same_state_as` rather than `PartialEq`, because a snapshot carrying a
+    /// NaN — which malformed server data produces — is never equal to itself
+    /// and would defeat the filter exactly when it matters most. It formerly
+    /// compared `Debug` output, which worked but allocated two full renderings
+    /// of the entire interface state on every poll.
     pub fn set(&mut self, snapshot: UiSnapshot) {
-        if format!("{:?}", snapshot) == format!("{:?}", self.snapshot) {
+        if snapshot.same_state_as(&self.snapshot) {
             return;
         }
         self.snapshot = snapshot;
+    }
+
+    /// Write through a `ResMut`, ticking change detection only on a real change.
+    ///
+    /// Taking a `ResMut` at all marks the resource changed the moment it is
+    /// dereferenced, whatever the write turns out to be — so guarding inside
+    /// `set` stops the *value* changing but not the tick, and the rail rebuilds
+    /// anyway. The write therefore bypasses detection and the tick is raised
+    /// explicitly, which is the only way to make "nothing happened" cost
+    /// nothing.
+    pub fn publish(state: &mut ResMut<'_, UiState>, snapshot: UiSnapshot) {
+        if snapshot.same_state_as(&state.bypass_change_detection().snapshot) {
+            return;
+        }
+        state.bypass_change_detection().snapshot = snapshot;
+        state.set_changed();
     }
 }
 
@@ -65,6 +83,19 @@ impl Default for ActiveScenario {
 #[derive(Message, Debug, Clone, PartialEq, Eq)]
 pub struct IntentMessage(pub Intent);
 
+/// System ordering label for the intent pipeline.
+///
+/// Filtering has to happen before anything consumes intents, or a ghost's
+/// forbidden action reaches the session in the same frame it was refused. An
+/// explicit set makes that orderable rather than accidental.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum IntentSet {
+    /// Drops intents the player is not allowed to make.
+    Filter,
+    /// Anything that acts on what survives.
+    Consume,
+}
+
 pub struct UiStatePlugin;
 
 impl Plugin for UiStatePlugin {
@@ -72,8 +103,15 @@ impl Plugin for UiStatePlugin {
         app.init_resource::<UiState>()
             .init_resource::<ActiveScenario>()
             .add_message::<IntentMessage>()
+            .configure_sets(Update, IntentSet::Filter.before(IntentSet::Consume))
             .add_systems(Startup, apply_scenario)
-            .add_systems(Update, (apply_scenario.run_if(scenario_changed), refuse_dead_intents));
+            .add_systems(
+                Update,
+                (
+                    apply_scenario.run_if(scenario_changed),
+                    refuse_dead_intents.in_set(IntentSet::Filter),
+                ),
+            );
     }
 }
 
@@ -82,7 +120,7 @@ fn scenario_changed(scenario: Res<ActiveScenario>) -> bool {
 }
 
 fn apply_scenario(scenario: Res<ActiveScenario>, mut state: ResMut<UiState>) {
-    state.set(fixtures::snapshot(scenario.0));
+    UiState::publish(&mut state, fixtures::snapshot(scenario.0));
 }
 
 /// Drop intents a ghost cannot act on.
@@ -134,29 +172,99 @@ mod tests {
         assert!(app.world().resource::<UiState>().get().is_dead());
     }
 
-    #[test]
-    fn writing_an_identical_snapshot_does_not_report_a_change() {
-        // A live adapter polling at 20Hz would otherwise rebuild the whole rail
-        // twenty times a second for nothing.
-        let mut state = UiState::default();
-        state.set(fixtures::snapshot(Scenario::Populated));
-        let before = format!("{:?}", state.get());
+    /// Counts how many frames a reader saw the state as changed.
+    #[derive(Resource, Default)]
+    struct Rebuilds(usize);
 
-        state.set(fixtures::snapshot(Scenario::Populated));
-        assert_eq!(format!("{:?}", state.get()), before);
+    /// Publish `scenarios` one per frame and count the rebuilds a reader sees.
+    ///
+    /// Counted from inside a system, because that is where it matters and
+    /// because `is_changed()` read from outside compares against a tick that
+    /// `update()` has already advanced — it answers a different question.
+    fn rebuilds(scenarios: &[Scenario]) -> usize {
+        let script: Vec<Scenario> = scenarios.to_vec();
+        let mut app = App::new();
+        app.init_resource::<UiState>().init_resource::<Rebuilds>();
+
+        let mut frame = 0usize;
+        app.add_systems(
+            Update,
+            (
+                move |mut state: ResMut<UiState>| {
+                    if let Some(scenario) = script.get(frame) {
+                        UiState::publish(&mut state, fixtures::snapshot(*scenario));
+                    }
+                    frame += 1;
+                },
+                |state: Res<UiState>, mut count: ResMut<Rebuilds>| {
+                    if state.is_changed() {
+                        count.0 += 1;
+                    }
+                },
+            )
+                .chain(),
+        );
+
+        for _ in 0..scenarios.len() {
+            app.update();
+        }
+        app.world().resource::<Rebuilds>().0
     }
 
     #[test]
-    fn a_malformed_snapshot_still_settles_rather_than_changing_forever() {
-        // It carries a NaN, so `PartialEq` reports it as different from
-        // itself. Comparing the formatted value is what stops the filter from
-        // being defeated by exactly the data it most needs to handle.
-        let mut state = UiState::default();
-        state.set(fixtures::snapshot(Scenario::Malformed));
-        let first = format!("{:?}", state.get());
+    fn an_identical_snapshot_does_not_rebuild_the_interface() {
+        // Once for the first real value, never again. A live adapter polling at
+        // 20Hz would otherwise rebuild the whole rail twenty times a second.
+        for scenario in [Scenario::Populated, Scenario::Empty, Scenario::DeadGhost] {
+            let count = rebuilds(&[scenario; 5]);
+            assert_eq!(count, 1, "{} rebuilt {count} times for one value", scenario.key());
+        }
+    }
 
-        state.set(fixtures::snapshot(Scenario::Malformed));
-        assert_eq!(format!("{:?}", state.get()), first);
+    #[test]
+    fn a_malformed_snapshot_settles_rather_than_rebuilding_forever() {
+        // It carries a NaN, so PartialEq reports it as different from itself.
+        // Without the NaN-aware comparison this is an unbounded rebuild loop,
+        // and it happens exactly when the client is already struggling.
+        assert_eq!(rebuilds(&[Scenario::Malformed; 5]), 1);
+    }
+
+    #[test]
+    fn a_genuine_change_does_rebuild() {
+        // The filter must not be so eager that a real update is dropped.
+        assert_eq!(
+            rebuilds(&[
+                Scenario::Populated,
+                Scenario::Populated,
+                Scenario::Empty,
+                Scenario::Empty,
+                Scenario::DeadGhost,
+            ]),
+            3
+        );
+    }
+
+    #[test]
+    fn intents_are_filtered_before_anything_consumes_them() {
+        // Ordering, not luck. A consumer scheduled before the filter would act
+        // on a ghost's forbidden intent in the frame it was supposedly refused.
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static SEEN: AtomicUsize = AtomicUsize::new(0);
+
+        fn consume(mut intents: MessageReader<IntentMessage>) {
+            SEEN.fetch_add(intents.read().count(), Ordering::SeqCst);
+        }
+
+        SEEN.store(0, Ordering::SeqCst);
+        let mut app = App::new();
+        app.add_plugins(UiStatePlugin).add_systems(Update, consume.in_set(IntentSet::Consume));
+        *app.world_mut().resource_mut::<ActiveScenario>() = ActiveScenario(Scenario::DeadGhost);
+        app.update();
+
+        app.world_mut().write_message(IntentMessage(Intent::UseInventorySlot { slot: 0 }));
+        app.update();
+
+        assert_eq!(SEEN.load(Ordering::SeqCst), 0, "a consumer saw a refused intent");
     }
 
     #[test]
