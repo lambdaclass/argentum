@@ -15,9 +15,14 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 /// One drawable region within a sheet.
-#[derive(Debug, Clone, Copy)]
+///
+/// `sheet` is the full asset path because the two indices name sheets
+/// differently: map tiles use numeric files under `/graficos`, characters use
+/// short string names like `a1` under `/graficos_char`. Carrying the resolved
+/// path removes that distinction from every call site.
+#[derive(Debug, Clone)]
 pub struct Grh {
-    pub file: u32,
+    pub sheet: String,
     pub x: f32,
     pub y: f32,
     pub width: f32,
@@ -40,15 +45,18 @@ impl GrhIndex {
     /// Resolve a grh to a drawable region, following one level of animation.
     pub fn resolve(&self, id: i32) -> Option<Grh> {
         if let Some(grh) = self.statics.get(&id) {
-            return Some(*grh);
+            return Some(grh.clone());
         }
         let first = *self.animations.get(&id)?.first()?;
-        self.statics.get(&first).copied()
+        self.statics.get(&first).cloned()
     }
 
-    /// Parse the index. Hand-rolled rather than serde to keep the wasm payload
-    /// down; the shape is fixed and flat, and this file is 5.9 MB of it.
-    pub fn parse(json: &str) -> Self {
+    /// Parse an index. Hand-rolled rather than serde to keep the wasm payload
+    /// down; the shape is fixed and flat, and the map index is 5.9 MB of it.
+    ///
+    /// `base` is the asset directory the sheet names belong to, which differs
+    /// between the map and character indices.
+    pub fn parse(json: &str, base: &str) -> Self {
         let mut index = GrhIndex::default();
 
         for object in split_objects(json) {
@@ -56,11 +64,11 @@ impl GrhIndex {
                 continue;
             };
 
-            if let Some(grafico) = number_field(object, "grafico") {
+            if let Some(grafico) = sheet_field(object) {
                 index.statics.insert(
                     id,
                     Grh {
-                        file: grafico as u32,
+                        sheet: format!("{base}/{grafico}.png"),
                         x: number_field(object, "offX").unwrap_or(0.0) as f32,
                         y: number_field(object, "offY").unwrap_or(0.0) as f32,
                         width: number_field(object, "width").unwrap_or(32.0) as f32,
@@ -104,6 +112,27 @@ fn split_objects(json: &str) -> impl Iterator<Item = &str> {
     }
 
     out.into_iter()
+}
+
+/// Sheet name, which is a bare number in the map index and a quoted string in
+/// the character index.
+fn sheet_field(object: &str) -> Option<String> {
+    let needle = "\"grafico\"";
+    let at = object.find(needle)? + needle.len();
+    let rest = object[at..].trim_start().strip_prefix(':')?.trim_start();
+
+    if let Some(quoted) = rest.strip_prefix('"') {
+        let end = quoted.find('"')?;
+        return Some(quoted[..end].to_string());
+    }
+
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    if end == 0 {
+        return None;
+    }
+    Some(rest[..end].to_string())
 }
 
 fn number_field(object: &str, key: &str) -> Option<f64> {
@@ -185,6 +214,102 @@ pub fn parse_directional(json: &str) -> HashMap<i32, Directional> {
     out
 }
 
+/// An NPC's appearance from `npcs.json`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NpcLook {
+    pub body: i32,
+    pub head: i32,
+    pub heading: i32,
+}
+
+/// Parse `npcs.json`: `{name, body, head, heading}` keyed by npc id. Entries are
+/// sparse — the array has nulls where ids are unused.
+pub fn parse_npcs(json: &str) -> HashMap<i32, NpcLook> {
+    // npcs.json has no id field: the array position is the id, and nulls
+    // occupy positions. split_objects cannot be used here because skipping the
+    // nulls would shift every later npc's appearance.
+    let mut out = HashMap::new();
+    let mut id = 0i32;
+    let mut depth = 0usize;
+    let mut start = None;
+    let bytes = json.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'[' if depth == 0 => depth = 1,
+            b'{' => {
+                if depth == 1 {
+                    start = Some(i + 1);
+                }
+                depth += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                if depth == 1 {
+                    if let Some(s) = start.take() {
+                        let object = &json[s..i];
+                        out.insert(
+                            id,
+                            NpcLook {
+                                body: number_field(object, "body").unwrap_or(0.0) as i32,
+                                head: number_field(object, "head").unwrap_or(0.0) as i32,
+                                heading: number_field(object, "heading").unwrap_or(3.0) as i32,
+                            },
+                        );
+                    }
+                    id += 1;
+                }
+            }
+            b'n' if depth == 1 && json[i..].starts_with("null") => {
+                id += 1;
+                i += 3;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Parse `objs.json`: `{name, grh}` positionally, same sparse-array shape.
+pub fn parse_objects(json: &str) -> HashMap<i32, i32> {
+    let mut out = HashMap::new();
+    let mut id = 0i32;
+    let mut depth = 0usize;
+    let mut start = None;
+    let bytes = json.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'[' if depth == 0 => depth = 1,
+            b'{' => {
+                if depth == 1 {
+                    start = Some(i + 1);
+                }
+                depth += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                if depth == 1 {
+                    if let Some(s) = start.take() {
+                        if let Some(grh) = number_field(&json[s..i], "grh") {
+                            out.insert(id, grh as i32);
+                        }
+                    }
+                    id += 1;
+                }
+            }
+            b'n' if depth == 1 && json[i..].starts_with("null") => {
+                id += 1;
+                i += 3;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    out
+}
+
 /// Loading state for the index and sheets, shared with the async fetcher.
 #[derive(Resource, Clone)]
 pub struct Graphics {
@@ -194,10 +319,14 @@ pub struct Graphics {
 #[derive(Default)]
 pub struct GraphicsInner {
     pub index: Option<Arc<GrhIndex>>,
+    /// Characters resolve against a different index with different sheet names.
+    pub char_index: Option<Arc<GrhIndex>>,
     pub bodies: Option<Arc<HashMap<i32, Directional>>>,
     pub heads: Option<Arc<HashMap<i32, Directional>>>,
+    pub npcs: Option<Arc<HashMap<i32, NpcLook>>>,
+    pub objects: Option<Arc<HashMap<i32, i32>>>,
     /// Sheet file number -> decoded RGBA, awaiting upload as a Bevy image.
-    pub pending_sheets: Vec<(u32, u32, u32, Vec<u8>)>,
+    pub pending_sheets: Vec<(String, u32, u32, Vec<u8>)>,
     pub failed: Option<String>,
 }
 
@@ -212,7 +341,17 @@ impl Graphics {
         self.inner.lock().ok().and_then(|g| g.index.clone())
     }
 
-    pub fn take_pending_sheets(&self) -> Vec<(u32, u32, u32, Vec<u8>)> {
+    pub fn char_index(&self) -> Option<Arc<GrhIndex>> {
+        self.inner.lock().ok().and_then(|g| g.char_index.clone())
+    }
+
+    pub fn set_char_index(&self, index: GrhIndex) {
+        if let Ok(mut g) = self.inner.lock() {
+            g.char_index = Some(Arc::new(index));
+        }
+    }
+
+    pub fn take_pending_sheets(&self) -> Vec<(String, u32, u32, Vec<u8>)> {
         self.inner
             .lock()
             .map(|mut g| std::mem::take(&mut g.pending_sheets))
@@ -229,6 +368,26 @@ impl Graphics {
 
     pub fn heads(&self) -> Option<Arc<HashMap<i32, Directional>>> {
         self.inner.lock().ok().and_then(|g| g.heads.clone())
+    }
+
+    pub fn npcs(&self) -> Option<Arc<HashMap<i32, NpcLook>>> {
+        self.inner.lock().ok().and_then(|g| g.npcs.clone())
+    }
+
+    pub fn objects(&self) -> Option<Arc<HashMap<i32, i32>>> {
+        self.inner.lock().ok().and_then(|g| g.objects.clone())
+    }
+
+    pub fn set_npcs(&self, npcs: HashMap<i32, NpcLook>) {
+        if let Ok(mut g) = self.inner.lock() {
+            g.npcs = Some(Arc::new(npcs));
+        }
+    }
+
+    pub fn set_objects(&self, objects: HashMap<i32, i32>) {
+        if let Ok(mut g) = self.inner.lock() {
+            g.objects = Some(Arc::new(objects));
+        }
     }
 
     pub fn set_bodies(&self, bodies: HashMap<i32, Directional>) {
@@ -249,9 +408,9 @@ impl Graphics {
         }
     }
 
-    pub fn push_sheet(&self, file: u32, width: u32, height: u32, rgba: Vec<u8>) {
+    pub fn push_sheet(&self, sheet: String, width: u32, height: u32, rgba: Vec<u8>) {
         if let Ok(mut g) = self.inner.lock() {
-            g.pending_sheets.push((file, width, height, rgba));
+            g.pending_sheets.push((sheet, width, height, rgba));
         }
     }
 
@@ -264,7 +423,7 @@ impl Graphics {
 
 /// Sheet file number -> uploaded texture.
 #[derive(Resource, Default)]
-pub struct SheetTextures(pub HashMap<u32, Handle<Image>>);
+pub struct SheetTextures(pub HashMap<String, Handle<Image>>);
 
 /// Decode a PNG into raw RGBA plus its dimensions.
 pub fn decode_png(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
@@ -304,17 +463,17 @@ mod tests {
             {"id": 91, "frames": [85, 86, 87], "velocidad": 333.0},
             {"id": 85, "grafico": 7, "offX": 10, "offY": 20, "width": 27, "height": 47}
         ]"#;
-        let index = GrhIndex::parse(json);
+        let index = GrhIndex::parse(json, "graficos");
         assert_eq!(index.len(), 2);
 
         let one = index.resolve(1).expect("static grh");
-        assert_eq!(one.file, 1);
+        assert_eq!(one.sheet, "graficos/1.png");
         assert_eq!((one.x, one.y, one.width, one.height), (64.0, 0.0, 32.0, 32.0));
 
         // An animation resolves through to its first frame rather than
         // rendering nothing.
         let animated = index.resolve(91).expect("animated grh");
-        assert_eq!(animated.file, 7);
+        assert_eq!(animated.sheet, "graficos/7.png");
         assert_eq!(animated.height, 47.0);
     }
 
@@ -340,19 +499,52 @@ mod tests {
     }
 
     #[test]
+    fn character_sheets_are_named_with_strings() {
+        // The character index names sheets "a1", the map index names them 7.
+        // Treating both as numbers silently dropped every character graphic.
+        let index = GrhIndex::parse(
+            r#"[{"id": 3000, "grafico": "a1", "offX": 2729, "offY": 1734, "width": 17, "height": 50}]"#,
+            "graficos_char",
+        );
+        let head = index.resolve(3000).expect("head grh");
+        assert_eq!(head.sheet, "graficos_char/a1.png");
+        assert_eq!((head.width, head.height), (17.0, 50.0));
+    }
+
+    #[test]
+    fn npcs_are_keyed_by_array_position_including_nulls() {
+        // npcs.json has no id field; the index is the position, and nulls
+        // occupy positions. Skipping them shifts every later npc's appearance.
+        let npcs = parse_npcs(
+            r#"[null, {"name":"Sacerdote","body":117,"head":3,"heading":3}, null, {"name":"X","body":9,"head":1,"heading":1}]"#,
+        );
+        assert_eq!(npcs.get(&1).map(|n| n.body), Some(117));
+        assert_eq!(npcs.get(&3).map(|n| n.body), Some(9));
+        assert!(npcs.get(&0).is_none());
+        assert!(npcs.get(&2).is_none());
+    }
+
+    #[test]
+    fn objects_are_keyed_by_array_position_too() {
+        let objs = parse_objects(r#"[null, {"name":"Manzana Roja","grh":506}]"#);
+        assert_eq!(objs.get(&1), Some(&506));
+        assert!(objs.get(&0).is_none());
+    }
+
+    #[test]
     fn unknown_ids_resolve_to_none() {
-        assert!(GrhIndex::parse("[]").resolve(42).is_none());
+        assert!(GrhIndex::parse("[]", "graficos").resolve(42).is_none());
     }
 
     #[test]
     fn ignores_entries_without_an_id() {
-        let index = GrhIndex::parse(r#"[{"grafico": 3, "width": 32}]"#);
+        let index = GrhIndex::parse(r#"[{"grafico": 3, "width": 32}]"#, "graficos");
         assert_eq!(index.len(), 0);
     }
 
     #[test]
     fn animation_pointing_at_a_missing_frame_is_not_a_panic() {
-        let index = GrhIndex::parse(r#"[{"id": 5, "frames": [999], "velocidad": 1.0}]"#);
+        let index = GrhIndex::parse(r#"[{"id": 5, "frames": [999], "velocidad": 1.0}]"#, "graficos");
         assert!(index.resolve(5).is_none());
     }
 }

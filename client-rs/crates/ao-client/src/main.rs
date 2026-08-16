@@ -9,6 +9,7 @@
 
 mod graphics;
 mod net;
+mod session;
 mod world;
 
 use bevy::prelude::*;

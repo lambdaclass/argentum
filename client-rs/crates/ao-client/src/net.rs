@@ -10,13 +10,19 @@
 //! publishes into a shared slot which a system polls. On native there is no
 //! fetch yet; the client falls back to a generated map so it still runs.
 
-use crate::graphics::{decode_png, parse_directional, Graphics, GrhIndex};
+use crate::graphics::{
+    decode_png, parse_directional, parse_npcs, parse_objects, Graphics, GrhIndex,
+};
 use bevy::prelude::Resource;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 /// Appearance used until a real character is logged in.
-pub const DEFAULT_BODY: i32 = 1;
+///
+/// Taken from the game's own race table (`resources/raw/init/HeadAndBodyData.json`):
+/// a human male is body 21 with heads 1-41. Body 1 is not a player body — it
+/// belongs to another set entirely, which is why the character looked wrong.
+pub const DEFAULT_BODY: i32 = 21;
 pub const DEFAULT_HEAD: i32 = 1;
 
 /// Where a load has got to. Polled by `world::apply_loaded_map`.
@@ -165,8 +171,19 @@ pub fn start_graphics_load(graphics: Graphics, origin: String, grh_ids: Vec<i32>
             Err(message) => return graphics.fail(message),
         };
 
-        let index = GrhIndex::parse(&json);
-        log::info!("grh index: {} static regions", index.len());
+        let index = GrhIndex::parse(&json, "graficos");
+        log::info!("map grh index: {} static regions", index.len());
+
+        // Characters resolve against a different index whose sheets live under
+        // /graficos_char and are named with strings ("a1"), not numbers.
+        match fetch_text(&format!("{origin}/indices/graficos.json")).await {
+            Ok(json) => {
+                let char_index = GrhIndex::parse(&json, "graficos_char");
+                log::info!("character grh index: {} static regions", char_index.len());
+                graphics.set_char_index(char_index);
+            }
+            Err(e) => log::warn!("character index: {e}"),
+        }
 
         // Character bodies and heads. Small files, and the player is a coloured
         // box until they arrive.
@@ -180,36 +197,67 @@ pub fn start_graphics_load(graphics: Graphics, origin: String, grh_ids: Vec<i32>
             log::info!("heads: {}", heads.len());
             graphics.set_heads(heads);
         }
-
-        let mut wanted = grh_ids;
-        if let (Some(bodies), Some(heads)) = (graphics.bodies(), graphics.heads()) {
-            if let Some(body) = bodies.get(&DEFAULT_BODY) {
-                wanted.extend([body.north, body.east, body.south, body.west]);
-            }
-            if let Some(head) = heads.get(&DEFAULT_HEAD) {
-                wanted.extend([head.north, head.east, head.south, head.west]);
-            }
+        if let Ok(json) = fetch_text(&format!("{origin}/indices/npcs.json")).await {
+            let npcs = parse_npcs(&json);
+            log::info!("npc looks: {}", npcs.len());
+            graphics.set_npcs(npcs);
+        }
+        if let Ok(json) = fetch_text(&format!("{origin}/indices/objs.json")).await {
+            let objects = parse_objects(&json);
+            log::info!("object graphics: {}", objects.len());
+            graphics.set_objects(objects);
         }
 
         let mut files = HashSet::new();
-        for id in &wanted {
+        for id in &grh_ids {
             if let Some(grh) = index.resolve(*id) {
-                files.insert(grh.file);
+                files.insert(grh.sheet);
+            }
+        }
+
+        // Character art: every body and head referenced by the player and by
+        // the npcs on this map.
+        if let (Some(char_index), Some(bodies), Some(heads), Some(npcs)) = (
+            graphics.char_index(),
+            graphics.bodies(),
+            graphics.heads(),
+            graphics.npcs(),
+        ) {
+            let mut looks: Vec<(i32, i32)> = vec![(DEFAULT_BODY, DEFAULT_HEAD)];
+            looks.extend(npcs.values().map(|n| (n.body, n.head)));
+
+            for (body_id, head_id) in looks {
+                if let Some(body) = bodies.get(&body_id) {
+                    for grh in [body.north, body.east, body.south, body.west] {
+                        if let Some(grh) = char_index.resolve(grh) {
+                            files.insert(grh.sheet);
+                        }
+                    }
+                }
+                if head_id > 0 {
+                    if let Some(head) = heads.get(&head_id) {
+                        for grh in [head.north, head.east, head.south, head.west] {
+                            if let Some(grh) = char_index.resolve(grh) {
+                                files.insert(grh.sheet);
+                            }
+                        }
+                    }
+                }
             }
         }
         log::info!("{} distinct sheets needed for the visible area", files.len());
         graphics.set_index(index);
 
-        for file in files {
-            let url = format!("{origin}/graficos/{file}.png");
+        for sheet in files {
+            let url = format!("{origin}/{sheet}");
             match fetch_bytes(&url).await {
                 Ok(bytes) => match decode_png(&bytes) {
-                    Ok((w, h, rgba)) => graphics.push_sheet(file, w, h, rgba),
+                    Ok((w, h, rgba)) => graphics.push_sheet(sheet.clone(), w, h, rgba),
                     // One unreadable sheet must not stop the rest of the world
                     // from drawing.
-                    Err(e) => log::warn!("sheet {file}: {e}"),
+                    Err(e) => log::warn!("sheet {sheet}: {e}"),
                 },
-                Err(e) => log::warn!("sheet {file}: {e}"),
+                Err(e) => log::warn!("sheet {sheet}: {e}"),
             }
         }
     });

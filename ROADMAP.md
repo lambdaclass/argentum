@@ -7,6 +7,18 @@ Work inside a phase can happen in parallel, but phases should close in order
 because later phases depend on the proof, tooling, or operational surface built
 earlier.
 
+## Related Roadmaps
+
+`client-rs/ROADMAP.md` tracks the Rust/Bevy client (browser wasm plus native
+desktop). It also lists the **server** changes that client needs, tagged
+`[server]`, so the dependency is visible from one place rather than split. Two
+of those benefit the existing browser client independently: shipping map
+`triggers` in the client map pack (neither client can hide roofs without them)
+and immutable cache headers on content-hashed assets (neither client caches
+assets between sessions today).
+
+Server work accepted from that list should be scheduled into a phase here.
+
 ## Current Priority
 
 Start Phase 2 (Automated Proof Gate). Phase 1 is closed except the explicitly

@@ -3,6 +3,7 @@
 
 use crate::graphics::{make_image, Graphics, Heading, SheetTextures};
 use crate::net::{DEFAULT_BODY, DEFAULT_HEAD};
+use crate::session::{ConnectionState, Session};
 use crate::net::{start_graphics_load, LoadState, MapLoader};
 use ao_core::{is_walkable, TileFlags, WalkGate, WalkGateConfig, WalkOutcome};
 use bevy::prelude::*;
@@ -33,15 +34,20 @@ impl Plugin for WorldPlugin {
             .insert_resource(MapLoadReported(false))
             .insert_resource(DrawnTiles::default())
             .insert_resource(CharacterDrawn(false))
+            .insert_resource(DrawnEntities::default())
+            .insert_resource(SceneDirty::default())
+            .insert_resource(Session::default())
             .insert_resource(SheetAtlases::default())
-            .add_systems(Startup, (setup, start_map_load))
+            .add_systems(Startup, (setup, start_map_load, connect_to_server))
             .add_systems(
                 Update,
                 (
                     apply_loaded_map,
                     upload_sheets,
                     paint_scene,
+                    paint_entities,
                     paint_character,
+                    apply_server_messages,
                     handle_input,
                     follow_camera,
                 )
@@ -103,11 +109,12 @@ pub struct LocalPlayer {
     pub y: i32,
     pub speed: f64,
     pub navigating: bool,
+    pub heading: Heading,
 }
 
 impl Default for LocalPlayer {
     fn default() -> Self {
-        Self { x: 50, y: 50, speed: 1.0, navigating: false }
+        Self { x: 50, y: 50, speed: 1.0, navigating: false, heading: Heading::South }
     }
 }
 
@@ -159,12 +166,16 @@ fn setup(mut commands: Commands, player: Res<LocalPlayer>, blockmap: Res<Blockma
     ));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_input(
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     blockmap: Res<Blockmap>,
     mut player: ResMut<LocalPlayer>,
     mut walk: ResMut<Walk>,
+    mut character: ResMut<CharacterDrawn>,
+    mut scene: ResMut<SceneDirty>,
+    session: Res<Session>,
     mut sprites: Query<&mut Transform, With<PlayerSprite>>,
 ) {
     // Held keys drive movement from the frame loop, never from key auto-repeat.
@@ -183,6 +194,19 @@ fn handle_input(
     };
 
     let Some((dx, dy)) = direction else { return };
+
+    // Face the way we are trying to go, even if the step is refused. VB6 turns
+    // on a blocked step rather than ignoring the key.
+    let facing = match (dx, dy) {
+        (0, -1) => Heading::North,
+        (0, 1) => Heading::South,
+        (-1, 0) => Heading::West,
+        _ => Heading::East,
+    };
+    if facing != player.heading {
+        player.heading = facing;
+        character.0 = false;
+    }
 
     let now_ms = time.elapsed_secs_f64() * 1000.0;
     match walk.gate.evaluate(now_ms, player.speed) {
@@ -205,8 +229,22 @@ fn handle_input(
         return;
     }
 
+    // Tell the server, then move locally. The walk gate above already refused
+    // anything the server would reject, so this should not draw a correction.
+    session.send(&ao_core::encode_walk(
+        match facing {
+            Heading::North => ao_core::Direction::North,
+            Heading::East => ao_core::Direction::East,
+            Heading::South => ao_core::Direction::South,
+            Heading::West => ao_core::Direction::West,
+        },
+        session.next_walk_count(),
+    ));
+
     player.x = nx;
     player.y = ny;
+    // The painted window is relative to the player, so moving exposes new tiles.
+    scene.0 = true;
 
     for mut transform in &mut sprites {
         transform.translation.x = (player.x - 1) as f32 * TILE_SIZE;
@@ -246,20 +284,33 @@ struct DrawnTiles(HashSet<(usize, u8, u8)>);
 /// Atlas layout per sheet, plus the index assigned to each region in it.
 #[derive(Resource, Default)]
 struct SheetAtlases {
-    layouts: HashMap<u32, Handle<TextureAtlasLayout>>,
-    indices: HashMap<(u32, URect), usize>,
+    layouts: HashMap<String, Handle<TextureAtlasLayout>>,
+    indices: HashMap<(String, URect), usize>,
 }
 
 /// Tiles drawn from the real graphics, as opposed to the placeholder grid.
 #[derive(Component)]
 struct SceneTile;
 
-/// Whether the player's body and head sprites have replaced the placeholder.
+/// Whether the player's body and head sprites are current. Cleared when the
+/// heading changes so the character is redrawn facing the new way.
 #[derive(Resource)]
 struct CharacterDrawn(bool);
 
+/// Set when the player moves, so the painted window is extended around the new
+/// position instead of leaving black beyond the original spawn area.
+#[derive(Resource, Default)]
+struct SceneDirty(bool);
+
 #[derive(Component)]
 struct CharacterPart;
+
+/// NPCs and ground objects already spawned, keyed by (kind, x, y).
+#[derive(Resource, Default)]
+struct DrawnEntities(HashSet<(u8, u8, u8)>);
+
+#[derive(Component)]
+struct WorldEntity;
 
 /// Origin the world data is fetched from.
 ///
@@ -378,9 +429,9 @@ fn upload_sheets(
     mut images: ResMut<Assets<Image>>,
     mut sheets: ResMut<SheetTextures>,
 ) {
-    for (file, width, height, rgba) in graphics.take_pending_sheets() {
+    for (sheet, width, height, rgba) in graphics.take_pending_sheets() {
         let handle = images.add(make_image(width, height, rgba));
-        sheets.0.insert(file, handle);
+        sheets.0.insert(sheet, handle);
     }
 }
 
@@ -394,6 +445,7 @@ fn paint_scene(
     sheets: Res<SheetTextures>,
     loaded: Res<LoadedMap>,
     player: Res<LocalPlayer>,
+    mut dirty: ResMut<SceneDirty>,
     mut atlases: ResMut<SheetAtlases>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
     mut drawn: ResMut<DrawnTiles>,
@@ -426,7 +478,7 @@ fn paint_scene(
                 continue;
             };
             // Sheet may simply not have arrived yet — leave it for a later pass.
-            let Some(image) = sheets.0.get(&grh.file) else {
+            let Some(image) = sheets.0.get(&grh.sheet) else {
                 continue;
             };
 
@@ -439,18 +491,18 @@ fn paint_scene(
 
             let layout_handle = atlases
                 .layouts
-                .entry(grh.file)
+                .entry(grh.sheet.clone())
                 .or_insert_with(|| layouts.add(TextureAtlasLayout::new_empty(UVec2::splat(1024))))
                 .clone();
 
-            let atlas_index = match atlases.indices.get(&(grh.file, rect)) {
+            let atlas_index = match atlases.indices.get(&(grh.sheet.clone(), rect)) {
                 Some(index) => *index,
                 None => {
                     let Some(layout) = layouts.get_mut(&layout_handle) else {
                         continue;
                     };
                     let index = layout.add_texture(rect);
-                    atlases.indices.insert((grh.file, rect), index);
+                    atlases.indices.insert((grh.sheet.clone(), rect), index);
                     index
                 }
             };
@@ -490,6 +542,8 @@ fn paint_scene(
         }
     }
 
+    dirty.0 = false;
+
     if painted > 0 {
         info!("painted {painted} more tiles ({} total)", drawn.0.len());
     }
@@ -516,7 +570,7 @@ fn paint_character(
         return;
     }
     let (Some(index), Some(bodies), Some(heads)) =
-        (graphics.index(), graphics.bodies(), graphics.heads())
+        (graphics.char_index(), graphics.bodies(), graphics.heads())
     else {
         return;
     };
@@ -524,7 +578,7 @@ fn paint_character(
         return;
     };
 
-    let heading = Heading::South;
+    let heading = player.heading;
     let Some(body_grh) = index.resolve(body.for_heading(heading)) else {
         return;
     };
@@ -533,10 +587,12 @@ fn paint_character(
     };
     // Both halves need their sheets before drawing, or the character appears
     // headless for a frame or two.
-    if !sheets.0.contains_key(&body_grh.file) || !sheets.0.contains_key(&head_grh.file) {
+    if !sheets.0.contains_key(&body_grh.sheet) || !sheets.0.contains_key(&head_grh.sheet) {
         return;
     }
 
+    // Despawn whatever is there now: on the first pass that is the placeholder
+    // box, on later passes the previous facing's body and head.
     for entity in &placeholder {
         commands.entity(entity).despawn();
     }
@@ -558,17 +614,17 @@ fn paint_character(
         );
         let layout_handle = atlases
             .layouts
-            .entry(grh.file)
+            .entry(grh.sheet.clone())
             .or_insert_with(|| layouts.add(TextureAtlasLayout::new_empty(UVec2::splat(1024))))
             .clone();
-        let atlas_index = match atlases.indices.get(&(grh.file, rect)) {
+        let atlas_index = match atlases.indices.get(&(grh.sheet.clone(), rect)) {
             Some(index) => *index,
             None => {
                 let Some(layout) = layouts.get_mut(&layout_handle) else {
                     return;
                 };
                 let index = layout.add_texture(rect);
-                atlases.indices.insert((grh.file, rect), index);
+                atlases.indices.insert((grh.sheet.clone(), rect), index);
                 index
             }
         };
@@ -576,7 +632,7 @@ fn paint_character(
         let size = Vec2::new(grh.width, grh.height);
         commands.spawn((
             Sprite {
-                image: sheets.0[&grh.file].clone(),
+                image: sheets.0[&grh.sheet].clone(),
                 texture_atlas: Some(TextureAtlas { layout: layout_handle, index: atlas_index }),
                 custom_size: Some(size),
                 ..default()
@@ -593,4 +649,241 @@ fn paint_character(
 
     done.0 = true;
     info!("character drawn: body {DEFAULT_BODY}, head {DEFAULT_HEAD}");
+}
+
+
+/// Spawn one grh at a tile, with AO anchoring and atlas bookkeeping.
+///
+/// Every drawable in the world goes through here so anchoring, the 1-based tile
+/// origin and atlas index reuse stay consistent. Returns false when the sheet
+/// has not arrived yet, so the caller can retry on a later pass.
+#[allow(clippy::too_many_arguments)]
+fn spawn_grh(
+    commands: &mut Commands,
+    sheets: &SheetTextures,
+    atlases: &mut SheetAtlases,
+    layouts: &mut Assets<TextureAtlasLayout>,
+    grh: crate::graphics::Grh,
+    tile_x: i32,
+    tile_y: i32,
+    z: f32,
+    pixel_offset: Vec2,
+    marker: impl Bundle,
+) -> bool {
+    let Some(image) = sheets.0.get(&grh.sheet) else {
+        return false;
+    };
+
+    let rect = URect::new(
+        grh.x as u32,
+        grh.y as u32,
+        (grh.x + grh.width) as u32,
+        (grh.y + grh.height) as u32,
+    );
+    let layout_handle = atlases
+        .layouts
+        .entry(grh.sheet.clone())
+        .or_insert_with(|| layouts.add(TextureAtlasLayout::new_empty(UVec2::splat(1024))))
+        .clone();
+    let atlas_index = match atlases.indices.get(&(grh.sheet.clone(), rect)) {
+        Some(index) => *index,
+        None => {
+            let Some(layout) = layouts.get_mut(&layout_handle) else {
+                return false;
+            };
+            let index = layout.add_texture(rect);
+            atlases.indices.insert((grh.sheet.clone(), rect), index);
+            index
+        }
+    };
+
+    let size = Vec2::new(grh.width, grh.height);
+    commands.spawn((
+        Sprite {
+            image: image.clone(),
+            texture_atlas: Some(TextureAtlas { layout: layout_handle, index: atlas_index }),
+            custom_size: Some(size),
+            ..default()
+        },
+        // Pixi anchors run 0..1 from the top-left with y down; Bevy's run
+        // -0.5..0.5 from the centre with y up. This is applyAoAnchor converted
+        // between the two, so tall art hangs above and left of its tile.
+        Anchor(Vec2::new(
+            (size.x - TILE_SIZE) / (2.0 * size.x) - 0.5,
+            0.5 - (size.y - TILE_SIZE) / size.y,
+        )),
+        Transform::from_xyz(
+            (tile_x - 1) as f32 * TILE_SIZE + pixel_offset.x,
+            -((tile_y - 1) as f32) * TILE_SIZE - pixel_offset.y,
+            z,
+        ),
+        marker,
+    ));
+
+    true
+}
+
+/// Draw the map's NPCs and ground objects.
+///
+/// Map 1 alone carries 27 npcs and 131 objects; without these the world reads
+/// as scenery rather than a place.
+#[allow(clippy::too_many_arguments)]
+fn paint_entities(
+    graphics: Res<Graphics>,
+    sheets: Res<SheetTextures>,
+    loaded: Res<LoadedMap>,
+    player: Res<LocalPlayer>,
+    mut atlases: ResMut<SheetAtlases>,
+    mut layouts: ResMut<Assets<TextureAtlasLayout>>,
+    mut drawn: ResMut<DrawnEntities>,
+    mut commands: Commands,
+) {
+    if sheets.0.is_empty() {
+        return;
+    }
+    let (Some(index), Some(map)) = (graphics.index(), loaded.0.as_ref()) else {
+        return;
+    };
+
+    let Some(char_index) = graphics.char_index() else {
+        return;
+    };
+
+    if let (Some(looks), Some(bodies), Some(heads)) =
+        (graphics.npcs(), graphics.bodies(), graphics.heads())
+    {
+        for npc in &map.npcs {
+            let key = (0u8, npc.x, npc.y);
+            if drawn.0.contains(&key) {
+                continue;
+            }
+            let (x, y) = (npc.x as i32, npc.y as i32);
+            if (x - player.x).abs() > VIEW_RADIUS_X || (y - player.y).abs() > VIEW_RADIUS_Y {
+                continue;
+            }
+            let Some(look) = looks.get(&(npc.npc_id as i32)) else {
+                drawn.0.insert(key);
+                continue;
+            };
+
+            let heading = heading_from_id(look.heading);
+            let mut placed = false;
+
+            if let Some(body) = bodies.get(&look.body) {
+                if let Some(grh) = char_index.resolve(body.for_heading(heading)) {
+                    placed |= spawn_grh(
+                        &mut commands, &sheets, &mut atlases, &mut layouts, grh, x, y, 5.0,
+                        Vec2::ZERO, WorldEntity,
+                    );
+                }
+                // head 0 means the body art already includes a head.
+                if look.head > 0 {
+                    if let Some(head) = heads.get(&look.head) {
+                        if let Some(grh) = char_index.resolve(head.for_heading(heading)) {
+                            spawn_grh(
+                                &mut commands, &sheets, &mut atlases, &mut layouts, grh, x, y,
+                                5.1, body.head_offset, WorldEntity,
+                            );
+                        }
+                    }
+                }
+            }
+
+            if placed {
+                drawn.0.insert(key);
+            }
+        }
+    }
+
+    if let Some(objects) = graphics.objects() {
+        for object in &map.objects {
+            let key = (1u8, object.x, object.y);
+            if drawn.0.contains(&key) {
+                continue;
+            }
+            let (x, y) = (object.x as i32, object.y as i32);
+            if (x - player.x).abs() > VIEW_RADIUS_X || (y - player.y).abs() > VIEW_RADIUS_Y {
+                continue;
+            }
+            let Some(grh) = objects
+                .get(&(object.obj_id as i32))
+                .and_then(|grh| index.resolve(*grh))
+            else {
+                drawn.0.insert(key);
+                continue;
+            };
+            if spawn_grh(
+                &mut commands, &sheets, &mut atlases, &mut layouts, grh, x, y, 4.0, Vec2::ZERO,
+                WorldEntity,
+            ) {
+                drawn.0.insert(key);
+            }
+        }
+    }
+}
+
+/// AO heading ids: 1 north, 2 east, 3 south, 4 west.
+fn heading_from_id(id: i32) -> Heading {
+    match id {
+        1 => Heading::North,
+        2 => Heading::East,
+        4 => Heading::West,
+        _ => Heading::South,
+    }
+}
+
+
+/// WebSocket gateway. Same endpoint the web client uses.
+const GATEWAY_URL: &str = "ws://127.0.0.1:7667/ao";
+
+/// Placeholder credentials until a login screen exists. These match the pattern
+/// BotArmy uses, so the server creates the character on first contact.
+const CHARACTER_NAME: &str = "RustClient";
+const CHARACTER_PASSWORD: &str = "rust_client_pass";
+const CLIENT_HASH: &str = "rustmd5";
+
+fn connect_to_server(session: Res<Session>) {
+    info!("connecting to {GATEWAY_URL} as {CHARACTER_NAME}");
+    session.connect(
+        GATEWAY_URL,
+        CHARACTER_NAME.to_string(),
+        CHARACTER_PASSWORD.to_string(),
+        CLIENT_HASH.to_string(),
+    );
+}
+
+/// Apply authoritative updates from the server.
+///
+/// The server is the authority on position. When it disagrees with prediction
+/// it wins — but because the client runs the server's own walk gate from
+/// ao-core, it should rarely need to.
+fn apply_server_messages(
+    session: Res<Session>,
+    mut player: ResMut<LocalPlayer>,
+    mut scene: ResMut<SceneDirty>,
+    mut character: ResMut<CharacterDrawn>,
+    mut reported: Local<bool>,
+) {
+    if let ConnectionState::Failed(message) = session.state() {
+        if !*reported {
+            *reported = true;
+            error!("connection failed: {message}");
+        }
+        return;
+    }
+
+    for message in session.drain() {
+        match message {
+            ao_core::ServerMessage::PosUpdate { x, y } => {
+                let (x, y) = (x as i32, y as i32);
+                if (player.x, player.y) != (x, y) {
+                    info!("server corrected position to ({x}, {y})");
+                    player.x = x;
+                    player.y = y;
+                    scene.0 = true;
+                    character.0 = false;
+                }
+            }
+        }
+    }
 }
