@@ -53,6 +53,7 @@ impl Plugin for WorldPlugin {
             .insert_resource(Blockmap::demo())
             .insert_resource(LocalPlayer::default())
             .insert_resource(Walk::default())
+            .insert_resource(HeldDirections::default())
             .insert_resource(MapLoader::default())
             .insert_resource(Graphics::default())
             .insert_resource(SheetTextures::default())
@@ -159,6 +160,70 @@ impl Default for Walk {
     }
 }
 
+/// Which keys mean which direction. Two keys per direction, and either one
+/// holds it: releasing the arrow while W is still down keeps you walking north.
+const DIRECTION_KEYS: [(Heading, [KeyCode; 2]); 4] = [
+    (Heading::North, [KeyCode::ArrowUp, KeyCode::KeyW]),
+    (Heading::South, [KeyCode::ArrowDown, KeyCode::KeyS]),
+    (Heading::West, [KeyCode::ArrowLeft, KeyCode::KeyA]),
+    (Heading::East, [KeyCode::ArrowRight, KeyCode::KeyD]),
+];
+
+/// Direction keys currently held, most recently pressed first.
+///
+/// Movement follows the newest key, not a fixed priority. This used to be an
+/// if/else chain in key order, which meant north always beat west: holding up
+/// and then pressing left kept you walking up until you let go of up. Every
+/// change of direction needed a release first, so turning a corner at speed
+/// dropped a step.
+///
+/// Keeping the whole held set, rather than just the latest key, is what makes
+/// the release case work too — let go of left while still holding up and you
+/// resume north immediately, with no second press.
+#[derive(Resource, Default)]
+struct HeldDirections(Vec<Heading>);
+
+impl HeldDirections {
+    /// Read the keyboard and reorder.
+    ///
+    /// A newly pressed key goes to the front even if it was already held under
+    /// another binding, so the most recent intent always wins.
+    fn update(&mut self, keys: &ButtonInput<KeyCode>) {
+        for (heading, codes) in DIRECTION_KEYS {
+            let held = codes.iter().any(|code| keys.pressed(*code));
+            if codes.iter().any(|code| keys.just_pressed(*code)) {
+                self.press(heading);
+            } else if !held {
+                self.release(heading);
+            }
+        }
+    }
+
+    fn press(&mut self, heading: Heading) {
+        self.0.retain(|held| *held != heading);
+        self.0.insert(0, heading);
+    }
+
+    fn release(&mut self, heading: Heading) {
+        self.0.retain(|held| *held != heading);
+    }
+
+    /// The direction to walk: the newest key still held, if any.
+    fn current(&self) -> Option<Heading> {
+        self.0.first().copied()
+    }
+}
+
+/// Tile step for a heading, in map coordinates. Y grows southward.
+fn heading_delta(heading: Heading) -> (i32, i32) {
+    match heading {
+        Heading::North => (0, -1),
+        Heading::South => (0, 1),
+        Heading::West => (-1, 0),
+        Heading::East => (1, 0),
+    }
+}
+
 #[derive(Component)]
 struct PlayerSprite;
 
@@ -204,33 +269,21 @@ fn handle_input(
     mut character: ResMut<CharacterDrawn>,
     mut scene: ResMut<SceneDirty>,
     mut motion: ResMut<Motion>,
+    mut held: ResMut<HeldDirections>,
     session: Res<Session>,
 ) {
     // Held keys drive movement from the frame loop, never from key auto-repeat.
     // The web client originally stepped at the OS repeat rate, which meant a
     // ~500ms stall on a default Linux desktop before the second step.
-    let direction = if keys.pressed(KeyCode::ArrowUp) || keys.pressed(KeyCode::KeyW) {
-        Some((0, -1))
-    } else if keys.pressed(KeyCode::ArrowDown) || keys.pressed(KeyCode::KeyS) {
-        Some((0, 1))
-    } else if keys.pressed(KeyCode::ArrowLeft) || keys.pressed(KeyCode::KeyA) {
-        Some((-1, 0))
-    } else if keys.pressed(KeyCode::ArrowRight) || keys.pressed(KeyCode::KeyD) {
-        Some((1, 0))
-    } else {
-        None
-    };
+    held.update(&keys);
 
-    let Some((dx, dy)) = direction else { return };
+    // Newest key wins, so a new direction takes effect on the next step rather
+    // than waiting for the previous key to be released.
+    let Some(facing) = held.current() else { return };
+    let (dx, dy) = heading_delta(facing);
 
     // Face the way we are trying to go, even if the step is refused. VB6 turns
     // on a blocked step rather than ignoring the key.
-    let facing = match (dx, dy) {
-        (0, -1) => Heading::North,
-        (0, 1) => Heading::South,
-        (-1, 0) => Heading::West,
-        _ => Heading::East,
-    };
     if facing != player.heading {
         player.heading = facing;
         character.0 = false;
@@ -1143,6 +1196,124 @@ mod tests {
         app.add_plugins((MinimalPlugins, StatesPlugin));
         app.init_state::<AppState>();
         app
+    }
+
+    /// One frame of keyboard state.
+    ///
+    /// `just_pressed` is edge-triggered and cleared between frames, so a test
+    /// that never clears would report every held key as newly pressed forever.
+    fn frame(keys: &mut ButtonInput<KeyCode>, held: &mut HeldDirections) {
+        held.update(keys);
+        keys.clear();
+    }
+
+    #[test]
+    fn a_new_key_takes_over_from_the_one_already_held() {
+        // The reported bug: walking up, press left, keep walking up.
+        let mut keys = ButtonInput::<KeyCode>::default();
+        let mut held = HeldDirections::default();
+
+        keys.press(KeyCode::ArrowUp);
+        frame(&mut keys, &mut held);
+        assert_eq!(held.current(), Some(Heading::North));
+
+        keys.press(KeyCode::ArrowLeft);
+        frame(&mut keys, &mut held);
+        assert_eq!(held.current(), Some(Heading::West));
+    }
+
+    #[test]
+    fn releasing_the_newer_key_falls_back_to_the_one_still_held() {
+        // Why the whole held set is kept rather than just the latest key:
+        // letting go of left must resume north without pressing up again.
+        let mut keys = ButtonInput::<KeyCode>::default();
+        let mut held = HeldDirections::default();
+
+        keys.press(KeyCode::ArrowUp);
+        frame(&mut keys, &mut held);
+        keys.press(KeyCode::ArrowLeft);
+        frame(&mut keys, &mut held);
+        assert_eq!(held.current(), Some(Heading::West));
+
+        keys.release(KeyCode::ArrowLeft);
+        frame(&mut keys, &mut held);
+        assert_eq!(held.current(), Some(Heading::North));
+    }
+
+    #[test]
+    fn releasing_everything_stops() {
+        let mut keys = ButtonInput::<KeyCode>::default();
+        let mut held = HeldDirections::default();
+
+        keys.press(KeyCode::ArrowUp);
+        frame(&mut keys, &mut held);
+        keys.release(KeyCode::ArrowUp);
+        frame(&mut keys, &mut held);
+
+        assert_eq!(held.current(), None);
+    }
+
+    #[test]
+    fn a_direction_survives_releasing_one_of_its_two_keys() {
+        // W and ArrowUp both mean north. Releasing one while the other is held
+        // must not stop movement, which a per-key model would get wrong.
+        let mut keys = ButtonInput::<KeyCode>::default();
+        let mut held = HeldDirections::default();
+
+        keys.press(KeyCode::KeyW);
+        frame(&mut keys, &mut held);
+        keys.press(KeyCode::ArrowUp);
+        frame(&mut keys, &mut held);
+        keys.release(KeyCode::ArrowUp);
+        frame(&mut keys, &mut held);
+
+        assert_eq!(held.current(), Some(Heading::North));
+    }
+
+    #[test]
+    fn re_pressing_a_held_direction_moves_it_back_to_the_front() {
+        // Tapping up again while left is held is an unambiguous request to go
+        // up, even though up never stopped being held.
+        let mut keys = ButtonInput::<KeyCode>::default();
+        let mut held = HeldDirections::default();
+
+        keys.press(KeyCode::ArrowUp);
+        frame(&mut keys, &mut held);
+        keys.press(KeyCode::ArrowLeft);
+        frame(&mut keys, &mut held);
+        assert_eq!(held.current(), Some(Heading::West));
+
+        // A second binding for a direction already held.
+        keys.press(KeyCode::KeyW);
+        frame(&mut keys, &mut held);
+        assert_eq!(held.current(), Some(Heading::North));
+    }
+
+    #[test]
+    fn holding_a_key_does_not_reorder_on_later_frames() {
+        // Only an edge reorders. If a held key counted as pressed every frame,
+        // whichever direction came last in DIRECTION_KEYS would win — the same
+        // fixed-priority bug, just with a different winner.
+        let mut keys = ButtonInput::<KeyCode>::default();
+        let mut held = HeldDirections::default();
+
+        keys.press(KeyCode::ArrowLeft);
+        frame(&mut keys, &mut held);
+        keys.press(KeyCode::ArrowUp);
+        frame(&mut keys, &mut held);
+
+        for _ in 0..5 {
+            frame(&mut keys, &mut held);
+            assert_eq!(held.current(), Some(Heading::North));
+        }
+    }
+
+    #[test]
+    fn every_direction_maps_to_a_single_tile_step() {
+        assert_eq!(heading_delta(Heading::North), (0, -1));
+        assert_eq!(heading_delta(Heading::South), (0, 1));
+        assert_eq!(heading_delta(Heading::West), (-1, 0));
+        assert_eq!(heading_delta(Heading::East), (1, 0));
     }
 
     #[test]
