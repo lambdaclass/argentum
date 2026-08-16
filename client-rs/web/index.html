@@ -197,7 +197,8 @@
     </script>
 
     <script type="module">
-      import init from "./pkg/ao-client.js";
+      const cacheBustModule = Date.now();
+      const { default: init } = await import(`./pkg/ao-client.js?v=${cacheBustModule}`);
 
       const boot = document.getElementById("boot");
       const bootError = document.getElementById("boot-error");
@@ -210,7 +211,18 @@
       }
 
       try {
-        await init();
+        // Cache-bust both halves in development. A browser will happily reuse
+        // a cached ao-client.js *and* its .wasm across a rebuild, which shows
+        // up as "the fix did not work" when the fix was simply never loaded —
+        // and the version stamp in the top bar is then also the stale one.
+        //
+        // The module URL busts the JS; init() is given the wasm URL explicitly
+        // because wasm-bindgen would otherwise resolve an uncached-looking
+        // path of its own.
+        const cacheBust = Date.now();
+        await init({
+          module_or_path: `./pkg/ao-client_bg.wasm?v=${cacheBust}`,
+        });
         // Bevy takes over the canvas from here. Give it a frame to present
         // before lifting the boot screen, so there is no black flash between.
         requestAnimationFrame(() =>

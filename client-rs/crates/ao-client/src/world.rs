@@ -284,6 +284,11 @@ fn setup(mut commands: Commands, player: Res<LocalPlayer>, blockmap: Res<Blockma
         // Marked so the shell can drive its viewport: the world occupies only
         // the space the character rail leaves, not the whole window.
         crate::ui::shell::WorldCamera,
+        Camera { order: 0, ..default() },
+        // Explicit rather than relying on the default: the shell draws on its
+        // own layer, and a world camera that also rendered that layer would
+        // draw the rail inside the world viewport.
+        bevy::camera::visibility::RenderLayers::layer(crate::ui::shell::WORLD_LAYER),
         Transform::from_xyz(
             (player.x - 1) as f32 * TILE_SIZE,
             -((player.y - 1) as f32) * TILE_SIZE,

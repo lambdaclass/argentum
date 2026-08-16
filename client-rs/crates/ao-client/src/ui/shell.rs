@@ -13,12 +13,35 @@
 use super::layout::{self, RailMode, ShellGeometry, WorldView};
 use super::scale::{self, ScaleDomains};
 use super::tokens::{focus, ink, size, space, surface, type_scale};
-use bevy::camera::Viewport;
+use bevy::camera::visibility::RenderLayers;
+use bevy::camera::{ClearColorConfig, Viewport};
 use bevy::prelude::*;
 
-/// Marks the camera that renders the game world, as opposed to the UI camera.
+/// Marks the camera that renders the game world.
+///
+/// Its viewport is the world region only, so the world is clipped to the space
+/// the rail leaves.
 #[derive(Component)]
 pub struct WorldCamera;
+
+/// Marks the camera that renders the shell.
+///
+/// A second camera, and not an optimisation: a camera's viewport clips
+/// *everything* it draws, so pointing the one camera at the world region
+/// clipped the top bar at the world's right edge and put the entire character
+/// rail outside the frame. The rail was being laid out correctly and simply
+/// never rendered.
+///
+/// This one covers the whole window and never has a viewport set.
+#[derive(Component)]
+pub struct UiCamera;
+
+/// Render layer the world draws on. Sprites default to this.
+pub const WORLD_LAYER: usize = 0;
+
+/// Render layer the shell draws on, so world sprites cannot appear over the
+/// rail and shell nodes cannot appear inside the world viewport.
+pub const UI_LAYER: usize = 1;
 
 /// Root of the shell tree.
 #[derive(Component)]
@@ -93,8 +116,20 @@ fn positioned(rect: Rect) -> Node {
 pub fn spawn_shell(mut commands: Commands) {
     let geometry = layout::shell_geometry(Vec2::ZERO);
 
+    // Drawn after the world and over it, with no clear so the world shows
+    // through everywhere the shell is transparent.
+    let ui_camera = commands
+        .spawn((
+            Camera2d,
+            Camera { order: 1, clear_color: ClearColorConfig::None, ..default() },
+            RenderLayers::layer(UI_LAYER),
+            UiCamera,
+        ))
+        .id();
+
     commands
         .spawn((
+            UiTargetCamera(ui_camera),
             Node {
                 position_type: PositionType::Absolute,
                 width: Val::Percent(100.0),
@@ -340,6 +375,95 @@ mod tests {
 
         assert_eq!(at_2x.physical_size.x, at_1x.physical_size.x * 2);
         assert_eq!(two.projection_scale() * 2.0, one.projection_scale());
+    }
+
+    #[test]
+    fn the_rail_is_still_drawn_when_the_world_camera_is_clipped_to_the_world() {
+        // The exact regression. One camera, viewport set to the world region,
+        // and the whole shell was clipped with it: the top bar stopped at the
+        // world's right edge and the character rail never rendered at all.
+        //
+        // The invariant is structural, so it is checkable without a GPU: the
+        // shell must be targeted at a camera that has no viewport, while the
+        // world camera has one.
+        let mut app = App::new();
+        app.add_systems(Startup, spawn_shell);
+        app.update();
+
+        // A world camera with a restricted viewport, as `apply_geometry` sets.
+        let geometry = layout::shell_geometry(Vec2::new(1280.0, 832.0));
+        let world_viewport = world_viewport(geometry, 1.0).expect("the world has area");
+        assert!(
+            (world_viewport.physical_size.x as f32) < geometry.top_bar.width(),
+            "this test is meaningless unless the world is narrower than the window"
+        );
+
+        let mut roots = app.world_mut().query::<(&UiTargetCamera, &ShellRoot)>();
+        let (target, _) = roots.iter(app.world()).next().expect("the shell has a root");
+        let target = target.0;
+
+        let camera =
+            app.world().get::<Camera>(target).expect("the shell targets a camera that exists");
+
+        assert!(
+            camera.viewport.is_none(),
+            "the shell is targeted at a clipped camera; the rail would be cut off"
+        );
+        assert!(app.world().get::<UiCamera>(target).is_some(), "and it must be the shell's own");
+    }
+
+    #[test]
+    fn the_shell_and_the_world_are_drawn_by_different_cameras() {
+        // A camera's viewport clips everything it draws. With one camera,
+        // pointing it at the world region clipped the top bar at the world's
+        // right edge and put the whole character rail outside the frame — the
+        // rail was laid out correctly and simply never rendered.
+        let mut app = App::new();
+        app.add_systems(Startup, spawn_shell);
+        app.update();
+
+        let mut world_cameras = app.world_mut().query_filtered::<Entity, With<WorldCamera>>();
+        let mut ui_cameras = app.world_mut().query_filtered::<Entity, With<UiCamera>>();
+
+        // The world camera lives in `world::setup`, so only the shell's is here.
+        assert_eq!(ui_cameras.iter(app.world()).count(), 1, "the shell needs its own camera");
+        assert_eq!(
+            world_cameras.iter(app.world()).count(),
+            0,
+            "the shell must not also spawn the world camera"
+        );
+    }
+
+    #[test]
+    fn the_shell_camera_draws_over_the_world_and_never_clears_it() {
+        // Order decides which is on top; clearing would erase the world the
+        // shell is meant to sit over.
+        let mut app = App::new();
+        app.add_systems(Startup, spawn_shell);
+        app.update();
+
+        let mut cameras = app.world_mut().query_filtered::<&Camera, With<UiCamera>>();
+        let camera = cameras.iter(app.world()).next().expect("a shell camera");
+
+        assert!(camera.order > 0, "the shell must draw after the world");
+        assert!(
+            matches!(camera.clear_color, ClearColorConfig::None),
+            "the shell camera must not clear the world underneath it"
+        );
+        assert!(
+            camera.viewport.is_none(),
+            "the shell camera must cover the whole window; a viewport is what clipped the rail"
+        );
+    }
+
+    #[test]
+    fn the_world_and_the_shell_are_on_separate_render_layers() {
+        // Otherwise world sprites draw over the rail, and shell nodes appear
+        // inside the world viewport.
+        assert_ne!(WORLD_LAYER, UI_LAYER);
+        // Sprites default to layer 0, so the world layer has to be that one or
+        // every sprite needs an explicit component.
+        assert_eq!(WORLD_LAYER, 0);
     }
 
     #[test]

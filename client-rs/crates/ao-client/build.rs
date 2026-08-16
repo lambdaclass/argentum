@@ -13,8 +13,12 @@ fn main() {
         return;
     }
 
+    // `describe --always --dirty` rather than a bare SHA: a build made before
+    // its changes are committed would otherwise be stamped with the *previous*
+    // commit, which is worse than no stamp because it looks authoritative. The
+    // `-dirty` suffix says "this commit plus uncommitted work".
     let short_sha = Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
+        .args(["describe", "--always", "--dirty", "--abbrev=7"])
         .output()
         .ok()
         .filter(|out| out.status.success())

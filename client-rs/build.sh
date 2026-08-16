@@ -28,6 +28,39 @@ WASM_OPT_FEATURES=(
   --enable-extended-const
 )
 
+# The build stamp shown in the client's top bar must be the commit that was
+# actually built. Checking the build script's output is not enough: cargo can
+# skip the script, or the artifact on disk can be from an earlier run, and both
+# produce a client that confidently displays the wrong commit. Screenshots are
+# then matched against the wrong source and the round trip is wasted.
+#
+# So this greps the shipped .wasm for the expected string, which is the only
+# thing that proves what a browser will load.
+assert_build_stamp() {
+  local artifact="$1"
+  local expected="$2"
+
+  if [ -z "$expected" ]; then
+    echo "    no git identity available; stamp not verified"
+    return 0
+  fi
+
+  if ! grep -aqF -- "$expected" "$artifact"; then
+    echo "    FAIL: $artifact does not contain the build stamp \"$expected\"" >&2
+    echo "    The client would display a commit it was not built from." >&2
+    echo "    Try: cargo clean -p ao-client && ./build.sh web" >&2
+    return 1
+  fi
+
+  echo "    stamped $expected"
+}
+
+# What the client should be claiming. Dirty trees are stamped as such, so the
+# stamp never silently attributes uncommitted work to the last commit.
+build_stamp_expected() {
+  git describe --always --dirty --abbrev=7 2>/dev/null || true
+}
+
 size_mb() { awk '{printf "%.1f MB\n", $1/1048576}' <<<"$(stat -c %s "$1")"; }
 
 # The client must compile no hosts and no credentials: in production it derives
@@ -80,6 +113,9 @@ case "$TARGET" in
 
     echo "==> configuration check"
     assert_no_embedded_config web/pkg/ao-client_bg.wasm
+
+    echo "==> build stamp"
+    assert_build_stamp web/pkg/ao-client_bg.wasm "$(build_stamp_expected)"
 
     echo
     echo "Serve it:  python3 -m http.server 8080 --directory web"
