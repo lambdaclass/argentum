@@ -8,6 +8,7 @@
 
 pub mod character;
 pub mod controls;
+pub mod fonts;
 pub mod hotbar;
 pub mod layout;
 pub mod rail;
@@ -26,6 +27,7 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
+            fonts::FontPlugin,
             state::UiStatePlugin,
             shell::ShellPlugin,
             topbar::TopBarPlugin,

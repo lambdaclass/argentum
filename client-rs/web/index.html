@@ -197,8 +197,31 @@
     </script>
 
     <script type="module">
-      const cacheBustModule = Date.now();
-      const { default: init } = await import(`./pkg/ao-client.js?v=${cacheBustModule}`);
+      // Version the client's URLs so a rebuild is actually fetched.
+      //
+      // In production this must be a *stable* value or the 5.6 MB compressed
+      // payload can never be cached by a browser or a CDN — a timestamp on
+      // every load would re-download the whole client each time. So the build
+      // id is used, which changes exactly when the client does.
+      //
+      // Development is the opposite problem: rebuilds share a commit while the
+      // tree is dirty, and a cached module presents as "the fix did not work"
+      // when the fix was never loaded. There, a timestamp is correct.
+      const isDevHost = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
+
+      async function clientVersion() {
+        if (isDevHost) return String(Date.now());
+        try {
+          const response = await fetch("./pkg/build-id.txt", { cache: "no-store" });
+          if (response.ok) return (await response.text()).trim();
+        } catch {
+          // Fall through: an unversioned load is better than no load.
+        }
+        return "unknown";
+      }
+
+      const version = await clientVersion();
+      const { default: init } = await import(`./pkg/ao-client.js?v=${version}`);
 
       const boot = document.getElementById("boot");
       const bootError = document.getElementById("boot-error");
@@ -211,17 +234,12 @@
       }
 
       try {
-        // Cache-bust both halves in development. A browser will happily reuse
-        // a cached ao-client.js *and* its .wasm across a rebuild, which shows
-        // up as "the fix did not work" when the fix was simply never loaded —
-        // and the version stamp in the top bar is then also the stale one.
-        //
-        // The module URL busts the JS; init() is given the wasm URL explicitly
-        // because wasm-bindgen would otherwise resolve an uncached-looking
-        // path of its own.
-        const cacheBust = Date.now();
+        // Both halves need the same version: the module URL covers the JS,
+        // and init() is given the wasm URL explicitly because wasm-bindgen
+        // would otherwise resolve an unversioned path of its own and serve a
+        // stale binary behind fresh glue.
         await init({
-          module_or_path: `./pkg/ao-client_bg.wasm?v=${cacheBust}`,
+          module_or_path: `./pkg/ao-client_bg.wasm?v=${version}`,
         });
         // Bevy takes over the canvas from here. Give it a frame to present
         // before lifting the boot screen, so there is no black flash between.

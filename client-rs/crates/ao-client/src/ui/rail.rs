@@ -102,17 +102,21 @@ fn populate(mut commands: Commands, rails: Query<(Entity, &Region)>) {
 
     commands.entity(rail).with_children(|rail| {
         // Identity, where the eye starts.
-        rail.spawn((
-            region_well(RailRegion::CharacterHeader, Val::Auto),
-            FullRailOnly,
-            children![label("—", type_scale::TITLE, ink::GOLD), muted_label("not connected"),],
-        ));
+        // No placeholder children: `character::rebuild_on_change` fills this
+        // from the snapshot. They used to be spawned here as well, so the rail
+        // showed a dash and "not connected" above the character it was in fact
+        // displaying.
+        rail.spawn((region_well(RailRegion::CharacterHeader, Val::Auto), FullRailOnly));
 
         rail.spawn((
             region_well(RailRegion::Tabs, Val::Auto),
             FullRailOnly,
             children![muted_label("Inventory    Spells")],
         ));
+
+        // Every region below carries a label when it has nothing in it. An
+        // unexplained empty panel reads as a rendering failure, and there is no
+        // way for a player to tell it apart from one.
 
         // The grid takes the slack, so the regions below stay pinned to the
         // bottom edge regardless of window height.
@@ -131,9 +135,14 @@ fn populate(mut commands: Commands, rails: Query<(Entity, &Region)>) {
         ));
 
         rail.spawn((region_well(RailRegion::SelectedDetails, Val::Px(72.0)), FullRailOnly));
+
+        // These two have no content until their tasks land. Each says so
+        // rather than sitting blank: an unlabelled empty panel is
+        // indistinguishable from one that failed to draw.
         rail.spawn((
             region_well(RailRegion::Consumables, Val::Px(size::SLOT + space::WIDE)),
             FullRailOnly,
+            children![muted_label("quick slots — not yet wired")],
         ));
         rail.spawn((region_well(RailRegion::Equipment, Val::Auto), FullRailOnly));
 
@@ -144,6 +153,7 @@ fn populate(mut commands: Commands, rails: Query<(Entity, &Region)>) {
         rail.spawn((
             region_well(RailRegion::Navigation, Val::Px(size::ICON_BUTTON + space::WIDE)),
             FullRailOnly,
+            children![muted_label("navigation — not yet wired")],
         ));
 
         // Compact rail: an icon strip. Vitals survive as unlabelled slivers

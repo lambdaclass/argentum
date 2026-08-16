@@ -115,7 +115,12 @@ case "$TARGET" in
     assert_no_embedded_config web/pkg/ao-client_bg.wasm
 
     echo "==> build stamp"
-    assert_build_stamp web/pkg/ao-client_bg.wasm "$(build_stamp_expected)"
+    stamp="$(build_stamp_expected)"
+    assert_build_stamp web/pkg/ao-client_bg.wasm "$stamp"
+
+    # Read by the host page to version its URLs. A stable value, so a browser
+    # and a CDN can cache the payload until the client actually changes.
+    printf '%s' "${stamp:-unknown}" > web/pkg/build-id.txt
 
     echo
     echo "Serve it:  python3 -m http.server 8080 --directory web"

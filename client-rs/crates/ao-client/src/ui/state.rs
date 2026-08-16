@@ -38,6 +38,11 @@ impl UiState {
     /// and would defeat the filter exactly when it matters most. It formerly
     /// compared `Debug` output, which worked but allocated two full renderings
     /// of the entire interface state on every poll.
+    /// Test-only. Production writes go through [`UiState::publish`], which is
+    /// the only path that avoids ticking change detection on a no-op — leaving
+    /// this reachable is how a future adapter quietly reintroduces a rail that
+    /// rebuilds twenty times a second.
+    #[cfg(test)]
     pub fn set(&mut self, snapshot: UiSnapshot) {
         if snapshot.same_state_as(&self.snapshot) {
             return;

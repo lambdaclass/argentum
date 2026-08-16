@@ -115,6 +115,21 @@ const WORLD_ZOOM_2X_WIDTH: f32 = 2560.0;
 /// pixel ratio: a retina display should render the same view more sharply, not
 /// a different view. Framing and pointer hit targets therefore depend only on
 /// how large the window is, which is what a player can see and control.
+///
+/// **Known limitation.** This makes the *logical* grid integral, not the
+/// physical one. At a fractional device ratio — 1.25 and 1.5 are ordinary
+/// Windows and GNOME settings — one world pixel still covers 1.25 or 1.5
+/// physical pixels, so nearest-neighbour duplicates some source pixels and not
+/// others, and the duplication pattern shifts as the camera pans. That is the
+/// shimmer the roadmap's integer-pixel requirement exists to prevent, and it is
+/// not yet solved.
+///
+/// Solving it properly means rendering the world to an offscreen target sized
+/// in whole world pixels and blitting that to the screen, which is the only way
+/// to keep the sampling grid integral independently of the display. Choosing
+/// framing stability first is deliberate: a framing that changes with the
+/// monitor also moves every click target, which is a correctness problem rather
+/// than a visual one.
 pub fn world_scale(logical_size: Vec2) -> u32 {
     if logical_size.x >= WORLD_ZOOM_2X_WIDTH {
         2

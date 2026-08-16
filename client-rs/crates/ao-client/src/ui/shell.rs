@@ -169,6 +169,10 @@ pub fn spawn_shell(mut commands: Commands) {
                         WorldMessageArea,
                     ));
 
+                    // Labelled, not blank. The minimap has no data source
+                    // until the world adapter lands, and an unexplained empty
+                    // rectangle over the world is indistinguishable from a
+                    // rendering failure — a player has no way to tell which.
                     world.spawn((
                         Node {
                             position_type: PositionType::Absolute,
@@ -177,11 +181,14 @@ pub fn spawn_shell(mut commands: Commands) {
                             width: Val::Px(180.0),
                             height: Val::Px(180.0),
                             border: UiRect::all(Val::Px(size::BORDER)),
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::Center,
                             ..default()
                         },
                         BackgroundColor(surface::WELL),
                         BorderColor::all(surface::EDGE),
                         Minimap,
+                        children![label("minimap unavailable", type_scale::MICRO, ink::DISABLED)],
                     ));
 
                     // Centred on the world viewport by making this row span the
@@ -376,6 +383,97 @@ mod tests {
 
         assert_eq!(at_2x.physical_size.x, at_1x.physical_size.x * 2);
         assert_eq!(two.projection_scale() * 2.0, one.projection_scale());
+    }
+
+    /// An app with both cameras and everything `apply_geometry` reads, so the
+    /// production system runs rather than a stand-in for it.
+    fn camera_app(window_size: Vec2) -> App {
+        let mut app = App::new();
+        app.init_resource::<AppliedGeometry>()
+            .init_resource::<ScaleDomains>()
+            .init_resource::<UiScale>()
+            .init_resource::<crate::world::ViewRadius>()
+            .add_systems(Startup, spawn_shell)
+            .add_systems(Update, apply_geometry);
+
+        // The world camera as `world::setup` spawns it.
+        app.world_mut().spawn((
+            Camera2d,
+            Camera { order: 0, ..default() },
+            RenderLayers::layer(WORLD_LAYER),
+            Projection::Orthographic(OrthographicProjection::default_2d()),
+            WorldCamera,
+        ));
+
+        let mut window = Window::default();
+        window.resolution.set(window_size.x, window_size.y);
+        app.world_mut().spawn(window);
+
+        app.update();
+        app
+    }
+
+    #[test]
+    fn the_world_camera_is_clipped_and_the_shell_camera_is_not() {
+        // The regression, checked against the real system rather than a
+        // hand-built stand-in: one camera with the world's viewport clipped
+        // the entire shell, so the rail never rendered.
+        let mut app = camera_app(Vec2::new(1280.0, 832.0));
+
+        let mut world = app.world_mut().query_filtered::<&Camera, With<WorldCamera>>();
+        let world_viewport = world
+            .iter(app.world())
+            .next()
+            .expect("a world camera")
+            .viewport
+            .clone()
+            .expect("the world camera must be clipped to the world region");
+
+        let mut shell = app.world_mut().query_filtered::<&Camera, With<UiCamera>>();
+        let shell_camera = shell.iter(app.world()).next().expect("a shell camera");
+
+        assert!(
+            shell_camera.viewport.is_none(),
+            "the shell camera is clipped; the rail would be cut off again"
+        );
+
+        // And the clipping is real, not a no-op that happens to pass.
+        let geometry = layout::shell_geometry(Vec2::new(1280.0, 832.0));
+        assert!(
+            (world_viewport.physical_size.x as f32) < geometry.top_bar.width(),
+            "the world viewport is not actually narrower than the window"
+        );
+    }
+
+    #[test]
+    fn the_two_cameras_draw_different_render_layers() {
+        // Shared layers would put world sprites over the rail and shell nodes
+        // inside the world viewport.
+        let mut app = camera_app(Vec2::new(1280.0, 832.0));
+
+        let mut world = app.world_mut().query_filtered::<&RenderLayers, With<WorldCamera>>();
+        let world_layers = world.iter(app.world()).next().expect("world layers").clone();
+
+        let mut shell = app.world_mut().query_filtered::<&RenderLayers, With<UiCamera>>();
+        let shell_layers = shell.iter(app.world()).next().expect("shell layers").clone();
+
+        assert!(
+            !world_layers.intersects(&shell_layers),
+            "the cameras share a render layer: {world_layers:?} and {shell_layers:?}"
+        );
+    }
+
+    #[test]
+    fn the_shell_camera_draws_after_the_world_camera() {
+        let mut app = camera_app(Vec2::new(1280.0, 832.0));
+
+        let mut world = app.world_mut().query_filtered::<&Camera, With<WorldCamera>>();
+        let world_order = world.iter(app.world()).next().expect("a world camera").order;
+
+        let mut shell = app.world_mut().query_filtered::<&Camera, With<UiCamera>>();
+        let shell_order = shell.iter(app.world()).next().expect("a shell camera").order;
+
+        assert!(shell_order > world_order, "the shell would render beneath the world");
     }
 
     #[test]

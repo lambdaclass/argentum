@@ -106,11 +106,13 @@ fn rebuild_on_change(
     state: Res<UiState>,
     selected: Res<SelectedSlot>,
     drag: Res<DragState>,
+    geometry: Res<super::shell::AppliedGeometry>,
     regions: Query<(Entity, &RailRegion)>,
     existing: Query<Entity, With<PanelContent>>,
     mut commands: Commands,
 ) {
-    if !state.is_changed() && !selected.is_changed() && !drag.is_changed() {
+    if !state.is_changed() && !selected.is_changed() && !drag.is_changed() && !geometry.is_changed()
+    {
         return;
     }
 
@@ -127,8 +129,12 @@ fn rebuild_on_change(
                 });
             }
             RailRegion::SlotGrid => {
+                let inner = geometry.0.rail.width() - space::BASE * 2.0 - space::TIGHT * 2.0;
                 commands.entity(entity).with_children(|parent| {
-                    parent.spawn((PanelContent, inventory_grid(snapshot, selected.0, drag.over)));
+                    parent.spawn((
+                        PanelContent,
+                        inventory_grid(snapshot, selected.0, drag.over, inner),
+                    ));
                 });
             }
             RailRegion::SelectedDetails => {
@@ -257,18 +263,31 @@ fn vital_bar(prefix: &str, gauge: Gauge, fill: Color) -> impl Bundle {
     )
 }
 
+/// Slot size that fits `columns` of them across `available` logical pixels.
+///
+/// The grid is fixed at six columns to match the reference composition, but the
+/// rail is a share of the window and at 1280 wide it is only about 260 pixels
+/// inside its padding — less than six 44-pixel slots plus their gaps. Laid out
+/// at a fixed size the row wrapped after five and the last rows fell out of the
+/// panel entirely.
+pub fn slot_size(available: f32, columns: usize) -> f32 {
+    let columns = columns.max(1) as f32;
+    let gaps = (columns - 1.0) * space::HAIR;
+    let fitted = (available - gaps) / columns;
+    // Never larger than the design size, and never so small it stops being a
+    // target: below this the compact rail is the right answer instead.
+    fitted.clamp(24.0, size::SLOT).floor()
+}
+
 fn inventory_grid(
     snapshot: &UiSnapshot,
     selected: Option<usize>,
     drag_over: Option<usize>,
+    rail_width: f32,
 ) -> impl Bundle {
     let inventory = &snapshot.inventory;
     let columns = inventory.columns.max(1);
-
-    let mut rows = Vec::new();
-    for chunk_start in (0..inventory.slots.len()).step_by(columns) {
-        rows.push((chunk_start, (chunk_start..(chunk_start + columns).min(inventory.slots.len()))));
-    }
+    let slot = slot_size(rail_width, columns);
 
     (
         Node {
@@ -280,18 +299,16 @@ fn inventory_grid(
             padding: UiRect::all(Val::Px(space::TIGHT)),
             ..default()
         },
-        Children::spawn(SpawnIter(
-            (0..inventory.slots.len())
+        Children::spawn(SpawnIter({
+            let slots = inventory.slots.clone();
+            (0..slots.len())
                 .map(move |index| (index, selected, drag_over))
                 .collect::<Vec<_>>()
                 .into_iter()
-                .map({
-                    let slots = inventory.slots.clone();
-                    move |(index, selected, drag_over)| {
-                        inventory_slot(&slots[index], index, selected, drag_over)
-                    }
-                }),
-        )),
+                .map(move |(index, selected, drag_over)| {
+                    inventory_slot(&slots[index], index, selected, drag_over, slot)
+                })
+        })),
     )
 }
 
@@ -300,6 +317,7 @@ fn inventory_slot(
     index: usize,
     selected: Option<usize>,
     drag_over: Option<usize>,
+    size_px: f32,
 ) -> impl Bundle {
     let is_selected = selected == Some(index);
     let is_drop_target = drag_over == Some(index) && slot.accepts_drop();
@@ -318,8 +336,11 @@ fn inventory_slot(
         // Locked slots are shown, not hidden: a player can see what expanding
         // the pack would buy.
         SlotState::Locked => {
+            // Not the padlock emoji: it is outside the font's basic plane and
+            // rendered as an empty box, which is exactly what an unexplained
+            // locked slot must not look like.
             children.push((
-                Text::new("\u{1f512}"),
+                Text::new("\u{00b7}\u{00b7}"),
                 TextFont { font_size: type_scale::SMALL, ..default() },
                 TextColor(ink::DISABLED),
             ));
@@ -350,8 +371,8 @@ fn inventory_slot(
 
     (
         Node {
-            width: Val::Px(size::SLOT),
-            height: Val::Px(size::SLOT),
+            width: Val::Px(size_px),
+            height: Val::Px(size_px),
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
             justify_content: JustifyContent::Center,
@@ -493,6 +514,54 @@ mod tests {
             rarity: Rarity::Common,
             icon_grh: 1,
         })
+    }
+
+    #[test]
+    fn six_columns_fit_the_rail_at_every_supported_window() {
+        // The grid is six wide to match the reference composition, but the rail
+        // is a share of the window: at 1280 it is only about 260 pixels inside
+        // its padding, less than six 44-pixel slots and their gaps. Laid out at
+        // a fixed size the row wrapped after five and the last rows fell out of
+        // the panel entirely.
+        use super::super::layout;
+
+        for width in [1280.0, 1366.0, 1600.0, 1920.0, 2560.0, 3840.0] {
+            let geometry = layout::shell_geometry(Vec2::new(width, 832.0));
+            if geometry.rail_mode != layout::RailMode::Full {
+                continue;
+            }
+            let inner = geometry.rail.width() - space::BASE * 2.0 - space::TIGHT * 2.0;
+            let slot = slot_size(inner, 6);
+            let used = slot * 6.0 + space::HAIR * 5.0;
+
+            assert!(used <= inner, "at {width}px the grid needs {used} of {inner} available");
+            assert!(slot >= 24.0, "at {width}px a slot is only {slot}px, too small to hit");
+        }
+    }
+
+    #[test]
+    fn a_slot_never_exceeds_its_design_size() {
+        // A very wide rail should leave space around the grid, not inflate the
+        // artwork past the size it was drawn at.
+        assert_eq!(slot_size(10_000.0, 6), size::SLOT);
+    }
+
+    #[test]
+    fn a_slot_size_is_a_whole_number_of_pixels() {
+        // Fractional slots put the pixel-art icons on half pixels.
+        for available in [200.0, 259.0, 260.5, 331.0, 419.9] {
+            assert_eq!(slot_size(available, 6).fract(), 0.0, "{available} gave a fractional slot");
+        }
+    }
+
+    #[test]
+    fn an_impossibly_narrow_rail_still_yields_a_usable_slot() {
+        // Guards a negative or zero size, which lays out as an invisible grid
+        // rather than an obviously broken one.
+        for available in [0.0, -50.0, 10.0] {
+            let slot = slot_size(available, 6);
+            assert!(slot >= 24.0, "{available} produced a {slot}px slot");
+        }
     }
 
     #[test]
