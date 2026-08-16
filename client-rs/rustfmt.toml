@@ -1,0 +1,6 @@
+# The client is written in a compact style: short structs, calls and asserts
+# stay on one line. Default rustfmt explodes those across four lines, which
+# would rewrite every file in the workspace and bury real diffs in noise.
+# Recording the style here makes `cargo fmt --check` a usable CI gate instead
+# of a permanent failure.
+use_small_heuristics = "Max"

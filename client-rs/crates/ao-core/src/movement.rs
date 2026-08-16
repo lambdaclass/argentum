@@ -65,12 +65,7 @@ pub struct WalkGate {
 
 impl WalkGate {
     pub fn new(config: WalkGateConfig) -> Self {
-        Self {
-            config,
-            counter: 0.0,
-            last_step_at: None,
-            next_move_at: f64::NEG_INFINITY,
-        }
+        Self { config, counter: 0.0, last_step_at: None, next_move_at: f64::NEG_INFINITY }
     }
 
     /// Effective minimum interval for an entity at `speed` (the server's

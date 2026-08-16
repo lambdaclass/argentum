@@ -10,9 +10,9 @@
 //! publishes into a shared slot which a system polls. On native there is no
 //! fetch yet; the client falls back to a generated map so it still runs.
 
+use crate::graphics::Graphics;
 #[cfg(target_arch = "wasm32")]
 use crate::graphics::{decode_png, parse_directional, parse_npcs, parse_objects, GrhIndex};
-use crate::graphics::Graphics;
 use bevy::prelude::Resource;
 #[cfg(target_arch = "wasm32")]
 use std::collections::HashSet;
@@ -148,11 +148,10 @@ pub async fn fetch_text_public(url: &str) -> Result<String, String> {
 #[cfg(target_arch = "wasm32")]
 async fn fetch_text(url: &str) -> Result<String, String> {
     let response = fetch_response(url).await?;
-    let text = wasm_bindgen_futures::JsFuture::from(
-        response.text().map_err(|e| format!("{url}: {e:?}"))?,
-    )
-    .await
-    .map_err(|e| format!("{url}: {e:?}"))?;
+    let text =
+        wasm_bindgen_futures::JsFuture::from(response.text().map_err(|e| format!("{url}: {e:?}"))?)
+            .await
+            .map_err(|e| format!("{url}: {e:?}"))?;
     text.as_string().ok_or_else(|| format!("{url}: body was not text"))
 }
 
@@ -166,7 +165,6 @@ async fn fetch_bytes(url: &str) -> Result<Vec<u8>, String> {
     .map_err(|e| format!("{url}: {e:?}"))?;
     Ok(js_sys::Uint8Array::new(&buffer).to_vec())
 }
-
 
 /// Fetch the grh index and every sheet the given grh ids need.
 ///
@@ -221,12 +219,9 @@ pub fn start_graphics_load(graphics: Graphics, origin: String, grh_ids: Vec<i32>
 
         // Character art: every body and head referenced by the player and by
         // the npcs on this map.
-        if let (Some(char_index), Some(bodies), Some(heads), Some(npcs)) = (
-            graphics.char_index(),
-            graphics.bodies(),
-            graphics.heads(),
-            graphics.npcs(),
-        ) {
+        if let (Some(char_index), Some(bodies), Some(heads), Some(npcs)) =
+            (graphics.char_index(), graphics.bodies(), graphics.heads(), graphics.npcs())
+        {
             let mut looks: Vec<(i32, i32)> = vec![(DEFAULT_BODY, DEFAULT_HEAD)];
             looks.extend(npcs.values().map(|n| (n.body, n.head)));
 

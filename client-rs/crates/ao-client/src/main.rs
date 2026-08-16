@@ -63,9 +63,7 @@ fn main() {
         // so movement appears to lag and then jump a whole tile at a time.
         .insert_resource(WinitSettings {
             focused_mode: UpdateMode::Continuous,
-            unfocused_mode: UpdateMode::reactive_low_power(
-                std::time::Duration::from_millis(100),
-            ),
+            unfocused_mode: UpdateMode::reactive_low_power(std::time::Duration::from_millis(100)),
         })
         .add_plugins((world::WorldPlugin, hud::HudPlugin))
         .run();

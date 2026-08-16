@@ -224,12 +224,7 @@ fn read_map(r: &mut Reader<'_>) -> Result<PackedMap, PackError> {
     let object_count = r.u16()?;
     let mut objects = Vec::with_capacity(object_count as usize);
     for _ in 0..object_count {
-        objects.push(MapObject {
-            x: r.u8()?,
-            y: r.u8()?,
-            obj_id: r.u16()?,
-            amount: r.u16()?,
-        });
+        objects.push(MapObject { x: r.u8()?, y: r.u8()?, obj_id: r.u16()?, amount: r.u16()? });
     }
 
     let exit_count = r.u16()?;

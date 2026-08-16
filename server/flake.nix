@@ -19,6 +19,15 @@
             pkgs.postgresql_16
             pkgs.rustc
             pkgs.cargo
+            # clippy and rustfmt must come from the same nixpkgs revision as
+            # rustc. Leaving them out does not disable them — cargo falls
+            # through to whatever toolchain is on the ambient PATH, and a
+            # clippy-driver from a different rustc cannot read the artifacts
+            # cargo build just produced. That surfaces as a baffling
+            # `E0514: found crate bevy compiled by an incompatible version of
+            # rustc` on a tree that builds and tests cleanly.
+            pkgs.clippy
+            pkgs.rustfmt
             pkgs.clang
             pkgs.gnumake
             pkgs.nodejs_22

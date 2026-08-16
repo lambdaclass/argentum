@@ -63,10 +63,8 @@ impl GrhIndex {
     /// character, so the frames matter as much as the first one.
     pub fn animation(&self, id: i32) -> Option<GrhAnimation> {
         let (ids, cycle_ms) = self.animations.get(&id)?;
-        let frames: Vec<Grh> = ids
-            .iter()
-            .filter_map(|frame| self.statics.get(frame).cloned())
-            .collect();
+        let frames: Vec<Grh> =
+            ids.iter().filter_map(|frame| self.statics.get(frame).cloned()).collect();
         if frames.is_empty() {
             return None;
         }
@@ -151,9 +149,7 @@ fn sheet_field(object: &str) -> Option<String> {
         return Some(quoted[..end].to_string());
     }
 
-    let end = rest
-        .find(|c: char| !c.is_ascii_digit())
-        .unwrap_or(rest.len());
+    let end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
     if end == 0 {
         return None;
     }
@@ -165,9 +161,8 @@ fn number_field(object: &str, key: &str) -> Option<f64> {
     let at = object.find(&needle)? + needle.len();
     let rest = object[at..].trim_start();
     let rest = rest.strip_prefix(':')?.trim_start();
-    let end = rest
-        .find(|c: char| !(c.is_ascii_digit() || c == '-' || c == '.'))
-        .unwrap_or(rest.len());
+    let end =
+        rest.find(|c: char| !(c.is_ascii_digit() || c == '-' || c == '.')).unwrap_or(rest.len());
     rest[..end].parse().ok()
 }
 
@@ -177,12 +172,7 @@ fn int_array_field(object: &str, key: &str) -> Option<Vec<i32>> {
     let rest = object[at..].trim_start().strip_prefix(':')?.trim_start();
     let rest = rest.strip_prefix('[')?;
     let end = rest.find(']')?;
-    Some(
-        rest[..end]
-            .split(',')
-            .filter_map(|part| part.trim().parse::<i32>().ok())
-            .collect(),
-    )
+    Some(rest[..end].split(',').filter_map(|part| part.trim().parse::<i32>().ok()).collect())
 }
 
 /// Directional grh ids for a body or head, plus where a body carries its head.
@@ -377,10 +367,7 @@ impl Graphics {
     }
 
     pub fn take_pending_sheets(&self) -> Vec<(String, u32, u32, Vec<u8>)> {
-        self.inner
-            .lock()
-            .map(|mut g| std::mem::take(&mut g.pending_sheets))
-            .unwrap_or_default()
+        self.inner.lock().map(|mut g| std::mem::take(&mut g.pending_sheets)).unwrap_or_default()
     }
 
     pub fn failure(&self) -> Option<String> {
@@ -517,7 +504,9 @@ mod tests {
 
     #[test]
     fn heads_have_no_offsets_and_that_is_fine() {
-        let heads = parse_directional(r#"[{"id": 1, "up": 3003, "right": 3001, "down": 3000, "left": 3002}]"#);
+        let heads = parse_directional(
+            r#"[{"id": 1, "up": 3003, "right": 3001, "down": 3000, "left": 3002}]"#,
+        );
         let head = heads.get(&1).copied().expect("head 1");
         assert_eq!(head.for_heading(Heading::South), 3000);
         assert_eq!(head.head_offset, Vec2::ZERO);
@@ -592,7 +581,8 @@ mod tests {
 
     #[test]
     fn animation_pointing_at_a_missing_frame_is_not_a_panic() {
-        let index = GrhIndex::parse(r#"[{"id": 5, "frames": [999], "velocidad": 1.0}]"#, "graficos");
+        let index =
+            GrhIndex::parse(r#"[{"id": 5, "frames": [999], "velocidad": 1.0}]"#, "graficos");
         assert!(index.resolve(5).is_none());
     }
 }
