@@ -232,8 +232,10 @@ fn apply_geometry(
     };
 
     let logical = Vec2::new(window.width(), window.height());
-    let resolved = scale::resolve(logical, window.scale_factor());
     let geometry = layout::shell_geometry(logical);
+    // The world's own space, not the window's: scaling for room the rail is
+    // using would push the world off its own edge.
+    let resolved = scale::resolve(logical, geometry.world.size(), window.scale_factor());
     if geometry == applied.0 && resolved == *domains {
         return;
     }
@@ -375,8 +377,10 @@ mod tests {
         let geometry = layout::shell_geometry(Vec2::new(1280.0, 720.0));
         let view = layout::world_view(geometry.world);
 
-        let one = scale::resolve(Vec2::new(1280.0, 720.0), 1.0);
-        let two = scale::resolve(Vec2::new(1280.0, 720.0), 2.0);
+        let window = Vec2::new(1280.0, 720.0);
+        let region = layout::shell_geometry(window).world.size();
+        let one = scale::resolve(window, region, 1.0);
+        let two = scale::resolve(window, region, 2.0);
 
         let at_1x = view_viewport(view, one.device).unwrap();
         let at_2x = view_viewport(view, two.device).unwrap();

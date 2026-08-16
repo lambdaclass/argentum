@@ -192,10 +192,15 @@ mod tests {
         tile_to_world(tile) + Vec2::new(TILE_SIZE / 2.0, -TILE_SIZE / 2.0)
     }
 
+    /// The world's share of a window, as the shell lays it out.
+    fn world_region_of(window: Vec2) -> Vec2 {
+        layout::shell_geometry(window).world.size()
+    }
+
     fn scene(size: Vec2, ratio: f32) -> (ShellGeometry, Rect, ScaleDomains) {
         let geometry = layout::shell_geometry(size);
         let view = layout::world_view(geometry.world).rect;
-        let domains = super::super::scale::resolve(size, ratio);
+        let domains = super::super::scale::resolve(size, world_region_of(size), ratio);
         (geometry, view, domains)
     }
 
