@@ -212,7 +212,10 @@ The world viewport grows when the window is maximized. The right rail remains
 readable rather than scaling every control proportionally, and the hotbar is
 centered within the world area—not beneath the rail. The layout borrows this
 information hierarchy from the reference screenshot, not its branded art,
-icons, fonts or exact decoration.
+icons, fonts or exact decoration. Reference comparison is performed at the
+same browser viewport: the target is comparable information clarity and
+interaction quality, not pixel-for-pixel reproduction. Every shipped icon and
+decorative asset is project-owned or licensed for this client.
 
 ### Task W-0001 — Fixed Bevy application shell
 
@@ -235,6 +238,11 @@ Required behavior:
 - The top bar spans the full shell width; the rail is full-height below it; the
   entire hotbar remains inside and centered on the world viewport. Any unused
   perimeter is an explicit layout result, not an accidental black rectangle.
+- The top bar gives textual values to FPS, ping and population, while actions
+  such as support, language, screenshot, audio, settings, minimize, maximize
+  and close use recognizable project-owned icons with localized tooltips and
+  accessible names. Cryptic production abbreviations such as `LN`, `PIC`,
+  `AUD`, `CBT` or `CFG` are not used as the only label for an action.
 - The host DOM contains only the canvas and pre-WASM/error fallback. Movement
   guidance, status, panels and gameplay controls live in Bevy.
 - Fixture/demo mode uses the production Bevy tree and does not alter network
@@ -348,8 +356,9 @@ close this task.
 
 Define transport-independent models for player vitals, inventory, equipment,
 spellbook, hotbar, target, chat, skills, progression, safety and services, plus
-typed command intents. Supply deterministic populated, empty, loading,
-disabled, rejected, disconnected, dead/ghost and malformed-data fixtures.
+minimap/world-map presentation and typed command intents. Supply deterministic
+populated, empty, loading, disabled, rejected, disconnected, dead/ghost and
+malformed-data fixtures.
 Server feedback crosses the boundary as stable semantic keys and parameters,
 not presentation-ready Spanish where the protocol can avoid it.
 
@@ -383,15 +392,24 @@ Register a `ControlsPlugin` that connects real Bevy pointer/interaction and
 keyboard input to the shared model:
 
 - hover, press, release, disabled and focused states update rendered controls;
-- Tab and Shift+Tab traverse enabled controls deterministically; Enter/Space
-  activate the focused control exactly once; removed or hidden controls cannot
-  retain focus;
+- while UI-focus context owns input, Tab and Shift+Tab traverse enabled controls
+  deterministically; Enter/Space activate the focused control exactly once;
+  removed or hidden controls cannot retain focus. While gameplay/world context
+  owns input, Tab is available to the full-map workflow in W-0089. A documented
+  keyboard action such as F6 enters/leaves UI-focus navigation without allowing
+  browser focus to escape the canvas;
 - text/password fields accept editing input, caret motion and masking without
   leaking gameplay hotkeys; IME composition crosses the platform boundary
   defined later without creating a second DOM field;
 - buttons, tabs, slots and dialog actions emit one shared typed activation
   message rather than panel-specific polling; and
 - WASM and native run the same focus/state/activation systems.
+
+Icon buttons retain localized accessible names even when no text label is
+drawn. Tooltips choose a placement that remains inside the current world/UI
+viewport at every supported scale, and status cannot be communicated by color
+alone: focus, pending, equipped, locked, unavailable and rejected states also
+use shape, iconography, border or text.
 
 Add Bevy app tests that inject pointer and keyboard input and observe the
 rendered state plus emitted activation. The production control path must be
@@ -435,6 +453,14 @@ visible locked slots. Exercise selection, equip/use/drop intent, splitting,
 drag cancellation, insufficient state and authoritative rejection/rollback
 presentation without claiming mock actions are live gameplay.
 
+The rail uses a deliberate information hierarchy: prominent character name;
+secondary class and level; XP bar; world time/status; compact currency and
+equipment summaries; then vitals and navigation. Gold does not consume the
+identity header when it can be scanned in the currency row. Equipment state is
+shown with recognizable slot/item icons and concise counters, not a permanent
+list of raw item names; full names, statistics and durability live in selection
+details or tooltips.
+
 Connect rendered slots to the W-0005 interaction system. Single click selects,
 double click emits exactly one use/equip intent, Shift-click opens or applies an
 explicit split/drop quantity rule, and drag/drop emits a move only for a valid
@@ -444,10 +470,14 @@ close and grid rebuild all cancel a drag and remove its ghost.
 Do not infer item behavior from stack quantity. Item action/category metadata
 in the view model decides whether activation equips, uses or opens an item;
 tests cover a single-use consumable and a non-stackable piece of equipment.
-Render item GRH icons and quantities, visible locked slots, selection and
-pending/rejected state in the actual rail. The fixture snapshot changes only
-after simulated authority accepts an intent; rejection leaves the authoritative
-item in place and shows semantic feedback.
+Render item GRH icons, corner quantity overlays, equipped markers, visible
+locked slots and distinct hover/focus/selection/pending/rejected states in the
+actual rail. Unknown GRHs use a stable visible fallback. Selection is keyed by
+stable item/slot identity and survives an unrelated snapshot update; removal,
+replacement or panel close clears it deterministically. While an action is
+pending, accidental double activation cannot emit a duplicate command. The
+fixture snapshot changes only after simulated authority accepts an intent;
+rejection leaves the authoritative item in place and shows semantic feedback.
 
 Close with Bevy interaction tests that click and drag spawned slot entities and
 assert `IntentMessage` output and cleanup. Testing an intent-mapping helper or
@@ -466,12 +496,16 @@ typed presentation states whose final authority remains server-side.
 
 Complete the rendered flow:
 
-- inventory/spell tabs switch visible content with keyboard and pointer input;
+- inventory/spell tabs are equal-width controls with distinct hover, focus,
+  pressed and selected states, preserve the selected tab across harmless
+  snapshots and switch visible content with keyboard and pointer input without
+  moving the surrounding rail;
 - clicking a ready self/area spell emits one cast intent; an entity/ground spell
   arms visibly, consumes the next valid world target and disarms on cast,
   Escape, death, disconnect or authoritative rejection;
 - spell rows and hotbar slots display GRH icon, cost, disabled reason, cooldown
-  overlay and focus/selection state; semantic keys are localized by the UI
+  and quantity overlays, key labels, disabled reason, cooldown overlay and
+  focus/selection/activation state; semantic keys are localized by the UI
   boundary rather than shown raw to players;
 - number keys and pointer clicks share one hotbar activation path, are suppressed
   while text owns focus and never fire a cooling or empty slot; and
@@ -493,6 +527,82 @@ party safety, navigation/dead restrictions, notifications and contextual
 actions. Define focus ownership so chat, IME, password fields and modals suppress
 movement/combat/hotkeys. Cover cooldown, mute, rejection and disconnect feedback.
 
+World chat is a bounded upper-left overlay with wrapping, fading, expansion and
+channel filters; long announcements cannot run beneath or obscure the minimap.
+Fixtures include the local name, several player/NPC names, bubbles, combat text,
+a selected target and success/failure feedback so the HUD is judged under real
+Argentum visual density rather than an empty map. Labels apply deterministic
+priority, overlap and distance/fade rules instead of becoming an unreadable
+stack.
+
+The selected-target presentation distinguishes player, NPC, object and ground
+targets, exposes only server-authorized information, and clears immediately on
+despawn, death, map change, range/visibility loss or disconnect. Feedback is
+visible without relying only on chat color.
+
+### Task W-0088 — Fixture-backed minimap presentation
+
+- **State:** planned
+- **Phase:** 0
+- **Depends on:** W-0004, W-0005, W-0008
+
+Replace the unexplained black minimap well with a fixture-backed Bevy minimap
+contract while keeping unavailable/loading/error states honest. Render the
+current map outline or tile abstraction, player marker, permitted party/NPC or
+objective markers, orientation and coordinates from typed presentation data;
+do not derive hidden authoritative entities from downloaded map assets.
+
+Markers use stable icon/shape distinctions in addition to color, stay clipped
+to the minimap, and expose localized tooltips where interaction is supported.
+Resize, compact mode, UI scale, map change and malformed/missing map data cannot
+stretch the map, leak state from the previous map or leave an unlabeled black
+rectangle. Phase 0 closes the presentation and fixture behavior; W-0039 owns
+the later authoritative live-world connection.
+
+### Task W-0089 — Tab world-map overlay
+
+- **State:** planned
+- **Phase:** 0
+- **Depends on:** W-0003, W-0004, W-0005, W-0008, W-0085, W-0088
+
+Implement the full world map as a Bevy-owned overlay within the world viewport,
+leaving the global top bar and character rail visible and interactive as in the
+reference workflow. In gameplay/world input context, Tab opens the map and Tab
+or Escape closes it. Opening the map hides or disables the world hotbar and
+world targeting, releases any armed spell/drag/pointer capture under their
+documented cancellation rules, and pauses movement/combat command emission
+without pausing the authoritative session.
+
+The initial view fits the whole known world while preserving aspect ratio with
+intentional crop/letterbox treatment. Support bounded pointer-wheel and
+keyboard zoom, pointer drag and keyboard pan, reset-to-fit, recenter-on-player
+and stable zoom-around-cursor behavior. Clamp every path to finite map bounds;
+malformed coordinates, a zero-sized viewport or repeated open/close cannot
+produce NaN transforms, reveal uninitialized texture memory or lose the last
+valid camera state. Persist the last valid pan/zoom for the session while a
+separate reset action always restores the whole-world view.
+
+Render the player marker, current region name and world coordinates plus typed,
+toggleable categories for merchants, quests, dungeons and points of interest.
+Markers are project-owned icons with localized labels, hover/focus states and
+non-color distinctions. The client renders only discovered or server-authorized
+markers; map resources cannot reveal hidden NPCs, players, objectives or
+resources. Filtering changes presentation only and never authoritative world
+state. Empty, unavailable, loading, stale-version and missing-icon states remain
+actionable and cannot silently degrade into a black rectangle.
+
+Use a dedicated bounded world-map asset/manifest entry rather than decoding or
+retaining the complete gameplay world pack to draw the overview. Specify source
+license, compressed/decoded/GPU byte cost, maximum texture dimensions and a
+fallback for devices below that limit; Phase 7 later content-hashes and caches
+the production asset.
+
+Close with Bevy app and browser tests proving input-context priority, one toggle
+per keypress, no movement/cast/target command while open, correct rail
+interaction, pan/zoom clamping and marker filtering. Capture whole-world,
+zoomed, panned, filtered and unavailable views at the Phase 0 size/DPR matrix,
+including close/restore after resize, maximize and fullscreen.
+
 ### Task W-0009 — Bevy product screens
 
 - **State:** planned
@@ -504,6 +614,13 @@ character creation with sprite preview, rankings, maintenance, reconnect,
 invalid-session and recovery screens. These are real Bevy navigation states,
 not DOM placeholders, and include empty/error/slow outcomes before Phase 2
 connects services.
+
+The rail's bottom navigation is a real, compact icon-button row using the
+shared control path, localized tooltips and accessible names. It provides the
+supported routes for character/statistics, journal/quests, achievements,
+party/social, clan/faction, map and settings plus an explicit session/logout
+action. Unimplemented destinations are visibly disabled with a reason; the
+production UI never ships a `navigation — not yet wired` text panel.
 
 ### Task W-0010 — Secondary windows and interaction ownership
 
@@ -528,6 +645,13 @@ movement, interaction, combat, inventory, spells, death and recovery. Exercise
 long ES/EN/PT strings, Unicode composition, missing localization and unavailable
 capabilities.
 
+Offer persistent named UI-scale choices covering at least 90%, 100%, 110% and
+125% (or measured equivalents), independent of logical world framing and DPR.
+Text keeps a documented readable minimum, pixel-art icons use the intended
+nearest-neighbor sampling, tooltips remain on-screen and changing UI scale
+preserves focus, selection, composing text and camera center. Every
+color-sensitive state has a non-color cue.
+
 ### Task W-0087 — Worst-case UI data and fallback fixtures
 
 - **State:** planned
@@ -541,6 +665,13 @@ character/item/spell labels and the largest supported numeric values. If a
 maximum is not currently defined, define and document a named client display or
 retention cap before constructing the fixture; do not choose a silent arbitrary
 number.
+
+Add a separate realistic busy-HUD fixture: several nearby players and NPCs with
+names, chat and system messages, a selected target, damaged vitals, equipment,
+a full first inventory page, assigned item/spell hotbar slots, active cooldowns,
+quantities and one rejected/pending action. It must exercise the actual world,
+rail, minimap and hotbar together; an empty scene with placeholder labels is
+not sufficient visual evidence.
 
 Add independent failure variants for an unknown/missing GRH icon, unavailable
 primary font, missing localization key, oversized translated label and malformed
@@ -559,25 +690,30 @@ fails monotonic entity or memory growth.
 
 - **State:** planned
 - **Phase:** 0
-- **Depends on:** W-0002, W-0003, W-0004, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0011, W-0085, W-0087
+- **Depends on:** W-0002, W-0003, W-0004, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0011, W-0085, W-0087, W-0088, W-0089
 
 Create a Bevy component gallery and scripted capture harness sharing the same
 fixtures as production UI. Pin fonts, seed, animation time, map/camera, locale,
 logical resolution, DPR and GPU tolerance. Store approved goldens for 720p,
 1080p, 1440p, ultrawide, small laptop, compact rail, maximized and fullscreen;
-include peaceful, combat, loading, empty and rejected states.
+include peaceful, realistic busy-HUD, combat, loading, empty and rejected
+states plus whole-world and zoomed/filtered Tab-map states. Reference-layout
+comparisons use the same browser viewport and record shell bounds, world/rail
+ratio and UI scale so conclusions are not drawn from differently sized
+captures.
 
 ### Task W-0086 — Resize and UI lifecycle stress
 
 - **State:** planned
 - **Phase:** 0
-- **Depends on:** W-0002, W-0003, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0012, W-0085, W-0087
+- **Depends on:** W-0002, W-0003, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0012, W-0085, W-0087, W-0088, W-0089
 
 Run the production Bevy tree through repeated lifecycle changes rather than
 testing each layout once. A scripted test performs 250 alternating resizes
 across minimum, 720p, 1080p and ultrawide bounds; 1,000 panel open/close cycles;
-1,000 inventory/spell tab switches; repeated maximize/fullscreen restoration;
-and a zero-sized/minimized canvas followed by restoration.
+1,000 inventory/spell tab switches; 1,000 Tab-map open/close cycles with bounded
+pan/zoom/filter changes; repeated maximize/fullscreen restoration; and a
+zero-sized/minimized canvas followed by restoration.
 
 After every settled transition there is exactly one shell root, top bar, world
 camera, rail and hotbar. Hidden or removed controls cannot retain focus; no drag,
@@ -595,7 +731,7 @@ native and a real browser, not only against pure layout functions.
 
 - **State:** planned
 - **Phase:** 0
-- **Depends on:** W-0001, W-0002, W-0003, W-0004, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0011, W-0012, W-0085, W-0086, W-0087
+- **Depends on:** W-0001, W-0002, W-0003, W-0004, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0011, W-0012, W-0085, W-0086, W-0087, W-0088, W-0089
 
 Run the Phase 0 technical checklist, archive capture artifacts and correct every
 failed contract. This closes the engineering gate and unlocks Phase 1; it does
@@ -648,9 +784,29 @@ close through `W-0014`; scheduling people does not idle ready technical work.
 - [ ] Product screens and HUD workflows are Bevy-owned and cover populated,
       empty, loading, disabled, rejected, disconnected, dead/ghost and malformed
       fixture states.
+- [ ] In gameplay context, one Tab press opens a whole-world map inside the
+      world viewport while preserving the rail; Tab/Escape closes it. Fit,
+      pan, zoom, reset, player recenter and merchant/quest/dungeon/POI filters
+      work by pointer and keyboard without leaking movement, combat, targeting
+      or hidden authoritative information.
+- [ ] The minimap and Tab map have labelled unavailable/loading/error states,
+      project-owned marker icons, bounded resources and deterministic captures;
+      neither can become an unexplained black well.
 - [ ] Full and compact rail trees contain visible, usable content; compact mode
       includes at least one vital indicator and one navigation control, and no
       rail mode degrades to an unexplained empty black rectangle.
+- [ ] The rendered rail uses real/fallback GRH icons, quantity and cooldown
+      overlays, stable selected/equipped/pending/rejected states, compact
+      currency/equipment summaries and equal-width Inventory/Spells tabs; no
+      raw fixture label or permanent textual equipment/navigation placeholder
+      substitutes for the intended control.
+- [ ] Top-bar and bottom-navigation actions use project-owned icons with
+      localized tooltips and accessible names, while FPS, ping and population
+      remain readable textual status. Disabled destinations explain why they
+      are unavailable.
+- [ ] Persistent 90/100/110/125% UI-scale choices (or measured equivalents)
+      preserve world framing, focus, selection and camera center; text remains
+      legible, pixel icons remain crisp and tooltips stay inside the viewport.
 - [ ] Pointer and keyboard input traverse, focus and activate real spawned Bevy
       controls. Inventory/spell/hotbar interactions emit typed intents through
       the shared control path; no production control model exists only in tests.
@@ -665,6 +821,10 @@ close through `W-0014`; scheduling people does not idle ready technical work.
       spells, hotbar and chat data plus longest labels. Missing GRH/font/key and
       malformed-value variants remain stable, legible and free of raw semantic
       keys; entity/rebuild/frame baselines are recorded.
+- [ ] A realistic busy-HUD capture contains nearby named players/NPCs, bounded
+      chat, a selected target, damaged vitals, a populated inventory/equipment
+      state, assigned hotbar items/spells, active cooldowns and pending/rejected
+      feedback without overlap or loss of actionability.
 - [ ] Focus, modal/chat ownership, drag cancellation, tooltips and IME never
       leak unintended world commands.
 - [ ] The native/browser lifecycle stress run completes 250 resizes, 1,000 panel
@@ -1006,6 +1166,11 @@ correction through the live path.
 
 Select characters/NPCs/objects/tiles, face/use/pick up/drop and preserve server
 range, navigation and visibility. Cover target disappearance and map change.
+Connect the W-0088 minimap and W-0089 Tab map to the authoritative current map,
+player position and explicitly authorized/discovered marker feed. Map opening,
+filtering and panning remain client presentation; any travel, targeting or
+context action returns through an ordinary validated intent and cannot infer
+entities outside server visibility.
 
 ### Task W-0040 — Combat and safety end to end
 
@@ -1030,6 +1195,9 @@ leak gameplay commands.
 
 - [ ] A real character fights, loots, moves/equips/uses/drops items, casts
       constrained spells, uses hotkeys, chats and toggles safety through Bevy.
+- [ ] The live minimap and Tab map follow authoritative map/player state, clear
+      stale markers on map change/reconnect and reveal no entity or objective
+      outside the server-authorized marker feed.
 - [ ] Inventory, magic, targeting, combat and chat cover success, rejection,
       interruption, death, map change and reconnect where applicable.
 - [ ] Server correction rolls back without duplicate items, cooldowns, targets
