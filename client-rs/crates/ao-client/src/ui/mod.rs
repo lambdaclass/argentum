@@ -11,6 +11,7 @@ pub mod controls;
 pub mod fonts;
 pub mod hotbar;
 pub mod layout;
+pub mod pointer;
 pub mod rail;
 pub mod scale;
 pub mod shell;
@@ -30,6 +31,7 @@ impl Plugin for UiPlugin {
         app.add_plugins((
             fonts::FontPlugin,
             controls::ControlsPlugin,
+            pointer::PointerPlugin,
             state::UiStatePlugin,
             shell::ShellPlugin,
             topbar::TopBarPlugin,

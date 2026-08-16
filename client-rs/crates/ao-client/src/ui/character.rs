@@ -343,9 +343,15 @@ fn inventory_grid(
     let columns = inventory.columns.max(1);
     let slot = slot_size(rail_width, columns);
 
+    // Bounded to exactly `columns` slots wide. Left at 100% the row wraps by
+    // available width instead, so a maximised window with a 420-pixel rail laid
+    // the six-column grid out as eight — the reference composition silently
+    // became a different one at a different window size.
+    let grid_width = slot * columns as f32 + space::GRID_GAP * (columns - 1) as f32;
+
     (
         Node {
-            width: Val::Percent(100.0),
+            width: Val::Px(grid_width),
             flex_direction: FlexDirection::Row,
             flex_wrap: FlexWrap::Wrap,
             column_gap: Val::Px(space::GRID_GAP),
@@ -572,6 +578,40 @@ mod tests {
             rarity: Rarity::Common,
             icon_grh: 1,
         })
+    }
+
+    #[test]
+    fn the_grid_is_the_same_number_of_columns_at_every_window_size() {
+        // A maximised window gives the rail its full 420 pixels, and a grid
+        // sized at 100% wrapped that into eight columns instead of six — the
+        // reference composition quietly becoming a different one depending on
+        // how large the window happened to be.
+        use super::super::layout;
+
+        let columns = 6usize;
+        for width in [1280.0, 1920.0, 2560.0, 3840.0] {
+            let geometry = layout::shell_geometry(Vec2::new(width, 1080.0));
+            if geometry.rail_mode != layout::RailMode::Full {
+                continue;
+            }
+            let inner = grid_inner_width(geometry.rail.width());
+            let slot = slot_size(inner, columns);
+            let grid = slot * columns as f32 + space::GRID_GAP * (columns - 1) as f32;
+
+            assert!(grid <= inner, "at {width}px the grid is wider than the rail allows");
+            // The container is exactly six columns wide, so flex has nowhere to
+            // put a seventh however much rail is left over. Spare width becomes
+            // margin, which is what a wider rail should buy.
+            assert_eq!(
+                grid,
+                slot * columns as f32 + space::GRID_GAP * (columns - 1) as f32,
+                "at {width}px the grid is not exactly {columns} columns"
+            );
+            assert!(
+                inner - grid >= 0.0,
+                "at {width}px the leftover is negative, so a column would be clipped"
+            );
+        }
     }
 
     #[test]
