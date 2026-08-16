@@ -132,6 +132,11 @@ and must leave the legacy TCP/WS path working.
 6. **[client]** Implement connection lifecycle: heartbeat/RTT, meaningful close reasons,
    exponential reconnect backoff and an explicit transition to `Playing` only
    after the authoritative bootstrap completes.
+7. **[client]** Add a redacted packet-trace recorder and deterministic replay harness. A
+   trace contains inbound frames, outbound commands, timestamps, application
+   state transitions and build/world versions, but never passwords, launch
+   tokens or account cookies. Replays run without a live socket and can inject
+   fragmentation, delay and disconnect boundaries.
 
 Exit criteria:
 
@@ -144,6 +149,8 @@ Exit criteria:
   and concatenated delivery.
 - Framing and packet decoders survive fuzz/property tests for truncation,
   hostile lengths and arbitrary unknown packet IDs without panic or desync.
+- A recorded login/bootstrap/gameplay trace replays to the same client-world
+  state deterministically, with secrets demonstrably redacted.
 
 ## Phase 2: Authoritative live world
 
@@ -175,7 +182,40 @@ Exit criteria:
   the server without oscillation.
 - Entity churn and reconnect soak tests leave no duplicate or leaked entities.
 
-## Phase 3: World fidelity and audio
+## Phase 3: Gameplay parity
+
+Decoding packets and drawing panels is not gameplay. Implement complete player
+workflows against the authoritative server before polishing or packaging them.
+
+1. **[client]** Targeting and interaction: select characters/NPCs/objects, face targets,
+   use the world, pick up/drop items and preserve server range/visibility rules.
+2. **[client]** Combat: attacks, weapon use, damage feedback, death, resurrection, safe-zone
+   restrictions and server rejection/correction paths.
+3. **[client]** Magic: spell selection, target modes, casting, cooldown/interval feedback,
+   mana requirements and cancellation.
+4. **[client]** Inventory and equipment: move/use/drop items, equip every supported layer,
+   quantities, locked slots and authoritative rollback on rejection.
+5. **[client]** NPC dialogue and services: conversation, quests where supported, training,
+   trade, bank and commerce transactions.
+6. **[client]** Social workflows: private/public chat, party and clan actions, trade between
+   players, block/mute/report and moderation feedback.
+7. **[client]** Cover travel restrictions, hunger/thirst, rest/meditation and other gameplay
+   state that changes which commands the client may offer. The server remains
+   authoritative; client-side gating improves feedback but grants no trust.
+8. **[client + server]** Maintain a parity matrix mapping each supported workflow to client
+   commands, server packets, Rust handlers, UI surface, VB6/TypeScript reference
+   and an end-to-end test. "Packet decoded" alone is not a completed row.
+
+Exit criteria:
+
+- A scripted character can complete combat, spell, inventory, NPC service,
+  commerce/bank, party/clan, death and resurrection flows end to end.
+- Each workflow tests success, server rejection, interruption and reconnect.
+- The parity matrix has no unexplained gap for the features exposed by the UI.
+- Packet-trace replay reproduces at least one regression from each major
+  workflow without a live server.
+
+## Phase 4: World fidelity and audio
 
 The authoritative world should now look and sound like Argentum.
 
@@ -194,6 +234,9 @@ The authoritative world should now look and sound like Argentum.
 7. **[client]** Music and positional sound with separate volume controls. Browser audio must
    unlock from a user gesture, suspend cleanly in a background tab and resume
    without overlapping tracks.
+8. **[client]** Profile the tile/entity renderer against the Phase 0 draw-call and frame-time
+   ceilings. Introduce chunked tile meshes, sprite batching or instancing only
+   where measurements require them; keep culling and entity cleanup observable.
 
 Exit criteria:
 
@@ -205,7 +248,7 @@ Exit criteria:
 - Golden screenshot tests cover representative outdoor, indoor, crowded and
   equipment-layer scenes at supported scale factors.
 
-## Phase 4: Versioned assets and persistent cache
+## Phase 5: Versioned assets and persistent cache
 
 This precedes seamless transitions: a transition cannot be hitch-free if the
 client first downloads or retains an unbounded 58.8 MB world pack.
@@ -228,7 +271,15 @@ client first downloads or retains an unbounded 58.8 MB world pack.
    separate megabyte allowance. Speculation stops before consuming the headroom
    reserved for the next authoritative world.
 7. **[client]** Cache the app shell/service worker, while remaining honest that gameplay
-   still requires a live server.
+   still requires a live server. Install/activate a new worker atomically so an
+   open tab cannot combine an old WASM client with a partially updated shell.
+8. **[client]** Prepare assets within the frame budget. Decode off the main gameplay loop
+   where the platform permits, spread GPU texture uploads across frames, cancel
+   obsolete speculative work and cap uploads/decoded bytes per frame. A cache
+   hit is not allowed to become a visible decode/upload hitch.
+9. **[client]** Reject malformed or hostile resources with explicit size/dimension/count
+   limits. Fuzz the map pack, index and image-metadata parsers; integrity hashes
+   do not replace defensive parsing.
 
 Exit criteria:
 
@@ -237,8 +288,10 @@ Exit criteria:
 - Corrupt, partial and mixed-version caches recover automatically.
 - CI reports cold/warm transferred bytes, cache hit rate, WASM heap and estimated
   GPU texture memory on a fixed browser profile.
+- A fully cached destination can be decoded and uploaded without exceeding the
+  configured per-frame budget or producing a long task.
 
-## Phase 5: Seamless map transitions
+## Phase 6: Seamless map transitions
 
 The player never sees a loading screen when changing maps. Requires coordinated
 server and client work; see the design discussion for full detail. Treat the
@@ -297,7 +350,7 @@ Client:
    queued envelopes whose source map/epoch is no longer active.
 8. **[client]** Pause gameplay input at `begin`, clear held keys and `WalkGate`, retain the
    old rendered world, then resume only after the atomic destination commit.
-9. **[client]** Use Phase 4's cache and exit dependency index to prepare destination maps and
+9. **[client]** Use Phase 5's cache and exit dependency index to prepare destination maps and
    textures without re-downloading or re-uploading shared resources.
 
 Exit criteria:
@@ -309,12 +362,12 @@ Exit criteria:
 - Under forced egress backpressure, packet capture proves that no handoff member
   is dropped, coalesced, or delivered outside its `begin`/`end` boundaries.
 - Browser telemetry reports decoded-map, speculative-preload and estimated
-  GPU-texture bytes separately and stays within Phase 4's ceilings.
+  GPU-texture bytes separately and stays within Phase 5's ceilings.
 - 1,000 repeated transitions leave no leaked entities or textures.
 - Destination failure, disconnect mid-transfer, stale source movement after
   handoff, and transitions under backpressure all behave.
 
-## Phase 6: Complete UI, localization and accessibility
+## Phase 7: Complete UI, localization and accessibility
 
 Use the hybrid boundary established in Phase 0: DOM for forms, text input, IME
 and accessible controls; Bevy for the world and tightly coupled HUD visuals.
@@ -334,6 +387,14 @@ and accessible controls; Bevy for the world and tightly coupled HUD visuals.
    assets and snapshot—and actionable retry/error states. The JavaScript boot
    screen must wait for a Rust readiness signal rather than disappear merely
    because the WASM module instantiated.
+7. **[client]** Implement responsive integer scaling for the pixel-art viewport. Define
+   behavior for small windows, ultrawide displays, browser zoom, device-pixel
+   ratios, orientation changes and OS scaling without fractional camera shimmer
+   or distorted aspect ratio.
+8. **[client]** Support windowed, maximized and fullscreen modes with a reliable return path,
+   persisted preference and browser-permission failure handling. Recompute the
+   viewport on every resize/fullscreen/DPI event without moving the player,
+   changing world visibility rules or losing focused text input.
 
 `research/argentumunited/README.md` documents a working AO client's layout and
 eight specific ideas worth taking, including numbers rendered inside status bars
@@ -346,8 +407,10 @@ Exit criteria:
 - Authentication, character selection and chat work with keyboard navigation
   and IME input.
 - Reloading preserves user settings without preserving passwords.
+- Automated resize tests cover supported aspect ratios and device-pixel ratios;
+  screenshots remain pixel-aligned in windowed and fullscreen modes.
 
-## Phase 7: Production hardening and release
+## Phase 8: Production hardening and release
 
 1. **[client]** Handle browser lifecycle deliberately: focus loss clears held input, hidden
    tabs suspend expensive presentation, long sleeps trigger resynchronisation,
@@ -358,6 +421,9 @@ Exit criteria:
    a client hash and browser-side checks are not security boundaries. Browser
    TLS uses the browser trust store; do not promise application certificate
    pinning for WASM.
+   Render player/chat content as text, never trusted HTML; define CSRF/session
+   handling for REST calls, maximum frame/decompressed-resource sizes, token
+   expiry, explicit logout and credential-free diagnostics.
 3. **[client]** Add structured, privacy-conscious diagnostics: build/world version, time to
    first interactive world, FPS/frame time, RTT, reconnects, handoff latency,
    cache hit rate and memory budgets. Never log credentials or launch tokens.
@@ -369,6 +435,14 @@ Exit criteria:
    Linux, macOS and Windows, with partial/content-addressed updates.
 6. **[client]** Display build identification in-client, automate reproducible release
    artifacts and retain a tested rollback path.
+7. **[server + client]** Define rolling-upgrade compatibility. Negotiate minimum/maximum
+   supported protocol and content builds, show a recoverable upgrade-required
+   screen, and test old-client/new-server plus new-client/old-server during every
+   rollout. Service-worker activation and rollback must preserve one coherent
+   client/manifest pair.
+8. **[server + client]** Define multi-tab/session ownership. Launching the same character in
+   another tab or device must produce a deterministic handoff or rejection,
+   never two active authorities, token leakage or an unexplained disconnect.
 
 Exit criteria:
 
@@ -378,8 +452,10 @@ Exit criteria:
 - Supported browsers pass the same login, gameplay, reconnect and handoff suite.
 - Release dashboards expose size, boot, frame, network and memory regressions
   before rollout.
+- Rolling upgrade/rollback and duplicate-session tests pass without corrupting
+  character state or mixing client/resource versions.
 
-## Phase 8: Research and experiments
+## Phase 9: Research and experiments
 
 Research produces measured proposals, not promises slipped into an active
 phase. Promote an idea into the roadmap only after documenting player value,
@@ -417,14 +493,18 @@ Everything tagged **[server]** above, ordered by when it blocks:
 | 0 | Serve `client-rs` from the game origin | Removes the dev-only CORS arrangement |
 | 1 | Parity decision and negotiated length-framed WS protocol | Lets modern clients skip unknown packets without changing legacy TCP/WS |
 | 1 | Canonical schema/extractor decision plus cross-language fixtures | Code generation is unsafe until a source is proven against Elixir bytes |
-| 3 | Emit `triggers` in `encode_map` | Roof hiding is impossible without them; the TypeScript client needs this too |
-| 4 | Indexed/per-map asset format, hashes, range support and immutable headers | Avoids downloading/retaining 58.8 MB and enables safe persistent caching |
-| 5 | Parity entries for the new handoff packets | Unclassified intentional divergences fail the protocol gate |
-| 5 | `map_handoff_begin` / `end` + fixtures | Explicit snapshot boundary |
-| 5 | `MapServer.enter/3` returns a snapshot | NPCs currently sent out-of-band, so no end marker is authoritative |
-| 5 | Session `world_epoch` | Char indices are map-local and reused |
-| 5 | `map_handoff_failed` | Destination refusal must not strand the player |
-| 5 | Ordered critical snapshot batch | Boundary packets alone cannot contain normally coalesced members |
+| 2 | Reconnect/resynchronisation snapshot contract | Prevents stale entities and replayed inputs after transport loss or tab sleep |
+| 3 | Gameplay workflow parity matrix and end-to-end fixtures | Proves commands, responses and rejection paths—not only individual packets |
+| 4 | Emit `triggers` in `encode_map` | Roof hiding is impossible without them; the TypeScript client needs this too |
+| 5 | Indexed/per-map asset format, hashes, range support and immutable headers | Avoids downloading/retaining 58.8 MB and enables safe persistent caching |
+| 6 | Parity entries for the new handoff packets | Unclassified intentional divergences fail the protocol gate |
+| 6 | `map_handoff_begin` / `end` + fixtures | Explicit snapshot boundary |
+| 6 | `MapServer.enter/3` returns a snapshot | NPCs currently sent out-of-band, so no end marker is authoritative |
+| 6 | Session `world_epoch` | Char indices are map-local and reused |
+| 6 | `map_handoff_failed` | Destination refusal must not strand the player |
+| 6 | Ordered critical snapshot batch | Boundary packets alone cannot contain normally coalesced members |
+| 8 | Protocol/build compatibility and upgrade-required response | Keeps cached old clients safe during rolling deploys and rollback |
+| 8 | Multi-tab/session ownership contract | Prevents two active authorities for one character |
 
 Map triggers, the asset format and immutable cache headers benefit the
 TypeScript client independently. Protocol v2 and handoff framing remain
@@ -446,7 +526,7 @@ capability-gated until that client deliberately opts in.
 
 - Maps larger than 100x100 or variable-sized maps during the seamless-handoff
   implementation. Server, NIF and wire coordinates use 100x100 maps with `u8`
-  tile coordinates; changing that is a separate Phase 8 research candidate.
+  tile coordinates; changing that is a separate Phase 9 research candidate.
 - Replacing the TypeScript client. Two clients against one server is a feature:
   it keeps the protocol honest.
 - Treating client-side asset encryption, client hashes or WASM validation as
