@@ -69,6 +69,10 @@ impl Session {
     /// Packet lengths are not on the wire, so an unknown id cannot be skipped:
     /// everything after it would be misread. The connection is failed instead,
     /// which is loud rather than subtly wrong.
+    ///
+    /// Only the wasm socket callbacks call this today; native transport is not
+    /// implemented yet.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     fn ingest(&self, bytes: &[u8]) {
         let mut failure = None;
 

@@ -29,12 +29,18 @@ pub struct Grh {
     pub height: f32,
 }
 
+/// A multi-frame animation: the frames themselves plus how long one full cycle
+/// takes. `velocidad` in the index is the whole cycle, not one frame.
+#[derive(Debug, Clone)]
+pub struct GrhAnimation {
+    pub frames: Vec<Grh>,
+    pub cycle_ms: f32,
+}
+
 #[derive(Default)]
 pub struct GrhIndex {
     statics: HashMap<i32, Grh>,
-    /// Animation id -> its frame grh ids. Frame 0 is used until animation is
-    /// wired up, which is still far better than drawing nothing.
-    animations: HashMap<i32, Vec<i32>>,
+    animations: HashMap<i32, (Vec<i32>, f32)>,
 }
 
 impl GrhIndex {
@@ -47,8 +53,24 @@ impl GrhIndex {
         if let Some(grh) = self.statics.get(&id) {
             return Some(grh.clone());
         }
-        let first = *self.animations.get(&id)?.first()?;
+        let first = *self.animations.get(&id)?.0.first()?;
         self.statics.get(&first).cloned()
+    }
+
+    /// Full animation for a grh, if it has one.
+    ///
+    /// Walking is the difference between a sliding cardboard cutout and a
+    /// character, so the frames matter as much as the first one.
+    pub fn animation(&self, id: i32) -> Option<GrhAnimation> {
+        let (ids, cycle_ms) = self.animations.get(&id)?;
+        let frames: Vec<Grh> = ids
+            .iter()
+            .filter_map(|frame| self.statics.get(frame).cloned())
+            .collect();
+        if frames.is_empty() {
+            return None;
+        }
+        Some(GrhAnimation { frames, cycle_ms: *cycle_ms })
     }
 
     /// Parse an index. Hand-rolled rather than serde to keep the wasm payload
@@ -76,7 +98,10 @@ impl GrhIndex {
                     },
                 );
             } else if let Some(frames) = int_array_field(object, "frames") {
-                index.animations.insert(id, frames);
+                // Bodies without a stated speed fall back to the web client's
+                // default of 210ms per cycle.
+                let cycle = number_field(object, "velocidad").unwrap_or(210.0) as f32;
+                index.animations.insert(id, (frames, cycle));
             }
         }
 
@@ -496,6 +521,29 @@ mod tests {
         let head = heads.get(&1).copied().expect("head 1");
         assert_eq!(head.for_heading(Heading::South), 3000);
         assert_eq!(head.head_offset, Vec2::ZERO);
+    }
+
+    #[test]
+    fn animations_expose_every_frame_and_the_cycle_time() {
+        let index = GrhIndex::parse(
+            r#"[
+                {"id": 91, "frames": [85, 86], "velocidad": 333.0},
+                {"id": 85, "grafico": "a1", "offX": 0, "offY": 0, "width": 25, "height": 45},
+                {"id": 86, "grafico": "a1", "offX": 25, "offY": 0, "width": 25, "height": 45}
+            ]"#,
+            "graficos_char",
+        );
+        let animation = index.animation(91).expect("animation");
+        assert_eq!(animation.frames.len(), 2);
+        assert_eq!(animation.cycle_ms, 333.0);
+        // velocidad is the whole cycle, so a two-frame walk advances every 166ms.
+        assert_eq!(animation.frames[1].x, 25.0);
+    }
+
+    #[test]
+    fn animation_missing_its_frames_yields_none_rather_than_an_empty_cycle() {
+        let index = GrhIndex::parse(r#"[{"id": 5, "frames": [999], "velocidad": 1.0}]"#, "g");
+        assert!(index.animation(5).is_none());
     }
 
     #[test]

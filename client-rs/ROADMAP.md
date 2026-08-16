@@ -9,10 +9,11 @@ Phases can overlap, but they are ordered by what unblocks what. Browser tests,
 protocol fixtures and performance measurements start with the feature they
 protect; they are not deferred to a final QA pass.
 
-Items are tagged **[server]** or **[client]**. Some of this work lives in
-`server/`, not here — it is tracked here because it exists to serve this client,
-and splitting it across two roadmaps would hide the dependency. Anything tagged
-**[server]** should also be reflected in the main `ROADMAP.md` when scheduled.
+Items are tagged **[server]**, **[client]** or **[client/design]**. Some of this
+work lives in `server/`, not here—it is tracked here because it exists to serve
+this client, and splitting it across two roadmaps would hide the dependency.
+Anything tagged **[server]** should also be reflected in the main `ROADMAP.md`
+when scheduled.
 
 ## Why this client exists
 
@@ -79,6 +80,11 @@ surface is still small.
    numeric ceilings for time to first interactive world, p95 frame time, draw
    calls, WASM heap, estimated GPU memory and reconnect/handoff latency before
    the phases that consume those budgets begin.
+9. **[client]** Probe capabilities before launching: WebGL2, maximum texture size, device
+   pixel ratio, audio support, persistent-storage availability/quota and memory
+   pressure indicators where the platform exposes them. Select a documented
+   low-resource profile or show an actionable unsupported-device result instead
+   of failing inside Bevy startup.
 
 Exit criteria:
 
@@ -90,6 +96,8 @@ Exit criteria:
 - The compressed WASM size is produced and checked by CI.
 - Runtime performance budgets have a reproducible measurement command and
   stored baseline, not an informal target.
+- Supported and deliberately unsupported capability profiles produce stable,
+  testable startup outcomes; the diagnostic report contains no identifying data.
 
 ## Phase 1: Protocol and real authentication
 
@@ -137,6 +145,12 @@ and must leave the legacy TCP/WS path working.
    state transitions and build/world versions, but never passwords, launch
    tokens or account cookies. Replays run without a live socket and can inject
    fragmentation, delay and disconnect boundaries.
+8. **[client]** Bound network work and memory in both directions. Limit queued inbound
+   frames/decoded packets by bytes and count, process them with a per-frame time
+   or packet budget, observe WebSocket `bufferedAmount`, and cap pending outbound
+   commands. Overflow must disconnect/resynchronise explicitly—never grow an
+   unbounded `Vec`, silently discard authoritative state or freeze one render
+   frame while draining a burst.
 
 Exit criteria:
 
@@ -151,6 +165,9 @@ Exit criteria:
   hostile lengths and arbitrary unknown packet IDs without panic or desync.
 - A recorded login/bootstrap/gameplay trace replays to the same client-world
   state deterministically, with secrets demonstrably redacted.
+- Sustained packet bursts and a deliberately stalled render loop stay within the
+  queue budgets, preserve critical ordering and recover through a fresh snapshot
+  after overflow.
 
 ## Phase 2: Authoritative live world
 
@@ -367,10 +384,72 @@ Exit criteria:
 - Destination failure, disconnect mid-transfer, stale source movement after
   handoff, and transitions under backpressure all behave.
 
-## Phase 7: Complete UI, localization and accessibility
+## Phase 7: UI design system and interaction prototype
 
-Use the hybrid boundary established in Phase 0: DOM for forms, text input, IME
-and accessible controls; Bevy for the world and tightly coupled HUD visuals.
+Define how Argentum looks and feels before implementing dozens of panels. The
+direction is recognisably classic AO—dense, tactile and readable—modernised
+without becoming a generic web dashboard.
+
+1. **[client/design]** Define the information architecture and persistent HUD regions: world
+   viewport, vitals, character state, hotbar, chat, minimap, notifications and
+   contextual actions. Specify which information is always visible and which
+   belongs in a window, tooltip or temporary overlay.
+2. **[client/design]** Publish design tokens for typography, licensed fonts, colors, borders,
+   spacing, icon sizes, focus states, disabled/locked states, rarity/status
+   semantics and pixel-art scaling. Every token must remain legible over bright
+   and dark maps and in supported color-sensitive modes.
+3. **[client/design]** Build a reusable component catalogue covering buttons, tabs, slots,
+   status bars with numbers, lists, text fields, tooltips, context menus, dialogs,
+   notifications, drag ghosts, progress/cooldown indicators and hotkey prompts.
+   Define whether each component is DOM or Bevy and how events cross that
+   boundary.
+4. **[client/design]** Specify the window manager: open/close/focus, z-order, modal behavior,
+   moving, snapping/docking, optional resizing, remembered positions, Escape
+   handling and restoration when the available viewport changes.
+5. **[client/design]** Specify interaction rules once: drag/drop and cancellation, quantity
+   splitting, click/double-click/right-click, tooltip timing, target modes,
+   cooldown/rejection feedback, keyboard shortcuts and suppression of world
+   commands while chat/forms/modals own input.
+6. **[client/design]** Prototype distinct peaceful/exploration and combat layouts, plus
+   responsive breakpoints for 720p, 1080p, ultrawide and small-laptop windows.
+   Include UI scaling, integer-scaled world presentation and the constrained
+   layout used when available space cannot show every optional panel.
+7. **[client/design]** Design onboarding and contextual guidance for a first-time player:
+   movement, interaction, combat, inventory, spells, death and recovery. Include
+   empty, loading, disabled, rejected, disconnected and maintenance states—not
+   only populated happy-path screens.
+8. **[client/design]** Produce an interactive prototype/component gallery using representative
+   real game data and long ES/EN/PT strings. Core workflows must be testable
+   without depending on a finished server implementation.
+9. **[client/design]** Run task-based usability sessions with both veteran AO players and
+   newcomers. Measure whether they can find health/mana, use/equip an item, cast
+   a spell, trade, bank, change chat channel and recover from a rejected action;
+   record findings and revise the prototype.
+10. **[client/design]** Keep reference screenshots and interaction specifications versioned
+    beside the client so implementation and golden tests share the same source
+    of truth.
+
+`research/argentumunited/README.md` documents a working AO client's layout and
+eight specific ideas worth taking, including numbers rendered inside status bars
+and locked inventory slots shown rather than hidden.
+
+Exit criteria:
+
+- Tokens, component states, window behavior and DOM/Bevy ownership are explicit
+  enough that two implementers produce compatible controls.
+- The interactive prototype completes the representative gameplay tasks at all
+  target resolutions without clipped critical information or fractional world
+  scaling.
+- Keyboard/focus traversal and modal/chat input ownership work in the prototype;
+  UI interaction never leaks an unintended command into the world.
+- Veteran/newcomer usability findings, resulting changes and remaining tradeoffs
+  are recorded with the approved reference screens.
+
+## Phase 8: Complete UI, localization and accessibility
+
+Implement Phase 7's design system through the hybrid boundary established in
+Phase 0: DOM for forms, text input, IME and accessible controls; Bevy for the
+world and tightly coupled HUD visuals.
 
 1. **[client]** Inventory, spells, stats, chat, hotbar and minimap.
 2. **[client]** Trade, bank, commerce, party and clan panels.
@@ -395,10 +474,15 @@ and accessible controls; Bevy for the world and tightly coupled HUD visuals.
    persisted preference and browser-permission failure handling. Recompute the
    viewport on every resize/fullscreen/DPI event without moving the player,
    changing world visibility rules or losing focused text input.
-
-`research/argentumunited/README.md` documents a working AO client's layout and
-eight specific ideas worth taking, including numbers rendered inside status bars
-and locked inventory slots shown rather than hidden.
+9. **[client]** Ship licensed fonts with explicit ES/EN/PT and game-symbol coverage. Treat
+   user text as Unicode grapheme clusters for cursor movement, selection,
+   truncation and length limits; define an emoji policy and neutralise malicious
+   bidirectional/control characters without corrupting legitimate accents or
+   copy/paste.
+10. **[client]** Version persistent settings and UI/cache metadata. Each release supplies a
+    tested forward migration; unknown, corrupt or newer schemas fall back safely
+    without retaining passwords or preventing startup. Downgrade behavior is
+    explicit rather than accidental.
 
 Exit criteria:
 
@@ -409,8 +493,12 @@ Exit criteria:
 - Reloading preserves user settings without preserving passwords.
 - Automated resize tests cover supported aspect ratios and device-pixel ratios;
   screenshots remain pixel-aligned in windowed and fullscreen modes.
+- Names and chat round-trip correctly through grapheme, font and bidi tests in
+  all supported languages.
+- Settings fixtures from every supported prior schema migrate deterministically;
+  corrupt/newer fixtures recover with documented defaults.
 
-## Phase 8: Production hardening and release
+## Phase 9: Production hardening and release
 
 1. **[client]** Handle browser lifecycle deliberately: focus loss clears held input, hidden
    tabs suspend expensive presentation, long sleeps trigger resynchronisation,
@@ -443,6 +531,23 @@ Exit criteria:
 8. **[server + client]** Define multi-tab/session ownership. Launching the same character in
    another tab or device must produce a deterministic handoff or rejection,
    never two active authorities, token leakage or an unexplained disconnect.
+9. **[server + client]** Add versioned runtime feature flags with safe defaults and cached
+   fallback behavior. Roll out or disable protocol v2, seamless handoff,
+   speculative preloading, shaders/audio and optional telemetry independently.
+   A flag may reduce optional functionality but must never weaken server
+   authority, authentication or protocol validation.
+10. **[client]** Retain private debug/symbol artifacts for every stripped WASM/native build
+    and make crash reports resolvable by build ID. Let players copy a redacted
+    support bundle containing capabilities, recent state transitions, error
+    codes and resource/protocol versions—never tokens, account data or chat.
+11. **[server + client]** Model maintenance and capacity as explicit states: scheduled-restart
+    warning/countdown, draining, maintenance, server-full/queue position and
+    retry eligibility. Preserve or close sessions deliberately so operational
+    work appears as a useful message rather than a generic socket failure.
+12. **[client]** Gate releases on dependency vulnerability/license auditing, an SBOM,
+    reproducible dependency locks, third-party notices, asset/font/music
+    provenance and AGPL distribution obligations. A resource without confirmed
+    redistribution rights does not enter a release artifact.
 
 Exit criteria:
 
@@ -454,8 +559,12 @@ Exit criteria:
   before rollout.
 - Rolling upgrade/rollback and duplicate-session tests pass without corrupting
   character state or mixing client/resource versions.
+- Packet floods, unavailable flag configuration, simulated crashes, maintenance
+  drain and server-full responses all reach their bounded/recoverable UI states.
+- A release publishes its SBOM/notices and archives symbol artifacts keyed by
+  the exact build ID shown in the client.
 
-## Phase 9: Research and experiments
+## Phase 10: Research and experiments
 
 Research produces measured proposals, not promises slipped into an active
 phase. Promote an idea into the roadmap only after documenting player value,
@@ -503,8 +612,11 @@ Everything tagged **[server]** above, ordered by when it blocks:
 | 6 | Session `world_epoch` | Char indices are map-local and reused |
 | 6 | `map_handoff_failed` | Destination refusal must not strand the player |
 | 6 | Ordered critical snapshot batch | Boundary packets alone cannot contain normally coalesced members |
-| 8 | Protocol/build compatibility and upgrade-required response | Keeps cached old clients safe during rolling deploys and rollback |
-| 8 | Multi-tab/session ownership contract | Prevents two active authorities for one character |
+| 9 | HTTPS/WSS, launch-token and origin policy | Makes the browser deployment boundary explicit and testable |
+| 9 | Protocol/build compatibility and upgrade-required response | Keeps cached old clients safe during rolling deploys and rollback |
+| 9 | Multi-tab/session ownership contract | Prevents two active authorities for one character |
+| 9 | Versioned feature-flag delivery with safe defaults | Supports staged rollout and emergency disablement without weakening authority |
+| 9 | Maintenance/drain/capacity state contract | Gives clients deterministic warnings, queues and retry behavior |
 
 Map triggers, the asset format and immutable cache headers benefit the
 TypeScript client independently. Protocol v2 and handoff framing remain
@@ -526,7 +638,7 @@ capability-gated until that client deliberately opts in.
 
 - Maps larger than 100x100 or variable-sized maps during the seamless-handoff
   implementation. Server, NIF and wire coordinates use 100x100 maps with `u8`
-  tile coordinates; changing that is a separate Phase 9 research candidate.
+  tile coordinates; changing that is a separate Phase 10 research candidate.
 - Replacing the TypeScript client. Two clients against one server is a feature:
   it keeps the protocol honest.
 - Treating client-side asset encryption, client hashes or WASM validation as

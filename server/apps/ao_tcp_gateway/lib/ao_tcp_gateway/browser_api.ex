@@ -208,6 +208,19 @@ defmodule AoTcpGateway.BrowserApi do
     json(conn, 200, %{entries: entries})
   end
 
+  @doc """
+  Public player count, for the client's status row.
+
+  Read-only and uncredentialed, so it carries the same permissive CORS header
+  as the world-pack manifest: an alternative client on another origin needs it
+  as much as the bundled one does.
+  """
+  def online(conn) do
+    conn
+    |> Plug.Conn.put_resp_header("access-control-allow-origin", "*")
+    |> json(200, %{online: AoSession.OnlineDirectory.online_count()})
+  end
+
   def world_pack(conn) do
     # Public, read-only metadata naming the current map pack. The pack file
     # itself is already served with `access-control-allow-origin: *`, so

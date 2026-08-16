@@ -8,12 +8,14 @@
 //! backwards in the web client.
 
 mod graphics;
+mod hud;
 mod net;
 mod session;
 mod world;
 
 use bevy::prelude::*;
 use bevy::window::{PresentMode, WindowResolution};
+use bevy::winit::{UpdateMode, WinitSettings};
 
 /// Logical viewport, matching the web client so both show the same area.
 const VIEWPORT_WIDTH: u32 = 1280;
@@ -54,7 +56,18 @@ fn main() {
                 // Pixel art: sample nearest, never blur.
                 .set(ImagePlugin::default_nearest()),
         )
-        .add_plugins(world::WorldPlugin)
+        // Run every frame, not only when an input event arrives.
+        //
+        // Winit's reactive mode is right for a tool and wrong for a game: with
+        // it, interpolation and animation only advance when a key is pressed,
+        // so movement appears to lag and then jump a whole tile at a time.
+        .insert_resource(WinitSettings {
+            focused_mode: UpdateMode::Continuous,
+            unfocused_mode: UpdateMode::reactive_low_power(
+                std::time::Duration::from_millis(100),
+            ),
+        })
+        .add_plugins((world::WorldPlugin, hud::HudPlugin))
         .run();
 }
 

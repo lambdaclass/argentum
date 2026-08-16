@@ -13,14 +13,23 @@ log = "0.4"
 # the wasm payload.
 image = { version = "0.25", default-features = false, features = ["png"] }
 
-# Full default features for now. A hand-trimmed feature list produced a
-# renderer that cleared the screen but drew no sprites, with no error — the 2D
-# pipeline needs more than the obvious bevy_sprite/bevy_render pair. Get it
-# rendering first, then trim with evidence rather than guesswork, since the
-# wasm payload does matter to players.
+# Trimmed from Bevy's defaults, which pull in PBR, glTF, audio, gizmos, picking
+# and more that a 2D client never uses.
+#
+# An earlier, tighter list (bevy_render + bevy_sprite + bevy_core_pipeline only)
+# produced a renderer that cleared the screen and drew nothing, with no error at
+# all — the 2D pipeline needs the whole sprite stack, not just the crates whose
+# names suggest it. If sprites stop drawing after a change here, that is the
+# first thing to suspect.
 [dependencies.bevy]
 version = "0.18"
-features = ["webgl2"]
+default-features = false
+# Bevy 0.18's defaults are ["2d", "3d", "ui"]. "2d" is a meta-feature carrying
+# default_app, default_platform, 2d_bevy_render, ui, scene, audio and picking —
+# the app and platform plumbing, not just the renderer. Selecting individual
+# bevy_sprite/bevy_render features instead leaves an App that clears the screen
+# and draws nothing, with no error. Drop "3d"; keep "2d".
+features = ["2d", "webgl2", "png", "x11", "wayland"]
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = { workspace = true }

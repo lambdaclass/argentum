@@ -16,6 +16,7 @@ defmodule ArenaWeb.Router do
     post "/auth/logout", BrowserApiController, :logout
     get "/meta/character-options", BrowserApiController, :character_options
     get "/meta/world-pack", BrowserApiController, :world_pack
+    get "/meta/online", BrowserApiController, :online
     get "/characters", BrowserApiController, :list_characters
     post "/characters", BrowserApiController, :create_character
     post "/characters/:id/session", BrowserApiController, :create_character_session

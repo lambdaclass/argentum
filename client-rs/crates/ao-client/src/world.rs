@@ -2,7 +2,7 @@
 //! the shared `ao-core` walk gate.
 
 use crate::graphics::{make_image, Graphics, Heading, SheetTextures};
-use crate::net::{DEFAULT_BODY, DEFAULT_HEAD};
+use crate::net::{DEFAULT_BODY, DEFAULT_HEAD, SERVER_ORIGIN};
 use crate::session::{ConnectionState, Session};
 use crate::net::{start_graphics_load, LoadState, MapLoader};
 use ao_core::{is_walkable, TileFlags, WalkGate, WalkGateConfig, WalkOutcome};
@@ -36,6 +36,7 @@ impl Plugin for WorldPlugin {
             .insert_resource(CharacterDrawn(false))
             .insert_resource(DrawnEntities::default())
             .insert_resource(SceneDirty::default())
+            .insert_resource(Motion::default())
             .insert_resource(Session::default())
             .insert_resource(SheetAtlases::default())
             .add_systems(Startup, (setup, start_map_load, connect_to_server))
@@ -49,6 +50,7 @@ impl Plugin for WorldPlugin {
                     paint_character,
                     apply_server_messages,
                     handle_input,
+                    animate_character,
                     follow_camera,
                 )
                     .chain(),
@@ -175,8 +177,8 @@ fn handle_input(
     mut walk: ResMut<Walk>,
     mut character: ResMut<CharacterDrawn>,
     mut scene: ResMut<SceneDirty>,
+    mut motion: ResMut<Motion>,
     session: Res<Session>,
-    mut sprites: Query<&mut Transform, With<PlayerSprite>>,
 ) {
     // Held keys drive movement from the frame loop, never from key auto-repeat.
     // The web client originally stepped at the OS repeat rate, which meant a
@@ -241,24 +243,58 @@ fn handle_input(
         session.next_walk_count(),
     ));
 
+    // Slide from wherever the sprite currently is — not from the old tile — so
+    // steps taken back-to-back chain smoothly instead of jerking.
+    let now_f32 = now_ms as f32;
+    let interval = walk.gate.min_interval_ms(player.speed) as f32;
+    let from = if motion.duration_ms > 0.0 {
+        motion.sample(now_f32)
+    } else {
+        tile_to_world(player.x, player.y)
+    };
+    *motion = Motion {
+        from,
+        to: tile_to_world(nx, ny),
+        started_at: now_f32,
+        duration_ms: (interval * VISUAL_WALK_SCALE).max(MIN_VISUAL_WALK_MS),
+    };
+
     player.x = nx;
     player.y = ny;
     // The painted window is relative to the player, so moving exposes new tiles.
     scene.0 = true;
 
-    for mut transform in &mut sprites {
-        transform.translation.x = (player.x - 1) as f32 * TILE_SIZE;
-        transform.translation.y = -((player.y - 1) as f32) * TILE_SIZE;
-    }
 }
 
+/// World-space position of a 1-based tile coordinate.
+fn tile_to_world(x: i32, y: i32) -> Vec2 {
+    Vec2::new(
+        (x - 1) as f32 * TILE_SIZE,
+        -((y - 1) as f32) * TILE_SIZE,
+    )
+}
+
+/// Follow the character's *drawn* position, not its logical tile.
+///
+/// Snapping the camera a whole tile while the sprite interpolates makes the
+/// character appear to slide backwards and then jump, which reads as far worse
+/// jitter than no interpolation at all.
 fn follow_camera(
+    time: Res<Time>,
+    motion: Res<Motion>,
     player: Res<LocalPlayer>,
     mut cameras: Query<&mut Transform, (With<Camera2d>, Without<PlayerSprite>)>,
 ) {
+    let now_ms = time.elapsed_secs_f64() as f32 * 1000.0;
+    let position = if motion.duration_ms > 0.0 {
+        motion.sample_snapped(now_ms)
+    } else {
+        tile_to_world(player.x, player.y)
+    };
+
     for mut transform in &mut cameras {
-        transform.translation.x = (player.x - 1) as f32 * TILE_SIZE;
-        transform.translation.y = -((player.y - 1) as f32) * TILE_SIZE;
+        transform.translation.x = position.x;
+        transform.translation.y = position.y;
     }
 }
 
@@ -297,13 +333,80 @@ struct SceneTile;
 #[derive(Resource)]
 struct CharacterDrawn(bool);
 
+/// Visual duration of one step, as a fraction of the walk interval.
+///
+/// The web client uses 0.84, so its sprite finishes early and then sits still
+/// for the remaining 16% of every step. At roughly five steps a second that
+/// dead time reads as a repeated micro-pause rather than as walking.
+///
+/// 1.0 makes the slide continuous: the sprite arrives exactly as the next step
+/// begins, so held-key movement is one unbroken glide. The cost is that a step
+/// no longer "lands" before the next starts, which is the deliberate feel the
+/// 0.84 was presumably chosen for — worth revisiting if walking ever looks too
+/// floaty, but a constant stutter is the worse of the two.
+const VISUAL_WALK_SCALE: f32 = 1.0;
+const MIN_VISUAL_WALK_MS: f32 = 55.0;
+
+/// Interpolation between two tiles.
+///
+/// Without this the character teleports 32px per step. Tile positions stay
+/// authoritative; only the drawn position is smoothed.
+#[derive(Resource, Default)]
+struct Motion {
+    from: Vec2,
+    to: Vec2,
+    started_at: f32,
+    duration_ms: f32,
+}
+
+impl Motion {
+    fn sample(&self, now_ms: f32) -> Vec2 {
+        if self.duration_ms <= 0.0 {
+            return self.to;
+        }
+        let t = ((now_ms - self.started_at) / self.duration_ms).clamp(0.0, 1.0);
+        self.from.lerp(self.to, t)
+    }
+
+    /// Sampled position snapped to whole pixels.
+    ///
+    /// This is pixel art: a camera on a fractional coordinate puts every sprite
+    /// on a different texel alignment each frame, which shows up as a constant
+    /// low-amplitude shimmer. Rounding only the camera is worse still — the
+    /// character then wobbles half a pixel against a world that snaps — so the
+    /// character and the camera must round the *same* value, which is why this
+    /// lives here rather than in either system.
+    fn sample_snapped(&self, now_ms: f32) -> Vec2 {
+        let p = self.sample(now_ms);
+        Vec2::new(p.x.round(), p.y.round())
+    }
+
+    fn is_moving(&self, now_ms: f32) -> bool {
+        self.duration_ms > 0.0 && now_ms - self.started_at < self.duration_ms
+    }
+}
+
+/// The body's walk cycle, advanced only while moving.
+#[derive(Component)]
+struct WalkCycle {
+    /// Atlas indices for each frame, already registered in the sheet layout.
+    frames: Vec<usize>,
+    cycle_ms: f32,
+    index: usize,
+    last_advance_ms: f32,
+}
+
 /// Set when the player moves, so the painted window is extended around the new
 /// position instead of leaving black beyond the original spawn area.
 #[derive(Resource, Default)]
 struct SceneDirty(bool);
 
+/// A body or head sprite belonging to the local character. `offset` is the
+/// head's `offHead` displacement, zero for the body.
 #[derive(Component)]
-struct CharacterPart;
+struct CharacterPart {
+    offset: Vec2,
+}
 
 /// NPCs and ground objects already spawned, keyed by (kind, x, y).
 #[derive(Resource, Default)]
@@ -311,12 +414,6 @@ struct DrawnEntities(HashSet<(u8, u8, u8)>);
 
 #[derive(Component)]
 struct WorldEntity;
-
-/// Origin the world data is fetched from.
-///
-/// The page is served separately from the game server during development, so
-/// this cannot be inferred from `window.location`.
-const SERVER_ORIGIN: &str = "http://127.0.0.1:4000";
 
 /// Map loaded on boot. 1 is the newbie start map.
 const INITIAL_MAP: u16 = 1;
@@ -379,8 +476,7 @@ fn apply_loaded_map(
             }
             wanted.sort_unstable();
             wanted.dedup();
-            info!("requesting graphics for {} distinct grh ids", wanted.len());
-            start_graphics_load(graphics.clone(), SERVER_ORIGIN.to_string(), wanted);
+                    start_graphics_load(graphics.clone(), SERVER_ORIGIN.to_string(), wanted);
 
             loaded.0 = Some(map);
         }
@@ -544,9 +640,7 @@ fn paint_scene(
 
     dirty.0 = false;
 
-    if painted > 0 {
-        info!("painted {painted} more tiles ({} total)", drawn.0.len());
-    }
+    let _ = painted;
 }
 
 
@@ -585,6 +679,7 @@ fn paint_character(
     let Some(head_grh) = index.resolve(head.for_heading(heading)) else {
         return;
     };
+
     // Both halves need their sheets before drawing, or the character appears
     // headless for a frame or two.
     if !sheets.0.contains_key(&body_grh.sheet) || !sheets.0.contains_key(&head_grh.sheet) {
@@ -602,38 +697,70 @@ fn paint_character(
         -((player.y - 1) as f32) * TILE_SIZE,
     );
 
-    for (grh, offset, z) in [
-        (body_grh, Vec2::ZERO, 10.0f32),
-        (head_grh, body.head_offset, 10.1f32),
+    // Body first (with its walk cycle), then head at the body's offHead point.
+    for (grh_id, offset, z, animated) in [
+        (body.for_heading(heading), Vec2::ZERO, 10.0f32, true),
+        (head.for_heading(heading), body.head_offset, 10.1f32, false),
     ] {
-        let rect = URect::new(
-            grh.x as u32,
-            grh.y as u32,
-            (grh.x + grh.width) as u32,
-            (grh.y + grh.height) as u32,
-        );
+        let Some(grh) = index.resolve(grh_id) else {
+            continue;
+        };
+        let Some(image) = sheets.0.get(&grh.sheet) else {
+            return;
+        };
+
         let layout_handle = atlases
             .layouts
             .entry(grh.sheet.clone())
             .or_insert_with(|| layouts.add(TextureAtlasLayout::new_empty(UVec2::splat(1024))))
             .clone();
-        let atlas_index = match atlases.indices.get(&(grh.sheet.clone(), rect)) {
-            Some(index) => *index,
-            None => {
-                let Some(layout) = layouts.get_mut(&layout_handle) else {
-                    return;
-                };
-                let index = layout.add_texture(rect);
-                atlases.indices.insert((grh.sheet.clone(), rect), index);
-                index
-            }
+
+        // Register every frame up front so animating is just an index change,
+        // never an asset mutation mid-frame.
+        let mut frame_indices = Vec::new();
+        let frames = if animated {
+            index
+                .animation(grh_id)
+                .map(|a| a.frames)
+                .unwrap_or_else(|| vec![grh.clone()])
+        } else {
+            vec![grh.clone()]
+        };
+        let cycle_ms = if animated {
+            index.animation(grh_id).map(|a| a.cycle_ms).unwrap_or(210.0)
+        } else {
+            210.0
         };
 
+        for frame in &frames {
+            let rect = URect::new(
+                frame.x as u32,
+                frame.y as u32,
+                (frame.x + frame.width) as u32,
+                (frame.y + frame.height) as u32,
+            );
+            let atlas_index = match atlases.indices.get(&(frame.sheet.clone(), rect)) {
+                Some(index) => *index,
+                None => {
+                    let Some(layout) = layouts.get_mut(&layout_handle) else {
+                        return;
+                    };
+                    let index = layout.add_texture(rect);
+                    atlases.indices.insert((frame.sheet.clone(), rect), index);
+                    index
+                }
+            };
+            frame_indices.push(atlas_index);
+        }
+
         let size = Vec2::new(grh.width, grh.height);
-        commands.spawn((
+        let mut entity = commands.spawn((
             Sprite {
-                image: sheets.0[&grh.sheet].clone(),
-                texture_atlas: Some(TextureAtlas { layout: layout_handle, index: atlas_index }),
+                image: image.clone(),
+                texture_atlas: Some(TextureAtlas {
+                    layout: layout_handle,
+                    index: frame_indices[0],
+                }),
                 custom_size: Some(size),
                 ..default()
             },
@@ -643,12 +770,20 @@ fn paint_character(
             )),
             Transform::from_xyz(base.x + offset.x, base.y - offset.y, z),
             PlayerSprite,
-            CharacterPart,
+            CharacterPart { offset },
         ));
+
+        if animated && frame_indices.len() > 1 {
+            entity.insert(WalkCycle {
+                frames: frame_indices,
+                cycle_ms,
+                index: 0,
+                last_advance_ms: 0.0,
+            });
+        }
     }
 
     done.0 = true;
-    info!("character drawn: body {DEFAULT_BODY}, head {DEFAULT_HEAD}");
 }
 
 
@@ -861,7 +996,7 @@ fn apply_server_messages(
     session: Res<Session>,
     mut player: ResMut<LocalPlayer>,
     mut scene: ResMut<SceneDirty>,
-    mut character: ResMut<CharacterDrawn>,
+    mut motion: ResMut<Motion>,
     mut reported: Local<bool>,
 ) {
     if let ConnectionState::Failed(message) = session.state() {
@@ -877,12 +1012,61 @@ fn apply_server_messages(
             ao_core::ServerMessage::PosUpdate { x, y } => {
                 let (x, y) = (x as i32, y as i32);
                 if (player.x, player.y) != (x, y) {
-                    info!("server corrected position to ({x}, {y})");
-                    player.x = x;
+                        player.x = x;
                     player.y = y;
                     scene.0 = true;
-                    character.0 = false;
+                    // Move the sprite by retargeting the interpolation, never by
+                    // respawning it: a respawn resets the walk cycle to frame 0,
+                    // so a correction on every step would freeze the legs.
+                    let to = tile_to_world(x, y);
+                    *motion = Motion { from: to, to, started_at: 0.0, duration_ms: 0.0 };
                 }
+            }
+        }
+    }
+}
+
+
+/// Slide the character between tiles and advance its walk cycle.
+///
+/// Both halves matter: interpolation alone gives a sliding cutout, frames alone
+/// give a marching statue. Together they read as walking.
+fn animate_character(
+    time: Res<Time>,
+    motion: Res<Motion>,
+    mut parts: Query<(&mut Transform, Option<&mut Sprite>, Option<&mut WalkCycle>, &CharacterPart)>,
+) {
+    let now_ms = time.elapsed_secs_f64() as f32 * 1000.0;
+    let position = motion.sample_snapped(now_ms);
+    let moving = motion.is_moving(now_ms);
+
+    for (mut transform, sprite, cycle, part) in &mut parts {
+        transform.translation.x = position.x + part.offset.x;
+        transform.translation.y = position.y - part.offset.y;
+
+        let (Some(mut sprite), Some(mut cycle)) = (sprite, cycle) else {
+            continue;
+        };
+        if cycle.frames.is_empty() {
+            continue;
+        }
+
+        if moving {
+            // velocidad is the whole cycle, so one frame is cycle / frames.
+            let per_frame = (cycle.cycle_ms / cycle.frames.len() as f32).max(1.0);
+            if now_ms - cycle.last_advance_ms >= per_frame {
+                cycle.index = (cycle.index + 1) % cycle.frames.len();
+                cycle.last_advance_ms = now_ms;
+                if let Some(atlas) = sprite.texture_atlas.as_mut() {
+                    atlas.index = cycle.frames[cycle.index];
+                }
+            }
+        } else if cycle.index != 0 {
+            // Standing still shows the neutral pose, not a frozen mid-stride.
+            cycle.index = 0;
+            cycle.last_advance_ms = now_ms;
+            if let Some(atlas) = sprite.texture_atlas.as_mut() {
+                atlas.index = cycle.frames[0];
             }
         }
     }

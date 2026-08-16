@@ -10,12 +10,16 @@
 //! publishes into a shared slot which a system polls. On native there is no
 //! fetch yet; the client falls back to a generated map so it still runs.
 
-use crate::graphics::{
-    decode_png, parse_directional, parse_npcs, parse_objects, Graphics, GrhIndex,
-};
+#[cfg(target_arch = "wasm32")]
+use crate::graphics::{decode_png, parse_directional, parse_npcs, parse_objects, GrhIndex};
+use crate::graphics::Graphics;
 use bevy::prelude::Resource;
+#[cfg(target_arch = "wasm32")]
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
+
+/// Origin the client fetches world data and status from.
+pub const SERVER_ORIGIN: &str = "http://127.0.0.1:4000";
 
 /// Appearance used until a real character is logged in.
 ///
@@ -135,6 +139,12 @@ async fn fetch_response(url: &str) -> Result<web_sys::Response, String> {
     Ok(response)
 }
 
+/// `fetch_text` for callers outside this module.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_text_public(url: &str) -> Result<String, String> {
+    fetch_text(url).await
+}
+
 #[cfg(target_arch = "wasm32")]
 async fn fetch_text(url: &str) -> Result<String, String> {
     let response = fetch_response(url).await?;
@@ -172,14 +182,12 @@ pub fn start_graphics_load(graphics: Graphics, origin: String, grh_ids: Vec<i32>
         };
 
         let index = GrhIndex::parse(&json, "graficos");
-        log::info!("map grh index: {} static regions", index.len());
 
         // Characters resolve against a different index whose sheets live under
         // /graficos_char and are named with strings ("a1"), not numbers.
         match fetch_text(&format!("{origin}/indices/graficos.json")).await {
             Ok(json) => {
                 let char_index = GrhIndex::parse(&json, "graficos_char");
-                log::info!("character grh index: {} static regions", char_index.len());
                 graphics.set_char_index(char_index);
             }
             Err(e) => log::warn!("character index: {e}"),
@@ -189,22 +197,18 @@ pub fn start_graphics_load(graphics: Graphics, origin: String, grh_ids: Vec<i32>
         // box until they arrive.
         if let Ok(json) = fetch_text(&format!("{origin}/indices/cuerpos.json")).await {
             let bodies = parse_directional(&json);
-            log::info!("bodies: {}", bodies.len());
             graphics.set_bodies(bodies);
         }
         if let Ok(json) = fetch_text(&format!("{origin}/indices/cabezas.json")).await {
             let heads = parse_directional(&json);
-            log::info!("heads: {}", heads.len());
             graphics.set_heads(heads);
         }
         if let Ok(json) = fetch_text(&format!("{origin}/indices/npcs.json")).await {
             let npcs = parse_npcs(&json);
-            log::info!("npc looks: {}", npcs.len());
             graphics.set_npcs(npcs);
         }
         if let Ok(json) = fetch_text(&format!("{origin}/indices/objs.json")).await {
             let objects = parse_objects(&json);
-            log::info!("object graphics: {}", objects.len());
             graphics.set_objects(objects);
         }
 
@@ -245,7 +249,6 @@ pub fn start_graphics_load(graphics: Graphics, origin: String, grh_ids: Vec<i32>
                 }
             }
         }
-        log::info!("{} distinct sheets needed for the visible area", files.len());
         graphics.set_index(index);
 
         for sheet in files {

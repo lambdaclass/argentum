@@ -32,7 +32,37 @@
             pkgs.binaryen
           ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
             pkgs.inotify-tools
+            # Native desktop build of client-rs. Bevy links windowing, input,
+            # audio and graphics at build time, so without these the native
+            # target fails to compile at all — which also silently stops
+            # `cargo test -p ao-client` from ever running.
+            pkgs.pkg-config
+            pkgs.alsa-lib
+            pkgs.udev
+            pkgs.vulkan-loader
+            pkgs.libxkbcommon
+            pkgs.wayland
+            pkgs.libx11
+            pkgs.libxcursor
+            pkgs.libxi
+            pkgs.libxrandr
           ];
+
+          # Bevy loads Vulkan and the windowing libraries with dlopen at
+          # runtime, so having them at link time is not enough.
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (
+            pkgs.lib.optionals pkgs.stdenv.isLinux [
+              pkgs.alsa-lib
+              pkgs.udev
+              pkgs.vulkan-loader
+              pkgs.libxkbcommon
+              pkgs.wayland
+              pkgs.libx11
+              pkgs.libxcursor
+              pkgs.libxi
+              pkgs.libxrandr
+            ]
+          );
 
           shellHook = ''
             export PATH="$HOME/.mix/escripts:$PATH"
