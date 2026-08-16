@@ -1,9 +1,10 @@
 //! World view: camera, a placeholder tile grid, and held-key movement driven by
 //! the shared `ao-core` walk gate.
 
+use crate::config::ClientConfig;
 use crate::graphics::{make_image, Graphics, Heading, SheetTextures};
 use crate::net::{start_graphics_load, LoadState, MapLoader};
-use crate::net::{DEFAULT_BODY, DEFAULT_HEAD, SERVER_ORIGIN};
+use crate::net::{DEFAULT_BODY, DEFAULT_HEAD};
 use crate::session::{ConnectionState, Session};
 use ao_core::{is_walkable, TileFlags, WalkGate, WalkGateConfig, WalkOutcome};
 use bevy::prelude::*;
@@ -406,9 +407,9 @@ struct WorldEntity;
 /// Map loaded on boot. 1 is the newbie start map.
 const INITIAL_MAP: u16 = 1;
 
-fn start_map_load(loader: Res<MapLoader>) {
-    info!("fetching map {INITIAL_MAP} from {SERVER_ORIGIN}");
-    loader.start(SERVER_ORIGIN.to_string(), INITIAL_MAP);
+fn start_map_load(loader: Res<MapLoader>, config: Res<ClientConfig>) {
+    info!("fetching map {INITIAL_MAP} from {}", config.asset_origin);
+    loader.start(config.asset_origin.clone(), INITIAL_MAP);
 }
 
 /// Swap the demo grid for the real map once it arrives.
@@ -422,6 +423,7 @@ fn apply_loaded_map(
     mut commands: Commands,
     tiles: Query<Entity, With<TileSprite>>,
     player: Res<LocalPlayer>,
+    config: Res<ClientConfig>,
 ) {
     match loader.state() {
         LoadState::Ready(map) => {
@@ -464,7 +466,7 @@ fn apply_loaded_map(
             }
             wanted.sort_unstable();
             wanted.dedup();
-            start_graphics_load(graphics.clone(), SERVER_ORIGIN.to_string(), wanted);
+            start_graphics_load(graphics.clone(), config.asset_origin.clone(), wanted);
 
             loaded.0 = Some(map);
         }
@@ -965,22 +967,19 @@ fn heading_from_id(id: i32) -> Heading {
     }
 }
 
-/// WebSocket gateway. Same endpoint the web client uses.
-const GATEWAY_URL: &str = "ws://127.0.0.1:7667/ao";
+fn connect_to_server(session: Res<Session>, config: Res<ClientConfig>) {
+    // No credentials means no connection. Connecting anyway would send packet
+    // 74, which creates a character on the server for whoever opened the page.
+    let Some(credentials) = &config.credentials else {
+        return;
+    };
 
-/// Placeholder credentials until a login screen exists. These match the pattern
-/// BotArmy uses, so the server creates the character on first contact.
-const CHARACTER_NAME: &str = "RustClient";
-const CHARACTER_PASSWORD: &str = "rust_client_pass";
-const CLIENT_HASH: &str = "rustmd5";
-
-fn connect_to_server(session: Res<Session>) {
-    info!("connecting to {GATEWAY_URL} as {CHARACTER_NAME}");
+    info!("connecting to {} as {}", config.gateway_url, credentials.name);
     session.connect(
-        GATEWAY_URL,
-        CHARACTER_NAME.to_string(),
-        CHARACTER_PASSWORD.to_string(),
-        CLIENT_HASH.to_string(),
+        &config.gateway_url,
+        credentials.name.clone(),
+        credentials.password.clone(),
+        config.client_hash.clone(),
     );
 }
 

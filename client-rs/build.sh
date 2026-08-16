@@ -30,6 +30,34 @@ WASM_OPT_FEATURES=(
 
 size_mb() { awk '{printf "%.1f MB\n", $1/1048576}' <<<"$(stat -c %s "$1")"; }
 
+# The client must compile no hosts and no credentials: in production it derives
+# its endpoints from the page origin, and development values live in
+# web/index.html, which is the host page rather than the artifact.
+#
+# The values to look for are read out of index.html rather than listed here, so
+# this keeps testing the real thing when the dev configuration changes. A
+# regression is easy to reintroduce — one `const` is enough — and invisible
+# until something is deployed against the wrong host.
+assert_no_embedded_config() {
+  local artifact="$1"
+  local failed=0
+
+  while read -r value; do
+    [ -z "$value" ] && continue
+    if grep -aqF -- "$value" "$artifact"; then
+      echo "    FAIL: \"$value\" is compiled into $artifact" >&2
+      failed=1
+    fi
+  done < <(sed -n 's/.*<meta name="ao:[^"]*" content="\([^"]*\)".*/\1/p' web/index.html)
+
+  if [ "$failed" -ne 0 ]; then
+    echo "    Configuration belongs in the page or the environment, not the binary." >&2
+    return 1
+  fi
+
+  echo "    no hosts or credentials embedded"
+}
+
 case "$TARGET" in
   web)
     echo "==> cargo build (wasm32-unknown-unknown, release)"
@@ -50,6 +78,9 @@ case "$TARGET" in
     mv web/pkg/ao-client_bg.opt.wasm web/pkg/ao-client_bg.wasm
     echo "    optimized:  $(size_mb web/pkg/ao-client_bg.wasm)"
 
+    echo "==> configuration check"
+    assert_no_embedded_config web/pkg/ao-client_bg.wasm
+
     echo
     echo "Serve it:  python3 -m http.server 8080 --directory web"
     echo "Then open: http://localhost:8080"
@@ -61,15 +92,32 @@ case "$TARGET" in
     # is where those are provided.
     cargo build -p ao-client --release
     echo "    binary: target/release/ao-client"
+    echo
+    # Native has no page origin to derive from, so it will not start without
+    # these. That is deliberate: the alternative is a host compiled into the
+    # binary.
+    echo "Run it:  AO_ASSET_ORIGIN=http://127.0.0.1:4000 \\"
+    echo "         AO_GATEWAY_URL=ws://127.0.0.1:7667/ao \\"
+    echo "         AO_CHARACTER_NAME=... AO_CHARACTER_PASSWORD=... \\"
+    echo "         target/release/ao-client"
     ;;
 
   check)
+    echo "==> formatting"
+    cargo fmt --all --check
     echo "==> check wasm target"
     cargo check -p ao-client --target wasm32-unknown-unknown
     echo "==> check native target"
     cargo check -p ao-client
-    echo "==> test shared core"
-    cargo test -p ao-core
+    # Both crates, not just ao-core: ao-client holds the config resolution and
+    # session bookkeeping, and those are exactly the parts that are easy to get
+    # wrong without a browser noticing.
+    echo "==> test"
+    cargo test --workspace
+    if [ -f web/pkg/ao-client_bg.wasm ]; then
+      echo "==> configuration check"
+      assert_no_embedded_config web/pkg/ao-client_bg.wasm
+    fi
     ;;
 
   *)

@@ -43,6 +43,8 @@ version = "0.3"
 features = [
   "Window",
   "Document",
+  "Element",
+  "Location",
   "Response",
   "WebSocket",
   "MessageEvent",

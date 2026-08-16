@@ -4,6 +4,30 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Argentum</title>
+
+    <!--
+      Development configuration.
+
+      The client compiles no hosts and no credentials. In production it is
+      served from the game origin and derives both endpoints from the page
+      itself, so these tags are absent and there is nothing to keep in sync
+      with a deployment.
+
+      Development does not have that property yet: the API is on 4000, the
+      gateway on 7667, and this page is usually served from a third port. Any
+      of these can be overridden per load with a query parameter — ?server=,
+      ?gateway=, ?name=, ?password=, ?hash= — which takes precedence over the
+      tag.
+
+      The character below is created on first contact, because the client
+      still sends packet 74. Remove these two tags and the client starts
+      without connecting rather than creating a character for every visitor.
+    -->
+    <meta name="ao:asset-origin" content="http://127.0.0.1:4000" />
+    <meta name="ao:gateway-url" content="ws://127.0.0.1:7667/ao" />
+    <meta name="ao:character-name" content="RustClient" />
+    <meta name="ao:character-password" content="rust_client_pass" />
+
     <style>
       :root {
         --bg: #07090d;

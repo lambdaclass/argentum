@@ -7,6 +7,7 @@
 //! what caused predicted steps to disagree with the server and snap the player
 //! backwards in the web client.
 
+mod config;
 mod graphics;
 mod hud;
 mod net;
@@ -28,7 +29,20 @@ const CANVAS_SELECTOR: &str = "#ao-canvas";
 fn main() {
     init_logging();
 
+    // Resolved before the app is built, so a client with nowhere to connect to
+    // says so once, in plain terms, instead of failing later as a stream of
+    // fetch and socket errors that look like the server is down.
+    let Some(config) = config::load() else {
+        error!("{}", config::MISSING_CONFIG_HELP);
+        return;
+    };
+    if config.credentials.is_none() {
+        warn!("{}", config::MISSING_CREDENTIALS_HELP);
+    }
+    info!("assets from {}, gateway {}", config.asset_origin, config.gateway_url);
+
     App::new()
+        .insert_resource(config)
         .add_plugins(
             DefaultPlugins
                 .set(WindowPlugin {

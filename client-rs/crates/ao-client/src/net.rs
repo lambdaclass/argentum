@@ -18,9 +18,6 @@ use bevy::prelude::Resource;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-/// Origin the client fetches world data and status from.
-pub const SERVER_ORIGIN: &str = "http://127.0.0.1:4000";
-
 /// Appearance used until a real character is logged in.
 ///
 /// Taken from the game's own race table (`resources/raw/init/HeadAndBodyData.json`):

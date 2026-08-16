@@ -76,9 +76,15 @@ surface is still small.
    login (73).~~ **Done.** Both encoders exist and carry the creation fields the
    server actually reads; a shared byte fixture asserts them against the
    server's decoder in both languages.
-2. **[client]** Replace hard-coded asset origin, gateway URL, character name, password and
+2. ~~**[client]** Replace hard-coded asset origin, gateway URL, character name, password and
    client hash with runtime configuration. Production derives HTTPS/WSS
-   endpoints from the page origin; development overrides them explicitly.
+   endpoints from the page origin; development overrides them explicitly.~~
+   **Done.** Layered as query string > page meta tags > page origin, with
+   `AO_*` environment variables natively. With nothing configured the client
+   reports what is missing instead of connecting; with no credentials it does
+   not log in, rather than creating a character for whoever opened the page.
+   `./build.sh` fails if any value configured in `web/index.html` is found
+   inside the built artifact.
 3. **[client]** Introduce Bevy application states:
    `Boot -> Authenticate -> SelectCharacter -> LoadWorld -> Playing -> Handoff
    -> Reconnecting`. Replace boolean lifecycle controls such as

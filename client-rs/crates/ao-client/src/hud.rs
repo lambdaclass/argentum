@@ -5,6 +5,7 @@
 //! They are cheap trust signals — a player can see at a glance whether a
 //! stutter is their machine, the network, or the server.
 
+use crate::config::ClientConfig;
 use crate::session::{ConnectionState, Session};
 use bevy::prelude::*;
 use std::sync::{Arc, Mutex};
@@ -160,14 +161,19 @@ fn send_ping(time: Res<Time>, mut timer: ResMut<PingTimer>, session: Res<Session
     }
 }
 
-fn poll_online(time: Res<Time>, mut timer: ResMut<OnlineTimer>, stats: Res<HudStats>) {
+fn poll_online(
+    time: Res<Time>,
+    mut timer: ResMut<OnlineTimer>,
+    stats: Res<HudStats>,
+    config: Res<ClientConfig>,
+) {
     if !timer.0.tick(time.delta()).just_finished() {
         return;
     }
     if document_hidden() {
         return;
     }
-    poll(stats.clone());
+    poll(stats.clone(), config.asset_origin.clone());
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -192,11 +198,9 @@ fn document_hidden() -> bool {
 
 /// Read the player count.
 #[cfg(target_arch = "wasm32")]
-fn poll(stats: HudStats) {
-    use crate::net::SERVER_ORIGIN;
-
+fn poll(stats: HudStats, asset_origin: String) {
     wasm_bindgen_futures::spawn_local(async move {
-        match crate::net::fetch_text_public(&format!("{SERVER_ORIGIN}/api/meta/online")).await {
+        match crate::net::fetch_text_public(&format!("{asset_origin}/api/meta/online")).await {
             Ok(body) => {
                 let online = body.split("\"online\":").nth(1).and_then(|rest| {
                     let digits: String = rest
@@ -214,4 +218,4 @@ fn poll(stats: HudStats) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn poll(_stats: HudStats) {}
+fn poll(_stats: HudStats, _asset_origin: String) {}
