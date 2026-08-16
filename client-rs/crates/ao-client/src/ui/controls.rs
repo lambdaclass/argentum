@@ -1,0 +1,676 @@
+//! The shared control catalogue, and the one interaction model behind it.
+//!
+//! Every control in the client is built from these. The value is not the
+//! drawing — that part is easy — it is that focus, disabled state, hover and
+//! activation behave identically everywhere, on wasm and native alike. A panel
+//! that grows its own button eventually grows its own focus rules, and then
+//! Tab stops working in one corner of the interface for reasons nobody can
+//! find.
+//!
+//! The interaction logic here is pure and tested without a window: focus
+//! traversal, text editing, password masking, bar fills and cooldown sweeps are
+//! all decidable from data.
+
+use super::tokens::{focus, ink, size, space, status, surface, type_scale};
+use ao_core::view::Gauge;
+use bevy::prelude::*;
+
+/// What a control looks like right now.
+///
+/// Ordered by precedence, which is the part that is easy to get wrong: a
+/// disabled control that is also hovered is *disabled*, and a focused control
+/// that is also pressed reads as pressed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum ControlState {
+    #[default]
+    Normal,
+    Hovered,
+    Focused,
+    Pressed,
+    Disabled,
+}
+
+impl ControlState {
+    /// Resolve the visible state from independent flags.
+    ///
+    /// Disabled wins over everything: a disabled control that happens to be
+    /// under the cursor must not light up as though it can be clicked.
+    pub fn resolve(enabled: bool, hovered: bool, focused: bool, pressed: bool) -> Self {
+        if !enabled {
+            return ControlState::Disabled;
+        }
+        if pressed {
+            return ControlState::Pressed;
+        }
+        if focused {
+            return ControlState::Focused;
+        }
+        if hovered {
+            return ControlState::Hovered;
+        }
+        ControlState::Normal
+    }
+
+    /// Surface colour for this state.
+    pub fn surface(self) -> Color {
+        match self {
+            ControlState::Normal => surface::RAISED,
+            ControlState::Hovered => surface::EDGE,
+            ControlState::Focused => surface::RAISED,
+            ControlState::Pressed => surface::WELL,
+            ControlState::Disabled => surface::WELL,
+        }
+    }
+
+    /// Text colour for this state.
+    pub fn ink(self) -> Color {
+        match self {
+            ControlState::Disabled => ink::DISABLED,
+            _ => ink::PRIMARY,
+        }
+    }
+
+    /// Whether a focus ring should be drawn.
+    pub fn shows_focus_ring(self) -> bool {
+        matches!(self, ControlState::Focused | ControlState::Pressed)
+    }
+
+    /// Whether activating this control does anything.
+    pub fn is_actionable(self) -> bool {
+        self != ControlState::Disabled
+    }
+}
+
+/// A control that can be focused and activated.
+#[derive(Component, Debug, Clone)]
+pub struct Control {
+    /// Position in the Tab order. Lower comes first.
+    pub tab_index: u32,
+    pub enabled: bool,
+    pub hovered: bool,
+    pub pressed: bool,
+}
+
+impl Default for Control {
+    fn default() -> Self {
+        Self { tab_index: 0, enabled: true, hovered: false, pressed: false }
+    }
+}
+
+/// Which control currently owns the keyboard.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct FocusOwner(pub Option<Entity>);
+
+/// One entry in the focus ring, as far as traversal is concerned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FocusCandidate {
+    pub entity: Entity,
+    pub tab_index: u32,
+    pub enabled: bool,
+}
+
+/// Next focusable control after `current`.
+///
+/// Skips disabled controls and wraps. Pure so the traversal order — the thing
+/// keyboard users actually experience — is testable without a window.
+///
+/// Candidates are sorted by `(tab_index, entity index)` rather than by
+/// `tab_index` alone: two controls sharing an index would otherwise traverse in
+/// whatever order the query happened to yield, which varies between runs.
+///
+/// The tie-break is `Entity::index()`, not `Entity` itself. `Entity` does
+/// implement `Ord`, but its ordering follows the packed representation rather
+/// than the spawn index, so sorting by it puts entity 3 before entity 1 — a
+/// stable order, but not the one anyone reading the code would predict.
+pub fn next_focus(
+    candidates: &[FocusCandidate],
+    current: Option<Entity>,
+    backwards: bool,
+) -> Option<Entity> {
+    let mut ordered: Vec<FocusCandidate> =
+        candidates.iter().copied().filter(|c| c.enabled).collect();
+    if ordered.is_empty() {
+        return None;
+    }
+    ordered.sort_by_key(|c| (c.tab_index, c.entity.index()));
+
+    let position = current.and_then(|entity| ordered.iter().position(|c| c.entity == entity));
+
+    let index = match (position, backwards) {
+        (Some(i), false) => (i + 1) % ordered.len(),
+        (Some(i), true) => (i + ordered.len() - 1) % ordered.len(),
+        // Nothing focused: Tab enters at the start, Shift+Tab at the end.
+        (None, false) => 0,
+        (None, true) => ordered.len() - 1,
+    };
+
+    Some(ordered[index].entity)
+}
+
+/// A single-line text field's contents and caret.
+///
+/// Editing is modelled rather than delegated to the platform, because there is
+/// no platform text field here: this is a canvas. The rules are the ones every
+/// field has, and getting them wrong is immediately obvious to a typist.
+#[derive(Component, Debug, Clone, Default, PartialEq, Eq)]
+pub struct TextField {
+    value: String,
+    /// Caret position, as a character index rather than a byte index — a byte
+    /// caret lands inside a multi-byte character and panics on the next slice.
+    caret: usize,
+    pub masked: bool,
+    pub max_length: Option<usize>,
+}
+
+impl TextField {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// A password field: same editing rules, different rendering.
+    pub fn password() -> Self {
+        Self { masked: true, ..Default::default() }
+    }
+
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+
+    pub fn caret(&self) -> usize {
+        self.caret
+    }
+
+    pub fn char_count(&self) -> usize {
+        self.value.chars().count()
+    }
+
+    /// What is drawn on screen.
+    ///
+    /// Masked fields never render their contents, and the mask is built from
+    /// the character count rather than the byte length so an accented password
+    /// does not leak its composition through a longer row of dots.
+    pub fn display(&self) -> String {
+        if self.masked {
+            "\u{2022}".repeat(self.char_count())
+        } else {
+            self.value.clone()
+        }
+    }
+
+    pub fn insert(&mut self, character: char) {
+        // Control characters arrive from key events and would render as boxes.
+        if character.is_control() {
+            return;
+        }
+        if let Some(limit) = self.max_length {
+            if self.char_count() >= limit {
+                return;
+            }
+        }
+        let byte = self.byte_offset(self.caret);
+        self.value.insert(byte, character);
+        self.caret += 1;
+    }
+
+    pub fn backspace(&mut self) {
+        if self.caret == 0 {
+            return;
+        }
+        let start = self.byte_offset(self.caret - 1);
+        let end = self.byte_offset(self.caret);
+        self.value.replace_range(start..end, "");
+        self.caret -= 1;
+    }
+
+    pub fn delete_forward(&mut self) {
+        if self.caret >= self.char_count() {
+            return;
+        }
+        let start = self.byte_offset(self.caret);
+        let end = self.byte_offset(self.caret + 1);
+        self.value.replace_range(start..end, "");
+    }
+
+    pub fn move_caret(&mut self, delta: i32) {
+        let target = self.caret as i32 + delta;
+        self.caret = target.clamp(0, self.char_count() as i32) as usize;
+    }
+
+    pub fn caret_to_start(&mut self) {
+        self.caret = 0;
+    }
+
+    pub fn caret_to_end(&mut self) {
+        self.caret = self.char_count();
+    }
+
+    /// Take the contents and reset, as submitting a chat line does.
+    pub fn take(&mut self) -> String {
+        self.caret = 0;
+        std::mem::take(&mut self.value)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.value.is_empty()
+    }
+
+    /// Byte offset of a character index. Clamped, so a caret that has somehow
+    /// outrun the value cannot slice out of bounds.
+    fn byte_offset(&self, char_index: usize) -> usize {
+        self.value
+            .char_indices()
+            .nth(char_index)
+            .map(|(offset, _)| offset)
+            .unwrap_or(self.value.len())
+    }
+}
+
+/// Width of a bar's fill, given its track.
+///
+/// Rounded to whole pixels: a fractional fill leaves a blurred edge against the
+/// track, which on a 18px bar is most of what a player sees.
+pub fn bar_fill_width(gauge: Gauge, track_width: f32) -> f32 {
+    (track_width.max(0.0) * gauge.fraction()).round()
+}
+
+/// The text drawn inside a status bar.
+///
+/// Inside, not beside: the reference client does this and the roadmap records
+/// it as one of the ideas worth taking, because it costs no extra height.
+pub fn bar_label(prefix: &str, gauge: Gauge) -> String {
+    format!("{prefix}: {}/{}", gauge.current.max(0), gauge.max.max(0))
+}
+
+/// Colour for a rarity, resolved at the token layer rather than in the model.
+pub fn rarity_ink(rarity: ao_core::view::Rarity) -> Color {
+    use ao_core::view::Rarity;
+    match rarity {
+        Rarity::Common => ink::PRIMARY,
+        Rarity::Uncommon => status::HUNGER,
+        Rarity::Rare => status::THIRST,
+        Rarity::Epic => status::MANA,
+        Rarity::Legendary => ink::GOLD,
+    }
+}
+
+/// A button.
+pub fn button(label_text: &str, state: ControlState, tab_index: u32) -> impl Bundle {
+    (
+        Node {
+            padding: UiRect::axes(Val::Px(space::WIDE), Val::Px(space::SNUG)),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border: UiRect::all(Val::Px(size::BORDER)),
+            ..default()
+        },
+        BackgroundColor(state.surface()),
+        BorderColor::all(if state.shows_focus_ring() { focus::RING } else { surface::EDGE }),
+        Control { tab_index, enabled: state.is_actionable(), ..default() },
+        children![(
+            Text::new(label_text.to_string()),
+            TextFont { font_size: type_scale::SMALL, ..default() },
+            TextColor(state.ink()),
+        )],
+    )
+}
+
+/// A tab in a strip.
+pub fn tab(label_text: &str, selected: bool, tab_index: u32) -> impl Bundle {
+    (
+        Node {
+            flex_grow: 1.0,
+            padding: UiRect::axes(Val::Px(space::BASE), Val::Px(space::SNUG)),
+            justify_content: JustifyContent::Center,
+            border: UiRect::bottom(Val::Px(focus::RING_WIDTH)),
+            ..default()
+        },
+        BackgroundColor(if selected { surface::RAISED } else { surface::WELL }),
+        // The selected tab is marked by its underline, not only by a slightly
+        // different fill: two dark browns are not a distinction at a glance.
+        BorderColor::all(if selected { focus::SELECTED } else { Color::NONE }),
+        Control { tab_index, ..default() },
+        children![(
+            Text::new(label_text.to_string()),
+            TextFont { font_size: type_scale::SMALL, ..default() },
+            TextColor(if selected { ink::GOLD } else { ink::MUTED }),
+        )],
+    )
+}
+
+/// An inventory or spell slot.
+pub fn slot(state: ControlState, tab_index: u32) -> impl Bundle {
+    (
+        Node {
+            width: Val::Px(size::SLOT),
+            height: Val::Px(size::SLOT),
+            border: UiRect::all(Val::Px(size::BORDER)),
+            ..default()
+        },
+        BackgroundColor(surface::WELL),
+        BorderColor::all(if state.shows_focus_ring() { focus::RING } else { surface::EDGE }),
+        Control { tab_index, enabled: state.is_actionable(), ..default() },
+    )
+}
+
+/// A labelled status bar with its value inside it.
+pub fn status_bar(prefix: &str, gauge: Gauge, fill: Color) -> impl Bundle {
+    let fraction = gauge.fraction();
+    (
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Px(size::STATUS_BAR_HEIGHT),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        },
+        BackgroundColor(surface::WELL),
+        children![
+            (
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
+                    width: Val::Percent(fraction * 100.0),
+                    ..default()
+                },
+                BackgroundColor(fill),
+            ),
+            (
+                Text::new(bar_label(prefix, gauge)),
+                TextFont { font_size: type_scale::SMALL, ..default() },
+                TextColor(ink::PRIMARY),
+            ),
+        ],
+    )
+}
+
+/// A cooldown sweep drawn over a slot.
+pub fn cooldown_overlay(fraction: f32) -> impl Bundle {
+    (
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.0),
+            right: Val::Px(0.0),
+            bottom: Val::Px(0.0),
+            height: Val::Percent(fraction.clamp(0.0, 1.0) * 100.0),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
+    )
+}
+
+/// A hotkey reminder in the corner of a slot.
+pub fn hotkey_prompt(key: &str) -> impl Bundle {
+    (
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(space::HAIR),
+            top: Val::Px(space::HAIR),
+            ..default()
+        },
+        Text::new(key.to_string()),
+        TextFont { font_size: type_scale::MICRO, ..default() },
+        TextColor(ink::MUTED),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entity(index: u32) -> Entity {
+        Entity::from_raw_u32(index).expect("a valid test entity")
+    }
+
+    fn candidate(index: u32, tab_index: u32, enabled: bool) -> FocusCandidate {
+        FocusCandidate { entity: entity(index), tab_index, enabled }
+    }
+
+    #[test]
+    fn disabled_wins_over_every_other_state() {
+        // A disabled control under the cursor must not light up as though it
+        // can be clicked.
+        assert_eq!(ControlState::resolve(false, true, true, true), ControlState::Disabled);
+        assert!(!ControlState::Disabled.is_actionable());
+        assert!(!ControlState::Disabled.shows_focus_ring());
+    }
+
+    #[test]
+    fn pressed_outranks_focused_which_outranks_hovered() {
+        assert_eq!(ControlState::resolve(true, true, true, true), ControlState::Pressed);
+        assert_eq!(ControlState::resolve(true, true, true, false), ControlState::Focused);
+        assert_eq!(ControlState::resolve(true, true, false, false), ControlState::Hovered);
+        assert_eq!(ControlState::resolve(true, false, false, false), ControlState::Normal);
+    }
+
+    #[test]
+    fn a_pressed_control_still_shows_it_has_focus() {
+        // Otherwise the ring vanishes for as long as a key is held, and a
+        // keyboard user loses their place mid-activation.
+        assert!(ControlState::Pressed.shows_focus_ring());
+    }
+
+    #[test]
+    fn tab_moves_forward_through_the_declared_order() {
+        let candidates = [candidate(1, 0, true), candidate(2, 1, true), candidate(3, 2, true)];
+
+        assert_eq!(next_focus(&candidates, Some(entity(1)), false), Some(entity(2)));
+        assert_eq!(next_focus(&candidates, Some(entity(2)), false), Some(entity(3)));
+    }
+
+    #[test]
+    fn tab_wraps_at_both_ends() {
+        let candidates = [candidate(1, 0, true), candidate(2, 1, true)];
+
+        assert_eq!(next_focus(&candidates, Some(entity(2)), false), Some(entity(1)));
+        assert_eq!(next_focus(&candidates, Some(entity(1)), true), Some(entity(2)));
+    }
+
+    #[test]
+    fn tab_enters_at_the_start_and_shift_tab_at_the_end() {
+        // With nothing focused, the two directions must not both land on the
+        // first control — Shift+Tab into a form should reach its last field.
+        let candidates = [candidate(1, 0, true), candidate(2, 1, true), candidate(3, 2, true)];
+
+        assert_eq!(next_focus(&candidates, None, false), Some(entity(1)));
+        assert_eq!(next_focus(&candidates, None, true), Some(entity(3)));
+    }
+
+    #[test]
+    fn disabled_controls_are_skipped_rather_than_focused_and_ignored() {
+        // Focusing one is a dead stop: the ring is on something that does
+        // nothing, and the next Tab appears not to work.
+        let candidates = [candidate(1, 0, true), candidate(2, 1, false), candidate(3, 2, true)];
+
+        assert_eq!(next_focus(&candidates, Some(entity(1)), false), Some(entity(3)));
+        assert_eq!(next_focus(&candidates, Some(entity(3)), true), Some(entity(1)));
+    }
+
+    #[test]
+    fn traversal_is_stable_when_two_controls_share_a_tab_index() {
+        // Sorting by index alone leaves the order to however the query
+        // happened to yield, which varies between runs and makes Tab feel
+        // random.
+        let candidates = [candidate(3, 5, true), candidate(1, 5, true), candidate(2, 5, true)];
+
+        let first = next_focus(&candidates, None, false);
+        for _ in 0..10 {
+            assert_eq!(next_focus(&candidates, None, false), first);
+        }
+        assert_eq!(first, Some(entity(1)), "ties should break on a stable key");
+    }
+
+    #[test]
+    fn a_form_with_nothing_enabled_has_nowhere_to_focus() {
+        // Returning the first candidate anyway would put the ring on a
+        // disabled control.
+        let candidates = [candidate(1, 0, false), candidate(2, 1, false)];
+        assert_eq!(next_focus(&candidates, None, false), None);
+        assert_eq!(next_focus(&[], None, false), None);
+    }
+
+    #[test]
+    fn focus_recovers_when_the_focused_control_disappears() {
+        // A panel closing under the cursor leaves a stale entity focused.
+        // Traversal must not dead-end there.
+        let candidates = [candidate(1, 0, true), candidate(2, 1, true)];
+        assert_eq!(next_focus(&candidates, Some(entity(99)), false), Some(entity(1)));
+    }
+
+    #[test]
+    fn typing_inserts_at_the_caret() {
+        let mut field = TextField::new();
+        for c in "helo".chars() {
+            field.insert(c);
+        }
+        field.move_caret(-1);
+        field.insert('l');
+
+        assert_eq!(field.value(), "hello");
+        assert_eq!(field.caret(), 4);
+    }
+
+    #[test]
+    fn editing_uses_character_indices_rather_than_byte_offsets() {
+        // A byte caret lands inside a multi-byte character and panics on the
+        // next slice. Spanish is the client's first language, so this is the
+        // common case, not an edge one.
+        let mut field = TextField::new();
+        for c in "año".chars() {
+            field.insert(c);
+        }
+        assert_eq!(field.char_count(), 3);
+
+        field.backspace();
+        assert_eq!(field.value(), "añ");
+        field.backspace();
+        assert_eq!(field.value(), "a");
+    }
+
+    #[test]
+    fn backspace_at_the_start_does_nothing() {
+        let mut field = TextField::new();
+        field.backspace();
+        assert!(field.is_empty());
+        assert_eq!(field.caret(), 0);
+    }
+
+    #[test]
+    fn delete_forward_at_the_end_does_nothing() {
+        let mut field = TextField::new();
+        field.insert('a');
+        field.delete_forward();
+        assert_eq!(field.value(), "a");
+    }
+
+    #[test]
+    fn the_caret_cannot_leave_the_value() {
+        let mut field = TextField::new();
+        field.insert('a');
+        field.move_caret(-99);
+        assert_eq!(field.caret(), 0);
+        field.move_caret(99);
+        assert_eq!(field.caret(), 1);
+    }
+
+    #[test]
+    fn control_characters_are_not_inserted() {
+        // Key events deliver these, and they render as boxes.
+        let mut field = TextField::new();
+        for c in ['\n', '\t', '\u{1b}', '\r'] {
+            field.insert(c);
+        }
+        assert!(field.is_empty());
+    }
+
+    #[test]
+    fn a_length_limit_is_enforced_in_characters() {
+        let mut field = TextField { max_length: Some(3), ..TextField::new() };
+        for c in "áéíóú".chars() {
+            field.insert(c);
+        }
+        assert_eq!(field.char_count(), 3);
+    }
+
+    #[test]
+    fn a_password_field_never_renders_its_contents() {
+        let mut field = TextField::password();
+        for c in "secret".chars() {
+            field.insert(c);
+        }
+
+        assert_eq!(field.display(), "••••••");
+        assert!(!field.display().contains("secret"));
+        // The value is still available to the code that submits it.
+        assert_eq!(field.value(), "secret");
+    }
+
+    #[test]
+    fn a_password_mask_does_not_leak_the_byte_length() {
+        // Masking by byte length would draw a longer row of dots for an
+        // accented password, which discloses something about its composition.
+        let mut ascii = TextField::password();
+        let mut accented = TextField::password();
+        for c in "aaaaa".chars() {
+            ascii.insert(c);
+        }
+        for c in "ááááá".chars() {
+            accented.insert(c);
+        }
+
+        assert_eq!(ascii.display().chars().count(), accented.display().chars().count());
+    }
+
+    #[test]
+    fn taking_the_value_clears_the_field_and_the_caret() {
+        // Submitting a chat line and leaving the caret past the end of an
+        // empty value would panic on the next keystroke.
+        let mut field = TextField::new();
+        for c in "hola".chars() {
+            field.insert(c);
+        }
+
+        assert_eq!(field.take(), "hola");
+        assert!(field.is_empty());
+        assert_eq!(field.caret(), 0);
+        field.insert('x');
+        assert_eq!(field.value(), "x");
+    }
+
+    #[test]
+    fn a_bar_fill_lands_on_whole_pixels() {
+        // A fractional fill leaves a blurred edge against the track, which on
+        // an 18px bar is most of what a player sees.
+        for current in 0..=100 {
+            let width = bar_fill_width(Gauge::new(current, 100), 137.0);
+            assert_eq!(width.fract(), 0.0, "{current}% produced {width}");
+            assert!((0.0..=137.0).contains(&width));
+        }
+    }
+
+    #[test]
+    fn a_bar_with_no_maximum_draws_nothing_rather_than_everything() {
+        assert_eq!(bar_fill_width(Gauge::new(5, 0), 100.0), 0.0);
+    }
+
+    #[test]
+    fn a_bar_label_never_shows_a_negative_number() {
+        // The gauge can arrive negative; "HP: -40/0" helps nobody.
+        assert_eq!(bar_label("HP", Gauge::new(-40, -10)), "HP: 0/0");
+        assert_eq!(bar_label("HP", Gauge::new(20, 20)), "HP: 20/20");
+    }
+
+    #[test]
+    fn every_rarity_has_a_distinct_colour() {
+        use ao_core::view::Rarity;
+        let rarities =
+            [Rarity::Common, Rarity::Uncommon, Rarity::Rare, Rarity::Epic, Rarity::Legendary];
+
+        for (i, a) in rarities.iter().enumerate() {
+            for b in &rarities[i + 1..] {
+                assert_ne!(rarity_ink(*a), rarity_ink(*b), "{a:?} and {b:?} share a colour");
+            }
+        }
+    }
+}

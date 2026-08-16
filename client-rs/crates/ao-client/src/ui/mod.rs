@@ -6,6 +6,7 @@
 //! of any screen here, and therefore no second source of UI state to keep in
 //! sync with this one.
 
+pub mod controls;
 pub mod hotbar;
 pub mod layout;
 pub mod rail;
