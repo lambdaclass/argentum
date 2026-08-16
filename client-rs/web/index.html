@@ -51,21 +51,30 @@
         overflow: hidden;
       }
 
-      /* The canvas tracks the browser's content area, on first load and on
-         every resize. A fixed game rectangle centred in a black page wastes
-         whatever the player gave the window, and enlarging the browser then
-         only enlarges the black.
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
 
-         Growing the canvas does not reveal more of the map: `ui::scale` keeps
-         the view at the size the interface was designed around and draws it
-         larger, so a bigger window is a bigger picture of the same scene.
+      /* The client is a window on the page, bounded to a comfortable playing
+         size and centred, with fullscreen available from the top bar.
+
+         It tracks the content area whenever the content area is *smaller* than
+         that bound, so a laptop or a half-width browser gets the whole of it
+         with no scrollbars. What it does not do is grow without limit: on a
+         2000-pixel browser an unbounded canvas made every element enormous
+         while showing the same scene, which is worse than the surround it
+         replaced.
 
          Sizing lives on this element rather than on the canvas because Bevy is
          told to track its parent and overwrites the canvas's own width and
          height every resize, so a rule set there is lost on the first frame. */
       #shell {
-        width: 100%;
-        height: 100%;
+        width: min(1280px, 100vw);
+        height: min(832px, 100vh);
+        border: 1px solid var(--panel-edge);
+        box-shadow: 0 0 0 1px #000, 0 18px 48px rgba(0, 0, 0, 0.75);
         overflow: hidden;
       }
 

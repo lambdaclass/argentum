@@ -74,14 +74,49 @@ async function waitForClient(page) {
   await page.waitForTimeout(2_000);
 }
 
+/// The client's bounded playing size, from web/index.html.
+///
+/// The canvas fills the content area only while the content area is smaller
+/// than this; beyond it the client is a centred window with fullscreen
+/// available. An unbounded canvas on a wide browser made every element enormous
+/// for no gain.
+const DESIGN = { width: 1280, height: 832 };
+
+/// Whether the client is the smaller of the playing size and the window.
+function fitsWindow(m) {
+  return (
+    Math.abs(m.shellWidth - Math.min(DESIGN.width, m.innerWidth)) <= 1 &&
+    Math.abs(m.shellHeight - Math.min(DESIGN.height, m.innerHeight)) <= 1
+  );
+}
+
+/// Whether the canvas fills the client, allowing for its decorative border.
+///
+/// The border is drawn inside the shell, so the canvas is a couple of pixels
+/// smaller than the shell's outer box. That is correct, and measuring the
+/// canvas against the *window* reported it as a two-pixel shortfall.
+function fillsShell(m) {
+  const border = 2;
+  return (
+    m.shellWidth - m.cssWidth <= border + 1 &&
+    m.shellHeight - m.cssHeight <= border + 1 &&
+    m.cssWidth > 0 &&
+    m.cssHeight > 0
+  );
+}
+
 /// What the page says about its own canvas and overflow.
 async function measure(page) {
   return page.evaluate(() => {
     const canvas = document.getElementById("ao-canvas");
+    const shell = document.getElementById("shell");
     const box = canvas.getBoundingClientRect();
+    const shellBox = shell.getBoundingClientRect();
     return {
       cssWidth: box.width,
       cssHeight: box.height,
+      shellWidth: shellBox.width,
+      shellHeight: shellBox.height,
       backingWidth: canvas.width,
       backingHeight: canvas.height,
       innerWidth: window.innerWidth,
@@ -122,10 +157,14 @@ async function main() {
 
       const first = await measure(page);
       check(
-        "canvas fills the content area on first load",
-        Math.abs(first.cssWidth - first.innerWidth) <= 1 &&
-          Math.abs(first.cssHeight - first.innerHeight) <= 1,
-        `canvas ${first.cssWidth}x${first.cssHeight} against window ${first.innerWidth}x${first.innerHeight}`
+        "the client is the content area bounded by the playing size",
+        fitsWindow(first),
+        `shell ${first.shellWidth}x${first.shellHeight} against window ${first.innerWidth}x${first.innerHeight}`
+      );
+      check(
+        "the canvas fills the client",
+        fillsShell(first),
+        `canvas ${first.cssWidth}x${first.cssHeight} inside shell ${first.shellWidth}x${first.shellHeight}`
       );
       check(
         "the page does not scroll",
@@ -154,10 +193,9 @@ async function main() {
       await page.waitForTimeout(1_200);
       const after = await measure(page);
       check(
-        `canvas follows a resize to ${size.width}x${size.height}`,
-        Math.abs(after.cssWidth - after.innerWidth) <= 1 &&
-          Math.abs(after.cssHeight - after.innerHeight) <= 1,
-        `canvas ${after.cssWidth}x${after.cssHeight} against window ${after.innerWidth}x${after.innerHeight}`
+        `client follows a resize to ${size.width}x${size.height}`,
+        fitsWindow(after) && fillsShell(after),
+        `shell ${after.shellWidth}x${after.shellHeight}, canvas ${after.cssWidth}x${after.cssHeight}, window ${after.innerWidth}x${after.innerHeight}`
       );
       check(
         `no scrollbars after resize to ${size.width}x${size.height}`,
@@ -192,10 +230,9 @@ async function main() {
 
       const measured = await measure(dprPage);
       check(
-        `canvas fills the content area at ${ratio}x`,
-        Math.abs(measured.cssWidth - measured.innerWidth) <= 1 &&
-          Math.abs(measured.cssHeight - measured.innerHeight) <= 1,
-        `canvas ${measured.cssWidth}x${measured.cssHeight} against window ${measured.innerWidth}x${measured.innerHeight}`
+        `client is correctly sized at ${ratio}x`,
+        fitsWindow(measured) && fillsShell(measured),
+        `shell ${measured.shellWidth}x${measured.shellHeight}, canvas ${measured.cssWidth}x${measured.cssHeight}, window ${measured.innerWidth}x${measured.innerHeight}`
       );
       check(`no scrollbars at ${ratio}x`, !measured.scrollsHorizontally && !measured.scrollsVertically);
       await dprContext.close();
