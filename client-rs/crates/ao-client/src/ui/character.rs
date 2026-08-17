@@ -11,7 +11,7 @@
 //! is where a pending indicator lives.
 
 use super::controls::{bar_label, rarity_ink, Control, ControlKey};
-use super::rail::RailRegion;
+use super::rail::{CompactVital, CompactVitalFill, RailRegion};
 use super::state::UiState;
 use super::tokens::{focus, ink, size, space, status, surface, type_scale};
 use ao_core::view::{EquipSlot, Gauge, Intent, ItemView, SlotState, UiSnapshot};
@@ -85,7 +85,12 @@ impl Plugin for CharacterPanelPlugin {
             .init_resource::<SplitAmount>()
             .add_systems(
                 Update,
-                (rebuild_on_change, cancel_drag_on_escape, clear_selection_when_slot_empties)
+                (
+                    rebuild_on_change,
+                    update_compact_vitals,
+                    cancel_drag_on_escape,
+                    clear_selection_when_slot_empties,
+                )
                     .chain()
                     .after(super::shell::spawn_shell),
             );
@@ -502,6 +507,32 @@ fn equipment_summary(snapshot: &UiSnapshot) -> impl Bundle {
             lines.into_iter().map(|line| text(line, type_scale::MICRO, ink::MUTED)),
         )),
     )
+}
+
+/// Fill the compact rail's vital slivers from the snapshot.
+///
+/// The full rail rebuilds its whole subtree; the slivers are updated in place
+/// instead, because they are five nodes that never change shape and rebuilding
+/// them would throw away the navigation focus beside them on every heartbeat.
+fn update_compact_vitals(
+    state: Res<UiState>,
+    slivers: Query<&Children, With<CompactVital>>,
+    mut fills: Query<&mut Node, With<CompactVitalFill>>,
+) {
+    if !state.is_changed() {
+        return;
+    }
+
+    let vitals = state.get().vitals;
+    let gauges = [vitals.health, vitals.mana, vitals.stamina, vitals.hunger, vitals.thirst];
+
+    for (children, gauge) in slivers.iter().zip(gauges) {
+        for child in children.iter() {
+            if let Ok(mut node) = fills.get_mut(child) {
+                node.width = Val::Percent(gauge.fraction() * 100.0);
+            }
+        }
+    }
 }
 
 /// Escape cancels a drag.

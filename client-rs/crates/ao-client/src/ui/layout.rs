@@ -44,6 +44,15 @@ pub const RAIL_MAX_WIDTH: f32 = 420.0;
 /// Width of the rail in compact mode: an icon strip, no grid.
 pub const RAIL_COMPACT_WIDTH: f32 = 56.0;
 
+/// Extra width required to leave compact mode, beyond what entering it needed.
+///
+/// Without it the mode flips on a single pixel: a window dragged to exactly the
+/// breakpoint alternates between a full rail and an icon strip on every frame,
+/// which is both unusable and expensive, since every flip rebuilds the rail.
+///
+/// Sized larger than any single drag step so crossing the band is deliberate.
+pub const COMPACT_HYSTERESIS: f32 = 48.0;
+
 /// Below this world width the full rail is giving up too much of the game.
 ///
 /// The choice is between a rail whose controls are unusably small and a rail
@@ -175,6 +184,30 @@ pub fn shell_geometry(size: Vec2) -> ShellGeometry {
     shell_geometry_scaled(size, 1.0)
 }
 
+/// Decide the rail mode, holding the previous one inside the hysteresis band.
+///
+/// `previous` is what the shell is currently showing. A window resting exactly
+/// on the breakpoint keeps whichever mode it already had, so dragging past it
+/// is a decision rather than a flicker.
+pub fn rail_mode_for(world_width: f32, previous: Option<RailMode>) -> RailMode {
+    match previous {
+        Some(RailMode::Compact) => {
+            if world_width >= WORLD_MIN_WIDTH + COMPACT_HYSTERESIS {
+                RailMode::Full
+            } else {
+                RailMode::Compact
+            }
+        }
+        _ => {
+            if world_width < WORLD_MIN_WIDTH {
+                RailMode::Compact
+            } else {
+                RailMode::Full
+            }
+        }
+    }
+}
+
 /// Lay out the shell when the interface is drawn at `ui_scale`.
 ///
 /// The clamps are content-driven — the rail's minimum is six slots wide, the
@@ -187,6 +220,11 @@ pub fn shell_geometry(size: Vec2) -> ShellGeometry {
 /// The regions themselves stay in logical pixels, because the camera viewport
 /// and the pointer both work in those and must agree with them exactly.
 pub fn shell_geometry_scaled(size: Vec2, ui_scale: f32) -> ShellGeometry {
+    shell_geometry_with(size, ui_scale, None)
+}
+
+/// Lay out the shell, holding `previous` inside the compact hysteresis band.
+pub fn shell_geometry_with(size: Vec2, ui_scale: f32, previous: Option<RailMode>) -> ShellGeometry {
     let ui = if ui_scale.is_finite() && ui_scale > 0.0 { ui_scale } else { 1.0 };
     let width = size.x.max(0.0);
     let height = size.y.max(0.0);
@@ -201,10 +239,10 @@ pub fn shell_geometry_scaled(size: Vec2, ui_scale: f32) -> ShellGeometry {
     // camera viewport in *physical* pixels: 998.4 rounds to 998 at 1x but 1997
     // at 2x, so the seam between world and rail lands differently per display.
     let preferred = (width * RAIL_FRACTION).clamp(RAIL_MIN_WIDTH * ui, RAIL_MAX_WIDTH * ui).round();
-    let (rail_width, rail_mode) = if width - preferred < WORLD_MIN_WIDTH {
-        (RAIL_COMPACT_WIDTH * ui, RailMode::Compact)
-    } else {
-        (preferred, RailMode::Full)
+    let rail_mode = rail_mode_for(width - preferred, previous);
+    let rail_width = match rail_mode {
+        RailMode::Compact => RAIL_COMPACT_WIDTH * ui,
+        RailMode::Full => preferred,
     };
 
     // Even the compact strip yields if there is genuinely no room; the world is
@@ -496,6 +534,102 @@ mod tests {
             );
         }
         assert!(flipped_at.is_some(), "the rail never went compact");
+    }
+
+    #[test]
+    fn a_one_pixel_dither_cannot_toggle_the_mode_forever() {
+        // The failure this rules out: a window resting between two widths — a
+        // drag that jitters, a scrollbar appearing and disappearing — driving a
+        // rail rebuild every frame.
+        //
+        // Note this is *not* "the mode never changes at the threshold". Every
+        // threshold has a pixel where one direction crosses it; asserting both
+        // directions hold at the same pixel is unsatisfiable. What must hold is
+        // that the crossings are at *different* widths, so a two-pixel dither
+        // settles instead of alternating.
+        for width in 400..3000 {
+            let low = width as f32;
+            let high = low + 1.0;
+
+            // Widening one pixel promotes...
+            let promoted =
+                shell_geometry_with(Vec2::new(high, 800.0), 1.0, Some(RailMode::Compact)).rail_mode;
+            // ...and narrowing that same pixel demotes again.
+            let demoted =
+                shell_geometry_with(Vec2::new(low, 800.0), 1.0, Some(RailMode::Full)).rail_mode;
+
+            assert!(
+                !(promoted == RailMode::Full && demoted == RailMode::Compact),
+                "a dither between {low}px and {high}px toggles the rail forever"
+            );
+        }
+    }
+
+    #[test]
+    fn the_two_thresholds_are_a_hysteresis_band_apart() {
+        // With the band collapsed to zero the test above still passes at every
+        // width but one, so pin the band itself.
+        let width_of = |mode: RailMode| {
+            (400..3000)
+                .map(|w| w as f32)
+                .find(|w| {
+                    shell_geometry_with(Vec2::new(*w, 800.0), 1.0, Some(mode)).rail_mode
+                        == RailMode::Full
+                })
+                .expect("the rail goes full somewhere")
+        };
+
+        let from_full = width_of(RailMode::Full);
+        let from_compact = width_of(RailMode::Compact);
+        assert!(
+            from_compact > from_full,
+            "widening promotes at {from_compact}px but narrowing demotes at {from_full}px; \
+             the thresholds coincide, so there is no band"
+        );
+        assert_eq!(
+            from_compact - from_full,
+            COMPACT_HYSTERESIS,
+            "the band is {}px wide, not the documented {COMPACT_HYSTERESIS}px",
+            from_compact - from_full
+        );
+    }
+
+    #[test]
+    fn crossing_the_whole_band_does_change_the_mode() {
+        // Hysteresis must not become "the mode never changes".
+        let narrow = shell_geometry_with(Vec2::new(700.0, 800.0), 1.0, Some(RailMode::Full));
+        assert_eq!(narrow.rail_mode, RailMode::Compact);
+
+        let wide = shell_geometry_with(Vec2::new(1600.0, 800.0), 1.0, Some(RailMode::Compact));
+        assert_eq!(wide.rail_mode, RailMode::Full);
+    }
+
+    #[test]
+    fn a_drag_across_the_band_settles_rather_than_alternating() {
+        // Walk a window across the breakpoint one pixel at a time, carrying the
+        // mode forward as the shell does, and count the transitions. More than
+        // one in each direction is a flicker.
+        let mut mode = RailMode::Compact;
+        let mut transitions = 0;
+        for width in 600..1600 {
+            let next =
+                shell_geometry_with(Vec2::new(width as f32, 800.0), 1.0, Some(mode)).rail_mode;
+            if next != mode {
+                transitions += 1;
+                mode = next;
+            }
+        }
+        assert_eq!(transitions, 1, "the mode changed {transitions} times widening once");
+
+        for width in (600..1600).rev() {
+            let next =
+                shell_geometry_with(Vec2::new(width as f32, 800.0), 1.0, Some(mode)).rail_mode;
+            if next != mode {
+                transitions += 1;
+                mode = next;
+            }
+        }
+        assert_eq!(transitions, 2, "narrowing back did not settle either");
     }
 
     #[test]

@@ -11,8 +11,10 @@
 //! its time, and vitals at the bottom edge nearest the world — the numbers you
 //! check mid-fight sit closest to what you are looking at.
 
+use super::controls::{Control, ControlKey};
+use super::icons::{icon, AccessibleName, Icon, ShowsTooltip};
 use super::shell::{muted_label, CompactRailOnly, FullRailOnly, Region};
-use super::tokens::{size, space, surface};
+use super::tokens::{ink, size, space, status, surface};
 use bevy::prelude::*;
 
 /// The rail's stacked regions, top to bottom.
@@ -157,24 +159,245 @@ fn populate(mut commands: Commands, rails: Query<(Entity, &Region)>) {
         ));
 
         // Compact rail: an icon strip. Vitals survive as unlabelled slivers
-        // because they are the one thing needed mid-fight.
+        // because they are the one thing needed mid-fight, and the navigation
+        // icons remain because they are how everything the strip dropped is
+        // reached. An empty node here would have been a claim, not a rail.
         rail.spawn((
             Node {
                 width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::SpaceBetween,
                 row_gap: Val::Px(space::TIGHT),
                 display: Display::None,
                 ..default()
             },
             CompactRailOnly,
-            RailRegion::Navigation,
+            children![compact_vitals(), compact_navigation()],
         ));
     });
 }
 
+/// Vitals as unlabelled slivers.
+///
+/// No numbers and no names: at 56 logical pixels there is no room, and a
+/// truncated "HP: 14..." is worse than a bar whose fill speaks for itself. The
+/// order matches the full rail so the colours mean the same thing in both.
+fn compact_vitals() -> impl Bundle {
+    (
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(space::HAIR),
+            padding: UiRect::all(Val::Px(space::TIGHT)),
+            ..default()
+        },
+        RailRegion::Vitals,
+        Children::spawn(SpawnIter(
+            [status::HEALTH, status::MANA, status::STAMINA, status::HUNGER, status::THIRST]
+                .into_iter()
+                .map(compact_sliver),
+        )),
+    )
+}
+
+/// One sliver. Filled by `character::rebuild_on_change` from the snapshot; the
+/// track is drawn here so the region is never an unexplained black well.
+fn compact_sliver(fill: Color) -> impl Bundle {
+    (
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Px(COMPACT_SLIVER_HEIGHT),
+            border: UiRect::all(Val::Px(size::BORDER)),
+            ..default()
+        },
+        BackgroundColor(surface::WELL),
+        BorderColor::all(surface::EDGE),
+        CompactVital(fill),
+        // The fill is created with the track, so the sliver is never an
+        // unexplained empty well waiting for its first snapshot.
+        children![(
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                width: Val::Percent(0.0),
+                ..default()
+            },
+            BackgroundColor(fill),
+            CompactVitalFill,
+        )],
+    )
+}
+
+/// The filled portion of a compact sliver.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct CompactVitalFill;
+
+/// Height of a compact vital sliver.
+const COMPACT_SLIVER_HEIGHT: f32 = 6.0;
+
+/// A vital drawn as a bare bar in the compact rail.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct CompactVital(pub Color);
+
+/// The navigation icons, stacked instead of in a row.
+fn compact_navigation() -> impl Bundle {
+    (
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            row_gap: Val::Px(space::TIGHT),
+            padding: UiRect::all(Val::Px(space::TIGHT)),
+            ..default()
+        },
+        RailRegion::Navigation,
+        Children::spawn(SpawnIter(COMPACT_NAVIGATION.into_iter().enumerate().map(
+            |(index, kind)| {
+                (
+                    Button,
+                    Node {
+                        width: Val::Px(size::ICON_BUTTON),
+                        height: Val::Px(size::ICON_BUTTON),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundColor(surface::RAISED),
+                    AccessibleName::new(kind.name_key()),
+                    ShowsTooltip,
+                    ControlKey::indexed("rail.compact.nav", index),
+                    Control { tab_index: 500 + index as u32, ..default() },
+                    CompactNavigation,
+                    children![icon(kind, size::ICON_BUTTON * 0.62, ink::PRIMARY)],
+                )
+            },
+        ))),
+    )
+}
+
+/// What the compact strip offers. Deliberately few: these are the ways back to
+/// what the strip had to drop, not the whole interface in miniature.
+const COMPACT_NAVIGATION: [Icon; 3] = [Icon::Settings, Icon::Support, Icon::Language];
+
+/// A navigation control that exists only in the compact rail.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct CompactNavigation;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Spawn the real rail tree and run the mode systems over it.
+    fn rail_app(window: Vec2) -> App {
+        use super::super::shell::{AppliedGeometry, ShellPlugin};
+
+        let mut app = App::new();
+        app.add_plugins(ShellPlugin)
+            .init_resource::<super::super::scale::ScaleDomains>()
+            .init_resource::<UiScale>()
+            .init_resource::<crate::world::ViewRadius>()
+            .add_plugins(RailPlugin);
+
+        let mut win = Window::default();
+        win.resolution.set(window.x, window.y);
+        app.world_mut().spawn(win);
+
+        // Two frames: one to spawn the tree, one for the mode systems to act on
+        // the geometry the first produced.
+        app.update();
+        app.update();
+
+        let _ = app.world().resource::<AppliedGeometry>();
+        app
+    }
+
+    /// Whether an entity and all its ancestors are displayed.
+    fn is_displayed(app: &App, entity: Entity) -> bool {
+        let mut current = Some(entity);
+        while let Some(id) = current {
+            match app.world().get::<Node>(id) {
+                Some(node) if node.display == Display::None => return false,
+                _ => {}
+            }
+            current = app.world().get::<ChildOf>(id).map(|parent| parent.parent());
+        }
+        true
+    }
+
+    #[test]
+    fn compact_mode_renders_a_visible_vital_and_a_usable_navigation_control() {
+        // An enum saying these regions survive is not evidence. This spawns the
+        // real tree at a window narrow enough to be compact and looks for the
+        // nodes a player would actually see.
+        let mut app = rail_app(Vec2::new(760.0, 700.0));
+        assert_eq!(
+            app.world().resource::<super::super::shell::AppliedGeometry>().0.rail_mode,
+            super::super::layout::RailMode::Compact,
+            "this window should be compact, or the test proves nothing"
+        );
+
+        let vitals: Vec<Entity> = app
+            .world_mut()
+            .query_filtered::<Entity, With<CompactVital>>()
+            .iter(app.world())
+            .collect();
+        assert!(!vitals.is_empty(), "compact mode drew no vitals");
+        assert!(
+            vitals.iter().any(|entity| is_displayed(&app, *entity)),
+            "every compact vital was hidden"
+        );
+
+        let navigation: Vec<Entity> = app
+            .world_mut()
+            .query_filtered::<Entity, With<CompactNavigation>>()
+            .iter(app.world())
+            .collect();
+        assert!(!navigation.is_empty(), "compact mode drew no navigation controls");
+        assert!(
+            navigation.iter().any(|entity| is_displayed(&app, *entity)),
+            "every compact navigation control was hidden"
+        );
+    }
+
+    #[test]
+    fn a_compact_navigation_control_is_focusable_rather_than_decorative() {
+        // "Usable" means reachable: a strip of icons nothing can focus is a
+        // picture of a rail.
+        let mut app = rail_app(Vec2::new(760.0, 700.0));
+
+        let mut query = app.world_mut().query_filtered::<&Control, With<CompactNavigation>>();
+        let controls: Vec<bool> = query.iter(app.world()).map(|c| c.enabled).collect();
+
+        assert!(!controls.is_empty(), "compact navigation has no controls");
+        assert!(controls.iter().any(|enabled| *enabled), "no compact control is enabled");
+    }
+
+    #[test]
+    fn the_full_rail_is_hidden_in_compact_mode_and_shown_otherwise() {
+        let mut app = rail_app(Vec2::new(760.0, 700.0));
+        let mut full = app.world_mut().query_filtered::<Entity, With<FullRailOnly>>();
+        let hidden: Vec<Entity> = full.iter(app.world()).collect();
+        assert!(!hidden.is_empty(), "there is no full-rail content to hide");
+        assert!(
+            hidden.iter().all(|entity| !is_displayed(&app, *entity)),
+            "full-rail content is still displayed in compact mode"
+        );
+
+        let mut wide = rail_app(Vec2::new(1600.0, 900.0));
+        assert_eq!(
+            wide.world().resource::<super::super::shell::AppliedGeometry>().0.rail_mode,
+            super::super::layout::RailMode::Full
+        );
+        let mut compact = wide.world_mut().query_filtered::<Entity, With<CompactRailOnly>>();
+        let strip: Vec<Entity> = compact.iter(wide.world()).collect();
+        assert!(
+            strip.iter().all(|entity| !is_displayed(&wide, *entity)),
+            "the compact strip is displayed beside a full rail"
+        );
+    }
 
     #[test]
     fn every_region_appears_exactly_once_in_the_order() {

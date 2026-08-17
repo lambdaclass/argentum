@@ -237,7 +237,9 @@ fn apply_geometry(
     // pass to find the scale, a second to lay out with it.
     let probe = layout::shell_geometry(logical);
     let resolved = scale::resolve(logical, probe.world.size(), window.scale_factor());
-    let geometry = layout::shell_geometry_scaled(logical, resolved.ui);
+    // The mode currently on screen, so a window resting on the breakpoint keeps
+    // what it has rather than flipping every frame.
+    let geometry = layout::shell_geometry_with(logical, resolved.ui, Some(applied.0.rail_mode));
     if geometry == applied.0 && resolved == *domains {
         return;
     }
