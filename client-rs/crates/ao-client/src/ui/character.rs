@@ -373,6 +373,12 @@ fn inventory_grid(
     (
         Node {
             width: Val::Px(grid_width),
+            // Centred, because the grid is capped at its design slot size while
+            // the rail is a share of the window: on an ultrawide the rail is
+            // 757 logical pixels and the grid only fills 516 of them. Left
+            // aligned, the remainder reads as a black column someone forgot to
+            // fill rather than as margin.
+            margin: UiRect::horizontal(Val::Auto),
             flex_direction: FlexDirection::Row,
             flex_wrap: FlexWrap::Wrap,
             column_gap: Val::Px(space::GRID_GAP),

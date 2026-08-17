@@ -490,6 +490,82 @@ mod tests {
     }
 
     #[test]
+    fn the_solved_grid_is_six_columns_wherever_the_rail_ends_up() {
+        // There is already an arithmetic test for this, and it is the arithmetic
+        // that was wrong once before — a maximised window laid the six-column
+        // grid out as eight. This one counts the slots the layout engine
+        // actually put on each row, at an ultrawide where the rail is nearly
+        // three times its minimum and the UI scale is 2x.
+        use super::super::character::InventorySlotButton;
+        use super::super::testing;
+
+        for window in
+            [Vec2::new(1280.0, 760.0), Vec2::new(1920.0, 1080.0), Vec2::new(3440.0, 1440.0)]
+        {
+            let mut app = testing::shell_app(window);
+            let slots: Vec<Entity> = app
+                .world_mut()
+                .query_filtered::<Entity, With<InventorySlotButton>>()
+                .iter(app.world())
+                .collect();
+            assert!(!slots.is_empty(), "{window:?} has no inventory slots at all");
+
+            // Grouped by solved top edge, which is what "a row" means once the
+            // engine has wrapped them.
+            let mut per_row: std::collections::BTreeMap<i32, usize> = Default::default();
+            for slot in &slots {
+                let rect = testing::solved_rect(&app, *slot).expect("a slot was never solved");
+                *per_row.entry(rect.min.y.round() as i32).or_default() += 1;
+            }
+
+            let full_rows: Vec<usize> =
+                per_row.values().copied().filter(|count| *count > 0).collect();
+            assert!(
+                full_rows.iter().all(|count| *count <= 6),
+                "{window:?} wrapped the grid into rows of {full_rows:?}"
+            );
+            assert_eq!(
+                full_rows.iter().sum::<usize>(),
+                slots.len(),
+                "{window:?} lost slots between the tree and the layout"
+            );
+        }
+    }
+
+    #[test]
+    fn the_grid_sits_centred_in_a_rail_wider_than_it_needs() {
+        // The grid is capped at its design slot size, so a wide rail leaves
+        // slack. Centred it reads as margin; left aligned it reads as a region
+        // that failed to fill, which is what the ultrawide capture showed.
+        use super::super::character::InventorySlotButton;
+        use super::super::testing;
+
+        let mut app = testing::shell_app(Vec2::new(3440.0, 1440.0));
+        let rail = testing::settled(&app).rail;
+
+        let mut left = f32::MAX;
+        let mut right = f32::MIN;
+        let slots: Vec<Entity> = app
+            .world_mut()
+            .query_filtered::<Entity, With<InventorySlotButton>>()
+            .iter(app.world())
+            .collect();
+        for slot in &slots {
+            let rect = testing::solved_rect(&app, *slot).expect("a slot was never solved");
+            left = left.min(rect.min.x);
+            right = right.max(rect.max.x);
+        }
+
+        let before = left - rail.min.x;
+        let after = rail.max.x - right;
+        assert!(
+            (before - after).abs() <= 2.0,
+            "the grid leaves {before} before it and {after} after it in the rail"
+        );
+        assert!(before > 2.0, "this rail has no slack, so centring proves nothing");
+    }
+
+    #[test]
     fn the_compact_strip_is_not_also_filled_with_full_rail_content() {
         // The compact strip carries the same RailRegion markers as the full
         // rail — it is the same region shown differently — so the panel rebuild
