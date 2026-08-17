@@ -566,6 +566,56 @@ mod tests {
     }
 
     #[test]
+    fn the_capture_harness_targets_the_real_breakpoint_and_minimum() {
+        // The capture script has to name pixel sizes, and it cannot call into
+        // this crate. Duplicated constants are how the client and the server
+        // AoI would have drifted apart, so pin these the same way: read the
+        // script and fail here if the numbers stop describing the shell.
+        //
+        // Without this, changing WORLD_MIN_WIDTH leaves a capture named
+        // "breakpoint-plus-1" that is nowhere near the breakpoint, and it is
+        // still filed as evidence that the transition was inspected.
+        let script = include_str!("../../../../scripts/capture.mjs");
+
+        // Each marker is a whole `const NAME = ` declaration, so it matches once
+        // and the value is a bare literal — no expression parsing, which would
+        // only be another place for the two sides to disagree quietly.
+        let literal_after = |marker: &str| -> f32 {
+            let tail = script
+                .split_once(marker)
+                .unwrap_or_else(|| panic!("capture.mjs no longer defines `{marker}`"))
+                .1;
+            let digits: String = tail.chars().take_while(char::is_ascii_digit).collect();
+            digits.parse().unwrap_or_else(|_| panic!("`{marker}` is no longer a plain number"))
+        };
+
+        assert_eq!(
+            literal_after("const RAIL_BREAKPOINT = "),
+            WORLD_MIN_WIDTH + RAIL_MIN_WIDTH,
+            "capture.mjs captures a breakpoint the shell does not have"
+        );
+        assert_eq!(
+            Vec2::new(
+                literal_after("const MINIMUM_SUPPORTED_WIDTH = "),
+                literal_after("const MINIMUM_SUPPORTED_HEIGHT = "),
+            ),
+            minimum_supported_size(),
+            "capture.mjs captures a minimum size the shell does not claim"
+        );
+    }
+
+    #[test]
+    fn the_first_full_rail_width_is_the_documented_breakpoint() {
+        // And that the breakpoint the capture script names is where the mode
+        // actually changes, rather than merely a sum of two constants.
+        let first_full = (400..3000)
+            .map(|w| w as f32)
+            .find(|w| shell_geometry(Vec2::new(*w, 800.0)).rail_mode == RailMode::Full)
+            .expect("the rail goes full somewhere");
+        assert_eq!(first_full, WORLD_MIN_WIDTH + RAIL_MIN_WIDTH);
+    }
+
+    #[test]
     fn the_two_thresholds_are_a_hysteresis_band_apart() {
         // With the band collapsed to zero the test above still passes at every
         // width but one, so pin the band itself.

@@ -46,6 +46,37 @@ const VIEWPORTS = [
   { name: "small-laptop", width: 1024, height: 768 },
 ];
 
+/// The rail's compact breakpoint, in logical pixels of window width.
+///
+/// Derived from the same constants the client uses, not pasted: the world
+/// gives up WORLD_MIN_WIDTH once the rail has taken its clamped share, and at
+/// this width the rail is at its RAIL_MIN_WIDTH floor.
+/// Written as a literal, and checked against the client's own constants by
+/// `the_capture_harness_targets_the_real_breakpoint_and_minimum` in layout.rs —
+/// which is what keeps it honest. Recomputing the arithmetic here would only
+/// duplicate the derivation, not the value it has to agree with.
+const RAIL_BREAKPOINT = 920;
+
+/// The smallest window the client claims to support: the whole area of interest
+/// beside a compact rail, under the top bar. Checked by the same test.
+const MINIMUM_SUPPORTED_WIDTH = 792;
+const MINIMUM_SUPPORTED_HEIGHT = 638;
+
+/// Sizes where the layout is meant to change character rather than just scale.
+///
+/// The two breakpoint shots are one pixel apart on purpose: side by side they
+/// are the evidence that the mode change is a deliberate transition and not a
+/// rail that has silently fallen off the edge. `maximize` is set where the
+/// windowed shell would clamp to its 1280px default and never reach the size
+/// under test at all — an "ultrawide" capture of a 1280px shell proves nothing.
+const RESPONSIVE = [
+  { name: "breakpoint-minus-1", width: RAIL_BREAKPOINT - 1, height: 760 },
+  { name: "breakpoint-plus-1", width: RAIL_BREAKPOINT + 1, height: 760 },
+  { name: "minimum-supported", width: MINIMUM_SUPPORTED_WIDTH, height: MINIMUM_SUPPORTED_HEIGHT },
+  { name: "ultrawide", width: 3440, height: 1440, maximize: true },
+  { name: "short-window", width: 1280, height: 560 },
+];
+
 function headStamp() {
   // The same rule build.sh uses, from the same script — computing it a third
   // time here is how the capture harness starts disagreeing with the build it
@@ -148,6 +179,39 @@ async function main() {
       }));
       if (overflow.horizontal || overflow.vertical) {
         throw new Error(`${viewport.name}: the page scrolls after restore (${JSON.stringify(overflow)})`);
+      }
+
+      await context.close();
+    }
+
+    // Sizes where the layout changes character. No maximise/restore cycle —
+    // these are about what the shell does at the size, not about host modes.
+    for (const size of RESPONSIVE) {
+      console.log(`  ${size.name} (${size.width}x${size.height})`);
+      const context = await browser.newContext({
+        viewport: { width: size.width, height: size.height },
+        deviceScaleFactor: 1,
+      });
+      const page = await context.newPage();
+      page.on("pageerror", (error) => console.error(`    page error: ${error.message}`));
+
+      await page.goto(url, { waitUntil: "load" });
+      await waitForClient(page);
+      if (size.maximize) {
+        await page.evaluate(() => window.aoWindow?.setMode("maximized"));
+        await page.waitForTimeout(1_500);
+      }
+      shots.push(await shoot(page, size.name));
+
+      // "No application panel requires page scrolling" — at the minimum
+      // supported size this is the assertion that the claim is real, and it is
+      // exactly where a layout that merely looks fine at 1080p gives way.
+      const overflow = await page.evaluate(() => ({
+        horizontal: document.documentElement.scrollWidth > window.innerWidth,
+        vertical: document.documentElement.scrollHeight > window.innerHeight,
+      }));
+      if (overflow.horizontal || overflow.vertical) {
+        throw new Error(`${size.name}: the page scrolls (${JSON.stringify(overflow)})`);
       }
 
       await context.close();
