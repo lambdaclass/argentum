@@ -488,7 +488,7 @@ fn inventory_slot(
 /// keys precisely so the localisation path is exercised, and inventing display
 /// names here would quietly bypass it.
 fn short_name(item: &ItemView) -> String {
-    item.name_key.rsplit('.').next().unwrap_or_default().to_string()
+    super::fallback_label(&item.name_key)
 }
 
 fn selected_details(snapshot: &UiSnapshot, selected: Option<usize>) -> impl Bundle {
@@ -915,9 +915,12 @@ mod tests {
     #[test]
     fn display_names_come_from_the_key_rather_than_being_invented() {
         // The fixtures carry keys precisely so the localisation path is
-        // exercised; hard-coding names here would quietly bypass it.
+        // exercised; hard-coding names here would quietly bypass it. Shared
+        // with every other key the interface has to draw, so a tooltip and an
+        // item name cannot disagree about what a key looks like.
         let item = ItemView { name_key: "item.potion.red".into(), ..Default::default() };
-        assert_eq!(short_name(&item), "red");
+        assert_eq!(short_name(&item), "Red");
+        assert_eq!(short_name(&item), super::super::fallback_label("item.potion.red"));
     }
 
     #[test]

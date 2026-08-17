@@ -26,6 +26,28 @@ pub mod topbar;
 
 use bevy::prelude::*;
 
+/// A readable label for a localisation key, until a catalogue exists.
+///
+/// Every user-visible string in this client is a key — `action.settings`,
+/// `item.potion.red` — so that translation is a lookup rather than a rewrite.
+/// Until the catalogue lands something has to be drawn, and the choice is
+/// between the raw key and a label derived from it.
+///
+/// Derived, because a raw key is not a translation and must not be presented as
+/// one: a player reading `action.settings` in a tooltip is reading our source
+/// code. Derived rather than hard-coded for the opposite reason — a table of
+/// English strings here would bypass the localisation path the keys exist to
+/// exercise, and would be the thing nobody remembers to delete.
+pub fn fallback_label(key: &str) -> String {
+    let last = key.rsplit('.').next().unwrap_or_default();
+    let spaced = last.replace(['_', '-'], " ");
+    let mut characters = spaced.chars();
+    match characters.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + characters.as_str(),
+        None => String::new(),
+    }
+}
+
 /// Everything that makes up the shell.
 pub struct UiPlugin;
 
@@ -44,5 +66,44 @@ impl Plugin for UiPlugin {
             spells::SpellPanelPlugin,
             hotbar::HotbarPlugin,
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_key_becomes_something_a_player_can_read() {
+        assert_eq!(fallback_label("action.settings"), "Settings");
+        assert_eq!(fallback_label("action.toggle_fullscreen"), "Toggle fullscreen");
+        assert_eq!(fallback_label("item.potion.red"), "Red");
+    }
+
+    #[test]
+    fn a_label_never_contains_the_key_structure_it_came_from() {
+        // The failure this exists for: a tooltip reading `action.settings`,
+        // which is our source code shown to a player and was being described as
+        // localised.
+        for key in [
+            "action.settings",
+            "action.support",
+            "action.language",
+            "topbar.close",
+            "inventory.slot.3",
+        ] {
+            let label = fallback_label(key);
+            assert!(!label.contains('.'), "{key} rendered as {label}");
+            assert!(!label.contains('_'), "{key} rendered as {label}");
+            assert_ne!(label, key);
+            assert!(!label.is_empty(), "{key} rendered as nothing at all");
+        }
+    }
+
+    #[test]
+    fn a_key_with_no_segments_or_no_content_does_not_panic() {
+        assert_eq!(fallback_label(""), "");
+        assert_eq!(fallback_label("."), "");
+        assert_eq!(fallback_label("settings"), "Settings");
     }
 }

@@ -328,10 +328,10 @@ fn follow_hovered_control(
 
     for child in children.iter() {
         if let Ok(mut text) = text.get_mut(child) {
-            // The key is shown as-is until a catalogue exists. Better a visible
-            // key than a blank tooltip: it still identifies the action, and it
-            // makes the missing translation obvious rather than silent.
-            text.0 = name.0.clone();
+            // Not the raw key: a player reading `action.settings` is reading
+            // our source. `fallback_label` derives something readable from it
+            // until the catalogue exists, without hard-coding English here.
+            text.0 = super::fallback_label(&name.0);
         }
     }
 
