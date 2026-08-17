@@ -80,7 +80,7 @@ async function waitForClient(page) {
 /// than this; beyond it the client is a centred window with fullscreen
 /// available. An unbounded canvas on a wide browser made every element enormous
 /// for no gain.
-const DESIGN = { width: 1200, height: 704 };
+const DESIGN = { width: 1280, height: 760 };
 
 /// Whether the client is the smaller of the playing size and the window.
 function fitsWindow(m) {

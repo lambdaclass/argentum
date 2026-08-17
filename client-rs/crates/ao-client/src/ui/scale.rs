@@ -114,12 +114,13 @@ pub fn resolve(logical_size: Vec2, world_region: Vec2, device_pixel_ratio: f32) 
 
 /// The view the interface is designed around, in tiles.
 ///
-/// Measured from the default windowed host — 1200x704 logical pixels, less the
-/// top bar and the character rail. That is the density Argentum is played at,
-/// and a maximised or fullscreen host is expected to show *this* view larger
-/// rather than a wider one.
-pub const DESIGN_TILES_X: f32 = 28.0;
-pub const DESIGN_TILES_Y: f32 = 21.0;
+/// Measured from the default windowed host — 1280x760 logical pixels, less the
+/// top bar and the character rail, which leaves 998x730 for the world. That is
+/// the density Argentum is played at, matched against the reference client at
+/// the same browser viewport, and a maximised or fullscreen host is expected to
+/// show *this* view larger rather than a wider one.
+pub const DESIGN_TILES_X: f32 = 31.0;
+pub const DESIGN_TILES_Y: f32 = 22.0;
 
 /// Whole logical pixels per world pixel.
 ///

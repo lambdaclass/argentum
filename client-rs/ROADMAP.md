@@ -238,7 +238,7 @@ the rendered browser and native window, rather than only in layout helpers.
 Required behavior:
 
 - The canvas follows the current host rectangle. In default desktop mode the
-  host is a bounded, centered approximately 1200x704 logical-pixel game window
+  host is a bounded, centered approximately 1280x760 logical-pixel game window
   that shrinks to fit smaller viewports. Explicit maximize expands the host to
   the browser content viewport; fullscreen expands it through the platform
   fullscreen capability. Restore returns to the bounded centered host. Every

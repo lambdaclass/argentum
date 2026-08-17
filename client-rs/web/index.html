@@ -61,15 +61,16 @@
          `ui::shell` recomputes the Bevy layout and the camera viewport from
          whatever rectangle it is given; nothing here stretches anything.
 
-         Windowed is the default: a bounded, centred game window at roughly the
-         density Argentum is played at. It shrinks to fit a smaller viewport, so
+         Windowed is the default: a bounded, centred game window matching the
+         reference client's measured size (1295x760 there, 1280x760 here — the
+         same 22% rail and the same world density, at a round width). It shrinks to fit a smaller viewport, so
          "bounded by default" never means "broken on a laptop", and it does not
          grow just because the monitor is large — an unbounded canvas on a
          2000-pixel browser made every element enormous while showing the same
          scene. */
       #shell {
-        width: min(1200px, 100vw);
-        height: min(704px, 100vh);
+        width: min(1280px, 100vw);
+        height: min(760px, 100vh);
         border: 1px solid var(--panel-edge);
         box-shadow: 0 0 0 1px #000, 0 18px 48px rgba(0, 0, 0, 0.75);
         overflow: hidden;
