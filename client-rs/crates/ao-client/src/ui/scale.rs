@@ -215,6 +215,70 @@ mod tests {
     /// retina display. 125% and 150% are ordinary Windows and GNOME settings.
     const RATIOS: [f32; 5] = [1.0, 1.25, 1.5, 1.75, 2.0];
 
+    /// The design window the host page steps in whole multiples of.
+    const HOST_DESIGN: Vec2 = Vec2::new(1280.0, 760.0);
+
+    #[test]
+    fn a_stepped_host_window_actually_steps_the_world_zoom() {
+        // The host page grows the windowed shell in whole multiples of this
+        // size, on the promise that a larger window means larger sprites rather
+        // than merely more terrain. That promise is only kept if the zoom this
+        // module derives comes out as the step number — so check it, rather than
+        // assume the arithmetic lines up.
+        use super::super::layout;
+
+        for step in 1..=3u32 {
+            let window = HOST_DESIGN * step as f32;
+            // The same two-pass resolve the shell performs: probe at 1x to find
+            // how much room the world has, then resolve the scales from it.
+            let probe = layout::shell_geometry(window);
+            let resolved = resolve(window, probe.world.size(), 1.0);
+            assert_eq!(
+                resolved.world, step,
+                "a {step}-step window ({window:?}) renders the world at {}x",
+                resolved.world
+            );
+
+            // And that it holds after the shell relays itself at that UI scale,
+            // which is the geometry actually used. A zoom that only survives the
+            // probe pass would flip back on the next frame.
+            let settled = layout::shell_geometry_scaled(window, resolved.ui);
+            let again = resolve(window, settled.world.size(), 1.0);
+            assert_eq!(
+                again.world, resolved.world,
+                "a {step}-step window disagrees with itself between passes"
+            );
+        }
+    }
+
+    #[test]
+    fn the_tile_count_is_what_a_step_holds_steady() {
+        // The point of stepping: the same scene, larger. Not the same size,
+        // wider. Tile counts are allowed to differ by the rail's clamps — it is
+        // 420 units at every step, so a bigger window really does buy a little
+        // more world — but not by a whole multiple.
+        use super::super::layout;
+
+        let mut counts = Vec::new();
+        for step in 1..=3u32 {
+            let window = HOST_DESIGN * step as f32;
+            let probe = layout::shell_geometry(window);
+            let resolved = resolve(window, probe.world.size(), 1.0);
+            let settled = layout::shell_geometry_scaled(window, resolved.ui);
+            let tiles = settled.world.size() / (TILE_SIZE * resolved.world as f32);
+            counts.push(tiles.x.floor());
+        }
+
+        for pair in counts.windows(2) {
+            let growth = pair[1] / pair[0];
+            assert!(
+                growth < 1.5,
+                "the tile count grew {growth}x between steps, so stepping is \
+                 widening the view rather than enlarging it: {counts:?}"
+            );
+        }
+    }
+
     /// The world's share of a window, as the shell lays it out.
     fn world_region_of(window: Vec2) -> Vec2 {
         super::super::layout::shell_geometry(window).world.size()

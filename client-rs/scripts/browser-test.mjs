@@ -82,11 +82,21 @@ async function waitForClient(page) {
 /// for no gain.
 const DESIGN = { width: 1280, height: 760 };
 
-/// Whether the client is the smaller of the playing size and the window.
+/// Whole design-sized steps that fit a viewport. Mirrors the host page, and
+/// `the_host_page_steps_the_window_the_way_this_harness_expects` compares the
+/// two against each other rather than trusting that they agree.
+const MARGIN = 0.94;
+function steps(innerWidth, innerHeight) {
+  const fit = Math.min((innerWidth * MARGIN) / DESIGN.width, (innerHeight * MARGIN) / DESIGN.height);
+  return Math.max(1, Math.floor(fit));
+}
+
+/// Whether the client is the smaller of its stepped playing size and the window.
 function fitsWindow(m) {
+  const step = steps(m.innerWidth, m.innerHeight);
   return (
-    Math.abs(m.shellWidth - Math.min(DESIGN.width, m.innerWidth)) <= 1 &&
-    Math.abs(m.shellHeight - Math.min(DESIGN.height, m.innerHeight)) <= 1
+    Math.abs(m.shellWidth - Math.min(DESIGN.width * step, m.innerWidth)) <= 1 &&
+    Math.abs(m.shellHeight - Math.min(DESIGN.height * step, m.innerHeight)) <= 1
   );
 }
 
@@ -318,6 +328,86 @@ async function main() {
       check(`no scrollbars at ${ratio}x`, !measured.scrollsHorizontally && !measured.scrollsVertically);
       await dprContext.close();
     }
+
+    // The stepped windowed size, at the sizes where it changes answer. 1440p is
+    // included because it is the case most likely to be assumed: a large
+    // display that still only fits one step, because two need 1520 pixels of
+    // height and it has 1440.
+    console.log("  windowed step-up");
+    const stepContext = await browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      deviceScaleFactor: 1,
+    });
+    const stepPage = await stepContext.newPage();
+    await stepPage.goto(url, { waitUntil: "load" });
+    await waitForClient(stepPage);
+
+    // The page's own rule, not a copy of it, evaluated for viewports this
+    // browser cannot actually be given.
+    const hostSteps = await stepPage.evaluate(
+      (cases) => cases.map(([w, h]) => window.aoWindow.shellSteps(w, h)),
+      [
+        [1280, 800],
+        [1920, 1080],
+        [2560, 1440],
+        [2560, 1600],
+        [3840, 2160],
+        [5120, 2880],
+      ]
+    );
+    const ourSteps = [
+      [1280, 800],
+      [1920, 1080],
+      [2560, 1440],
+      [2560, 1600],
+      [3840, 2160],
+      [5120, 2880],
+    ].map(([w, h]) => steps(w, h));
+    check(
+      "the host page steps the window the way this harness expects",
+      JSON.stringify(hostSteps) === JSON.stringify(ourSteps),
+      `page ${JSON.stringify(hostSteps)} vs harness ${JSON.stringify(ourSteps)}`
+    );
+    check(
+      "a 1440p display fits one step, not two",
+      hostSteps[2] === 1,
+      `got ${hostSteps[2]} steps at 2560x1440`
+    );
+    check(
+      "4K fits two steps",
+      hostSteps[4] === 2,
+      `got ${hostSteps[4]} steps at 3840x2160`
+    );
+    check(
+      "a step is never zero, however small the viewport",
+      (await stepPage.evaluate(() => window.aoWindow.shellSteps(320, 200))) === 1
+    );
+    await stepContext.close();
+
+    // And that the rule is actually applied, at a viewport large enough to
+    // step. Real, not evaluated: this is the one that catches the CSS variable
+    // being set and never read.
+    const bigContext = await browser.newContext({
+      viewport: { width: 3840, height: 2160 },
+      deviceScaleFactor: 1,
+    });
+    const bigPage = await bigContext.newPage();
+    await bigPage.goto(url, { waitUntil: "load" });
+    await waitForClient(bigPage);
+    const big = await measure(bigPage);
+    check(
+      "a 4K viewport gets a two-step window",
+      Math.abs(big.shellWidth - DESIGN.width * 2) <= 1 &&
+        Math.abs(big.shellHeight - DESIGN.height * 2) <= 1,
+      `shell ${big.shellWidth}x${big.shellHeight}, expected ${DESIGN.width * 2}x${DESIGN.height * 2}`
+    );
+    check(
+      "a stepped window still leaves room around itself",
+      big.shellWidth < big.innerWidth && big.shellHeight < big.innerHeight,
+      `shell ${big.shellWidth}x${big.shellHeight} in ${big.innerWidth}x${big.innerHeight}`
+    );
+    check("no scrollbars at 4K", !big.scrollsHorizontally && !big.scrollsVertically);
+    await bigContext.close();
   } finally {
     await browser.close();
   }

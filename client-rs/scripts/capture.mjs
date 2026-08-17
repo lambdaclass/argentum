@@ -83,6 +83,10 @@ const RESPONSIVE = [
     client: { width: MINIMUM_SUPPORTED_WIDTH, height: MINIMUM_SUPPORTED_HEIGHT },
   },
   { name: "ultrawide", width: 3440, height: 1440, maximize: true },
+  // Windowed, deliberately: this is the size at which the host page's second
+  // whole step engages, and the shell should be 2560x1520 inside it rather than
+  // the 1280x760 it uses on every smaller display.
+  { name: "stepped-4k", width: 3840, height: 2160 },
   { name: "short-window", client: { height: 560 } },
 ];
 

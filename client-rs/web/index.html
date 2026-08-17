@@ -63,14 +63,22 @@
 
          Windowed is the default: a bounded, centred game window matching the
          reference client's measured size (1295x760 there, 1280x760 here — the
-         same 22% rail and the same world density, at a round width). It shrinks to fit a smaller viewport, so
-         "bounded by default" never means "broken on a laptop", and it does not
-         grow just because the monitor is large — an unbounded canvas on a
-         2000-pixel browser made every element enormous while showing the same
-         scene. */
+         same 22% rail and the same world density, at a round width). It shrinks
+         to fit a smaller viewport, so "bounded by default" never means "broken
+         on a laptop".
+
+         On a display large enough for a whole multiple of that size it steps up
+         to it: 2x is 2560x1520, 3x is 3840x2280. Whole multiples only, because
+         the world is pixel art — the client's world zoom is an integer, so a
+         window 1.6x the design size does not show 1.6x-sized sprites, it shows
+         the same sprites and more terrain. Stepping in whole multiples is the
+         only way a larger window means a larger *scene* rather than a wider one.
+         `--shell-steps` is set by the script below; 1 until a step actually
+         fits, which on a 2560x1440 display is the whole time, since two steps
+         need 1520 pixels of height. */
       #shell {
-        width: min(1280px, 100vw);
-        height: min(760px, 100vh);
+        width: min(calc(1280px * var(--shell-steps, 1)), 100vw);
+        height: min(calc(760px * var(--shell-steps, 1)), 100vh);
         border: 1px solid var(--panel-edge);
         box-shadow: 0 0 0 1px #000, 0 18px 48px rgba(0, 0, 0, 0.75);
         overflow: hidden;
@@ -194,10 +202,38 @@
     </div>
 
     <script>
-      // Browser-capability adapter, not application UI. Bevy owns every screen;
-      // it cannot resize its own host element, so this exposes the one thing
-      // only the page can do. Deliberately tiny and stateless-ish: the shell is
-      // still the single source of truth for whether it is maximised.
+      // How many whole design-sized steps of game window fit the viewport.
+      //
+      // Exported on `window.aoWindow` so the browser tests check the same rule
+      // the page applies rather than a copy of it. A margin, so a step only
+      // engages when there is visible room around it — a shell that exactly
+      // equals the viewport is maximised, and maximising is a separate mode the
+      // player asks for.
+      const SHELL_DESIGN = { width: 1280, height: 760 };
+      const SHELL_MARGIN = 0.94;
+
+      function shellSteps(width, height) {
+        const fit = Math.min(
+          (width * SHELL_MARGIN) / SHELL_DESIGN.width,
+          (height * SHELL_MARGIN) / SHELL_DESIGN.height
+        );
+        // At least one: below a single step the shell shrinks to the viewport
+        // instead, which is what keeps a small laptop working.
+        return Math.max(1, Math.floor(fit));
+      }
+
+      function applyShellSteps() {
+        const steps = shellSteps(window.innerWidth, window.innerHeight);
+        document.documentElement.style.setProperty("--shell-steps", String(steps));
+        return steps;
+      }
+
+      applyShellSteps();
+      // Resize covers browser zoom and a move to another monitor as well: both
+      // change innerWidth/innerHeight, and both should be able to change the
+      // step. Bevy picks the new rectangle up from its own resize observer.
+      window.addEventListener("resize", applyShellSteps);
+
       // Browser-capability adapter, not application UI. Bevy owns every screen
       // and cannot resize or fullscreen its own host element; this exposes the
       // two things only the page can do.
@@ -206,6 +242,10 @@
       // and re-reads it, because Escape leaves fullscreen without telling
       // anyone.
       window.aoWindow = {
+        /// The windowed step rule, so a test checks this rule and not a copy.
+        shellSteps,
+        shellDesign: SHELL_DESIGN,
+
         /// "windowed" | "maximized" | "fullscreen"
         getMode() {
           if (document.fullscreenElement) return "fullscreen";
