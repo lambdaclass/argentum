@@ -567,6 +567,35 @@ mod tests {
     }
 
     #[test]
+    fn maximize_and_fullscreen_are_independent_controls() {
+        // Two buttons, two jobs. The failure this rules out is either one
+        // becoming a way to reach the other's mode, which is how a player ends
+        // up unable to leave fullscreen because the button they pressed was
+        // maximize and it put them back into fullscreen.
+        for from in [HostMode::Windowed, HostMode::Maximized, HostMode::Fullscreen] {
+            assert_ne!(
+                from.toggled_maximize(),
+                HostMode::Fullscreen,
+                "maximize from {from:?} asks for fullscreen"
+            );
+            assert_ne!(
+                from.toggled_fullscreen(),
+                HostMode::Maximized,
+                "fullscreen from {from:?} asks for maximize"
+            );
+            // And each does something from every mode: a control that is a
+            // no-op in one mode is a control a player presses twice.
+            assert_ne!(from.toggled_maximize(), from, "maximize from {from:?} changes nothing");
+            assert_ne!(from.toggled_fullscreen(), from, "fullscreen from {from:?} changes nothing");
+        }
+
+        // Either mode is escapable by its own control, which is what makes
+        // Escape a convenience rather than the only way out.
+        assert_eq!(HostMode::Maximized.toggled_maximize(), HostMode::Windowed);
+        assert_eq!(HostMode::Fullscreen.toggled_fullscreen(), HostMode::Windowed);
+    }
+
+    #[test]
     fn every_bar_action_is_distinct() {
         // These become platform-service calls in W-0015; two sharing an
         // identity would silently wire one button to the other's capability.

@@ -742,6 +742,136 @@ mod tests {
     }
 
     #[test]
+    fn a_host_mode_change_and_back_preserves_what_the_player_was_doing() {
+        // From inside the client, maximise-and-restore is two window resizes and
+        // no other notification. Anything that does not survive them is state
+        // the client silently drops when a player presses the maximise button —
+        // and the danger is that most of it survives by accident, because
+        // nothing touches it, so an untested pass here means nothing.
+        use super::super::character::SelectedSlot;
+        use super::super::controls::{Control, ControlKey, FocusOwner, TextField};
+        use super::super::testing;
+
+        let windowed = Vec2::new(1280.0, 760.0);
+        let maximised = Vec2::new(1920.0, 1040.0);
+
+        let mut app = testing::shell_app(windowed);
+
+        // Something selected, something focused, something half-typed.
+        app.world_mut().resource_mut::<SelectedSlot>().0 = Some(4);
+
+        // A key of its own. Reusing an inventory slot's key made focus reattach
+        // to the real slot on the next frame — which is correct behaviour, and
+        // was the test setting up a collision rather than a finding.
+        let key = ControlKey::new("chat.compose");
+        let field = app
+            .world_mut()
+            .spawn((Node::default(), Control::default(), key.clone(), {
+                let mut field = TextField::new();
+                for character in "hola ".chars() {
+                    field.insert(character);
+                }
+                field
+            }))
+            .id();
+        app.world_mut().resource_mut::<FocusOwner>().focus(field, Some(&key));
+
+        // And a camera looking somewhere specific.
+        let centre = Vec3::new(1234.0, -567.0, 0.0);
+        let camera = app
+            .world_mut()
+            .query_filtered::<Entity, With<WorldCamera>>()
+            .iter(app.world())
+            .next()
+            .expect("there is a world camera");
+        app.world_mut().entity_mut(camera).insert(Transform::from_translation(centre));
+        app.update();
+
+        testing::resize(&mut app, maximised);
+        testing::resize(&mut app, windowed);
+
+        assert_eq!(
+            app.world().resource::<SelectedSlot>().0,
+            Some(4),
+            "the selected item was lost across a maximise and restore"
+        );
+        // By key, not entity: a panel rebuild is allowed to replace the entity,
+        // and that is exactly what focus-by-key exists to survive. What must not
+        // change is *which control* the keyboard belongs to.
+        assert_eq!(
+            app.world().resource::<FocusOwner>().key(),
+            Some(&key),
+            "focus forgot which control it belonged to across a restore"
+        );
+        let focused = app
+            .world()
+            .resource::<FocusOwner>()
+            .entity()
+            .expect("focus was lost across a maximise and restore");
+        assert_eq!(
+            app.world().get::<ControlKey>(focused),
+            Some(&key),
+            "focus points at an entity that is not the control it names"
+        );
+        assert_eq!(
+            app.world().get::<TextField>(field).map(|f| f.value().to_string()),
+            Some("hola ".to_string()),
+            "composing text was lost across a maximise and restore"
+        );
+        assert_eq!(
+            app.world().get::<Transform>(camera).map(|t| t.translation),
+            Some(centre),
+            "the camera moved across a maximise and restore"
+        );
+    }
+
+    #[test]
+    fn the_pointer_is_recomputed_for_the_geometry_the_window_now_has() {
+        // The other half of a restore, and the one that survives by accident
+        // least gracefully: the pointer pipeline is derived from the shell
+        // geometry, so a stale reading makes the first click after a restore
+        // land on the tile the *previous* window had under the cursor.
+        use super::super::pointer::{PointerState, PointerTarget};
+        use super::super::testing;
+
+        let narrow = Vec2::new(1000.0, 800.0);
+        let wide = Vec2::new(1920.0, 1040.0);
+
+        let mut app = testing::shell_app(narrow);
+
+        // A point chosen to be over the rail in the narrow window and over the
+        // world in the wide one — the rail's right edge moves, so the same
+        // screen position means two different things.
+        let narrow_rail = testing::settled(&app).rail;
+        let probe = Vec2::new(narrow_rail.min.x + 8.0, 400.0);
+
+        testing::point_at(&mut app, probe);
+        assert_eq!(
+            app.world().resource::<PointerState>().target,
+            Some(PointerTarget::Interface),
+            "the probe point is not over the interface, so this proves nothing"
+        );
+
+        testing::resize(&mut app, wide);
+        let wide_rail = testing::settled(&app).rail;
+        assert!(
+            probe.x < wide_rail.min.x,
+            "the rail did not move past the probe point, so this proves nothing"
+        );
+
+        testing::point_at(&mut app, probe);
+        assert_eq!(
+            app.world().resource::<PointerState>().target,
+            Some(PointerTarget::World),
+            "the pointer still reports the rail at a position the world now owns"
+        );
+        assert!(
+            app.world().resource::<PointerState>().tile.is_some(),
+            "the pointer is over the world but names no tile"
+        );
+    }
+
+    #[test]
     fn device_pixel_ratio_is_applied_once_at_the_camera() {
         // Logical everywhere else, physical only here. Applying it twice
         // renders a quarter of the world scaled up; not at all renders a

@@ -61,10 +61,16 @@ pub fn shell_app(size: Vec2) -> App {
         super::state::UiStatePlugin,
         super::controls::ControlsPlugin,
         ShellPlugin,
+        super::pointer::PointerPlugin,
         super::rail::RailPlugin,
         super::character::CharacterPanelPlugin,
     ))
     .init_resource::<crate::world::ViewRadius>();
+
+    // The real world camera, from the client's own definition. A hand-written
+    // stand-in here could not notice the client getting its render layer, order
+    // or projection wrong.
+    app.world_mut().spawn(crate::world::world_camera(50, 50));
 
     // Spawn the tree, apply the geometry that produced, solve the layout the
     // geometry asked for, and let the clip pass propagate through it.
@@ -72,6 +78,33 @@ pub fn shell_app(size: Vec2) -> App {
         app.update();
     }
     app
+}
+
+/// Resize the window and let the shell settle at the new size.
+///
+/// This is what a host-mode change looks like from inside the client: the page
+/// resizes the canvas, winit reports a new window size, and nothing else about
+/// the client is told anything. Anything that does not survive this is state the
+/// client is dropping on a maximise.
+pub fn resize(app: &mut App, size: Vec2) {
+    let mut windows = app.world_mut().query::<&mut Window>();
+    let mut window = windows.single_mut(app.world_mut()).expect("there is one window");
+    window.resolution.set(size.x, size.y);
+    for _ in 0..4 {
+        app.update();
+    }
+}
+
+/// Put the pointer at a logical position inside the window.
+pub fn point_at(app: &mut App, position: Vec2) {
+    let mut windows = app.world_mut().query::<&mut Window>();
+    let mut window = windows.single_mut(app.world_mut()).expect("there is one window");
+    let factor = window.scale_factor() as f64;
+    window.set_physical_cursor_position(Some(bevy::math::DVec2::new(
+        position.x as f64 * factor,
+        position.y as f64 * factor,
+    )));
+    app.update();
 }
 
 /// The rail mode the shell settled on, which must exist once it has run.

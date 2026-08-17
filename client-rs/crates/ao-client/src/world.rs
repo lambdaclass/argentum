@@ -275,11 +275,15 @@ struct PlayerSprite;
 #[derive(Component)]
 struct TileSprite;
 
-fn setup(mut commands: Commands, player: Res<LocalPlayer>, blockmap: Res<Blockmap>) {
-    // Place the camera on the player immediately. Leaving it at the origin for
-    // frame 0 shows an empty grey viewport, which is indistinguishable from a
-    // renderer failure while debugging.
-    commands.spawn((
+/// The world camera, as the client spawns it.
+///
+/// A function rather than inline, so tests instantiate *this* camera instead of
+/// a hand-written approximation of it. A test that builds its own camera is
+/// testing its own camera: it cannot notice a render layer, order or projection
+/// that the client gets wrong, which is the class of fault that put the entire
+/// shell inside a clipped viewport once already.
+pub fn world_camera(tile_x: i32, tile_y: i32) -> impl Bundle {
+    (
         Camera2d,
         // Marked so the shell can drive its viewport: the world occupies only
         // the space the character rail leaves, not the whole window.
@@ -290,11 +294,18 @@ fn setup(mut commands: Commands, player: Res<LocalPlayer>, blockmap: Res<Blockma
         // draw the rail inside the world viewport.
         bevy::camera::visibility::RenderLayers::layer(crate::ui::shell::WORLD_LAYER),
         Transform::from_xyz(
-            (player.x - 1) as f32 * TILE_SIZE,
-            -((player.y - 1) as f32) * TILE_SIZE,
+            (tile_x - 1) as f32 * TILE_SIZE,
+            -((tile_y - 1) as f32) * TILE_SIZE,
             0.0,
         ),
-    ));
+    )
+}
+
+fn setup(mut commands: Commands, player: Res<LocalPlayer>, blockmap: Res<Blockmap>) {
+    // Place the camera on the player immediately. Leaving it at the origin for
+    // frame 0 shows an empty grey viewport, which is indistinguishable from a
+    // renderer failure while debugging.
+    commands.spawn(world_camera(player.x, player.y));
 
     spawn_tile_window(&mut commands, &player, &blockmap);
 
