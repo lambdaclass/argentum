@@ -86,6 +86,13 @@ impl Session {
         }
     }
 
+    /// Force a connection state. Test-only: production transitions come from
+    /// the socket callbacks and from `mark_playing`.
+    #[cfg(test)]
+    pub fn set_state_for_test(&self, state: ConnectionState) {
+        self.set_state(state);
+    }
+
     /// Drain everything decoded since the last call.
     pub fn drain(&self) -> Vec<ServerMessage> {
         self.inner.lock().map(|mut s| std::mem::take(&mut s.inbox)).unwrap_or_default()

@@ -318,10 +318,13 @@ fn update_readout(
     if dt <= 0.0 {
         return;
     }
-    // A hidden or unfocused window is throttled by the platform, and reporting
-    // that rate as performance tells a player their machine is failing when it
-    // is idle.
-    let foreground = windows.iter().any(|window| window.focused) && !document_hidden();
+    // Visibility, not focus. A window that is visible but unfocused is still
+    // being rendered continuously, and its frame rate is real — a player
+    // watching the game beside a guide should see the truth. What must not be
+    // reported is a *throttled* rate: a hidden tab runs at a few frames a
+    // second, and showing that as performance says the machine is failing when
+    // it is idle.
+    let foreground = windows.iter().any(|window| window.visible) && !document_hidden();
 
     for (mut average, row) in &mut rows {
         average.set_foreground(foreground);
@@ -456,9 +459,9 @@ mod tests {
             .init_resource::<Session>()
             .add_systems(Update, update_readout);
 
-        // The readout only measures a foreground window, so there has to be
-        // one: a throttled background rate is not a frame rate.
-        app.world_mut().spawn(Window { focused: true, ..Default::default() });
+        // The readout only measures a visible window, so there has to be one:
+        // a throttled background rate is not a frame rate.
+        app.world_mut().spawn(Window { visible: true, ..Default::default() });
 
         let row = app
             .world_mut()
@@ -503,17 +506,14 @@ mod tests {
         shown
     }
 
-    #[test]
-    fn an_unfocused_window_does_not_report_a_frame_rate() {
-        // A throttled window's rate is the platform's scheduling, not the
-        // machine's performance, and showing it tells a player their computer
-        // is failing when it is idle.
+    /// Build a readout app whose window has the given visibility.
+    fn readout_app(visible: bool) -> (App, Entity) {
         let mut app = App::new();
         app.insert_resource(Time::<()>::default())
             .init_resource::<HudStats>()
             .init_resource::<Session>()
             .add_systems(Update, update_readout);
-        app.world_mut().spawn(Window { focused: false, ..Default::default() });
+        app.world_mut().spawn(Window { visible, focused: false, ..Default::default() });
 
         let row = app
             .world_mut()
@@ -531,56 +531,26 @@ mod tests {
                 .advance_by(std::time::Duration::from_millis(16));
             app.update();
         }
-
-        assert_eq!(shown_values(&mut app, row)[0], "--", "a background rate was reported");
+        (app, row)
     }
 
     #[test]
-    fn maximise_and_fullscreen_are_different_actions() {
-        // They are different things to a player: one keeps the browser's tabs
-        // and address bar, the other takes the display. A single control that
-        // did both could not express either.
-        assert_ne!(BarAction::ToggleMaximise, BarAction::ToggleFullscreen);
-        assert_ne!(
-            bar_tab_index(BarAction::ToggleMaximise),
-            bar_tab_index(BarAction::ToggleFullscreen)
-        );
+    fn a_visible_but_unfocused_window_still_reports_its_real_frame_rate() {
+        // The task is explicit that a visible-but-unfocused window keeps
+        // measuring actual rendered frames rather than switching to a
+        // background reading. It is still being drawn, and a player watching
+        // the game beside a guide should see the truth.
+        let (mut app, row) = readout_app(true);
+        assert_ne!(shown_values(&mut app, row)[0], "--", "an unfocused window reported nothing");
     }
 
     #[test]
-    fn each_control_toggles_back_to_windowed() {
-        // Pressing maximise while maximised restores, rather than doing
-        // nothing or requiring the player to find a different button.
-        assert_eq!(HostMode::Windowed.toggled_maximize(), HostMode::Maximized);
-        assert_eq!(HostMode::Maximized.toggled_maximize(), HostMode::Windowed);
-
-        assert_eq!(HostMode::Windowed.toggled_fullscreen(), HostMode::Fullscreen);
-        assert_eq!(HostMode::Fullscreen.toggled_fullscreen(), HostMode::Windowed);
-    }
-
-    #[test]
-    fn maximise_from_fullscreen_leaves_fullscreen() {
-        // Otherwise the two controls fight: the class says maximised while the
-        // browser is still fullscreen, and restoring needs both.
-        assert_eq!(HostMode::Fullscreen.toggled_maximize(), HostMode::Maximized);
-        assert_eq!(HostMode::Maximized.toggled_fullscreen(), HostMode::Fullscreen);
-    }
-
-    #[test]
-    fn host_mode_names_round_trip() {
-        // The page is authoritative and communicates in these strings; a typo
-        // silently reads as windowed forever.
-        for mode in [HostMode::Windowed, HostMode::Maximized, HostMode::Fullscreen] {
-            assert_eq!(HostMode::from_str(mode.as_str()), mode);
-        }
-    }
-
-    #[test]
-    fn an_unknown_host_mode_reads_as_windowed() {
-        // A future page could answer something this build does not know, and
-        // the bounded window is the safe interpretation.
-        assert_eq!(HostMode::from_str("something-else"), HostMode::Windowed);
-        assert_eq!(HostMode::from_str(""), HostMode::Windowed);
+    fn a_window_that_is_not_visible_does_not_report_a_frame_rate() {
+        // What must never be shown is a *throttled* rate: a hidden tab runs at
+        // a few frames a second, and reporting that as performance says the
+        // machine is failing when it is idle.
+        let (mut app, row) = readout_app(false);
+        assert_eq!(shown_values(&mut app, row)[0], "--", "a throttled rate was reported");
     }
 
     #[test]

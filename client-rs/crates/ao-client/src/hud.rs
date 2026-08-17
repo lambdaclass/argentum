@@ -24,7 +24,7 @@ impl Plugin for HudPlugin {
                 ONLINE_INTERVAL_SECS,
                 TimerMode::Repeating,
             )))
-            .add_systems(Update, (send_ping, poll_online));
+            .add_systems(Update, (reset_schedule_on_reconnect, send_ping, poll_online).chain());
     }
 }
 
@@ -96,6 +96,26 @@ pub fn ping_label(state: &ConnectionState, ping_ms: Option<u32>) -> String {
 /// actually travels. It excludes egress queueing, so it answers "is the network
 /// or server slow" rather than "am I being shed" — walk-to-confirmation is the
 /// measure for the latter.
+/// Reset the probe schedule when the connection restarts.
+///
+/// The elapsed time belonged to a socket that no longer exists. Carried over, a
+/// reconnect either probes immediately — before the new session is ready — or
+/// waits out the remainder of an interval that has nothing to do with it.
+fn reset_schedule_on_reconnect(
+    session: Res<Session>,
+    mut schedule: ResMut<PingSchedule>,
+    mut previous: Local<Option<ConnectionState>>,
+) {
+    let current = session.state();
+    let restarted = matches!(current, ConnectionState::Connecting)
+        && !matches!(*previous, Some(ConnectionState::Connecting));
+
+    if restarted {
+        schedule.reset();
+    }
+    *previous = Some(current);
+}
+
 fn send_ping(time: Res<Time>, mut schedule: ResMut<PingSchedule>, session: Res<Session>) {
     // Scheduled on its own clock, not from the readout's refresh: tying the
     // probe to a display update makes its rate a function of the frame rate,
@@ -213,6 +233,63 @@ mod tests {
     fn a_measured_round_trip_is_shown_in_milliseconds() {
         assert_eq!(ping_label(&ConnectionState::Playing, Some(8)), "8ms");
         assert_eq!(ping_label(&ConnectionState::Authenticating, Some(140)), "140ms");
+    }
+
+    /// An app running the probe schedule against a fake clock.
+    fn probe_app() -> App {
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default())
+            .init_resource::<PingSchedule>()
+            .init_resource::<Session>()
+            .add_systems(Update, (reset_schedule_on_reconnect, send_ping).chain());
+        app
+    }
+
+    fn advance(app: &mut App, seconds: f32) {
+        app.world_mut()
+            .resource_mut::<Time<()>>()
+            .advance_by(std::time::Duration::from_secs_f32(seconds));
+        app.update();
+    }
+
+    #[test]
+    fn reconnecting_resets_the_probe_schedule() {
+        // The elapsed time belonged to a socket that no longer exists. Carried
+        // over, a reconnect either probes before the new session is ready or
+        // waits out the remainder of an interval that has nothing to do with
+        // it.
+        let mut app = probe_app();
+
+        // Four seconds into the interval on the old connection.
+        advance(&mut app, 4.0);
+        assert!(app.world().resource::<PingSchedule>().remaining() < 2.0);
+
+        app.world().resource::<Session>().set_state_for_test(ConnectionState::Connecting);
+        // A zero-length frame: Bevy keeps the previous delta until it is
+        // advanced again, so a plain update would re-apply the four seconds and
+        // hide the reset that just happened.
+        advance(&mut app, 0.0);
+
+        assert_eq!(
+            app.world().resource::<PingSchedule>().remaining(),
+            crate::ui::telemetry::PING_INTERVAL_SECS,
+            "the new connection inherited the old one's elapsed time"
+        );
+    }
+
+    #[test]
+    fn staying_connected_does_not_keep_resetting_the_schedule() {
+        // The reset fires on the transition into Connecting, not for every
+        // frame spent there — otherwise the probe never becomes due.
+        let mut app = probe_app();
+        app.world().resource::<Session>().set_state_for_test(ConnectionState::Connecting);
+        advance(&mut app, 0.0);
+
+        advance(&mut app, 3.0);
+        assert!(
+            app.world().resource::<PingSchedule>().remaining() < 3.0,
+            "the schedule was reset again while already connecting"
+        );
     }
 
     #[test]
