@@ -19,6 +19,84 @@ Never reuse a completed ID in the active roadmap.
 
 ## Closed tasks
 
+### Completed Task W-0002 — Responsive geometry and visibility policy
+
+Closed: 2026-08-16 (`31ddbe2`, `729451e`, `501e6c5`, `75080c8`, `450bf83`,
+`a76f270`)
+
+The rail mode is carried across frames rather than recomputed from nothing.
+Entering compact needs the world below `WORLD_MIN_WIDTH`; leaving it needs a
+further `COMPACT_HYSTERESIS`, so the two crossings sit 48px apart and a window
+resting on the boundary settles instead of rebuilding the rail every frame.
+
+Compact mode stopped being a promise: five vital slivers and three focusable
+navigation controls, driven from the same view model the full rail uses.
+
+Three faults were found by looking at the captures, not by the tests that
+passed alongside them, and each is now held by a test that fails without its
+fix:
+
+- Every window between 920px and 968px opened as an icon strip.
+  `AppliedGeometry` defaulted to the geometry of a zero-sized window — which is
+  compact — and the hysteresis carried that seed forward, so the seed rather
+  than the width decided the mode across the whole band. It is now
+  `Option<ShellGeometry>`: never laid out is a state, and it maps onto the
+  `Option<RailMode>` the layout already took.
+- The compact strip drew the full rail's labelled bars on top of its slivers.
+  Both carry `RailRegion::Vitals` — the same region shown differently — so the
+  panel rebuild filled both. It now queries `With<FullRailOnly>`.
+- The inventory grid drew over the panel below it in a short window. The
+  regions themselves shrink in order and never overlap, so measuring them found
+  nothing; what overflowed was the content inside a shrunken well.
+
+Evidence:
+
+- hysteresis as a property, not a shape: `a_one_pixel_dither_cannot_toggle_the_mode_forever`
+  rules out any adjacent pair of widths that alternates, and
+  `the_two_thresholds_are_a_hysteresis_band_apart` pins the band, since the
+  first still passes with the band collapsed. Both fail at
+  `COMPACT_HYSTERESIS = 0.0`.
+- `a_window_opened_inside_the_hysteresis_band_gets_the_rail_its_width_asks_for`,
+  which fails if the compact seed is reintroduced.
+- `ui/testing.rs`, an app that really solves the layout — the smallest plugin
+  set that makes `ComputedNode` real, no renderer and no GPU. It includes
+  `FontPlugin` deliberately: without a font every string measures zero, and an
+  overflow test that cannot measure text cannot fail.
+- computed-layout tests over that app:
+  `nothing_in_the_full_rail_is_laid_out_past_its_edge` at the narrowest full
+  rail there is; `the_compact_strip_is_not_also_filled_with_full_rail_content`;
+  `no_rail_region_draws_outside_itself_in_a_short_window`, which reads
+  `CalculatedClip` because clipping is a render property and comparing
+  rectangles alone would have passed against the bug;
+  `the_solved_grid_is_six_columns_wherever_the_rail_ends_up`, counting what the
+  engine put on each row at 2x UI scale, where the previous guarantee was
+  arithmetic and the arithmetic is what was wrong the last time this broke.
+- compact content is queried in the real tree:
+  `compact_mode_renders_a_visible_vital_and_a_usable_navigation_control`,
+  `a_compact_navigation_control_is_focusable_rather_than_decorative`,
+  `the_full_rail_is_hidden_in_compact_mode_and_shown_otherwise`.
+- captures at the breakpoint minus and plus one pixel, the minimum supported
+  size (792x638, derived from the area of interest beside a compact rail),
+  ultrawide and a short window, each asserting the page does not scroll. Sizes
+  are expressed as the window the *client* receives and measured from the host
+  page: the shell has a 1px border, and the first attempt handed the client
+  919px for a capture named `breakpoint-plus-1`, producing two identical
+  compact shells labelled as opposite sides of the boundary. The harness now
+  fails rather than mislabelling, and refuses sizes the shell's clamps make
+  unreachable. `the_capture_harness_targets_the_real_breakpoint_and_minimum`
+  checks the script's literals against the client's constants.
+- ultrawide: the rail reaches 757 logical pixels at 2x while the grid is capped
+  at its design slot size and fills 516, so the grid is centred — left aligned
+  the remainder read as a region that failed to fill.
+- the area of interest is unchanged and still checked against the server:
+  `aoi_client_contract_test.exs`, 2 tests, 0 failures.
+- `./build.sh check`: 312 client tests, 70 core tests, 0 failures. Captures
+  taken from a clean build of the closing commit.
+
+Known limitation, not fixed here: below roughly 700px of window height the
+inventory grid loses its lower rows to the clip. That is better than drawing
+them over the next panel, but making them reachable is a scrolling rail.
+
 ### Completed Task W-0084 — Honest FPS, focus and ping status
 
 Closed: 2026-08-16 (`0aa683b`, `4008cd0`, `f0f2e5a`)

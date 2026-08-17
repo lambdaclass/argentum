@@ -225,35 +225,6 @@ same browser viewport: the target is comparable information clarity and
 interaction quality, not pixel-for-pixel reproduction. Every shipped icon and
 decorative asset is project-owned or licensed for this client.
 
-### Task W-0002 — Responsive geometry and visibility policy
-
-- **State:** planned
-- **Phase:** 0
-- **Depends on:** W-0001
-
-The pure geometry policy exists. Connect it to the rendered Bevy tree and make
-each mode honest:
-
-- The desktop rail targets 21–23% of width within named minimum/maximum logical
-  clamps. The world receives the remaining usable width and the hotbar centers
-  on that world rectangle.
-- The compact transition has one documented breakpoint plus hysteresis so a
-  one-pixel resize cannot oscillate modes.
-- Compact mode visibly renders the promised vital slivers and usable navigation
-  controls. An enum saying those regions survive is not evidence if the compact
-  Bevy node is empty.
-- Minimum-size, short-window, ultrawide and cosmetic-perimeter behavior are
-  explicit. No application panel requires page scrolling and no rail region is
-  replaced by an unexplained black well.
-- Rendering more public terrain never expands the server-owned entity area of
-  interest, targetability, interaction or command range.
-
-Close with Bevy computed-layout tests for full and compact trees, including a
-query that finds at least one visible vital and one navigation control in
-compact mode. Add captures at the breakpoint minus/plus one pixel, the minimum
-supported size and ultrawide. Server/client contract tests must fail if the
-authoritative entity AoI is widened.
-
 ### Task W-0003 — Scaling, fullscreen, resize and DPI
 
 - **State:** planned
