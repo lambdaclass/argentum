@@ -28,6 +28,23 @@ const VIEWPORT_HEIGHT: u32 = 832;
 #[cfg(target_arch = "wasm32")]
 const CANVAS_SELECTOR: &str = "#ao-canvas";
 
+/// How often the app updates, focused and unfocused.
+///
+/// Both continuous. Winit's reactive mode is right for a tool and wrong for a
+/// game: with it, interpolation and animation advance only when an input event
+/// arrives, so movement lags and then jumps a whole tile.
+///
+/// Unfocused is continuous for a second reason. A visible window that is not
+/// focused is still being watched — alt-tabbed to a guide, or on a second
+/// monitor — and dropping it to a 10Hz event-driven loop both stalls the world
+/// and makes the frame-rate readout report the throttle as game performance.
+/// The browser throttles a genuinely *hidden* tab on its own, which is the case
+/// that should be throttled, and the readout and the latency probe both stand
+/// down there.
+fn winit_settings() -> WinitSettings {
+    WinitSettings { focused_mode: UpdateMode::Continuous, unfocused_mode: UpdateMode::Continuous }
+}
+
 fn main() {
     init_logging();
 
@@ -81,17 +98,7 @@ fn main() {
         // Winit's reactive mode is right for a tool and wrong for a game: with
         // it, interpolation and animation only advance when a key is pressed,
         // so movement appears to lag and then jump a whole tile at a time.
-        .insert_resource(WinitSettings {
-            focused_mode: UpdateMode::Continuous,
-            // Also continuous while unfocused. Throttling to 10Hz saves power
-            // but stalls the world: an unfocused window is still being watched
-            // — alt-tabbed to a guide, second monitor — and the frame rate
-            // visibly collapsing is worse than the battery it saves. The
-            // browser throttles a *hidden* tab on its own, which is the case
-            // that genuinely wants throttling, and the latency probe already
-            // pauses there.
-            unfocused_mode: UpdateMode::Continuous,
-        })
+        .insert_resource(winit_settings())
         .add_plugins((world::WorldPlugin, ui::UiPlugin, hud::HudPlugin))
         .run();
 }
@@ -105,4 +112,19 @@ fn init_logging() {
 #[cfg(not(target_arch = "wasm32"))]
 fn init_logging() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unfocused_window_is_not_dropped_to_an_event_driven_loop() {
+        // A visible but unfocused window keeps rendering, so its measured frame
+        // rate stays real. Reactive mode here would stall the world and make
+        // the readout report the throttle as performance.
+        let settings = winit_settings();
+        assert_eq!(settings.unfocused_mode, UpdateMode::Continuous);
+        assert_eq!(settings.focused_mode, UpdateMode::Continuous);
+    }
 }

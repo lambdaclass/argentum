@@ -225,33 +225,6 @@ same browser viewport: the target is comparable information clarity and
 interaction quality, not pixel-for-pixel reproduction. Every shipped icon and
 decorative asset is project-owned or licensed for this client.
 
-### Task W-0084 — Honest FPS, focus and ping status
-
-- **State:** planned
-- **Phase:** 0
-- **Depends on:** W-0001
-
-Update the displayed FPS at most once per second from a stable foreground
-sample. When the window/tab is unfocused, hidden or browser-throttled, show an
-explicit background/paused state (or hold a clearly labelled last foreground
-sample) instead of reporting the throttle rate as game performance. Reset the
-sample window on focus restoration so background frames cannot produce a false
-10 FPS reading.
-
-Send game-socket ping 900 once every five seconds—not from the render/readout
-update—and keep at most one probe in flight. Background suspension or a long
-frame must not cause catch-up bursts; reconnect resets the timer and pending
-sample. Tests use a fake clock to prove display cadence, focus transitions,
-probe cadence and no-burst behavior.
-
-Closure evidence must prove these exact boundaries: no second FPS rewrite before
-one foreground second; a hidden/background interval never becomes a foreground
-FPS sample; restoration starts a fresh sample; no ping before five seconds;
-exactly one ping when five seconds elapse; and a 30-second suspension produces
-at most one resumed probe, never six catch-up probes. Visible-but-unfocused
-native windows continue measuring actual rendered FPS instead of switching to a
-10 Hz event-driven loop.
-
 ### Task W-0002 — Responsive geometry and visibility policy
 
 - **State:** planned

@@ -19,6 +19,59 @@ Never reuse a completed ID in the active roadmap.
 
 ## Closed tasks
 
+### Completed Task W-0084 — Honest FPS, focus and ping status
+
+Closed: 2026-08-16 (`0aa683b`, `4008cd0`, `f0f2e5a`)
+
+The frame rate is counted over a full second of *visible* frames and rewritten
+at most once per second. Latency is probed on its own five-second schedule, not
+from the readout update, so a struggling client does not probe least exactly
+when latency matters most.
+
+Visibility, not focus, decides whether a sample is real. A visible but unfocused
+window is still being rendered, and its rate is the truth; only a hidden or
+throttled one stands down, because a tab running at a few frames a second
+reported as performance says the machine is failing when it is idle. A held
+reading is labelled `144 bg` rather than shown bare — an unmarked stale number
+is indistinguishable from a current one.
+
+The probe schedule resets rather than decrements. A decrementing timer preserves
+average rate but, after a suspension, owes several probes and fires them the
+instant the tab wakes — from every client waking together.
+
+Evidence — each boundary the task names, proved against a fake clock:
+
+- no second rewrite before a full foreground second —
+  `no_second_rewrite_before_a_full_foreground_second`
+- a background interval never becomes a foreground sample —
+  `a_background_interval_never_becomes_a_foreground_sample`
+- restoration starts a fresh sample — `restoration_starts_a_fresh_sample`,
+  `a_long_frame_on_resume_is_not_averaged_into_the_rate`
+- no probe before five seconds, exactly one at five —
+  `no_probe_before_the_interval_and_exactly_one_at_it`
+- a thirty-second suspension produces one probe, not six —
+  `a_thirty_second_suspension_produces_one_probe_and_not_six`, with
+  `the_schedule_holds_its_rate_over_a_long_run` confirming resetting has not
+  quietly changed the rate
+- reconnect resets timer and pending sample — `reconnecting_resets_the_schedule`,
+  `reconnecting_resets_the_probe_schedule`, and
+  `staying_connected_does_not_keep_resetting_the_schedule` so the probe still
+  becomes due
+- visible-but-unfocused keeps measuring —
+  `a_visible_but_unfocused_window_still_reports_its_real_frame_rate`,
+  `a_window_that_is_not_visible_does_not_report_a_frame_rate`, and
+  `an_unfocused_window_is_not_dropped_to_an_event_driven_loop` pinning the winit
+  update mode so the client cannot fall back to a 10Hz event-driven loop
+
+`cargo test --workspace` — 297 client, 70 core.
+
+Two faults found and fixed while closing. Splitting the status row into three
+labelled fields had left the update writing to a `Text` component that no longer
+existed on that entity, so the bar read `FPS -- PING -- ON --` permanently while
+the counter beneath it worked perfectly; there is now a test that runs the
+system and asserts the values change. And the probe schedule was never reset on
+reconnect, so a new connection inherited the old one's elapsed time.
+
 ### Completed Task W-0001 — Fixed Bevy application shell
 
 Closed: 2026-08-16 (`9c41009`, `b078ac0`, `eebfe80`, `d206294`, `2b80041`, `83dc05e`)
