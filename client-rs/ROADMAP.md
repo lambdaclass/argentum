@@ -225,59 +225,6 @@ same browser viewport: the target is comparable information clarity and
 interaction quality, not pixel-for-pixel reproduction. Every shipped icon and
 decorative asset is project-owned or licensed for this client.
 
-### Task W-0001 — Fixed Bevy application shell
-
-- **State:** ready
-- **Phase:** 0
-- **Depends on:** none
-
-The Bevy region scaffold, top bar, world region, rail root and numbered hotbar
-exist. This task remains open until they form one complete application shell in
-the rendered browser and native window, rather than only in layout helpers.
-
-Required behavior:
-
-- The canvas follows the current host rectangle. In default desktop mode the
-  host is a bounded, centered approximately 1280x760 logical-pixel game window
-  that shrinks to fit smaller viewports. Explicit maximize expands the host to
-  the browser content viewport; fullscreen expands it through the platform
-  fullscreen capability. Restore returns to the bounded centered host. Every
-  transition recomputes Bevy layout and camera viewports without CSS
-  stretching, world-scale changes, clipping or input-coordinate drift.
-- Maximize and fullscreen are separate controls. Maximize keeps the browser's
-  tabs and address bar; fullscreen takes the display, requires a user gesture
-  and can be refused, in which case the client reports what actually happened
-  rather than assuming it succeeded. Escape leaves fullscreen without notifying
-  the client, so the host mode is re-read rather than remembered.
-- Restore preserves player position, camera center, UI scale, selected item,
-  focused control and composing text, and leaves no scrollbars, clipping or
-  stale pointer coordinates.
-- The native window remains resizable. In both targets, top bar, world, rail and
-  hotbar are derived from the same current window dimensions and partition the
-  usable viewport without clipping or overlap.
-- The top bar spans the full shell width; the rail is full-height below it; the
-  entire hotbar remains inside and centered on the world viewport. Any unused
-  perimeter is an explicit layout result, not an accidental black rectangle.
-- The top bar gives textual values to FPS, ping and population, while actions
-  such as support, language, screenshot, audio, settings, minimize, maximize
-  and close use recognizable project-owned icons with localized tooltips and
-  accessible names. Cryptic production abbreviations such as `LN`, `PIC`,
-  `AUD`, `CBT` or `CFG` are not used as the only label for an action.
-- The host DOM contains only the canvas and pre-WASM/error fallback. Movement
-  guidance, status, panels and gameplay controls live in Bevy.
-- Fixture/demo mode uses the production Bevy tree and does not alter network
-  behavior.
-
-Closure evidence:
-
-- A browser integration test resizes the viewport and asserts the canvas CSS
-  size follows `window.innerWidth/innerHeight` within one pixel, with no page
-  scrollbars.
-- Bevy app tests inspect the resolved top-bar/world/rail/hotbar bounds and prove
-  they are non-negative, non-overlapping and within the window.
-- Captures at 1280×720 and 1920×1080 show the full top bar, rail and hotbar;
-  neither capture may clip the status bar, rail or bottom of the hotbar.
-
 ### Task W-0084 — Honest FPS, focus and ping status
 
 - **State:** planned

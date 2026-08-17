@@ -131,13 +131,14 @@ async function main() {
       await waitForClient(page);
       shots.push(await shoot(page, `${viewport.name}-windowed`));
 
-      // Maximised: the shell's own control, exercised the way a player would.
-      await page.evaluate(() => window.aoWindow?.setMaximized(true));
+      // Maximised: the host mode a player reaches from the top bar. Not
+      // fullscreen, which needs a user gesture automation cannot supply.
+      await page.evaluate(() => window.aoWindow?.setMode("maximized"));
       await page.waitForTimeout(1_500);
       shots.push(await shoot(page, `${viewport.name}-maximized`));
 
       // And back, which is where a restore that leaves scrollbars shows up.
-      await page.evaluate(() => window.aoWindow?.setMaximized(false));
+      await page.evaluate(() => window.aoWindow?.setMode("windowed"));
       await page.waitForTimeout(1_500);
       shots.push(await shoot(page, `${viewport.name}-restored`));
 

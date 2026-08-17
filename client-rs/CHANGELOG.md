@@ -17,6 +17,70 @@ Evidence: commands, tests, captures and measurements
 
 Never reuse a completed ID in the active roadmap.
 
+## Closed tasks
+
+### Completed Task W-0001 — Fixed Bevy application shell
+
+Closed: 2026-08-16 (`9c41009`, `b078ac0`, `eebfe80`, `d206294`, `2b80041`, `83dc05e`)
+
+The top bar, world region, character rail and numbered hotbar form one
+application shell in the rendered browser window, derived from the current host
+rectangle rather than from layout helpers alone.
+
+**Host modes.** The canvas follows the host. Windowed is a bounded, centred
+1280x760 game window — the reference client's measured height, the same 22%
+rail — which shrinks to fit smaller viewports so a laptop is never broken by the
+bound. Maximize expands the host to the browser content area with tabs and
+address bar visible; fullscreen goes through the platform capability, needs a
+user gesture and can be refused, in which case the adapter reports the mode
+actually reached instead of claiming success. Escape leaves fullscreen without
+notifying the client, so the mode is re-read twice a second rather than
+remembered.
+
+**Top bar.** `LN`, `PIC`, `AUD`, `CBT` and `CFG` are gone. Actions use icons
+composed from primitives — no font or sheet to license — each carrying a
+localisation key used as both hover tooltip and accessible name. One tooltip
+node is reused and ignores picking, since a tooltip that can be hovered steals
+the pointer from the control it describes. FPS, ping and population stay
+textual.
+
+**Focus across rebuilds.** Panels rebuild on every snapshot and every geometry
+change, which despawns their controls, so focus held as an entity was lost by a
+resize. Controls carry stable keys and focus remembers both entity and key,
+survives a panel being briefly absent mid-rebuild, and declines to re-attach to
+a control that came back disabled.
+
+Evidence:
+
+- `node scripts/browser-test.mjs` — canvas is the smaller of the playing size
+  and the viewport within one pixel with no page scrollbars, at 720p, 1080p,
+  1440p, small-laptop and narrow; across three live resizes; at emulated device
+  pixel ratios 1.25, 1.5 and 2. Host modes: windowed is bounded and smaller than
+  its viewport, maximize fills the content area with the canvas following it,
+  restore returns to exactly the starting size and the host reports itself
+  windowed again.
+- `cargo test --workspace` — 298 client, 70 core. Region partition tests assert
+  non-negative, non-overlapping bounds inside the window at nine sizes including
+  1x1 and zero; the bar spans full width with the rail full-height beneath it;
+  world and rail leave no gap; the hotbar stays inside and centred on the world
+  rather than the window.
+- `node scripts/capture.mjs` — 13 captures at build `83dc05e`. 1280x720 and
+  1920x1080 show the full top bar, rail and hotbar with no clipping.
+- Artifact: 24.2 MB raw, 20.0 MB optimized, 5.78 MB gzip.
+
+Roadmap correction: the task originally required the canvas to track the browser
+content area without qualification. Implementation showed that is wrong above a
+certain size — the world holds its designed view and scales up rather than
+revealing more map, so filling a 2000-pixel browser made every element enormous
+while showing nothing more. The requirement now carries its bound and still
+forbids what it was written to forbid: a fixed rectangle that ignores a smaller
+window.
+
+Known limitation carried forward to W-0003: Playwright's `deviceScaleFactor` is
+an emulation headless Chromium does not rasterize at, so the canvas backing
+store measures identically at 1x and 2x. Verifying that it follows a real device
+pixel ratio needs a physical high-DPI display.
+
 ## Pre-stable-ID foundation
 
 ### 2026-08-16 — Honest login request encoders
