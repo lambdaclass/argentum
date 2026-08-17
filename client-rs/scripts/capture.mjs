@@ -69,13 +69,47 @@ const MINIMUM_SUPPORTED_HEIGHT = 638;
 /// rail that has silently fallen off the edge. `maximize` is set where the
 /// windowed shell would clamp to its 1280px default and never reach the size
 /// under test at all — an "ultrawide" capture of a 1280px shell proves nothing.
+///
+/// `client` sizes are the window the *client* sees, not the browser viewport.
+/// The shell is inset from the viewport by its border, so a 921px viewport gives
+/// the client a 919px window — which is on the other side of the breakpoint.
+/// The first pass at these captures got exactly that wrong and produced two
+/// identical compact shells labelled "minus 1" and "plus 1".
 const RESPONSIVE = [
-  { name: "breakpoint-minus-1", width: RAIL_BREAKPOINT - 1, height: 760 },
-  { name: "breakpoint-plus-1", width: RAIL_BREAKPOINT + 1, height: 760 },
-  { name: "minimum-supported", width: MINIMUM_SUPPORTED_WIDTH, height: MINIMUM_SUPPORTED_HEIGHT },
+  { name: "breakpoint-minus-1", client: { width: RAIL_BREAKPOINT - 1 } },
+  { name: "breakpoint-plus-1", client: { width: RAIL_BREAKPOINT + 1 } },
+  {
+    name: "minimum-supported",
+    client: { width: MINIMUM_SUPPORTED_WIDTH, height: MINIMUM_SUPPORTED_HEIGHT },
+  },
   { name: "ultrawide", width: 3440, height: 1440, maximize: true },
-  { name: "short-window", width: 1280, height: 560 },
+  { name: "short-window", client: { height: 560 } },
 ];
+
+/// How much wider the browser viewport has to be than the window the client gets.
+///
+/// Measured rather than assumed: the host page owns its own border and padding,
+/// and a capture that silently lands on the wrong side of a breakpoint is worse
+/// than no capture, because it is filed as evidence that the boundary was
+/// inspected.
+async function measureChrome(browser, url) {
+  // Below the shell's own 1280x760 windowed clamp on both axes, or the clamp is
+  // measured as chrome and every derived viewport is wrong by the difference.
+  const probe = 700;
+  const context = await browser.newContext({
+    viewport: { width: probe, height: probe },
+    deviceScaleFactor: 1,
+  });
+  const page = await context.newPage();
+  await page.goto(url, { waitUntil: "load" });
+  await page.waitForSelector("#ao-canvas");
+  const size = await page.evaluate(() => {
+    const canvas = document.getElementById("ao-canvas");
+    return { width: canvas.clientWidth, height: canvas.clientHeight };
+  });
+  await context.close();
+  return { width: probe - size.width, height: probe - size.height };
+}
 
 function headStamp() {
   // The same rule build.sh uses, from the same script — computing it a third
@@ -186,12 +220,21 @@ async function main() {
 
     // Sizes where the layout changes character. No maximise/restore cycle —
     // these are about what the shell does at the size, not about host modes.
+    const chrome = await measureChrome(browser, url);
+    console.log(`  host chrome: ${chrome.width}x${chrome.height}px around the client window`);
+
     for (const size of RESPONSIVE) {
-      console.log(`  ${size.name} (${size.width}x${size.height})`);
-      const context = await browser.newContext({
-        viewport: { width: size.width, height: size.height },
-        deviceScaleFactor: 1,
-      });
+      // Only the axes a capture actually constrains are derived from a client
+      // size; the rest keep a roomy default. The shell clamps at 1280x760
+      // before its border, so a client window of exactly 1280 or 760 on that
+      // axis is not reachable at all — asking for one is a mistake worth an
+      // error, not a silent near miss.
+      const viewport = {
+        width: size.client?.width ? size.client.width + chrome.width : (size.width ?? 1400),
+        height: size.client?.height ? size.client.height + chrome.height : (size.height ?? 900),
+      };
+      console.log(`  ${size.name} (${viewport.width}x${viewport.height})`);
+      const context = await browser.newContext({ viewport, deviceScaleFactor: 1 });
       const page = await context.newPage();
       page.on("pageerror", (error) => console.error(`    page error: ${error.message}`));
 
@@ -201,6 +244,25 @@ async function main() {
         await page.evaluate(() => window.aoWindow?.setMode("maximized"));
         await page.waitForTimeout(1_500);
       }
+
+      // The whole point of the breakpoint pair is that the two shots sit on
+      // opposite sides of one pixel. If the client did not get the width this
+      // capture is named after, the file is mislabelled evidence.
+      if (size.client) {
+        const actual = await page.evaluate(() => {
+          const canvas = document.getElementById("ao-canvas");
+          return { width: canvas.clientWidth, height: canvas.clientHeight };
+        });
+        for (const axis of ["width", "height"]) {
+          if (size.client[axis] && actual[axis] !== size.client[axis]) {
+            throw new Error(
+              `${size.name}: asked for a client ${axis} of ${size.client[axis]}, ` +
+                `got ${actual[axis]}`
+            );
+          }
+        }
+      }
+
       shots.push(await shoot(page, size.name));
 
       // "No application panel requires page scrolling" — at the minimum

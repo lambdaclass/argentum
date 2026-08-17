@@ -99,7 +99,7 @@ impl Plugin for CharacterPanelPlugin {
 
 /// Marks nodes owned by this panel, so a rebuild can clear exactly them.
 #[derive(Component)]
-struct PanelContent;
+pub struct PanelContent;
 
 /// A clickable inventory slot.
 #[derive(Component, Debug, Clone, Copy)]
@@ -113,7 +113,11 @@ fn rebuild_on_change(
     drag: Res<DragState>,
     geometry: Res<super::shell::AppliedGeometry>,
     ui_scale: Res<UiScale>,
-    regions: Query<(Entity, &RailRegion)>,
+    // Full-rail regions only. The compact strip carries the same RailRegion
+    // markers — it is the same region, presented differently — and without this
+    // filter the labelled bars were spawned into the 56px strip as well, on top
+    // of the slivers, overflowing it. That is what the compact capture showed.
+    regions: Query<(Entity, &RailRegion), With<super::shell::FullRailOnly>>,
     existing: Query<Entity, With<PanelContent>>,
     mut commands: Commands,
 ) {

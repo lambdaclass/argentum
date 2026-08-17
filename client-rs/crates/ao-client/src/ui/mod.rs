@@ -19,6 +19,8 @@ pub mod shell;
 pub mod spells;
 pub mod state;
 pub mod telemetry;
+#[cfg(test)]
+pub mod testing;
 pub mod tokens;
 pub mod topbar;
 

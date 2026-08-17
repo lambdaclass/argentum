@@ -430,6 +430,111 @@ mod tests {
         assert_eq!(settled_mode(&app), super::super::layout::RailMode::Compact);
     }
 
+    /// The rail node itself, in a solved app.
+    fn rail_entity(app: &mut App) -> Entity {
+        app.world_mut()
+            .query::<(Entity, &Region)>()
+            .iter(app.world())
+            .find(|(_, region)| **region == Region::Rail)
+            .map(|(entity, _)| entity)
+            .expect("the shell has no rail")
+    }
+
+    #[test]
+    fn nothing_in_the_full_rail_is_laid_out_past_its_edge() {
+        // The Water bar reached past the rail and drew over the world, because
+        // a flex item's default minimum is its own content and "Water: 64/100"
+        // is wider than half a 280px rail. Declared widths all looked right;
+        // only the solved tree showed it.
+        use super::super::testing;
+
+        // The first is the narrowest full rail there is — one pixel above the
+        // breakpoint, where the rail sits on its RAIL_MIN_WIDTH floor and has
+        // the least room for its labels. That is the window whose capture
+        // exposed this; the wider ones only ever had more room.
+        let narrowest =
+            super::super::layout::WORLD_MIN_WIDTH + super::super::layout::RAIL_MIN_WIDTH;
+        for window in
+            [Vec2::new(narrowest + 1.0, 760.0), Vec2::new(1280.0, 760.0), Vec2::new(1920.0, 1080.0)]
+        {
+            let mut app = testing::shell_app(window);
+            let geometry = testing::settled(&app);
+            assert_eq!(
+                geometry.rail_mode,
+                super::super::layout::RailMode::Full,
+                "{window:?} is not a full rail, so this proves nothing"
+            );
+
+            let rail = rail_entity(&mut app);
+            let bounds = testing::solved_rect(&app, rail).expect("the rail was never solved");
+
+            for entity in testing::descendants(&app, rail) {
+                if !testing::is_displayed(&app, entity) {
+                    continue;
+                }
+                let Some(rect) = testing::solved_rect(&app, entity) else {
+                    continue;
+                };
+                // Half a pixel: the layout solver rounds to physical pixels, and
+                // a rail edge landing on x.5 is not the fault being looked for.
+                assert!(
+                    rect.max.x <= bounds.max.x + 0.5 && rect.min.x >= bounds.min.x - 0.5,
+                    "at {window:?} a node spans {}..{} in a rail of {}..{}",
+                    rect.min.x,
+                    rect.max.x,
+                    bounds.min.x,
+                    bounds.max.x
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_compact_strip_is_not_also_filled_with_full_rail_content() {
+        // The compact strip carries the same RailRegion markers as the full
+        // rail — it is the same region shown differently — so the panel rebuild
+        // spawned the labelled bars into it as well. On screen that was five
+        // slivers with five overflowing bars stacked over them.
+        use super::super::character::PanelContent;
+        use super::super::testing;
+
+        let mut app = testing::shell_app(Vec2::new(760.0, 700.0));
+        assert_eq!(testing::settled(&app).rail_mode, super::super::layout::RailMode::Compact);
+
+        let strip = app
+            .world_mut()
+            .query_filtered::<Entity, With<CompactRailOnly>>()
+            .iter(app.world())
+            .next()
+            .expect("there is no compact strip");
+
+        for entity in testing::descendants(&app, strip) {
+            assert!(
+                app.world().get::<PanelContent>(entity).is_none(),
+                "full-rail panel content was spawned inside the compact strip"
+            );
+        }
+
+        // And what is there fits: a sliver wider than the strip is the same
+        // fault wearing a different hat.
+        let bounds = testing::solved_rect(&app, strip).expect("the strip was never solved");
+        let slivers: Vec<Entity> = app
+            .world_mut()
+            .query_filtered::<Entity, With<CompactVital>>()
+            .iter(app.world())
+            .collect();
+        assert!(!slivers.is_empty(), "the compact strip has no vitals at all");
+        for sliver in slivers {
+            let rect = testing::solved_rect(&app, sliver).expect("a sliver was never solved");
+            assert!(
+                rect.max.x <= bounds.max.x + 0.5,
+                "a sliver reaches {} past a strip ending at {}",
+                rect.max.x,
+                bounds.max.x
+            );
+        }
+    }
+
     #[test]
     fn every_region_appears_exactly_once_in_the_order() {
         // The order is also the keyboard tab order, so a duplicate or a
