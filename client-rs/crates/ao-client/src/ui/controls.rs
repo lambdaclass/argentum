@@ -97,9 +97,68 @@ impl Default for Control {
     }
 }
 
+/// A control's identity across rebuilds.
+///
+/// Panels are rebuilt whenever their snapshot or the window geometry changes,
+/// which despawns every control inside them. An entity is therefore not an
+/// identity: focus expressed as an entity is lost by a resize, and a player who
+/// has tabbed to an inventory slot loses their place when the window moves.
+///
+/// Keys are stable strings — `inventory.slot.3`, `topbar.settings` — so the
+/// same control can be found again in the tree that replaced it.
+#[derive(Component, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ControlKey(pub String);
+
+impl ControlKey {
+    pub fn new(key: impl Into<String>) -> Self {
+        Self(key.into())
+    }
+
+    /// Key for an indexed control in a group.
+    pub fn indexed(group: &str, index: usize) -> Self {
+        Self(format!("{group}.{index}"))
+    }
+}
+
 /// Which control currently owns the keyboard.
+///
+/// Holds both: the entity for this frame's work, and the key so focus survives
+/// the panel being rebuilt underneath it.
 #[derive(Resource, Debug, Clone, Default)]
-pub struct FocusOwner(pub Option<Entity>);
+pub struct FocusOwner {
+    entity: Option<Entity>,
+    key: Option<ControlKey>,
+}
+
+impl FocusOwner {
+    pub fn entity(&self) -> Option<Entity> {
+        self.entity
+    }
+
+    pub fn key(&self) -> Option<&ControlKey> {
+        self.key.as_ref()
+    }
+
+    /// Focus a control, remembering its key if it has one.
+    pub fn focus(&mut self, entity: Entity, key: Option<&ControlKey>) {
+        self.entity = Some(entity);
+        self.key = key.cloned();
+    }
+
+    pub fn clear(&mut self) {
+        self.entity = None;
+        self.key = None;
+    }
+
+    /// Re-attach to the entity that now carries the remembered key.
+    ///
+    /// The key is kept even when nothing currently carries it: a panel can be
+    /// absent for a frame while it rebuilds, and dropping the key there would
+    /// lose the player's place for a reason they cannot see.
+    fn reattach(&mut self, entity: Entity) {
+        self.entity = Some(entity);
+    }
+}
 
 /// One entry in the focus ring, as far as traversal is concerned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -333,7 +392,7 @@ impl Plugin for ControlsPlugin {
             .configure_sets(Update, ControlSet::Interact.before(ControlSet::Present))
             .add_systems(
                 Update,
-                (track_pointer, move_focus_with_tab, activate_with_keyboard, forget_missing_focus)
+                (track_pointer, move_focus_with_tab, activate_with_keyboard, resolve_focus)
                     .chain()
                     .in_set(ControlSet::Interact),
             )
@@ -347,11 +406,11 @@ impl Plugin for ControlsPlugin {
 /// before letting go is a cancellation — every desktop toolkit behaves this way
 /// and players notice when one does not.
 fn track_pointer(
-    mut controls: Query<(Entity, &Interaction, &mut Control)>,
+    mut controls: Query<(Entity, &Interaction, &mut Control, Option<&ControlKey>)>,
     mut focus: ResMut<FocusOwner>,
     mut activated: MessageWriter<Activated>,
 ) {
-    for (entity, interaction, mut control) in &mut controls {
+    for (entity, interaction, mut control, key) in &mut controls {
         let was_pressed = control.pressed;
 
         control.hovered = !matches!(interaction, Interaction::None);
@@ -365,7 +424,7 @@ fn track_pointer(
         }
 
         if matches!(interaction, Interaction::Pressed) {
-            focus.0 = Some(entity);
+            focus.focus(entity, key);
         }
 
         // Released while still over the control.
@@ -382,7 +441,7 @@ fn track_pointer(
 /// navigation.
 fn move_focus_with_tab(
     keys: Res<ButtonInput<KeyCode>>,
-    controls: Query<(Entity, &Control)>,
+    controls: Query<(Entity, &Control, Option<&ControlKey>)>,
     mut focus: ResMut<FocusOwner>,
 ) {
     if !keys.just_pressed(KeyCode::Tab) {
@@ -392,14 +451,20 @@ fn move_focus_with_tab(
 
     let candidates: Vec<FocusCandidate> = controls
         .iter()
-        .map(|(entity, control)| FocusCandidate {
+        .map(|(entity, control, _)| FocusCandidate {
             entity,
             tab_index: control.tab_index,
             enabled: control.enabled,
         })
         .collect();
 
-    focus.0 = next_focus(&candidates, focus.0, backwards);
+    match next_focus(&candidates, focus.entity(), backwards) {
+        Some(next) => {
+            let key = controls.get(next).ok().and_then(|(_, _, key)| key);
+            focus.focus(next, key);
+        }
+        None => focus.clear(),
+    }
 }
 
 /// Enter and Space activate the focused control.
@@ -415,7 +480,7 @@ fn activate_with_keyboard(
     if !keys.just_pressed(KeyCode::Enter) && !keys.just_pressed(KeyCode::Space) {
         return;
     }
-    let Some(entity) = focus.0 else {
+    let Some(entity) = focus.entity() else {
         return;
     };
     // A control that became disabled while focused must not fire.
@@ -424,19 +489,46 @@ fn activate_with_keyboard(
     }
 }
 
-/// Drop focus that no longer points at a usable control.
+/// Keep focus pointing at a usable control across rebuilds.
 ///
-/// Panels rebuild on every snapshot, so the focused entity is routinely
-/// despawned underneath the player. Left dangling, Tab appears to do nothing:
-/// traversal restarts from a control that no longer exists.
-fn forget_missing_focus(controls: Query<&Control>, mut focus: ResMut<FocusOwner>) {
-    let Some(entity) = focus.0 else {
+/// Panels rebuild whenever their snapshot or the window geometry changes, which
+/// despawns the focused control. Two things have to happen:
+///
+/// The entity is re-attached to whatever now carries the remembered key, so a
+/// resize does not move the player's place in the interface. Only then, if
+/// nothing carries it and the entity is really gone, is focus dropped — left
+/// dangling, Tab appears to do nothing, because traversal restarts from a
+/// control that no longer exists.
+fn resolve_focus(
+    controls: Query<(Entity, &Control, Option<&ControlKey>)>,
+    mut focus: ResMut<FocusOwner>,
+) {
+    let still_usable = focus
+        .entity()
+        .and_then(|entity| controls.get(entity).ok())
+        .map(|(_, control, _)| control.enabled)
+        .unwrap_or(false);
+
+    if still_usable {
         return;
-    };
-    let usable = controls.get(entity).map(|control| control.enabled).unwrap_or(false);
-    if !usable {
-        focus.0 = None;
     }
+
+    // The control was rebuilt: find its replacement by key.
+    if let Some(key) = focus.key().cloned() {
+        let replacement = controls
+            .iter()
+            .find(|(_, control, candidate)| control.enabled && *candidate == Some(&key));
+        if let Some((entity, _, _)) = replacement {
+            focus.reattach(entity);
+            return;
+        }
+        // Keyed but currently absent — a panel mid-rebuild. Keep the key so it
+        // can be found again, but stop pointing at a dead entity.
+        focus.entity = None;
+        return;
+    }
+
+    focus.clear();
 }
 
 /// Redraw controls from their resolved state.
@@ -448,7 +540,7 @@ fn present_controls(
         let state = ControlState::resolve(
             control.enabled,
             control.hovered,
-            focus.0 == Some(entity),
+            focus.entity() == Some(entity),
             control.pressed,
         );
         background.0 = state.surface();
@@ -639,6 +731,161 @@ mod tests {
     }
 
     #[test]
+    fn focus_survives_the_control_being_rebuilt() {
+        // Panels rebuild on every snapshot and every window resize, which
+        // despawns and respawns every control inside them. Focus held as an
+        // entity is lost by a resize, so a player who has tabbed to an
+        // inventory slot silently loses their place when the window moves.
+        let mut app = App::new();
+        app.add_plugins(ControlsPlugin).insert_resource(ButtonInput::<KeyCode>::default());
+
+        let original = app
+            .world_mut()
+            .spawn((
+                Control::default(),
+                ControlKey::indexed("inventory.slot", 3),
+                Interaction::None,
+                BackgroundColor(Color::NONE),
+                BorderColor::all(Color::NONE),
+            ))
+            .id();
+        app.update();
+
+        app.world_mut()
+            .resource_mut::<FocusOwner>()
+            .focus(original, Some(&ControlKey::indexed("inventory.slot", 3)));
+
+        // The rebuild: the old control goes, an identical one takes its place.
+        app.world_mut().despawn(original);
+        let rebuilt = app
+            .world_mut()
+            .spawn((
+                Control::default(),
+                ControlKey::indexed("inventory.slot", 3),
+                Interaction::None,
+                BackgroundColor(Color::NONE),
+                BorderColor::all(Color::NONE),
+            ))
+            .id();
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<FocusOwner>().entity(),
+            Some(rebuilt),
+            "focus did not follow the control through its rebuild"
+        );
+    }
+
+    #[test]
+    fn focus_is_kept_while_a_panel_is_briefly_absent() {
+        // A rebuild can despawn before it respawns. Dropping the key in that
+        // gap loses the player's place for a reason they cannot see.
+        let mut app = App::new();
+        app.add_plugins(ControlsPlugin).insert_resource(ButtonInput::<KeyCode>::default());
+
+        let control = app
+            .world_mut()
+            .spawn((
+                Control::default(),
+                ControlKey::new("topbar.settings"),
+                Interaction::None,
+                BackgroundColor(Color::NONE),
+                BorderColor::all(Color::NONE),
+            ))
+            .id();
+        app.update();
+        app.world_mut()
+            .resource_mut::<FocusOwner>()
+            .focus(control, Some(&ControlKey::new("topbar.settings")));
+
+        app.world_mut().despawn(control);
+        app.update();
+
+        assert_eq!(app.world().resource::<FocusOwner>().entity(), None, "a dead entity was kept");
+        assert_eq!(
+            app.world().resource::<FocusOwner>().key(),
+            Some(&ControlKey::new("topbar.settings")),
+            "the key was dropped, so the control cannot be found again"
+        );
+
+        // And it is found again when the panel comes back.
+        let rebuilt = app
+            .world_mut()
+            .spawn((
+                Control::default(),
+                ControlKey::new("topbar.settings"),
+                Interaction::None,
+                BackgroundColor(Color::NONE),
+                BorderColor::all(Color::NONE),
+            ))
+            .id();
+        app.update();
+
+        assert_eq!(app.world().resource::<FocusOwner>().entity(), Some(rebuilt));
+    }
+
+    #[test]
+    fn an_unkeyed_control_still_loses_focus_when_it_disappears() {
+        // Keys are the mechanism for surviving a rebuild; a control without one
+        // has no identity to restore, and holding a dead entity makes Tab
+        // appear to do nothing.
+        let mut app = App::new();
+        app.add_plugins(ControlsPlugin).insert_resource(ButtonInput::<KeyCode>::default());
+
+        let control = app
+            .world_mut()
+            .spawn((
+                Control::default(),
+                Interaction::None,
+                BackgroundColor(Color::NONE),
+                BorderColor::all(Color::NONE),
+            ))
+            .id();
+        app.update();
+        app.world_mut().resource_mut::<FocusOwner>().focus(control, None);
+
+        app.world_mut().despawn(control);
+        app.update();
+
+        assert_eq!(app.world().resource::<FocusOwner>().entity(), None);
+        assert_eq!(app.world().resource::<FocusOwner>().key(), None);
+    }
+
+    #[test]
+    fn a_rebuilt_control_that_came_back_disabled_does_not_take_focus() {
+        // Rebuilding is when a slot becomes locked. Re-attaching to it would
+        // put the ring on something that cannot be activated.
+        let mut app = App::new();
+        app.add_plugins(ControlsPlugin).insert_resource(ButtonInput::<KeyCode>::default());
+
+        let key = ControlKey::indexed("inventory.slot", 0);
+        let original = app
+            .world_mut()
+            .spawn((
+                Control::default(),
+                key.clone(),
+                Interaction::None,
+                BackgroundColor(Color::NONE),
+                BorderColor::all(Color::NONE),
+            ))
+            .id();
+        app.update();
+        app.world_mut().resource_mut::<FocusOwner>().focus(original, Some(&key));
+
+        app.world_mut().despawn(original);
+        app.world_mut().spawn((
+            Control { enabled: false, ..default() },
+            key.clone(),
+            Interaction::None,
+            BackgroundColor(Color::NONE),
+            BorderColor::all(Color::NONE),
+        ));
+        app.update();
+
+        assert_eq!(app.world().resource::<FocusOwner>().entity(), None);
+    }
+
+    #[test]
     fn a_click_activates_on_release_rather_than_on_press() {
         // A press that slides off before letting go is a cancellation. Every
         // desktop toolkit behaves this way and players notice when one does not.
@@ -670,7 +917,7 @@ mod tests {
         let (mut app, controls) = control_app(2);
 
         set_interaction(&mut app, controls[1], Interaction::Pressed);
-        assert_eq!(app.world().resource::<FocusOwner>().0, Some(controls[1]));
+        assert_eq!(app.world().resource::<FocusOwner>().entity(), Some(controls[1]));
     }
 
     #[test]
@@ -685,7 +932,7 @@ mod tests {
         let by_pointer = activations(&mut app);
 
         let (mut app, controls) = control_app(1);
-        app.world_mut().resource_mut::<FocusOwner>().0 = Some(controls[0]);
+        app.world_mut().resource_mut::<FocusOwner>().focus(controls[0], None);
         press_key(&mut app, KeyCode::Enter);
         let by_keyboard = activations(&mut app);
 
@@ -701,7 +948,7 @@ mod tests {
         // A slot grid is navigated like a list, and Space is what the hand
         // reaches for there.
         let (mut app, controls) = control_app(1);
-        app.world_mut().resource_mut::<FocusOwner>().0 = Some(controls[0]);
+        app.world_mut().resource_mut::<FocusOwner>().focus(controls[0], None);
 
         press_key(&mut app, KeyCode::Space);
         assert_eq!(activations(&mut app).len(), 1);
@@ -712,22 +959,22 @@ mod tests {
         let (mut app, controls) = control_app(3);
 
         press_key(&mut app, KeyCode::Tab);
-        assert_eq!(app.world().resource::<FocusOwner>().0, Some(controls[0]));
+        assert_eq!(app.world().resource::<FocusOwner>().entity(), Some(controls[0]));
 
         press_key(&mut app, KeyCode::Tab);
-        assert_eq!(app.world().resource::<FocusOwner>().0, Some(controls[1]));
+        assert_eq!(app.world().resource::<FocusOwner>().entity(), Some(controls[1]));
     }
 
     #[test]
     fn shift_tab_moves_focus_backwards() {
         let (mut app, controls) = control_app(3);
-        app.world_mut().resource_mut::<FocusOwner>().0 = Some(controls[1]);
+        app.world_mut().resource_mut::<FocusOwner>().focus(controls[1], None);
 
         app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ShiftLeft);
         press_key(&mut app, KeyCode::Tab);
         app.world_mut().resource_mut::<ButtonInput<KeyCode>>().release(KeyCode::ShiftLeft);
 
-        assert_eq!(app.world().resource::<FocusOwner>().0, Some(controls[0]));
+        assert_eq!(app.world().resource::<FocusOwner>().entity(), Some(controls[0]));
     }
 
     #[test]
@@ -739,7 +986,7 @@ mod tests {
         set_interaction(&mut app, controls[0], Interaction::Hovered);
 
         assert!(activations(&mut app).is_empty(), "a disabled control activated");
-        assert_ne!(app.world().resource::<FocusOwner>().0, Some(controls[0]));
+        assert_ne!(app.world().resource::<FocusOwner>().entity(), Some(controls[0]));
     }
 
     #[test]
@@ -747,7 +994,7 @@ mod tests {
         // Panels rebuild constantly, and a control can lose its enabled state
         // between the player choosing it and pressing the key.
         let (mut app, controls) = control_app(1);
-        app.world_mut().resource_mut::<FocusOwner>().0 = Some(controls[0]);
+        app.world_mut().resource_mut::<FocusOwner>().focus(controls[0], None);
         app.world_mut().get_mut::<Control>(controls[0]).unwrap().enabled = false;
 
         press_key(&mut app, KeyCode::Enter);
@@ -760,15 +1007,15 @@ mod tests {
         // despawned underneath the player. Left dangling, Tab appears to do
         // nothing because traversal restarts from something that is gone.
         let (mut app, controls) = control_app(2);
-        app.world_mut().resource_mut::<FocusOwner>().0 = Some(controls[0]);
+        app.world_mut().resource_mut::<FocusOwner>().focus(controls[0], None);
         app.world_mut().despawn(controls[0]);
         app.update();
 
-        assert_eq!(app.world().resource::<FocusOwner>().0, None);
+        assert_eq!(app.world().resource::<FocusOwner>().entity(), None);
 
         // And traversal still works afterwards.
         press_key(&mut app, KeyCode::Tab);
-        assert_eq!(app.world().resource::<FocusOwner>().0, Some(controls[1]));
+        assert_eq!(app.world().resource::<FocusOwner>().entity(), Some(controls[1]));
     }
 
     #[test]
@@ -776,7 +1023,7 @@ mod tests {
         // Presentation follows the resolved state rather than being set at each
         // call site, so a control cannot be focused without looking focused.
         let (mut app, controls) = control_app(2);
-        app.world_mut().resource_mut::<FocusOwner>().0 = Some(controls[0]);
+        app.world_mut().resource_mut::<FocusOwner>().focus(controls[0], None);
         app.update();
 
         let ring = app.world().get::<BorderColor>(controls[0]).unwrap().top;

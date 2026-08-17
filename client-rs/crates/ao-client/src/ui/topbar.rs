@@ -8,7 +8,7 @@
 //! Presentation only. Sampling lives in `hud`, which owns the probe cadence;
 //! this module reads what it published.
 
-use super::controls::Control;
+use super::controls::{Control, ControlKey};
 use super::icons::{action_icon, icon, AccessibleName, Icon, ShowsTooltip};
 use super::shell::{label, Region};
 use super::telemetry::{fps_label, FpsAverage};
@@ -168,6 +168,7 @@ fn icon_button(action: BarAction, kind: Icon) -> impl Bundle {
         action,
         AccessibleName::new(kind.name_key()),
         ShowsTooltip,
+        ControlKey::new(kind.name_key()),
         Control { tab_index: bar_tab_index(action), ..default() },
         children![action_icon(kind, ink::PRIMARY)],
     )
@@ -258,6 +259,7 @@ fn populate(mut commands: Commands, bars: Query<(Entity, &Region)>) {
                     BarAction::Support,
                     AccessibleName::new(Icon::Support.name_key()),
                     ShowsTooltip,
+                    ControlKey::new(Icon::Support.name_key()),
                     Control { tab_index: bar_tab_index(BarAction::Support), ..default() },
                     // Icon *and* word: support is the one action a player looks
                     // for while something is already going wrong, and it is

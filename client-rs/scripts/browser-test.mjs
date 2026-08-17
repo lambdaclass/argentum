@@ -205,6 +205,87 @@ async function main() {
 
     await context.close();
 
+    // Host modes: windowed, maximized, fullscreen and back.
+    console.log("  host modes");
+    {
+      const modeContext = await browser.newContext({
+        viewport: { width: 1600, height: 900 },
+        deviceScaleFactor: 1,
+      });
+      const modePage = await modeContext.newPage();
+      await modePage.goto(url, { waitUntil: "load" });
+      await waitForClient(modePage);
+
+      const windowed = await measure(modePage);
+      check(
+        "windowed is the bounded playing size",
+        fitsWindow(windowed),
+        `shell ${windowed.shellWidth}x${windowed.shellHeight} in ${windowed.innerWidth}x${windowed.innerHeight}`
+      );
+      check(
+        "windowed is smaller than the viewport it sits in",
+        windowed.shellWidth < windowed.innerWidth,
+        `shell ${windowed.shellWidth} against window ${windowed.innerWidth}`
+      );
+
+      const reached = await modePage.evaluate(() => window.aoWindow.setMode("maximized"));
+      await modePage.waitForTimeout(1_200);
+      const maximized = await measure(modePage);
+      check("maximize is reported as reached", reached === "maximized", `got ${reached}`);
+      check(
+        "maximize fills the browser content area",
+        Math.abs(maximized.shellWidth - maximized.innerWidth) <= 1 &&
+          Math.abs(maximized.shellHeight - maximized.innerHeight) <= 1,
+        `shell ${maximized.shellWidth}x${maximized.shellHeight} against window ${maximized.innerWidth}x${maximized.innerHeight}`
+      );
+      check(
+        "the canvas followed the host into maximize",
+        fillsShell(maximized),
+        `canvas ${maximized.cssWidth}x${maximized.cssHeight} in shell ${maximized.shellWidth}x${maximized.shellHeight}`
+      );
+      check(
+        "maximize does not scroll the page",
+        !maximized.scrollsHorizontally && !maximized.scrollsVertically
+      );
+
+      // Fullscreen needs a user gesture. Automation has none, so the adapter is
+      // expected to report the fallback it actually reached rather than
+      // claiming success — which is the behaviour worth testing here.
+      const fullscreenResult = await modePage.evaluate(() =>
+        window.aoWindow.setMode("fullscreen")
+      );
+      check(
+        "a refused fullscreen reports the mode actually reached",
+        fullscreenResult === "fullscreen" || fullscreenResult === "maximized",
+        `got ${fullscreenResult}`
+      );
+
+      await modePage.evaluate(() => window.aoWindow.setMode("windowed"));
+      await modePage.waitForTimeout(1_200);
+      const restored = await measure(modePage);
+      check(
+        "restore returns to the bounded window",
+        fitsWindow(restored) && restored.shellWidth < restored.innerWidth,
+        `shell ${restored.shellWidth}x${restored.shellHeight} in ${restored.innerWidth}x${restored.innerHeight}`
+      );
+      check(
+        "restore leaves no scrollbars",
+        !restored.scrollsHorizontally && !restored.scrollsVertically
+      );
+      check(
+        "restore returns to exactly the size it started at",
+        Math.abs(restored.shellWidth - windowed.shellWidth) <= 1 &&
+          Math.abs(restored.shellHeight - windowed.shellHeight) <= 1,
+        `restored ${restored.shellWidth}x${restored.shellHeight}, started ${windowed.shellWidth}x${windowed.shellHeight}`
+      );
+      check(
+        "the host reports itself windowed again",
+        (await modePage.evaluate(() => window.aoWindow.getMode())) === "windowed"
+      );
+
+      await modeContext.close();
+    }
+
     // Device pixel ratio is checked only for "the client still works", not for
     // rasterization sharpness.
     //

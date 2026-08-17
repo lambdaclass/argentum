@@ -10,7 +10,7 @@
 //! normal path: intents go out, snapshots come back, and the gap between them
 //! is where a pending indicator lives.
 
-use super::controls::{bar_label, rarity_ink, Control};
+use super::controls::{bar_label, rarity_ink, Control, ControlKey};
 use super::rail::RailRegion;
 use super::state::UiState;
 use super::tokens::{focus, ink, size, space, status, surface, type_scale};
@@ -451,6 +451,9 @@ fn inventory_slot(
         BackgroundColor(if locked { surface::VOID } else { surface::WELL }),
         BorderColor::all(border),
         InventorySlotButton { index },
+        // Keyed so focus survives the grid being rebuilt, which happens on
+        // every snapshot and every resize.
+        ControlKey::indexed("inventory.slot", index),
         Control { tab_index: 100 + index as u32, enabled: !locked, ..default() },
         Children::spawn(SpawnIter(children.into_iter())),
     )
