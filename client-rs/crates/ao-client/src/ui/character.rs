@@ -126,6 +126,13 @@ fn rebuild_on_change(
         commands.entity(entity).despawn();
     }
 
+    // No layout yet means no rail width, and the grid's column count is derived
+    // from it. Rebuilding against a guess produces a grid that has to be thrown
+    // away one frame later.
+    let Some(shell) = geometry.0 else {
+        return;
+    };
+
     let snapshot = state.get();
     for (entity, region) in &regions {
         match region {
@@ -139,7 +146,7 @@ fn rebuild_on_change(
                 // Val::Px by the UI scale, so a width measured in logical
                 // pixels would let six 43-unit slots be laid out into a space
                 // that is only three of them wide once scaled.
-                let inner = grid_inner_width(geometry.0.rail.width() / ui_scale.0.max(0.001));
+                let inner = grid_inner_width(shell.rail.width() / ui_scale.0.max(0.001));
                 commands.entity(entity).with_children(|parent| {
                     parent.spawn((
                         PanelContent,

@@ -145,7 +145,12 @@ fn resolve_pointer(
         return;
     };
 
-    let geometry = applied.0;
+    // Before the first layout there is no world rectangle to resolve against,
+    // and guessing one would report a tile under a pointer that is over nothing.
+    let Some(geometry) = applied.0 else {
+        *pointer = PointerState::default();
+        return;
+    };
     let view = super::layout::world_view(geometry.world).rect;
 
     let Some(position) = window.cursor_position() else {

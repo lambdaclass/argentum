@@ -314,6 +314,15 @@ mod tests {
         app
     }
 
+    /// The mode the shell actually settled on, which must exist by now.
+    fn settled_mode(app: &App) -> super::super::layout::RailMode {
+        app.world()
+            .resource::<super::super::shell::AppliedGeometry>()
+            .0
+            .expect("the shell never laid itself out")
+            .rail_mode
+    }
+
     /// Whether an entity and all its ancestors are displayed.
     fn is_displayed(app: &App, entity: Entity) -> bool {
         let mut current = Some(entity);
@@ -334,7 +343,7 @@ mod tests {
         // nodes a player would actually see.
         let mut app = rail_app(Vec2::new(760.0, 700.0));
         assert_eq!(
-            app.world().resource::<super::super::shell::AppliedGeometry>().0.rail_mode,
+            settled_mode(&app),
             super::super::layout::RailMode::Compact,
             "this window should be compact, or the test proves nothing"
         );
@@ -387,16 +396,38 @@ mod tests {
         );
 
         let mut wide = rail_app(Vec2::new(1600.0, 900.0));
-        assert_eq!(
-            wide.world().resource::<super::super::shell::AppliedGeometry>().0.rail_mode,
-            super::super::layout::RailMode::Full
-        );
+        assert_eq!(settled_mode(&wide), super::super::layout::RailMode::Full);
         let mut compact = wide.world_mut().query_filtered::<Entity, With<CompactRailOnly>>();
         let strip: Vec<Entity> = compact.iter(wide.world()).collect();
         assert!(
             strip.iter().all(|entity| !is_displayed(&wide, *entity)),
             "the compact strip is displayed beside a full rail"
         );
+    }
+
+    #[test]
+    fn a_window_opened_inside_the_hysteresis_band_gets_the_rail_its_width_asks_for() {
+        // Hysteresis carries the previous mode forward, so it needs a previous
+        // mode to carry. Seeding that from a stand-in geometry seeds *compact*,
+        // and every window between the breakpoint and the top of the band then
+        // opens as an icon strip — which is what the browser captures showed:
+        // 919px and 921px produced identical compact shells.
+        //
+        // A window that has just opened has no previous mode. It should get the
+        // one its width asks for.
+        let width = super::super::layout::WORLD_MIN_WIDTH + super::super::layout::RAIL_MIN_WIDTH;
+        for offset in [1.0, super::super::layout::COMPACT_HYSTERESIS - 1.0] {
+            let app = rail_app(Vec2::new(width + offset, 760.0));
+            assert_eq!(
+                settled_mode(&app),
+                super::super::layout::RailMode::Full,
+                "a window opened {offset}px above the breakpoint came up compact"
+            );
+        }
+
+        // And below it, still compact — the seed must not simply be inverted.
+        let app = rail_app(Vec2::new(width - 1.0, 760.0));
+        assert_eq!(settled_mode(&app), super::super::layout::RailMode::Compact);
     }
 
     #[test]

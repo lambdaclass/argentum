@@ -81,14 +81,15 @@ pub struct FullRailOnly;
 pub struct CompactRailOnly;
 
 /// The geometry currently applied, kept so the shell only rebuilds on a change.
-#[derive(Resource, Debug, Clone, Copy, PartialEq)]
-pub struct AppliedGeometry(pub ShellGeometry);
-
-impl Default for AppliedGeometry {
-    fn default() -> Self {
-        Self(layout::shell_geometry(Vec2::ZERO))
-    }
-}
+///
+/// `None` until the first real window size arrives. It matters that this is not
+/// a stand-in geometry: the rail mode is carried forward across frames for
+/// hysteresis, so seeding it with a zero-sized window seeds *compact*, and every
+/// window inside the hysteresis band then loads as an icon strip even though its
+/// width plainly asks for a full rail. A window that has never been laid out has
+/// no previous mode, which is exactly what `shell_geometry_with` takes.
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Default)]
+pub struct AppliedGeometry(pub Option<ShellGeometry>);
 
 pub struct ShellPlugin;
 
@@ -239,11 +240,12 @@ fn apply_geometry(
     let resolved = scale::resolve(logical, probe.world.size(), window.scale_factor());
     // The mode currently on screen, so a window resting on the breakpoint keeps
     // what it has rather than flipping every frame.
-    let geometry = layout::shell_geometry_with(logical, resolved.ui, Some(applied.0.rail_mode));
-    if geometry == applied.0 && resolved == *domains {
+    let geometry =
+        layout::shell_geometry_with(logical, resolved.ui, applied.0.map(|g| g.rail_mode));
+    if applied.0 == Some(geometry) && resolved == *domains {
         return;
     }
-    applied.0 = geometry;
+    applied.0 = Some(geometry);
     *domains = resolved;
 
     // Text and controls only. Bevy's UiScale does not touch the world camera,
@@ -317,7 +319,10 @@ fn apply_rail_mode(
     if !applied.is_changed() {
         return;
     }
-    let full_visible = applied.0.rail_mode == RailMode::Full;
+    let Some(geometry) = applied.0 else {
+        return;
+    };
+    let full_visible = geometry.rail_mode == RailMode::Full;
 
     for mut node in &mut full {
         node.display = if full_visible { Display::Flex } else { Display::None };
