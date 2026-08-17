@@ -81,6 +81,12 @@ fn region_well(region: RailRegion, height: Val) -> impl Bundle {
             row_gap: Val::Px(space::TIGHT),
             padding: UiRect::all(Val::Px(space::SNUG)),
             border: UiRect::all(Val::Px(size::BORDER)),
+            // A short window shrinks these wells — the regions themselves stay
+            // in order and never overlap — but the content inside one does not
+            // shrink with it. In a 560px window the five-row inventory grid was
+            // drawn straight over the panel beneath it. A region owns its own
+            // rectangle and nothing more.
+            overflow: Overflow::clip(),
             ..default()
         },
         BackgroundColor(surface::WELL),
@@ -128,6 +134,11 @@ fn populate(mut commands: Commands, rails: Query<(Entity, &Region)>) {
                 flex_grow: 1.0,
                 min_height: Val::Px(size::SLOT * 2.0),
                 border: UiRect::all(Val::Px(size::BORDER)),
+                // This region is built inline rather than from `region_well`,
+                // and so missed the clip that keeps a region inside itself. It
+                // is the one that needed it most: the grid is the tallest thing
+                // in the rail and the first to be squeezed.
+                overflow: Overflow::clip(),
                 ..default()
             },
             BackgroundColor(surface::WELL),
@@ -438,6 +449,58 @@ mod tests {
             .find(|(_, region)| **region == Region::Rail)
             .map(|(entity, _)| entity)
             .expect("the shell has no rail")
+    }
+
+    #[test]
+    fn no_rail_region_draws_outside_itself_in_a_short_window() {
+        // The regions shrink in order and never overlap, so measuring them
+        // proves nothing. What overflowed was the content inside a shrunken
+        // well: at 560px tall the inventory grid kept its five rows and drew
+        // over the panel below it. Clipping is a render property, so this asks
+        // the layout what each node's visible rectangle actually is.
+        use super::super::testing;
+        use bevy::ui::CalculatedClip;
+
+        for height in [1080.0f32, 760.0, 640.0, 560.0] {
+            let window = Vec2::new(1400.0, height);
+            let mut app = testing::shell_app(window);
+
+            let regions: Vec<(Entity, Rect)> = app
+                .world_mut()
+                .query_filtered::<Entity, With<RailRegion>>()
+                .iter(app.world())
+                .filter_map(|entity| testing::solved_rect(&app, entity).map(|rect| (entity, rect)))
+                .collect();
+            assert!(!regions.is_empty(), "{window:?} has no rail regions");
+
+            for (region, bounds) in regions {
+                if !testing::is_displayed(&app, region) {
+                    continue;
+                }
+                for entity in testing::descendants(&app, region) {
+                    let Some(rect) = testing::solved_rect(&app, entity) else {
+                        continue;
+                    };
+                    // What the player sees is the node intersected with
+                    // whatever clip it inherited.
+                    let visible = match app.world().get::<CalculatedClip>(entity) {
+                        Some(clip) => rect.intersect(clip.clip),
+                        None => rect,
+                    };
+                    if visible.is_empty() {
+                        continue;
+                    }
+                    assert!(
+                        visible.min.y >= bounds.min.y - 0.5 && visible.max.y <= bounds.max.y + 0.5,
+                        "at {window:?} a node is visible over {}..{} in a region of {}..{}",
+                        visible.min.y,
+                        visible.max.y,
+                        bounds.min.y,
+                        bounds.max.y
+                    );
+                }
+            }
+        }
     }
 
     #[test]

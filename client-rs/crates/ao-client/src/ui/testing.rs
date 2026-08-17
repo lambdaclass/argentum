@@ -66,9 +66,9 @@ pub fn shell_app(size: Vec2) -> App {
     ))
     .init_resource::<crate::world::ViewRadius>();
 
-    // Three passes: spawn the tree, apply the geometry that produced, then
-    // solve the layout the geometry asked for.
-    for _ in 0..3 {
+    // Spawn the tree, apply the geometry that produced, solve the layout the
+    // geometry asked for, and let the clip pass propagate through it.
+    for _ in 0..4 {
         app.update();
     }
     app
