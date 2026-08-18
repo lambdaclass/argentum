@@ -259,6 +259,37 @@ bounds against the camera viewport at UI scale 1.0 and greater than 1.0, plus
 browser captures for the DPR matrix. Pure `ScaleDomains` tests alone do not
 close this task.
 
+Implementation notes, recorded because they change what is left rather than what
+is required:
+
+- The interim pixel-stable solution in place is the third option this task
+  allows: the web build pins its scale factor to 1, so one CSS pixel is one
+  logical pixel and the world's physical grid is integral at every ratio. It
+  holds the framing and the grid; it does not gain HiDPI sharpness, because the
+  backing store stays at CSS size. `host_resolution` in `main.rs` carries the
+  reasoning.
+- The offscreen integer render target — world camera to a texture whose zoom is
+  a whole number, presented by a dedicated compositor camera — was implemented
+  and reverted. `scale::world_render` is kept and tested: extent from the logical
+  region so a ratio cannot move the framing, whole-number zoom flooring the
+  ratio, the composite rectangle carried so projection, placement and pointer
+  inversion cannot diverge, explicit `Reduction` reporting, and a byte and
+  maximum-dimension budget.
+- Where it stalled, so the next attempt does not repeat it: with the compositor
+  camera and the presenting quad on a shared render layer, the world rendered
+  nothing into the texture. Diagnosed in the browser rather than guessed —
+  `ViewVisibility` was false until `NoFrustumCulling` was added, because
+  `calculate_bounds_2d` derives a sprite's bounds from its image and a render
+  target has no useful main-world dimensions. After that the quad drew but the
+  texture was still empty, and `RenderAssetUsages::default()` plus `Msaa::Off`
+  on the world camera did not change it. No wgpu validation error appeared at
+  any point. The remaining suspects are the 2D render graph's handling of an
+  image target under WebGL2/software rasterisation, and camera ordering across
+  two different target kinds.
+- Physical HiDPI validation is outstanding regardless: text sharpness and
+  compositor behaviour cannot be judged where every ratio is emulated and
+  headless Chromium composites at 1x.
+
 ### Task W-0004 — Typed UI models, intents and fixtures
 
 - **State:** planned
