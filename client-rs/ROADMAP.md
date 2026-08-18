@@ -290,34 +290,6 @@ is required:
   compositor behaviour cannot be judged where every ratio is emulated and
   headless Chromium composites at 1x.
 
-### Task W-0004 — Typed UI models, intents and fixtures
-
-- **State:** planned
-- **Phase:** 0
-- **Depends on:** W-0001
-
-Define transport-independent models for player vitals, inventory, equipment,
-spellbook, hotbar, target, chat, skills, progression, safety and services, plus
-minimap/world-map presentation and typed command intents. Supply deterministic
-populated, empty, loading, disabled, rejected, disconnected, dead/ghost and
-malformed-data fixtures.
-Server feedback crosses the boundary as stable semantic keys and parameters,
-not presentation-ready Spanish where the protocol can avoid it.
-
-Snapshot updates use semantic, allocation-bounded equality or versioning; they
-must not compare whole snapshots by formatting `Debug`. An identical snapshot
-does not mark `UiState` changed or rebuild the rail, including through an actual
-`ResMut<UiState>` call. Normalize or compare malformed floating-point values so
-NaN data settles deterministically. Add a Bevy app test with a rebuild counter:
-the first snapshot rebuilds once, twenty identical writes rebuild zero times,
-and one changed field rebuilds exactly once.
-
-Intent filtering and consumers use explicit system ordering. A dead-player
-intent is rejected before any session consumer can observe it; allowed chat
-still crosses the boundary. Closure requires an app-level producer/filter/
-consumer test rather than inspection of the message buffer after an unordered
-schedule.
-
 ### Task W-0005 — Design tokens and Bevy primitives
 
 - **State:** planned

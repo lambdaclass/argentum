@@ -19,6 +19,74 @@ Never reuse a completed ID in the active roadmap.
 
 ## Closed tasks
 
+### Completed Task W-0004 — Typed UI models, intents and fixtures
+
+Closed: 2026-08-18 (`4e4090d`)
+
+Transport-independent models for every domain the task lists, in
+`ao-core/src/view.rs`: progression, vitals, inventory, equipment, spellbook,
+hotbar, target, chat, skills, safety, services, and — added to close this task —
+minimap and world-map presentation. Nothing in `view` knows about a socket or a
+packet. Rendering of the two map views belongs to W-0088 and W-0089; this is the
+state they consume.
+
+Server feedback crosses as `FeedbackKey` plus typed `FeedbackParam`, never
+presentation-ready Spanish. Prose the protocol cannot classify is preserved and
+explicitly marked not-a-key, so nothing branches on it.
+
+Map availability is four states rather than an `Option` — not requested,
+loading, ready, refused — because a player reacts differently to each and only a
+failure is worth retrying. Reasons use their own `MapUnavailable` vocabulary
+rather than `FeedbackKey`: those are gameplay results a player caused, these are
+states of the client, and sharing the enum would have meant a free-form key
+variant nothing could safely branch on.
+
+Evidence:
+
+- eight deterministic fixtures, mutually distinguishable —
+  `every_scenario_is_distinguishable_from_every_other`.
+- snapshot equality is semantic and allocation-bounded: `same_state_as` compares
+  fields, NaN-aware so malformed data settles. It formerly compared `Debug`
+  output, which allocated two full renderings of the entire interface state on
+  every poll.
+- the rebuild contract at its stated numbers: the first snapshot rebuilds once
+  and twenty identical writes rebuild zero times
+  (`an_identical_snapshot_does_not_rebuild_the_interface`), one changed field
+  rebuilds exactly once (`one_changed_field_rebuilds_exactly_once`), a NaN
+  snapshot settles (`a_malformed_snapshot_settles_rather_than_rebuilding_forever`),
+  and a real change is not swallowed (`a_genuine_change_does_rebuild`). Counted
+  from inside a system through a real `ResMut<UiState>`, because `is_changed()`
+  read from outside compares against a tick `update()` has already advanced and
+  answers a different question. `UiState::set` is `#[cfg(test)]`; production
+  writes go through `publish`, which bypasses detection and raises the tick
+  explicitly — taking a `ResMut` at all marks the resource changed the moment it
+  is dereferenced, so guarding inside a setter stops the value changing but not
+  the tick.
+- intent filtering by explicit ordering, `IntentSet::Filter.before(Consume)`,
+  proved at app level rather than by inspecting a buffer:
+  `intents_are_filtered_before_anything_consumes_them` runs a real consumer in
+  the Consume set and sees nothing; `a_ghost_cannot_emit_an_action_intent` and
+  `a_ghost_may_still_talk` cover both halves of the rule, because filtering
+  everything would strand a dead player with no way to ask for a resurrection.
+- the map models: availability states distinguished
+  (`a_map_distinguishes_no_data_from_not_loaded_from_refused`), retry confined to
+  failures (`only_a_failure_invites_another_attempt`), distinct localisation keys
+  (`every_map_reason_carries_its_own_key`), the radius enforced against the
+  malformed fixture's i32-extreme markers
+  (`a_minimap_never_reports_a_marker_outside_its_own_radius`), empty
+  distinguished from unloaded (`an_empty_minimap_is_ready_rather_than_unloaded`),
+  an overlay open while loading (`a_world_map_open_while_loading_is_a_state_a_player_can_reach`),
+  a ghost keeping its map (`a_ghost_can_still_read_the_map`), and participation in
+  snapshot equality (`the_map_states_take_part_in_snapshot_equality`) — without
+  which a map change would never rebuild the interface and the map would freeze
+  while nothing else looked wrong.
+- `./build.sh check`: 338 client tests, 79 core tests, 0 failures.
+
+One correction found while writing the fixtures: `disabled`, `rejected` and
+`disconnected` derive from `populated` and had silently inherited a ready map, so
+the three scenarios specifically about being told no would have shown a working
+minimap.
+
 ### Completed Task W-0002 — Responsive geometry and visibility policy
 
 Closed: 2026-08-16 (`31ddbe2`, `729451e`, `501e6c5`, `75080c8`, `450bf83`,
