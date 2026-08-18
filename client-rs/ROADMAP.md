@@ -225,90 +225,6 @@ same browser viewport: the target is comparable information clarity and
 interaction quality, not pixel-for-pixel reproduction. Every shipped icon and
 decorative asset is project-owned or licensed for this client.
 
-### Task W-0003 — Scaling, fullscreen, resize and DPI
-
-- **State:** active
-- **Phase:** 0
-- **Depends on:** W-0002
-
-Separate responsive logical UI scale, integer nearest-neighbor world scale and
-physical device-pixel scale, and prove the separation in Bevy rather than only
-in arithmetic helpers.
-
-Implementation constraints:
-
-- Shell rectangles and the world camera viewport share one coordinate source.
-  Do not apply global `UiScale` to absolute shell `Val::Px` bounds while leaving
-  the camera viewport unscaled. Scale child controls/text in an isolated UI
-  subtree, compensate the shell coordinates explicitly, or use another tested
-  design whose computed bounds agree.
-- A DPR-only change must not change logical camera framing or visible tile
-  count. Test DPR 1.0, 1.25, 1.5, 1.75 and 2.0; rounding DPR to an integer world
-  scale may not make the player alternately see materially more and less world.
-  Use an integer render target, symmetric crop/letterbox or another measured
-  pixel-stable solution when fractional DPR makes direct scaling impossible.
-- Browser resize, zoom, maximize, fullscreen enter/exit and monitor/DPI changes
-  update the backing store and Bevy window exactly once per event without CSS
-  resampling.
-- Restoring windowed/fullscreen state preserves focused control, composing text,
-  player position and camera center. It cannot stretch sprites, shimmer while
-  moving or expand authoritative entity visibility.
-
-Close with a Bevy layout integration test that compares `ComputedNode` physical
-bounds against the camera viewport at UI scale 1.0 and greater than 1.0, plus
-browser captures for the DPR matrix. Pure `ScaleDomains` tests alone do not
-close this task.
-
-Implementation notes, recorded because they change what is left rather than what
-is required:
-
-- The interim pixel-stable solution in place is the third option this task
-  allows: the web build pins its scale factor to 1, so one CSS pixel is one
-  logical pixel and the world's physical grid is integral at every ratio. It
-  holds the framing and the grid; it does not gain HiDPI sharpness, because the
-  backing store stays at CSS size. `host_resolution` in `main.rs` carries the
-  reasoning.
-- The offscreen integer render target — world camera to a texture whose zoom is
-  a whole number, presented by a dedicated compositor camera — was implemented
-  and reverted. `scale::world_render` is kept and tested: extent from the logical
-  region so a ratio cannot move the framing, whole-number zoom flooring the
-  ratio, the composite rectangle carried so projection, placement and pointer
-  inversion cannot diverge, explicit `Reduction` reporting, and a byte and
-  maximum-dimension budget.
-- Where it stalled, so the next attempt does not repeat it: with the compositor
-  camera and the presenting quad on a shared render layer, the world rendered
-  nothing into the texture. `ViewVisibility` was false until `NoFrustumCulling`
-  was added, because `calculate_bounds_2d` derives a sprite's bounds from its
-  image and a render target has no useful main-world dimensions. After that the
-  quad drew but the texture was still empty, and `RenderAssetUsages::default()`
-  plus `Msaa::Off` did not change it. No wgpu validation error appeared at any
-  point.
-- What has since been ruled out. `examples/render_target_probe.rs` isolates the
-  question into three stages — clear an image target, draw a colour-only quad
-  into it, draw a textured sprite into it — and reads the texture back so the
-  answer is pixels rather than a screenshot. **All three pass natively.** So the
-  image-target mechanism itself is sound, and the production failure is not
-  clearing, not culling, not sampling and not MSAA.
-- What that leaves. The failing observation was made in the browser, so WebGL2 is
-  now the prime suspect, along with the two-camera arrangement the probe does not
-  reproduce: one camera rendering to a texture while a second presents it to the
-  window, which is two different target kinds in one frame. The next step is the
-  same staged probe under WASM, then the two-camera arrangement natively.
-- Worth knowing about the probe: its first version reported a false failure. The
-  readback fires every frame and the earliest completion describes the texture
-  before anything has rendered into it, so the initial fill read back as "never
-  cleared". It now waits for several frames of rendering before believing a
-  result.
-- **The HiDPI path is not implemented.** This is an implementation gap, not a
-  validation one, and an earlier note here wrongly described the task as blocked
-  only on hardware. The pinned scale factor deliberately keeps the backing store
-  at CSS resolution: it holds the framing and the pixel grid, and it forgoes
-  physical-device scaling entirely, which is the thing this task requires. What
-  remains is to render at physical resolution without resampling — the offscreen
-  integer target above, or another design that achieves it. Hardware validation
-  of text sharpness comes after that exists; hardware cannot validate behaviour
-  that has not been written.
-
 ### Task W-0005 — Design tokens and Bevy primitives
 
 - **State:** active
@@ -1741,6 +1657,51 @@ Close with repository/deployment searches proving no production or CI path
 builds or serves the obsolete frontend, a Rust staging/rollback smoke test, and
 dependency/license scans proving its package ecosystem no longer ships. Record
 which reference artifacts were retained and why.
+
+### Task W-0092 — Render the world and interface at physical device resolution
+
+- **State:** planned
+- **Phase:** 11
+- **Depends on:** W-0003
+
+Deferred from W-0003 by decision on 2026-08-18, and placed at the end of the
+sequence deliberately: the interim path satisfies every scaling requirement in
+the Phase 0 exit gate, so this is quality rather than correctness, and it should
+not hold up gameplay work.
+
+Today the web build pins its scale factor to 1, so one CSS pixel is one logical
+pixel and the canvas backing store is the CSS size. The world is unaffected in
+kind — it is pixel art on an integral grid, and an integer ratio is
+nearest-neighbour either way — but interface text is drawn at CSS resolution and
+upscaled by the compositor, which on a 2x display is visibly soft.
+
+Implement physical-resolution rendering:
+
+- The canvas backing store is `round(css × devicePixelRatio)`, set once per
+  resize or ratio change, with Bevy's logical size remaining the CSS size.
+- Interface text and controls render at physical resolution.
+- The world keeps a whole number of physical pixels per world pixel, so a
+  fractional ratio cannot make the sampling grid shift while the camera pans.
+  `scale::world_render` already decides that target and is tested; the wiring is
+  what remains.
+- Pointer mapping follows CSS → composite rectangle → world exactly once, with no
+  second derivation of the same rectangle.
+- Render-target dimensions and memory stay inside `scale::TargetLimits`, which
+  reads the device's own maximum.
+- The pinned scale-factor-1 path is retained as a tested fallback for devices
+  that cannot support the above.
+
+Known before starting, from `examples/render_target_probe.rs`: clearing an image
+target, drawing a colour-only quad into it, drawing a textured sprite into it,
+and two cameras with two targets in one frame all **pass natively**. The
+production attempt failed in the browser after those same mechanisms were ruled
+out, so WebGL2 is the remaining suspect and the probe should be run under WASM
+first. Do not re-diagnose culling, asset usages or MSAA; those are settled.
+
+Close with the DPR matrix showing a backing store of `css × ratio` at each ratio,
+an unchanged logical layout and tile count across ratios, a pointer round-trip
+that holds at every ratio, and a measurement of text sharpness on physical
+high-DPI hardware — which is the one part that needs a real display.
 
 ### Phase 10 exit gate
 

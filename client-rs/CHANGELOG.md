@@ -19,6 +19,88 @@ Never reuse a completed ID in the active roadmap.
 
 ## Closed tasks
 
+### Completed Task W-0003 — Scaling, fullscreen, resize and DPI
+
+Closed: 2026-08-18 (`c99ed51`, `df4a563`, `ec7fa8f`, `6d0db91`, `87441d5`,
+`f9df406`, `3b9c597`, `188314a`, `2bb6532`, `d92149f`)
+
+Three scale domains kept separate and proved in Bevy rather than in arithmetic:
+device pixel ratio, integer world zoom, continuous UI scale.
+
+The fault this task existed to prevent turned out to be live, and was found by
+taking the DPR captures and looking at them. At an emulated ratio of 2 the
+character rail had collapsed to its icon strip and the world drew at double zoom
+— a display setting silently changing how much of the game a player could see.
+Bevy's `fit_canvas_to_parent` installs the parent's *CSS* box as the window's
+*physical* size, so with a scale factor from the display the client computed its
+logical size as css/ratio and a 1278px shell became a 639px window. The web build
+now pins its scale factor to 1: one CSS pixel is one logical pixel, whatever the
+display reports.
+
+Evidence:
+
+- `the_camera_viewport_is_the_world_node_at_every_ui_scale` compares the solved
+  `ComputedNode` bounds of the world region against the camera's actual viewport
+  at UI scale 1.0 and above it, and asserts the two cases really are different
+  scales so it is not one case written twice. Removing the `node_px`
+  compensation makes it report a 3994x2920 node against a 1997x1460 viewport.
+- `a_device_pixel_ratio_change_alone_does_not_change_what_is_framed` runs the
+  1.0/1.25/1.5/1.75/2.0 matrix natively — `shell_app_at` keeps the logical size
+  and grows the backing store, which is what a higher-DPI display is. Deriving
+  the geometry from physical size instead makes 1.25x frame 1248x920 where 1x
+  frames 998x760. Paired with
+  `a_higher_ratio_buys_more_physical_pixels_for_the_same_world`, so "nothing
+  changed" cannot pass by the ratio being ignored entirely.
+- restore preserves what the player was doing:
+  `a_host_mode_change_and_back_preserves_what_the_player_was_doing` (selected
+  item, focused control by key, half-typed text, camera centre) and
+  `the_pointer_is_recomputed_for_the_geometry_the_window_now_has`, which fails
+  when `resolve_pointer` is made to cache its geometry — otherwise the first
+  click after a restore lands on the tile the *previous* window had under the
+  cursor.
+- browser checks: one CSS pixel is one logical pixel at every emulated ratio; one
+  resize moves the backing store to exactly one new size; three host modes with
+  truthful fallback when fullscreen is refused; the windowed step-up.
+- the windowed shell now takes the largest whole multiple of 1280x760 the
+  viewport has room for, and `a_stepped_host_window_actually_steps_the_world_zoom`
+  proves a 1, 2 and 3-step window resolves to world zoom 1, 2 and 3 — without
+  which a larger window would have been a wider view rather than a larger scene.
+- captures: the DPR matrix at 1.0/1.25/1.5/1.75/2.0, plus windowed, maximized,
+  restored, ultrawide, minimum supported, short window and a stepped 4K shell.
+
+Two claims of mine were wrong and are corrected in place. The harness said
+Playwright's `deviceScaleFactor` "is not observed by winit"; it is, and that
+reading was the bug — a note explaining the evidence away. And a first attempt to
+assert layout invariance in the browser sampled rendered pixels for the rail's
+edge, reported the same value at every ratio while the captures plainly showed
+the rail collapsing, and was deleted: a check that passes for the wrong reason is
+worse than none.
+
+Also fixed here because it made every capture untrustworthy: `build.rs` only
+re-ran when `.git/HEAD` moved, so editing a source file left the previous stamp
+baked in — precisely when `-dirty` should appear. And the capture harness waited
+four seconds and assumed the world had loaded, which is how twenty-four
+screenshots of a bare placeholder grid were filed as evidence; it now preflights
+the asset origin and waits for the client's own report of decoded sheets and
+painted tiles.
+
+**Deferred to W-0092:** rendering at physical device resolution. The pinned path
+meets every scaling requirement in the Phase 0 exit gate — pixel alignment across
+the DPR matrix, the three scales kept separate, a DPR-only change preserving
+framing and tile count, no shimmer — and it forgoes the extra resolution a HiDPI
+display offers, so interface text is upscaled there. That is real debt, deferred
+by decision on 2026-08-18 and recorded as its own task rather than left implicit.
+
+`examples/render_target_probe.rs` remains as the diagnostic for it: clearing an
+image target, a colour-only quad, a textured sprite, and two cameras with two
+targets in one frame all pass natively, so the mechanism is sound and the
+production failure was none of culling, asset usages or MSAA — every one of the
+things changed while guessing. WebGL2 is the remaining suspect. The probe's first
+version reported a false failure, because readback fires every frame and the
+earliest completion describes the texture before anything has rendered into it.
+
+`./build.sh check`: 351 client tests, 79 core tests, 0 failures.
+
 ### Completed Task W-0004 — Typed UI models, intents and fixtures
 
 Closed: 2026-08-18 (`4e4090d`)
