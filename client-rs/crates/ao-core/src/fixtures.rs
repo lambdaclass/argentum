@@ -72,6 +72,21 @@ const UNLOCKED_SLOTS: usize = 18;
 const TOTAL_SLOTS: usize = 30;
 
 fn item(item_id: i32, name_key: &str, quantity: i32, rarity: Rarity) -> ItemView {
+    item_doing(item_id, name_key, quantity, rarity, ItemAction::Use)
+}
+
+/// The same, naming what activating it does.
+///
+/// Every fixture item states its action rather than leaving the interface to guess
+/// from the stack size — which is the guess this task forbids, and which got the
+/// last potion of a stack wrong by calling it equipment.
+fn item_doing(
+    item_id: i32,
+    name_key: &str,
+    quantity: i32,
+    rarity: Rarity,
+    action: ItemAction,
+) -> ItemView {
     ItemView {
         item_id,
         name_key: name_key.to_string(),
@@ -79,6 +94,7 @@ fn item(item_id: i32, name_key: &str, quantity: i32, rarity: Rarity) -> ItemView
         equipped: false,
         rarity,
         icon_grh: 1000 + item_id,
+        action,
     }
 }
 
@@ -174,18 +190,43 @@ fn populated() -> UiSnapshot {
             hunger: Gauge::new(72, 100),
             thirst: Gauge::new(64, 100),
         },
+        // Real `obj.dat` identities, so the artwork the client resolves matches the
+        // name beside it. Invented ids (1..6) resolved to whatever those slots
+        // happen to hold in the game's own table — the interface drew an apple
+        // labelled "Red potion" and three trees, which is worse than no icon: it
+        // looks like the *client* is confused rather than the fixture.
         inventory: grid(vec![
-            item(1, "item.potion.red", 498, Rarity::Common),
-            item(2, "item.potion.blue", 150, Rarity::Common),
-            item(3, "item.scroll.teleport", 15, Rarity::Uncommon),
-            item(4, "item.apple", 50, Rarity::Common),
-            item(5, "item.staff.oak", 1, Rarity::Rare),
-            item(6, "item.robe.apprentice", 1, Rarity::Uncommon),
+            // 461 Poción de Vida, 492 Poción de Maná (Newbie).
+            item(461, "item.potion.red", 498, Rarity::Common),
+            item(492, "item.potion.blue", 150, Rarity::Common),
+            // 146 Teleport a Ullathorpe.
+            item_doing(146, "item.scroll.teleport", 15, Rarity::Uncommon, ItemAction::Use),
+            // 1 Manzana Roja.
+            item(1, "item.apple", 50, Rarity::Common),
+            // 1352 Báculo (Newbie).
+            // 3502 Túnica del Principiante, whose sheet (graficos/1001.png) is not
+            // in the shipped asset set — so this item exercises the missing-artwork
+            // fallback in every capture, which the task requires to be visible and
+            // stable. Kept deliberately rather than swapped for one that resolves.
+            item_doing(1352, "item.staff.oak", 1, Rarity::Rare, ItemAction::Equip),
+            item_doing(3502, "item.robe.apprentice", 1, Rarity::Uncommon, ItemAction::Equip),
         ]),
         equipment: EquipmentState {
             worn: vec![
-                (EquipSlot::Weapon, item(5, "item.staff.oak", 1, Rarity::Rare)),
-                (EquipSlot::Armour, item(6, "item.robe.apprentice", 1, Rarity::Uncommon)),
+                (
+                    EquipSlot::Weapon,
+                    item_doing(1352, "item.staff.oak", 1, Rarity::Rare, ItemAction::Equip),
+                ),
+                (
+                    EquipSlot::Armour,
+                    item_doing(
+                        3502,
+                        "item.robe.apprentice",
+                        1,
+                        Rarity::Uncommon,
+                        ItemAction::Equip,
+                    ),
+                ),
             ],
         },
         spellbook: SpellbookState {

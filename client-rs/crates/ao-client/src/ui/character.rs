@@ -14,7 +14,7 @@ use super::controls::{bar_label, rarity_ink, Control, ControlKey};
 use super::rail::{CompactVital, CompactVitalFill, RailRegion};
 use super::state::UiState;
 use super::tokens::{focus, ink, size, space, status, surface, type_scale};
-use ao_core::view::{EquipSlot, Gauge, Intent, ItemView, SlotState, UiSnapshot};
+use ao_core::view::{EquipSlot, Gauge, Intent, ItemAction, ItemView, SlotState, UiSnapshot};
 use bevy::prelude::*;
 
 /// Which inventory slot the player last clicked.
@@ -86,9 +86,13 @@ impl Plugin for CharacterPanelPlugin {
             .add_systems(
                 Update,
                 (
+                    // Before the rebuild, so the frame that first sees an item also
+                    // asks for its artwork.
+                    request_item_graphics,
                     rebuild_on_change,
                     update_compact_vitals,
                     cancel_drag_on_escape,
+                    cancel_drag_when_its_destination_becomes_unknowable,
                     clear_selection_when_slot_empties,
                 )
                     .chain()
@@ -107,6 +111,77 @@ pub struct InventorySlotButton {
     pub index: usize,
 }
 
+/// Ask the loader for the sheets an item's artwork needs.
+///
+/// Sheets are fetched for the map tiles in view and nothing else, which is right
+/// for the world and leaves the inventory with no artwork at all: every slot
+/// resolved to nothing and drew its name instead. The items a player is carrying
+/// are a small, bounded set — a handful of sheets — so they are requested as the
+/// snapshot names them.
+///
+/// `Local` remembers what has been asked for, because the snapshot changes far more
+/// often than its contents do and a request per heartbeat would refetch the same
+/// sheets forever.
+fn request_item_graphics(
+    state: Res<UiState>,
+    graphics: Res<crate::graphics::Graphics>,
+    sheets: Res<crate::graphics::SheetTextures>,
+    config: Option<Res<crate::config::ClientConfig>>,
+    mut requested: Local<std::collections::HashSet<i32>>,
+) {
+    // Deliberately not gated on `state.is_changed()`. The snapshot's first change is
+    // at boot, before the object table has been fetched, so a one-shot gate ran
+    // exactly once — too early — and the inventory never got its artwork. The
+    // `requested` set is what keeps this cheap: a few dozen ids compared per frame,
+    // and each asked for once.
+    let Some(config) = config else {
+        return;
+    };
+    let (Some(objects), Some(index)) = (graphics.objects(), graphics.index()) else {
+        return;
+    };
+
+    let snapshot = state.get();
+    let carried = snapshot
+        .inventory
+        .slots
+        .iter()
+        .filter_map(|slot| slot.item())
+        .chain(snapshot.equipment.worn.iter().map(|(_, item)| item));
+
+    let mut wanted = Vec::new();
+    for item in carried {
+        let grh_id = objects.get(&item.item_id).copied().unwrap_or(item.icon_grh);
+        if !requested.insert(grh_id) {
+            continue;
+        }
+        // Only what is actually missing: a sheet the world already pulled in needs
+        // no second fetch.
+        if let Some(grh) = index.resolve(grh_id) {
+            if !sheets.0.contains_key(&grh.sheet) {
+                wanted.push(grh_id);
+            }
+        }
+    }
+
+    if !wanted.is_empty() {
+        crate::net::start_graphics_load(graphics.clone(), config.asset_origin.clone(), wanted);
+    }
+}
+
+/// A resolved item icon: the sheet, the atlas and the region inside it.
+///
+/// Resolved once per rebuild and handed to the slots, because resolution needs
+/// resources a pure builder cannot hold — and threading the resources themselves
+/// into every builder would put atlas bookkeeping inside the presentation.
+#[derive(Clone)]
+pub struct ItemIcon {
+    image: Handle<Image>,
+    layout: Handle<TextureAtlasLayout>,
+    index: usize,
+}
+
+#[allow(clippy::too_many_arguments)]
 fn rebuild_on_change(
     state: Res<UiState>,
     selected: Res<SelectedSlot>,
@@ -119,9 +194,50 @@ fn rebuild_on_change(
     // of the slivers, overflowing it. That is what the compact capture showed.
     regions: Query<(Entity, &RailRegion), With<super::shell::FullRailOnly>>,
     existing: Query<Entity, With<PanelContent>>,
+    graphics: Res<crate::graphics::Graphics>,
+    sheets: Res<crate::graphics::SheetTextures>,
+    mut atlases: ResMut<crate::world::SheetAtlases>,
+    mut layouts: ResMut<Assets<TextureAtlasLayout>>,
+    mut last_drawable: Local<usize>,
     mut commands: Commands,
 ) {
-    if !state.is_changed() && !selected.is_changed() && !drag.is_changed() && !geometry.is_changed()
+    // Artwork arrives asynchronously, long after the snapshot that named it, and
+    // nothing else in this condition changes when it does — so the grid kept
+    // whatever it drew when the items first appeared, which is the name fallback,
+    // for the rest of the session.
+    //
+    // Counted as "carried items whose artwork is available *now*", not as "how many
+    // sheets exist". The sheet count is decided by a system in another plugin, and
+    // this one can run before it in a frame: the count then changes, the rebuild
+    // happens against the sheets from before the upload, and the count never changes
+    // again. That left exactly one item — the staff, whose sheet arrived in a later
+    // batch than the potions — permanently on its fallback.
+    let index = graphics.index();
+    let drawable = state
+        .get()
+        .inventory
+        .slots
+        .iter()
+        .filter_map(|slot| slot.item())
+        .filter(|item| {
+            let grh_id = graphics
+                .objects()
+                .and_then(|table| table.get(&item.item_id).copied())
+                .unwrap_or(item.icon_grh);
+            index
+                .as_ref()
+                .and_then(|index| index.resolve(grh_id))
+                .is_some_and(|grh| sheets.0.contains_key(&grh.sheet))
+        })
+        .count();
+    let artwork_arrived = *last_drawable != drawable;
+    *last_drawable = drawable;
+
+    if !state.is_changed()
+        && !selected.is_changed()
+        && !drag.is_changed()
+        && !geometry.is_changed()
+        && !artwork_arrived
     {
         return;
     }
@@ -138,6 +254,27 @@ fn rebuild_on_change(
     };
 
     let snapshot = state.get();
+
+    // Item artwork, through the same resolution the world uses to draw the item on
+    // the ground. `None` for a graphic whose sheet has not arrived, or that the
+    // index does not know — the slot then draws its fallback, which is visible
+    // rather than empty.
+    // The game's own object table maps an item id to its graphic. Preferred over the
+    // view model's `icon_grh`, which fixtures fill with plausible-looking numbers
+    // that are not real graphics — every one resolved to nothing, and every slot
+    // drew its fallback. The field remains the override for items the table does
+    // not cover.
+    let objects = graphics.objects();
+    let mut icon_for = |item: &ItemView| -> Option<ItemIcon> {
+        let grh_id = objects
+            .as_ref()
+            .and_then(|table| table.get(&item.item_id).copied())
+            .unwrap_or(item.icon_grh);
+        let grh = index.as_ref()?.resolve(grh_id)?;
+        let (image, layout, atlas_index) =
+            crate::world::resolve_grh(&sheets, &mut atlases, &mut layouts, &grh)?;
+        Some(ItemIcon { image, layout, index: atlas_index })
+    };
     for (entity, region) in &regions {
         match region {
             RailRegion::CharacterHeader => {
@@ -154,7 +291,7 @@ fn rebuild_on_change(
                 commands.entity(entity).with_children(|parent| {
                     parent.spawn((
                         PanelContent,
-                        inventory_grid(snapshot, selected.0, drag.over, inner),
+                        inventory_grid(snapshot, selected.0, drag.over, inner, &mut icon_for),
                     ));
                 });
             }
@@ -210,7 +347,32 @@ fn character_header(snapshot: &UiSnapshot) -> impl Bundle {
             text(name, type_scale::TITLE, ink::GOLD),
             text(subtitle, type_scale::SMALL, ink::MUTED),
             experience_bar(progression.experience),
-            text(format!("gold {}", progression.gold.max(0)), type_scale::SMALL, ink::MUTED),
+            currency_row(progression.gold),
+        ],
+    )
+}
+
+/// Currency, as a row rather than a line under the name.
+///
+/// The task is explicit that gold must not consume the identity header when it can
+/// be scanned in a currency row. The distinction is what the header is *for*: it
+/// answers "who am I", and a number that changes every time something is sold does
+/// not belong in the same breath as a character's name. As a labelled row it is
+/// scanned rather than read.
+fn currency_row(gold: i64) -> impl Bundle {
+    (
+        Node {
+            width: Val::Percent(100.0),
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            padding: UiRect::horizontal(Val::Px(space::SNUG)),
+            ..default()
+        },
+        children![
+            text("oro", type_scale::MICRO, ink::MUTED),
+            // Right-aligned and in the gold ink, so the eye finds the amount
+            // without reading the label first.
+            text(format!("{}", gold.max(0)), type_scale::SMALL, ink::GOLD),
         ],
     )
 }
@@ -337,6 +499,7 @@ fn inventory_grid(
     selected: Option<usize>,
     drag_over: Option<usize>,
     rail_width: f32,
+    icon_for: &mut dyn FnMut(&ItemView) -> Option<ItemIcon>,
 ) -> impl Bundle {
     let inventory = &snapshot.inventory;
     let columns = inventory.columns.max(1);
@@ -364,13 +527,25 @@ fn inventory_grid(
             ..default()
         },
         Children::spawn(SpawnIter({
+            // Icons resolved here, while the resources are still borrowable, and
+            // moved into the iterator: the closure that spawns each slot runs later
+            // and cannot hold them.
             let slots = inventory.slots.clone();
+            let icons: Vec<Option<ItemIcon>> =
+                slots.iter().map(|slot| slot.item().and_then(|item| icon_for(item))).collect();
             (0..slots.len())
                 .map(move |index| (index, selected, drag_over))
                 .collect::<Vec<_>>()
                 .into_iter()
                 .map(move |(index, selected, drag_over)| {
-                    inventory_slot(&slots[index], index, selected, drag_over, slot)
+                    inventory_slot(
+                        &slots[index],
+                        index,
+                        selected,
+                        drag_over,
+                        slot,
+                        icons[index].clone(),
+                    )
                 })
         })),
     )
@@ -382,6 +557,7 @@ fn inventory_slot(
     selected: Option<usize>,
     drag_over: Option<usize>,
     size_px: f32,
+    icon: Option<ItemIcon>,
 ) -> impl Bundle {
     let is_selected = selected == Some(index);
     let is_drop_target = drag_over == Some(index) && slot.accepts_drop();
@@ -395,7 +571,19 @@ fn inventory_slot(
         surface::EDGE
     };
 
-    let mut children: Vec<(Text, TextFont, TextColor)> = Vec::new();
+    // Each child carries its own node so the quantity and the equipped marker can
+    // sit in corners rather than across the artwork. The task asks for corner
+    // overlays, and the reason is legibility: "498" printed over a potion obscures
+    // the one thing the icon is there to convey.
+    let mut children: Vec<(Node, Text, TextFont, TextColor)> = Vec::new();
+    let centred = Node::default();
+    let corner = |bottom: bool| Node {
+        position_type: PositionType::Absolute,
+        right: Val::Px(space::HAIR),
+        top: if bottom { Val::Auto } else { Val::Px(space::HAIR) },
+        bottom: if bottom { Val::Px(space::HAIR) } else { Val::Auto },
+        ..default()
+    };
     match slot {
         // Locked slots are shown, not hidden: a player can see what expanding
         // the pack would buy.
@@ -404,19 +592,29 @@ fn inventory_slot(
             // rendered as an empty box, which is exactly what an unexplained
             // locked slot must not look like.
             children.push((
+                centred.clone(),
                 Text::new("\u{00b7}\u{00b7}"),
                 TextFont { font_size: type_scale::SMALL, ..default() },
                 TextColor(ink::DISABLED),
             ));
         }
         SlotState::Filled(item) => {
-            children.push((
-                Text::new(short_name(item)),
-                TextFont { font_size: type_scale::MICRO, ..default() },
-                TextColor(rarity_ink(item.rarity)),
-            ));
+            // The name is the *fallback*, drawn only when the artwork is not
+            // available — an unknown graphic, or a sheet still arriving. A slot that
+            // shows neither is indistinguishable from an empty one, which is the
+            // failure this avoids; the task calls for a stable visible fallback and
+            // this is it.
+            if icon.is_none() {
+                children.push((
+                    centred.clone(),
+                    Text::new(short_name(item)),
+                    TextFont { font_size: type_scale::MICRO, ..default() },
+                    TextColor(rarity_ink(item.rarity)),
+                ));
+            }
             if item.shows_quantity() {
                 children.push((
+                    corner(true),
                     Text::new(item.display_quantity().to_string()),
                     TextFont { font_size: type_scale::MICRO, ..default() },
                     TextColor(ink::PRIMARY),
@@ -424,6 +622,7 @@ fn inventory_slot(
             }
             if item.equipped {
                 children.push((
+                    corner(false),
                     Text::new("E"),
                     TextFont { font_size: type_scale::MICRO, ..default() },
                     TextColor(ink::GOLD),
@@ -450,6 +649,28 @@ fn inventory_slot(
         },
         BackgroundColor(if locked { surface::VOID } else { surface::WELL }),
         BorderColor::all(border),
+        // The artwork, on the slot itself rather than as a child: a UI node can be
+        // both a container and an image, so the quantity and equipped markers draw
+        // over the icon without a second layer to keep aligned.
+        //
+        // Stretched to the slot and nearest-sampled. A 32-pixel graphic in a
+        // 43-pixel slot is not an integer multiple, so it is not pixel-exact; making
+        // it so needs the slot sized from the artwork, which is a change to the
+        // reference composition rather than to this function.
+        match &icon {
+            Some(icon) => ImageNode {
+                image: icon.image.clone(),
+                texture_atlas: Some(TextureAtlas {
+                    layout: icon.layout.clone(),
+                    index: icon.index,
+                }),
+                ..default()
+            },
+            // Invisible rather than absent: `ImageNode::default()` carries the
+            // engine's white placeholder, which would draw a white square over every
+            // empty slot.
+            None => ImageNode { color: Color::NONE, ..default() },
+        },
         InventorySlotButton { index },
         // Keyed so focus survives the grid being rebuilt, which happens on
         // every snapshot and every resize.
@@ -486,24 +707,90 @@ fn selected_details(snapshot: &UiSnapshot, selected: Option<usize>) -> impl Bund
     (column(space::TIGHT), children![text(detail, type_scale::BODY, colour)])
 }
 
+/// Equipment as a row of slots, not a list of names.
+///
+/// The task forbids "a permanent list of raw item names" here, and the reason is
+/// space: six lines of `Weapon: oak` fill a third of the rail to say almost
+/// nothing, and the one line a player actually wants — what is in their hand right
+/// now — is no easier to find than the five they do not. Six small squares are
+/// scanned in one glance, and the full name lives in the tooltip and in the
+/// selection details, which is where a player goes when they want it.
+///
+/// Empty slots are drawn rather than hidden, so the shape of the row is constant
+/// and a missing shield is visibly missing rather than absent.
 fn equipment_summary(snapshot: &UiSnapshot) -> impl Bundle {
-    let lines: Vec<String> = EquipSlot::ALL
+    let cells: Vec<_> = EquipSlot::ALL
         .iter()
         .map(|slot| {
-            let worn = snapshot
-                .equipment
-                .in_slot(*slot)
-                .map(short_name)
-                .unwrap_or_else(|| "—".to_string());
-            format!("{slot:?}: {worn}")
+            let worn = snapshot.equipment.in_slot(*slot);
+            equipment_cell(*slot, worn)
         })
         .collect();
 
     (
-        column(space::HAIR),
-        Children::spawn(SpawnIter(
-            lines.into_iter().map(|line| text(line, type_scale::MICRO, ink::MUTED)),
-        )),
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            flex_wrap: FlexWrap::Wrap,
+            column_gap: Val::Px(space::GRID_GAP),
+            row_gap: Val::Px(space::GRID_GAP),
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        Children::spawn(SpawnIter(cells.into_iter())),
+    )
+}
+
+/// One equipment slot.
+fn equipment_cell(slot: EquipSlot, worn: Option<&ItemView>) -> impl Bundle {
+    // Until item artwork is drawn here, the first characters of the derived name
+    // stand in — enough to tell an oak staff from an apprentice robe at a glance,
+    // which is what the row is for. The full name is one hover away.
+    let label = worn
+        .map(|item| super::fallback_label(&item.name_key).chars().take(3).collect::<String>())
+        .unwrap_or_else(|| "·".to_string());
+
+    // The accessible name is the *item* when there is one and the *slot* when there
+    // is not, so a tooltip on an empty slot says what could go there.
+    let name_key =
+        worn.map(|item| item.name_key.clone()).unwrap_or_else(|| slot.name_key().to_string());
+
+    let filled = worn.is_some();
+    let count = worn.map(|item| item.display_quantity()).unwrap_or(0);
+
+    (
+        Node {
+            width: Val::Px(size::SLOT * 0.72),
+            height: Val::Px(size::SLOT * 0.72),
+            border: UiRect::all(Val::Px(size::BORDER)),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            overflow: Overflow::clip(),
+            ..default()
+        },
+        BackgroundColor(if filled { surface::RAISED } else { surface::WELL }),
+        // Equipped is marked by the border as well as the fill, since two dark
+        // browns are not a distinction.
+        BorderColor::all(if filled { focus::SELECTED } else { surface::EDGE }),
+        super::icons::AccessibleName::new(&name_key),
+        super::icons::ShowsTooltip,
+        children![(
+            Node {
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            children![
+                text(label, type_scale::MICRO, if filled { ink::PRIMARY } else { ink::DISABLED }),
+                // A concise counter, and only where it means something: ammunition
+                // has a count, a helmet does not.
+                text(
+                    if count > 1 { format!("{count}") } else { String::new() },
+                    type_scale::MICRO,
+                    ink::MUTED
+                ),
+            ],
+        )],
     )
 }
 
@@ -538,6 +825,35 @@ fn update_compact_vitals(
 /// Also fires when the pointer leaves the window, because a drag that survives
 /// losing the pointer reattaches to whatever is under the cursor when it comes
 /// back.
+/// End a drag whenever the thing being dragged onto stops being knowable.
+///
+/// The task names four of these beyond Escape: the pointer leaving the window,
+/// focus loss, the panel closing and the grid rebuilding. They share one reason —
+/// a drag is a promise about a destination, and each of these destroys the
+/// client's knowledge of where the pointer is or what is under it. A drag that
+/// survives becomes a move to a slot the player never chose.
+fn cancel_drag_when_its_destination_becomes_unknowable(
+    pointer: Res<super::pointer::PointerState>,
+    windows: Query<&Window>,
+    mut drag: ResMut<DragState>,
+) {
+    if !drag.is_dragging() {
+        return;
+    }
+
+    // The pointer left the window, so there is no destination any more. Reported
+    // as `Outside` or as no target at all, depending on how it left.
+    let lost_pointer = !matches!(pointer.target, Some(super::pointer::PointerTarget::Interface))
+        && pointer.position.is_none();
+    // Focus loss. A drag continuing while the player is in another window ends
+    // wherever the pointer happens to be when they come back.
+    let lost_focus = windows.iter().next().is_some_and(|window| !window.focused);
+
+    if lost_pointer || lost_focus {
+        drag.cancel();
+    }
+}
+
 fn cancel_drag_on_escape(keys: Res<ButtonInput<KeyCode>>, mut drag: ResMut<DragState>) {
     if drag.is_dragging() && keys.just_pressed(KeyCode::Escape) {
         drag.cancel();
@@ -580,23 +896,22 @@ pub fn click_intent(
         return Some(Intent::DropInventorySlot { slot: index, amount: 1 });
     }
     if double_click {
-        return Some(if item.equipped || is_equippable(item) {
-            Intent::EquipInventorySlot { slot: index }
-        } else {
-            Intent::UseInventorySlot { slot: index }
-        });
+        // From the item's own metadata, never from its stack size. The previous
+        // rule treated anything not stackable as equipment, which called the last
+        // potion of a stack a sword — the guess got worse as a player's inventory
+        // emptied, which is the worst possible direction for it to fail in.
+        //
+        // An item that is already equipped is still Equip, so a second activation
+        // takes it off rather than doing nothing.
+        return match item.action {
+            ItemAction::Equip => Some(Intent::EquipInventorySlot { slot: index }),
+            ItemAction::Use | ItemAction::Open => Some(Intent::UseInventorySlot { slot: index }),
+            // Nothing happens, and nothing is sent: a quest token that produces a
+            // rejected intent teaches a player that the interface is unreliable.
+            ItemAction::Inert => None,
+        };
     }
     None
-}
-
-/// Whether double-clicking should equip rather than consume.
-///
-/// A stand-in until item metadata crosses the boundary: anything that is not
-/// stackable is treated as gear. Wrong for a few items, and deliberately
-/// conservative — equipping a potion fails harmlessly, drinking a sword does
-/// not exist.
-fn is_equippable(item: &ItemView) -> bool {
-    item.display_quantity() <= 1
 }
 
 #[cfg(test)]
@@ -606,6 +921,152 @@ mod tests {
     use ao_core::fixtures::{self, Scenario};
     use ao_core::view::Rarity;
 
+    /// A slot holding an item that does `action`.
+    fn slot_doing(action: ItemAction, quantity: i32) -> SlotState {
+        SlotState::Filled(ItemView {
+            item_id: 7,
+            name_key: "item.test".into(),
+            quantity,
+            equipped: false,
+            rarity: Rarity::Common,
+            icon_grh: 1,
+            action,
+        })
+    }
+
+    /// An app with the drag cancellations and a drag already in progress.
+    fn dragging_app(focused: bool, pointer: super::super::pointer::PointerState) -> App {
+        let mut app = App::new();
+        app.insert_resource(DragState { from: Some(2), over: Some(5) })
+            .insert_resource(pointer)
+            .add_systems(Update, cancel_drag_when_its_destination_becomes_unknowable);
+        let mut window = Window::default();
+        window.focused = focused;
+        app.world_mut().spawn(window);
+        app
+    }
+
+    #[test]
+    fn a_drag_ends_when_the_pointer_leaves_the_window() {
+        // A drag is a promise about a destination. Once the pointer is gone the
+        // client no longer knows what is under it, and a drag that survives becomes
+        // a move to a slot the player never chose.
+        use super::super::pointer::PointerState;
+
+        let mut app = dragging_app(true, PointerState::default());
+        app.update();
+        assert!(
+            !app.world().resource::<DragState>().is_dragging(),
+            "a drag survived the pointer leaving the window"
+        );
+    }
+
+    #[test]
+    fn a_drag_ends_when_the_window_loses_focus() {
+        // Otherwise it ends wherever the pointer happens to be when the player
+        // comes back from another window.
+        use super::super::pointer::{PointerState, PointerTarget};
+
+        let over_interface = PointerState {
+            position: Some(Vec2::new(100.0, 100.0)),
+            target: Some(PointerTarget::Interface),
+            tile: None,
+        };
+        let mut app = dragging_app(false, over_interface);
+        app.update();
+        assert!(
+            !app.world().resource::<DragState>().is_dragging(),
+            "a drag survived the window losing focus"
+        );
+    }
+
+    #[test]
+    fn a_drag_over_the_interface_in_a_focused_window_continues() {
+        // The cancellations must not be so eager that an ordinary drag across the
+        // rail cancels itself halfway.
+        use super::super::pointer::{PointerState, PointerTarget};
+
+        let over_interface = PointerState {
+            position: Some(Vec2::new(100.0, 100.0)),
+            target: Some(PointerTarget::Interface),
+            tile: None,
+        };
+        let mut app = dragging_app(true, over_interface);
+        app.update();
+        assert!(
+            app.world().resource::<DragState>().is_dragging(),
+            "an ordinary drag across the interface cancelled itself"
+        );
+        assert_eq!(app.world().resource::<DragState>().over, Some(5));
+    }
+
+    #[test]
+    fn activation_comes_from_the_item_and_not_from_its_stack_size() {
+        // The two cases the previous rule got wrong. It treated anything with a
+        // count of one as equipment, so the last potion of a stack was a sword —
+        // and the guess grew *more* wrong as a player's inventory emptied, which is
+        // the worst direction for a guess to fail in.
+        let last_potion = slot_doing(ItemAction::Use, 1);
+        assert_eq!(
+            click_intent(&last_potion, 3, true, false),
+            Some(Intent::UseInventorySlot { slot: 3 }),
+            "a single-copy consumable was treated as equipment"
+        );
+
+        // And a non-stackable piece of equipment is still equipment.
+        let sword = slot_doing(ItemAction::Equip, 1);
+        assert_eq!(
+            click_intent(&sword, 4, true, false),
+            Some(Intent::EquipInventorySlot { slot: 4 }),
+            "equipment was treated as a consumable"
+        );
+
+        // A large stack of equipment — arrows, say — is equipment too, which the old
+        // quantity rule also got backwards.
+        let arrows = slot_doing(ItemAction::Equip, 500);
+        assert_eq!(
+            click_intent(&arrows, 5, true, false),
+            Some(Intent::EquipInventorySlot { slot: 5 })
+        );
+    }
+
+    #[test]
+    fn an_inert_item_sends_nothing_at_all() {
+        // A quest token that produces a rejected intent teaches a player that the
+        // interface is unreliable. Better to do nothing visibly than to be refused.
+        let token = slot_doing(ItemAction::Inert, 1);
+        assert_eq!(click_intent(&token, 6, true, false), None);
+        assert!(!ItemAction::Inert.is_activatable());
+        for action in [ItemAction::Use, ItemAction::Equip, ItemAction::Open] {
+            assert!(action.is_activatable(), "{action:?} should be activatable");
+        }
+    }
+
+    #[test]
+    fn opening_an_item_is_not_equipping_it() {
+        // Distinct in the model, and both are "not Equip" — a container that
+        // equipped itself would be a strange sight.
+        let book = slot_doing(ItemAction::Open, 1);
+        assert_eq!(
+            click_intent(&book, 7, true, false),
+            Some(Intent::UseInventorySlot { slot: 7 }),
+            "an openable item should not equip"
+        );
+    }
+
+    #[test]
+    fn every_item_action_names_a_distinct_key() {
+        let keys: Vec<&str> =
+            [ItemAction::Use, ItemAction::Equip, ItemAction::Open, ItemAction::Inert]
+                .into_iter()
+                .map(ItemAction::name_key)
+                .collect();
+        let mut unique = keys.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), keys.len(), "two actions share a key: {keys:?}");
+    }
+
     fn stack(quantity: i32) -> SlotState {
         SlotState::Filled(ItemView {
             item_id: 1,
@@ -614,6 +1075,7 @@ mod tests {
             equipped: false,
             rarity: Rarity::Common,
             icon_grh: 1,
+            action: ItemAction::Use,
         })
     }
 

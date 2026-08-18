@@ -83,7 +83,14 @@ pub fn shell_app_at(size: Vec2, device_pixel_ratio: f32) -> App {
         // questions about a shell that does not exist.
         super::hotbar::HotbarPlugin,
     ))
-    .init_resource::<crate::world::ViewRadius>();
+    .init_resource::<crate::world::ViewRadius>()
+    // The graphics resources the rail's rebuild reads to resolve item artwork.
+    // Empty here: no sheets have arrived, which is the case every slot's fallback
+    // exists for, and the one a headless test can actually reproduce.
+    .init_resource::<crate::graphics::Graphics>()
+    .init_resource::<crate::graphics::SheetTextures>()
+    .init_resource::<crate::world::SheetAtlases>()
+    .init_asset::<bevy::image::TextureAtlasLayout>();
 
     // A mouse pointer, so picking has something to route input through. Bevy's
     // input plugin spawns this in production; there is no winit here.

@@ -704,6 +704,101 @@ mod tests {
         }
     }
 
+    /// Every string drawn inside a rail region, in the real tree.
+    fn texts_in(app: &mut App, region: RailRegion) -> Vec<String> {
+        use super::super::testing;
+
+        let entity = app
+            .world_mut()
+            .query::<(Entity, &RailRegion)>()
+            .iter(app.world())
+            .find(|(_, kind)| **kind == region)
+            .map(|(entity, _)| entity);
+        let Some(entity) = entity else {
+            return Vec::new();
+        };
+        testing::descendants(app, entity)
+            .into_iter()
+            .filter_map(|child| app.world().get::<Text>(child).map(|text| text.0.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn gold_is_scanned_in_a_currency_row_rather_than_read_in_the_header() {
+        // The header answers "who am I". A number that changes every time something
+        // is sold does not belong in the same breath as a character's name, and the
+        // task says so outright.
+        use super::super::testing;
+
+        let mut app = testing::shell_app(Vec2::new(1280.0, 832.0));
+        let header = texts_in(&mut app, RailRegion::CharacterHeader);
+        assert!(!header.is_empty(), "the header draws nothing");
+
+        assert!(
+            !header.iter().any(|line| line.starts_with("gold ")),
+            "gold is still a line of the identity header: {header:?}"
+        );
+        // It is still present — moved, not deleted.
+        assert!(
+            header.iter().any(|line| line == "1250"),
+            "the currency row does not show the amount: {header:?}"
+        );
+        assert!(header.iter().any(|line| line == "oro"), "the amount has no label: {header:?}");
+    }
+
+    #[test]
+    fn equipment_is_a_row_of_slots_rather_than_a_list_of_names() {
+        // Six lines of "Weapon: oak" fill a third of the rail to say almost nothing,
+        // and the one line a player wants is no easier to find than the five they do
+        // not.
+        use super::super::testing;
+
+        let mut app = testing::shell_app(Vec2::new(1280.0, 832.0));
+        let lines = texts_in(&mut app, RailRegion::Equipment);
+
+        assert!(
+            !lines.iter().any(|line| line.contains(':')),
+            "equipment is still drawn as labelled name lines: {lines:?}"
+        );
+
+        // The shape is constant: every slot is drawn, empty ones included, so a
+        // missing shield is visibly missing rather than absent.
+        let cells = app
+            .world_mut()
+            .query_filtered::<Entity, With<super::super::icons::ShowsTooltip>>()
+            .iter(app.world())
+            .count();
+        assert!(cells >= ao_core::view::EquipSlot::ALL.len(), "only {cells} tooltip targets");
+    }
+
+    #[test]
+    fn an_empty_equipment_slot_still_says_what_belongs_there() {
+        // An unexplained empty square is indistinguishable from a rendering fault.
+        // The accessible name is the item when there is one and the slot when there
+        // is not, so the tooltip always answers the question.
+        use super::super::icons::AccessibleName;
+        use super::super::testing;
+
+        let mut app = testing::shell_app(Vec2::new(1280.0, 832.0));
+        let names: Vec<String> = app
+            .world_mut()
+            .query::<&AccessibleName>()
+            .iter(app.world())
+            .map(|name| name.0.clone())
+            .collect();
+
+        // The populated fixture wears a weapon and armour and nothing else, so the
+        // helmet slot must name itself.
+        assert!(
+            names.iter().any(|name| name == "equip.slot.helmet"),
+            "an empty equipment slot has no accessible name: {names:?}"
+        );
+        assert!(
+            names.iter().any(|name| name == "item.staff.oak"),
+            "a worn item's slot does not name the item: {names:?}"
+        );
+    }
+
     #[test]
     fn every_region_appears_exactly_once_in_the_order() {
         // The order is also the keyboard tab order, so a duplicate or a

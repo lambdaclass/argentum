@@ -105,6 +105,46 @@ pub struct ItemView {
     pub rarity: Rarity,
     /// Graphic index into the shared atlas.
     pub icon_grh: i32,
+    /// What activating this item does.
+    ///
+    /// Carried, not inferred. The interface previously guessed from the stack
+    /// quantity — anything not stackable was treated as equipment — which is
+    /// wrong for every single-copy consumable a player owns one of, and the
+    /// guess gets *worse* as their inventory empties: the last potion in a stack
+    /// becomes a sword.
+    pub action: ItemAction,
+}
+
+/// What activating an item does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ItemAction {
+    /// Consumed: a potion, food, a scroll.
+    Use,
+    /// Worn or wielded.
+    Equip,
+    /// Opens something — a container, a book, a map.
+    Open,
+    /// Nothing, but it can still be moved, dropped and inspected. Quest tokens
+    /// and materials.
+    #[default]
+    Inert,
+}
+
+impl ItemAction {
+    /// Whether double-clicking should do anything at all.
+    pub fn is_activatable(self) -> bool {
+        !matches!(self, ItemAction::Inert)
+    }
+
+    /// The localisation key naming the action, for tooltips and prompts.
+    pub fn name_key(self) -> &'static str {
+        match self {
+            ItemAction::Use => "item.action.use",
+            ItemAction::Equip => "item.action.equip",
+            ItemAction::Open => "item.action.open",
+            ItemAction::Inert => "item.action.none",
+        }
+    }
 }
 
 impl ItemView {
@@ -196,6 +236,18 @@ pub enum EquipSlot {
 }
 
 impl EquipSlot {
+    /// Localisation key naming the slot, for empty slots and tooltips.
+    pub fn name_key(self) -> &'static str {
+        match self {
+            EquipSlot::Weapon => "equip.slot.weapon",
+            EquipSlot::Shield => "equip.slot.shield",
+            EquipSlot::Helmet => "equip.slot.helmet",
+            EquipSlot::Armour => "equip.slot.armour",
+            EquipSlot::Ring => "equip.slot.ring",
+            EquipSlot::Ammunition => "equip.slot.ammunition",
+        }
+    }
+
     pub const ALL: [EquipSlot; 6] = [
         EquipSlot::Weapon,
         EquipSlot::Shield,

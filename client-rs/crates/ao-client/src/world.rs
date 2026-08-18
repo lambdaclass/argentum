@@ -505,7 +505,7 @@ struct DrawnTiles(HashSet<(usize, u8, u8)>);
 
 /// Atlas layout per sheet, plus the index assigned to each region in it.
 #[derive(Resource, Default)]
-struct SheetAtlases {
+pub struct SheetAtlases {
     layouts: HashMap<String, Handle<TextureAtlasLayout>>,
     indices: HashMap<(String, URect), usize>,
 }
@@ -1092,6 +1092,47 @@ fn paint_character(
 
 /// Spawn one grh at a tile, with AO anchoring and atlas bookkeeping.
 ///
+/// Turn a graphic into the texture, atlas layout and index that draw it.
+///
+/// Extracted from `spawn_grh` so the interface can draw an item's icon through the
+/// same resolution as the world draws the item on the ground. Two implementations
+/// of "which region of which sheet is this graphic" would eventually disagree, and
+/// the symptom would be an inventory showing the wrong picture — which looks like
+/// bad data rather than like a bug.
+///
+/// `None` while the sheet is still arriving, so a caller can retry on a later pass
+/// instead of caching a miss.
+pub fn resolve_grh(
+    sheets: &SheetTextures,
+    atlases: &mut SheetAtlases,
+    layouts: &mut Assets<TextureAtlasLayout>,
+    grh: &crate::graphics::Grh,
+) -> Option<(Handle<Image>, Handle<TextureAtlasLayout>, usize)> {
+    let image = sheets.0.get(&grh.sheet)?;
+
+    let rect = URect::new(
+        grh.x as u32,
+        grh.y as u32,
+        (grh.x + grh.width) as u32,
+        (grh.y + grh.height) as u32,
+    );
+    let layout_handle = atlases
+        .layouts
+        .entry(grh.sheet.clone())
+        .or_insert_with(|| layouts.add(TextureAtlasLayout::new_empty(UVec2::splat(1024))))
+        .clone();
+    let atlas_index = match atlases.indices.get(&(grh.sheet.clone(), rect)) {
+        Some(index) => *index,
+        None => {
+            let index = layouts.get_mut(&layout_handle)?.add_texture(rect);
+            atlases.indices.insert((grh.sheet.clone(), rect), index);
+            index
+        }
+    };
+
+    Some((image.clone(), layout_handle, atlas_index))
+}
+
 /// Every drawable in the world goes through here so anchoring, the 1-based tile
 /// origin and atlas index reuse stay consistent. Returns false when the sheet
 /// has not arrived yet, so the caller can retry on a later pass.
@@ -1108,31 +1149,9 @@ fn spawn_grh(
     pixel_offset: Vec2,
     marker: impl Bundle,
 ) -> bool {
-    let Some(image) = sheets.0.get(&grh.sheet) else {
+    let Some((image, layout_handle, atlas_index)) = resolve_grh(sheets, atlases, layouts, &grh)
+    else {
         return false;
-    };
-
-    let rect = URect::new(
-        grh.x as u32,
-        grh.y as u32,
-        (grh.x + grh.width) as u32,
-        (grh.y + grh.height) as u32,
-    );
-    let layout_handle = atlases
-        .layouts
-        .entry(grh.sheet.clone())
-        .or_insert_with(|| layouts.add(TextureAtlasLayout::new_empty(UVec2::splat(1024))))
-        .clone();
-    let atlas_index = match atlases.indices.get(&(grh.sheet.clone(), rect)) {
-        Some(index) => *index,
-        None => {
-            let Some(layout) = layouts.get_mut(&layout_handle) else {
-                return false;
-            };
-            let index = layout.add_texture(rect);
-            atlases.indices.insert((grh.sheet.clone(), rect), index);
-            index
-        }
     };
 
     let size = Vec2::new(grh.width, grh.height);
