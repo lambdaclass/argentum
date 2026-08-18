@@ -871,9 +871,9 @@ pub fn text_field(field: TextField, tab_index: u32) -> impl Bundle {
 
 fn present_controls(
     focus: Res<FocusOwner>,
-    mut controls: Query<(Entity, &Control, &mut BackgroundColor, &mut BorderColor)>,
+    mut controls: Query<(Entity, &Control, &mut Node, &mut BackgroundColor, &mut BorderColor)>,
 ) {
-    for (entity, control, mut background, mut border) in &mut controls {
+    for (entity, control, mut node, mut background, mut border) in &mut controls {
         let state = ControlState::resolve(
             control.enabled,
             control.hovered,
@@ -881,8 +881,19 @@ fn present_controls(
             control.pressed,
         );
         background.0 = state.surface();
-        *border =
-            BorderColor::all(if state.shows_focus_ring() { focus::RING } else { surface::EDGE });
+
+        let focused = state.shows_focus_ring();
+        *border = BorderColor::all(if focused { focus::RING } else { surface::EDGE });
+
+        // Thickness as well as colour. Focus was previously a colour change and
+        // nothing else, which this task forbids for exactly the reason it is worth
+        // forbidding: a player who cannot distinguish the two browns has no way to
+        // tell where the keyboard is, and that is the one state you cannot play
+        // without knowing.
+        let width = Val::Px(if focused { focus::RING_WIDTH } else { size::BORDER });
+        if node.border.top != width {
+            node.border = UiRect::all(width);
+        }
     }
 }
 
@@ -1064,16 +1075,14 @@ mod tests {
         app.add_plugins(ControlsPlugin).insert_resource(ButtonInput::<KeyCode>::default());
         app.world_mut().resource_mut::<FocusNavigation>().active = true;
 
+        // The production builder, not a hand-assembled approximation. The
+        // hand-built version had no `Node`, so when `present_controls` began
+        // setting border *width* as well as colour these entities silently stopped
+        // matching its query and the tests asserted against a control nothing was
+        // presenting.
         let entities: Vec<Entity> = (0..count)
             .map(|index| {
-                app.world_mut()
-                    .spawn((
-                        Control { tab_index: index as u32, ..default() },
-                        Interaction::None,
-                        BackgroundColor(Color::NONE),
-                        BorderColor::all(Color::NONE),
-                    ))
-                    .id()
+                app.world_mut().spawn(button("control", ControlState::Normal, index as u32)).id()
             })
             .collect();
 
@@ -1383,6 +1392,52 @@ mod tests {
         app.update();
 
         assert_eq!(value_of(&app, entity), "", "an unfocused edit was replayed on focus");
+    }
+
+    #[test]
+    fn focus_is_not_signalled_by_colour_alone() {
+        // The task forbids colour-only status, and focus is the state you cannot
+        // play without knowing: a player who cannot distinguish two dark browns
+        // had no way to tell where the keyboard was pointing.
+        let mut app = controls_app();
+        let first = app.world_mut().spawn(button("Attack", ControlState::Normal, 1)).id();
+        let second = app.world_mut().spawn(button("Defend", ControlState::Normal, 2)).id();
+        app.update();
+
+        press_key(&mut app, KeyCode::Tab);
+        assert_eq!(app.world().resource::<FocusOwner>().entity(), Some(first));
+        app.update();
+
+        let border_of = |app: &App, entity: Entity| {
+            app.world().get::<Node>(entity).expect("a control").border.top
+        };
+        let focused = border_of(&app, first);
+        let unfocused = border_of(&app, second);
+
+        assert_ne!(
+            focused, unfocused,
+            "focused and unfocused controls differ only in colour: both borders are {focused:?}"
+        );
+        assert_eq!(focused, Val::Px(focus::RING_WIDTH));
+        assert_eq!(unfocused, Val::Px(size::BORDER));
+
+        // And it moves with the focus rather than being set once.
+        press_key(&mut app, KeyCode::Tab);
+        app.update();
+        assert_eq!(border_of(&app, second), Val::Px(focus::RING_WIDTH));
+        assert_eq!(border_of(&app, first), Val::Px(size::BORDER));
+    }
+
+    #[test]
+    fn a_locked_slot_says_so_in_text_rather_than_only_in_colour() {
+        // The other half of the same rule, already true and worth pinning: a
+        // locked inventory slot draws a mark, so it is not merely a darker square.
+        use ao_core::view::SlotState;
+        assert!(!SlotState::Locked.accepts_drop());
+
+        let snapshot = ao_core::fixtures::snapshot(ao_core::fixtures::Scenario::Empty);
+        let locked = snapshot.inventory.slots.iter().any(|slot| matches!(slot, SlotState::Locked));
+        assert!(locked, "the empty fixture has no locked slot, so this proves nothing");
     }
 
     #[test]
