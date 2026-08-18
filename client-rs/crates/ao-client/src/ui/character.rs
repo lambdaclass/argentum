@@ -83,6 +83,7 @@ impl Plugin for CharacterPanelPlugin {
         app.init_resource::<SelectedSlot>()
             .init_resource::<DragState>()
             .init_resource::<SplitAmount>()
+            .init_resource::<PendingSlot>()
             .add_systems(
                 Update,
                 (
@@ -94,6 +95,8 @@ impl Plugin for CharacterPanelPlugin {
                     cancel_drag_on_escape,
                     cancel_drag_when_its_destination_becomes_unknowable,
                     clear_selection_when_slot_empties,
+                    apply_slot_activations,
+                    clear_pending_on_answer,
                 )
                     .chain()
                     .after(super::shell::spawn_shell),
@@ -109,6 +112,116 @@ pub struct PanelContent;
 #[derive(Component, Debug, Clone, Copy)]
 pub struct InventorySlotButton {
     pub index: usize,
+}
+
+/// An intent that has been sent and not yet answered.
+///
+/// The task requires that an accidental double activation cannot emit a duplicate
+/// command, and the reason is concrete: two identical use-intents drink two
+/// potions. Held by slot rather than as a flag, so activating a *different* slot
+/// while one is pending still works — a global lock would make a laggy connection
+/// feel like a frozen interface.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct PendingSlot {
+    pub slot: Option<usize>,
+    /// Seconds remaining before the guard gives up waiting for an answer.
+    ///
+    /// A guard with no expiry is a permanently dead control the first time a reply
+    /// is dropped, which is worse than the duplicate it prevents.
+    pub expires_in: f32,
+}
+
+impl PendingSlot {
+    /// Whether this slot is already waiting for an answer.
+    pub fn blocks(&self, slot: usize) -> bool {
+        self.slot == Some(slot) && self.expires_in > 0.0
+    }
+
+    fn mark(&mut self, slot: usize) {
+        self.slot = Some(slot);
+        self.expires_in = PENDING_TIMEOUT_SECS;
+    }
+
+    fn clear(&mut self) {
+        self.slot = None;
+        self.expires_in = 0.0;
+    }
+}
+
+/// How long an unanswered intent blocks its slot.
+const PENDING_TIMEOUT_SECS: f32 = 2.0;
+
+/// How close together two activations count as a double click.
+const DOUBLE_CLICK_SECS: f32 = 0.4;
+
+/// Turn slot activations into selection and intents.
+///
+/// This is what "connect the rendered slots to the interaction system" means, and
+/// it was missing: the slots emitted `Activated` and nothing listened, so
+/// `click_intent` had no production caller at all and clicking an item did nothing
+/// a player could see.
+///
+/// One activation selects. A second on the same slot, soon enough, is the action.
+/// Selection first, because a player who double-clicks still wants the details
+/// panel to be showing the thing they acted on.
+fn apply_slot_activations(
+    mut activated: MessageReader<super::controls::Activated>,
+    slots: Query<&InventorySlotButton>,
+    keys: Res<ButtonInput<KeyCode>>,
+    state: Res<UiState>,
+    time: Res<Time>,
+    mut selected: ResMut<SelectedSlot>,
+    mut pending: ResMut<PendingSlot>,
+    mut intents: MessageWriter<super::state::IntentMessage>,
+    mut last: Local<Option<(usize, f32)>>,
+) {
+    let now = time.elapsed_secs();
+    if pending.expires_in > 0.0 {
+        pending.expires_in = (pending.expires_in - time.delta_secs()).max(0.0);
+        if pending.expires_in == 0.0 {
+            pending.clear();
+        }
+    }
+
+    for message in activated.read() {
+        let Ok(button) = slots.get(message.entity) else {
+            continue;
+        };
+        let index = button.index;
+
+        let double = matches!(*last, Some((previous, at)) if previous == index && now - at <= DOUBLE_CLICK_SECS);
+        *last = Some((index, now));
+
+        selected.0 = Some(index);
+
+        let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+        if !double && !shift {
+            continue;
+        }
+
+        if pending.blocks(index) {
+            // Deliberately silent: the player pressed again because the first press
+            // looked like it did nothing, and a refusal message would say the
+            // interface is broken when it is merely waiting.
+            continue;
+        }
+
+        let slot = state.get().inventory.slot(index);
+        if let Some(intent) = click_intent(slot, index, double, shift) {
+            intents.write(super::state::IntentMessage(intent));
+            pending.mark(index);
+        }
+    }
+}
+
+/// Release the guard once the authority has answered.
+///
+/// Any snapshot change counts: the server's reply is a new snapshot, and an
+/// accepted action and a rejected one both produce one.
+fn clear_pending_on_answer(state: Res<UiState>, mut pending: ResMut<PendingSlot>) {
+    if state.is_changed() && pending.slot.is_some() {
+        pending.clear();
+    }
 }
 
 /// Ask the loader for the sheets an item's artwork needs.
@@ -998,6 +1111,139 @@ mod tests {
             "an ordinary drag across the interface cancelled itself"
         );
         assert_eq!(app.world().resource::<DragState>().over, Some(5));
+    }
+
+    /// An app with the activation pipeline and a populated inventory.
+    fn activation_app() -> (App, Entity) {
+        let mut app = App::new();
+        app.init_resource::<UiState>()
+            .init_resource::<SelectedSlot>()
+            .init_resource::<PendingSlot>()
+            .insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(Time::<()>::default())
+            .add_message::<super::super::controls::Activated>()
+            .add_message::<super::super::state::IntentMessage>()
+            .init_resource::<Recorded>()
+            .add_systems(
+                Update,
+                (apply_slot_activations, record_intents, clear_pending_on_answer).chain(),
+            );
+        UiState::set(
+            &mut app.world_mut().resource_mut::<UiState>(),
+            fixtures::snapshot(Scenario::Populated),
+        );
+
+        // A real slot entity, as the grid spawns them.
+        let slot = app.world_mut().spawn(InventorySlotButton { index: 0 }).id();
+        app.update();
+        (app, slot)
+    }
+
+    fn activate(app: &mut App, slot: Entity) {
+        app.world_mut().write_message(super::super::controls::Activated {
+            entity: slot,
+            source: super::super::controls::ActivationSource::Pointer,
+        });
+        app.update();
+    }
+
+    /// Every intent emitted since the app started.
+    ///
+    /// Accumulated by a system rather than read with a fresh cursor: `Messages` are
+    /// double-buffered and drop after a couple of frames, so reading them at the end
+    /// of a multi-frame test measures the buffer's retention rather than what the
+    /// client sent. Two of these tests failed that way before this existed.
+    #[derive(Resource, Default)]
+    struct Recorded(Vec<Intent>);
+
+    fn record_intents(
+        mut messages: MessageReader<super::super::state::IntentMessage>,
+        mut recorded: ResMut<Recorded>,
+    ) {
+        for message in messages.read() {
+            recorded.0.push(message.0.clone());
+        }
+    }
+
+    fn intents(app: &App) -> Vec<Intent> {
+        app.world().resource::<Recorded>().0.clone()
+    }
+
+    #[test]
+    fn one_click_selects_and_sends_nothing() {
+        // Selecting is free; acting is not. A single click that used the item would
+        // make the inventory dangerous to browse.
+        let (mut app, slot) = activation_app();
+        activate(&mut app, slot);
+
+        assert_eq!(app.world().resource::<SelectedSlot>().0, Some(0));
+        assert!(intents(&app).is_empty(), "a single click sent {:?}", intents(&app));
+    }
+
+    #[test]
+    fn a_double_click_sends_exactly_one_intent() {
+        // Exactly one: the task's word. Two use-intents drink two potions.
+        let (mut app, slot) = activation_app();
+        activate(&mut app, slot);
+        activate(&mut app, slot);
+
+        let sent = intents(&app);
+        assert_eq!(sent.len(), 1, "a double click sent {} intents: {sent:?}", sent.len());
+        assert_eq!(sent[0], Intent::UseInventorySlot { slot: 0 });
+    }
+
+    #[test]
+    fn hammering_a_slot_while_it_waits_sends_nothing_more() {
+        // The guard the task asks for. A player whose first click looked like it did
+        // nothing clicks again, and again — and each extra one would be another
+        // potion.
+        let (mut app, slot) = activation_app();
+        activate(&mut app, slot);
+        activate(&mut app, slot);
+        assert_eq!(intents(&app).len(), 1);
+
+        for _ in 0..6 {
+            activate(&mut app, slot);
+        }
+        let sent = intents(&app);
+        assert_eq!(sent.len(), 1, "hammering produced {} intents", sent.len());
+    }
+
+    #[test]
+    fn the_guard_lifts_when_the_authority_answers() {
+        // Held forever, it would be a dead control the first time a reply is lost.
+        let (mut app, slot) = activation_app();
+        activate(&mut app, slot);
+        activate(&mut app, slot);
+        assert!(app.world().resource::<PendingSlot>().blocks(0));
+
+        // The server's answer is a new snapshot, accepted or rejected alike.
+        UiState::set(
+            &mut app.world_mut().resource_mut::<UiState>(),
+            fixtures::snapshot(Scenario::Rejected),
+        );
+        app.update();
+        assert!(
+            !app.world().resource::<PendingSlot>().blocks(0),
+            "the guard survived the authority answering"
+        );
+    }
+
+    #[test]
+    fn a_pending_slot_does_not_block_a_different_one() {
+        // A global lock would make a laggy connection feel like a frozen interface.
+        let (mut app, first) = activation_app();
+        let second = app.world_mut().spawn(InventorySlotButton { index: 1 }).id();
+        app.update();
+
+        activate(&mut app, first);
+        activate(&mut app, first);
+        assert_eq!(intents(&app).len(), 1);
+
+        activate(&mut app, second);
+        activate(&mut app, second);
+        let sent = intents(&app);
+        assert_eq!(sent.len(), 2, "a pending slot blocked an unrelated one: {sent:?}");
     }
 
     #[test]
