@@ -303,26 +303,12 @@ mod tests {
 
     /// Spawn the real rail tree and run the mode systems over it.
     fn rail_app(window: Vec2) -> App {
-        use super::super::shell::{AppliedGeometry, ShellPlugin};
-
-        let mut app = App::new();
-        app.add_plugins(ShellPlugin)
-            .init_resource::<super::super::scale::ScaleDomains>()
-            .init_resource::<UiScale>()
-            .init_resource::<crate::world::ViewRadius>()
-            .add_plugins(RailPlugin);
-
-        let mut win = Window::default();
-        win.resolution.set(window.x, window.y);
-        app.world_mut().spawn(win);
-
-        // Two frames: one to spawn the tree, one for the mode systems to act on
-        // the geometry the first produced.
-        app.update();
-        app.update();
-
-        let _ = app.world().resource::<AppliedGeometry>();
-        app
+        // The shared harness, so there is one description of "a running shell".
+        // This was a local builder until `apply_geometry` began allocating the
+        // world's render target, which needs an asset server the local builder
+        // did not have. Three harnesses agreeing about the shell by coincidence
+        // was always going to end this way.
+        super::super::testing::shell_app(window)
     }
 
     /// The mode the shell actually settled on, which must exist by now.

@@ -398,32 +398,15 @@ mod tests {
         assert_eq!(two.projection_scale() * 2.0, one.projection_scale());
     }
 
-    /// An app with both cameras and everything `apply_geometry` reads, so the
-    /// production system runs rather than a stand-in for it.
+    /// The shared harness: the real shell, the real cameras, and the real world
+    /// camera from `world::world_camera`.
+    ///
+    /// Was a local builder that spawned its own approximation of the world
+    /// camera — which by construction could not notice the client getting its
+    /// render layer, order or target wrong. One description of "a running
+    /// shell", used by every test that needs one.
     fn camera_app(window_size: Vec2) -> App {
-        let mut app = App::new();
-        app.init_resource::<AppliedGeometry>()
-            .init_resource::<ScaleDomains>()
-            .init_resource::<UiScale>()
-            .init_resource::<crate::world::ViewRadius>()
-            .add_systems(Startup, spawn_shell)
-            .add_systems(Update, apply_geometry);
-
-        // The world camera as `world::setup` spawns it.
-        app.world_mut().spawn((
-            Camera2d,
-            Camera { order: 0, ..default() },
-            RenderLayers::layer(WORLD_LAYER),
-            Projection::Orthographic(OrthographicProjection::default_2d()),
-            WorldCamera,
-        ));
-
-        let mut window = Window::default();
-        window.resolution.set(window_size.x, window_size.y);
-        app.world_mut().spawn(window);
-
-        app.update();
-        app
+        super::super::testing::shell_app(window_size)
     }
 
     #[test]
