@@ -97,6 +97,8 @@ impl Plugin for ShellPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AppliedGeometry>()
             .init_resource::<ScaleDomains>()
+            .init_resource::<scale::TargetLimits>()
+            .add_systems(Update, adopt_device_limits)
             .add_systems(Startup, spawn_shell)
             .add_systems(Update, (apply_geometry, apply_rail_mode).chain());
     }
@@ -216,6 +218,36 @@ pub fn spawn_shell(mut commands: Commands) {
                 Region::Rail,
             ));
         });
+}
+
+/// Replace the fallback target limits with what the renderer will actually take.
+///
+/// The device's `max_texture_dimension_2d` is the only authority on how large a
+/// render target can be, and it is not a constant: WebGL2 guarantees 2048, most
+/// desktop hardware offers 16384, and the client cannot know which it has until
+/// a device exists. Reading it once and caching it keeps the choice of target
+/// size honest without querying every frame.
+///
+/// `Option<Res<..>>` because there is no render device in a headless test, and
+/// the fallback is the right answer there.
+fn adopt_device_limits(
+    device: Option<Res<bevy::render::renderer::RenderDevice>>,
+    mut limits: ResMut<scale::TargetLimits>,
+    mut adopted: Local<bool>,
+) {
+    if *adopted {
+        return;
+    }
+    let Some(device) = device else {
+        return;
+    };
+    let reported = device.limits().max_texture_dimension_2d;
+    let next = scale::TargetLimits::for_device(reported);
+    if *limits != next {
+        info!("render target limit is {reported}px (was assuming {})", limits.max_dimension);
+        *limits = next;
+    }
+    *adopted = true;
 }
 
 /// Resize the regions and the world camera when the window changes.

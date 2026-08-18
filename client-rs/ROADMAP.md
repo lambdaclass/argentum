@@ -286,13 +286,19 @@ is required:
   any point. The remaining suspects are the 2D render graph's handling of an
   image target under WebGL2/software rasterisation, and camera ordering across
   two different target kinds.
-- Physical HiDPI validation is outstanding regardless: text sharpness and
-  compositor behaviour cannot be judged where every ratio is emulated and
-  headless Chromium composites at 1x.
+- **The HiDPI path is not implemented.** This is an implementation gap, not a
+  validation one, and an earlier note here wrongly described the task as blocked
+  only on hardware. The pinned scale factor deliberately keeps the backing store
+  at CSS resolution: it holds the framing and the pixel grid, and it forgoes
+  physical-device scaling entirely, which is the thing this task requires. What
+  remains is to render at physical resolution without resampling — the offscreen
+  integer target above, or another design that achieves it. Hardware validation
+  of text sharpness comes after that exists; hardware cannot validate behaviour
+  that has not been written.
 
 ### Task W-0005 — Design tokens and Bevy primitives
 
-- **State:** planned
+- **State:** active
 - **Phase:** 0
 - **Depends on:** W-0001
 

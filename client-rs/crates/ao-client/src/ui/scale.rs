@@ -255,18 +255,59 @@ pub const BYTES_PER_PIXEL: u64 = 4;
 /// created before the old target is dropped so the swap can be atomic.
 pub const MAX_TARGET_BYTES: u64 = 48 * 1024 * 1024;
 
-/// Largest dimension on either axis.
+/// Largest dimension on either axis when the real limit is not known yet.
 ///
-/// WebGL2 guarantees only 2048, and wgpu's own default limit is 8192. A texture
-/// that exceeds the device maximum fails to create at all — a total-size budget
-/// does not catch it, because a 16384x512 target is small and still impossible.
-/// The conservative floor is deliberate: this client ships to WebGL2.
-pub const MAX_TARGET_DIMENSION: u32 = 8192;
+/// A texture that exceeds the device maximum fails to create at all, and a
+/// total-size budget does not catch it: a 16384x512 target is small and still
+/// impossible. So the limit has to be enforced separately — and it has to be the
+/// *device's* limit.
+///
+/// This value is wgpu's own default request, which is what Bevy receives on
+/// native and on WebGL2 where the hardware allows it. It is a fallback for the
+/// window before a render device exists, and for tests that have no device at
+/// all; it is not a claim about any particular backend. An earlier version of
+/// this constant justified 8192 as "conservative because WebGL2 guarantees only
+/// 2048", which is contradictory — 8192 is four times the guarantee, not a
+/// conservative reading of it. The guarantee is the reason to *ask the device*
+/// rather than the reason to pick a number.
+pub const FALLBACK_MAX_DIMENSION: u32 = 8192;
+
+/// What the renderer will actually accept as a render target.
+///
+/// Populated from `RenderDevice` once one exists; the fallback until then.
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TargetLimits {
+    /// The device's `max_texture_dimension_2d`.
+    pub max_dimension: u32,
+    /// Our own memory budget, which is a choice rather than a device limit.
+    pub max_bytes: u64,
+}
+
+impl Default for TargetLimits {
+    fn default() -> Self {
+        Self { max_dimension: FALLBACK_MAX_DIMENSION, max_bytes: MAX_TARGET_BYTES }
+    }
+}
+
+impl TargetLimits {
+    /// The limits for a device reporting `max_dimension`.
+    ///
+    /// Clamped to at least one, because a device reporting zero would otherwise
+    /// make every target impossible and the reduction loop pointless.
+    pub fn for_device(max_dimension: u32) -> Self {
+        Self { max_dimension: max_dimension.max(1), ..Self::default() }
+    }
+}
 
 /// Choose the world's render target for a region, ratio and logical zoom.
 ///
 /// `region` is the world's rectangle in logical pixels, as the shell laid it out.
-pub fn world_render(region: Rect, device: f32, logical_zoom: u32) -> WorldRender {
+pub fn world_render(
+    region: Rect,
+    device: f32,
+    logical_zoom: u32,
+    limits: TargetLimits,
+) -> WorldRender {
     let logical_zoom = logical_zoom.max(1);
     let device = if device.is_finite() && device > 0.0 { device } else { 1.0 };
 
@@ -300,9 +341,9 @@ pub fn world_render(region: Rect, device: f32, logical_zoom: u32) -> WorldRender
 
     let fits = |extent: UVec2, zoom: u32| {
         let size = extent * zoom;
-        size.x <= MAX_TARGET_DIMENSION
-            && size.y <= MAX_TARGET_DIMENSION
-            && (size.x as u64) * (size.y as u64) * BYTES_PER_PIXEL <= MAX_TARGET_BYTES
+        size.x <= limits.max_dimension
+            && size.y <= limits.max_dimension
+            && (size.x as u64) * (size.y as u64) * BYTES_PER_PIXEL <= limits.max_bytes
     };
 
     // Give up sharpness first: it is invisible to most players, where giving up
@@ -323,7 +364,7 @@ pub fn world_render(region: Rect, device: f32, logical_zoom: u32) -> WorldRender
     // path. Clamp to something creatable and say so: a texture that fails to
     // allocate is a black screen, and a quietly reframed world is a player
     // seeing a different amount of the game than everyone else.
-    let used = wanted.min(UVec2::splat(MAX_TARGET_DIMENSION / zoom.max(1))).max(UVec2::ONE);
+    let used = wanted.min(UVec2::splat(limits.max_dimension / zoom.max(1))).max(UVec2::ONE);
     let mut extent = used;
     while !fits(extent, zoom) && (extent.x > 1 || extent.y > 1) {
         extent = (extent.as_vec2() * 0.5).floor().as_uvec2().max(UVec2::ONE);
@@ -402,7 +443,8 @@ mod tests {
         // as the camera pans.
         for device in RATIOS {
             for logical in 1..=3u32 {
-                let render = world_render(region(998.0, 730.0), device, logical);
+                let render =
+                    world_render(region(998.0, 730.0), device, logical, TargetLimits::default());
                 assert!(render.zoom >= 1, "zoom {} at {device}x", render.zoom);
                 // Integral by construction — the assertion that matters is that
                 // it is never *derived* from the ratio by multiplication, which
@@ -422,10 +464,10 @@ mod tests {
         // A ratio change must not move what is on screen. The extent is the
         // framing, so it is the thing that has to be ratio-independent.
         let region = region(998.0, 730.0);
-        let baseline = world_render(region, 1.0, 1).extent;
+        let baseline = world_render(region, 1.0, 1, TargetLimits::default()).extent;
         for device in RATIOS {
             assert_eq!(
-                world_render(region, device, 1).extent,
+                world_render(region, device, 1, TargetLimits::default()).extent,
                 baseline,
                 "at {device}x the world covers a different number of world pixels"
             );
@@ -437,8 +479,8 @@ mod tests {
         // The complement: ratio-independent framing must not mean the ratio is
         // ignored, or the target is pointless and HiDPI gains nothing.
         let region = region(998.0, 730.0);
-        let one = world_render(region, 1.0, 1);
-        let two = world_render(region, 2.0, 1);
+        let one = world_render(region, 1.0, 1, TargetLimits::default());
+        let two = world_render(region, 2.0, 1, TargetLimits::default());
         assert_eq!(one.extent, two.extent);
         assert!(
             two.texture_size().x > one.texture_size().x,
@@ -455,10 +497,10 @@ mod tests {
         // would render at 2x and then downscale to 1.25, discarding detail it
         // had just paid to produce.
         let region = region(998.0, 730.0);
-        assert_eq!(world_render(region, 1.25, 1).zoom, 1);
-        assert_eq!(world_render(region, 1.75, 1).zoom, 1);
-        assert_eq!(world_render(region, 2.0, 1).zoom, 2);
-        assert_eq!(world_render(region, 2.5, 1).zoom, 2);
+        assert_eq!(world_render(region, 1.25, 1, TargetLimits::default()).zoom, 1);
+        assert_eq!(world_render(region, 1.75, 1, TargetLimits::default()).zoom, 1);
+        assert_eq!(world_render(region, 2.0, 1, TargetLimits::default()).zoom, 2);
+        assert_eq!(world_render(region, 2.5, 1, TargetLimits::default()).zoom, 2);
     }
 
     #[test]
@@ -471,7 +513,7 @@ mod tests {
             layout::MAX_WORLD_TILES_X as f32 * TILE_SIZE,
             layout::MAX_WORLD_TILES_Y as f32 * TILE_SIZE,
         );
-        let render = world_render(region, 2.0, 1);
+        let render = world_render(region, 2.0, 1, TargetLimits::default());
         assert_eq!(render.zoom, 1, "the zoom was not the thing given up");
         assert!(
             render.texture_bytes() <= MAX_TARGET_BYTES,
@@ -481,7 +523,7 @@ mod tests {
         );
         assert_eq!(
             render.extent,
-            world_render(region, 1.0, 1).extent,
+            world_render(region, 1.0, 1, TargetLimits::default()).extent,
             "the bound changed the framing instead of the zoom"
         );
     }
@@ -491,10 +533,10 @@ mod tests {
         // Unreachable through the shell, because world_view caps the region
         // first. Asserted anyway: a target over the budget must not be
         // constructible from here whatever a future caller passes.
-        let render = world_render(region(20_000.0, 20_000.0), 4.0, 1);
+        let render = world_render(region(20_000.0, 20_000.0), 4.0, 1, TargetLimits::default());
         let size = render.texture_size();
         assert!(
-            render.texture_bytes() <= MAX_TARGET_BYTES && size.x <= MAX_TARGET_DIMENSION,
+            render.texture_bytes() <= MAX_TARGET_BYTES && size.x <= FALLBACK_MAX_DIMENSION,
             "{size:?} is {} bytes, over budget",
             render.texture_bytes()
         );
@@ -508,7 +550,7 @@ mod tests {
         // render target, so this may never return one.
         for region in [region(0.0, 0.0), region(-10.0, 5.0), region(f32::NAN, f32::NAN)] {
             for device in [1.0, 0.0, -1.0, f32::NAN, f32::INFINITY] {
-                let render = world_render(region, device, 1);
+                let render = world_render(region, device, 1, TargetLimits::default());
                 assert!(render.extent.x >= 1 && render.extent.y >= 1, "{region:?} at {device}");
                 assert!(render.zoom >= 1);
             }
@@ -523,7 +565,7 @@ mod tests {
         // they come to disagree by a pixel.
         let logical = Rect::from_corners(Vec2::new(0.0, 30.0), Vec2::new(998.0, 760.0));
         for device in RATIOS {
-            let render = world_render(logical, device, 1);
+            let render = world_render(logical, device, 1, TargetLimits::default());
             assert_eq!(
                 render.composite.min,
                 (logical.min * device).round(),
@@ -542,17 +584,17 @@ mod tests {
         // A target that came back smaller has either cost sharpness or changed
         // what the player can see. The second is a fault, and neither may be
         // absorbed silently.
-        let ordinary = world_render(region(998.0, 730.0), 2.0, 1);
+        let ordinary = world_render(region(998.0, 730.0), 2.0, 1, TargetLimits::default());
         assert_eq!(ordinary.reduced, None, "an ordinary window should need no reduction");
 
         // Large enough that 2x exceeds the budget while 1x fits, so the zoom is
         // what gives way.
         let big = region(2600.0, 1600.0);
-        let render = world_render(big, 2.0, 1);
+        let render = world_render(big, 2.0, 1, TargetLimits::default());
         assert_eq!(render.reduced, Some(Reduction::Zoom { from: 2, to: 1 }));
         assert_eq!(
             render.extent,
-            world_render(big, 1.0, 1).extent,
+            world_render(big, 1.0, 1, TargetLimits::default()).extent,
             "the framing moved when only the zoom should have"
         );
     }
@@ -569,7 +611,7 @@ mod tests {
             super::super::layout::MAX_WORLD_TILES_Y as f32 * TILE_SIZE,
         );
         for device in RATIOS {
-            let render = world_render(capped, device, 1);
+            let render = world_render(capped, device, 1, TargetLimits::default());
             assert!(
                 !matches!(render.reduced, Some(Reduction::Framing { .. })),
                 "at {device}x the largest legitimate region was reframed: {:?}",
@@ -592,12 +634,45 @@ mod tests {
         // future caller does reach it, the framing change is reported, because a
         // quietly reframed world is a player seeing a different amount of the
         // game than everybody else.
-        let render = world_render(region(40_000.0, 40_000.0), 1.0, 1);
+        let render = world_render(region(40_000.0, 40_000.0), 1.0, 1, TargetLimits::default());
         assert!(
             matches!(render.reduced, Some(Reduction::Framing { .. })),
             "got {:?}",
             render.reduced
         );
+    }
+
+    #[test]
+    fn a_smaller_device_limit_is_honoured_rather_than_the_fallback() {
+        // The fallback is wgpu's default request, not a promise about any
+        // backend. A device that reports less has to be believed, or the client
+        // asks for a texture that cannot be created and gets a black screen.
+        let region = region(3000.0, 2000.0);
+        let generous = world_render(region, 1.0, 1, TargetLimits::default());
+        assert!(
+            generous.texture_size().x > 2048,
+            "this case must exceed a 2048 limit to mean anything"
+        );
+
+        let webgl2 = world_render(region, 1.0, 1, TargetLimits::for_device(2048));
+        assert!(
+            webgl2.texture_size().x <= 2048 && webgl2.texture_size().y <= 2048,
+            "{:?} exceeds the 2048 the device reported",
+            webgl2.texture_size()
+        );
+        assert!(
+            webgl2.reduced.is_some(),
+            "the target was cut to fit the device and did not say so"
+        );
+    }
+
+    #[test]
+    fn a_device_reporting_nothing_usable_still_yields_a_creatable_target() {
+        // A zero limit would otherwise make every size impossible and leave the
+        // reduction loop spinning against a bound it can never satisfy.
+        let render = world_render(region(998.0, 730.0), 1.0, 1, TargetLimits::for_device(0));
+        assert!(render.texture_size().x >= 1 && render.texture_size().y >= 1);
+        assert!(render.zoom >= 1);
     }
 
     #[test]
@@ -608,11 +683,12 @@ mod tests {
         // the replacement before dropping the original.
         for device in [1.0f32, 1.25, 1.5, 2.0, 4.0] {
             for size in [500.0f32, 1920.0, 4000.0, 12_000.0] {
-                let render = world_render(region(size, size * 0.6), device, 1);
+                let render =
+                    world_render(region(size, size * 0.6), device, 1, TargetLimits::default());
                 let texture = render.texture_size();
                 assert!(
-                    texture.x <= MAX_TARGET_DIMENSION && texture.y <= MAX_TARGET_DIMENSION,
-                    "{texture:?} exceeds the {MAX_TARGET_DIMENSION}px dimension limit at {device}x"
+                    texture.x <= FALLBACK_MAX_DIMENSION && texture.y <= FALLBACK_MAX_DIMENSION,
+                    "{texture:?} exceeds the {FALLBACK_MAX_DIMENSION}px dimension limit at {device}x"
                 );
                 assert!(
                     render.texture_bytes() <= MAX_TARGET_BYTES,
