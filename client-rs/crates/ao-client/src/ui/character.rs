@@ -454,7 +454,10 @@ fn inventory_slot(
         // Keyed so focus survives the grid being rebuilt, which happens on
         // every snapshot and every resize.
         ControlKey::indexed("inventory.slot", index),
-        Control { tab_index: 100 + index as u32, enabled: !locked, ..default() },
+        // The shared contract, not `Control` alone: this carried `Control` and no
+        // `Button`, so it had no `Interaction` and the pointer pipeline could not
+        // see it. Clicking an inventory slot did nothing.
+        super::controls::interactive(100 + index as u32, !locked),
         Children::spawn(SpawnIter(children.into_iter())),
     )
 }

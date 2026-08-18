@@ -661,6 +661,50 @@ mod tests {
     }
 
     #[test]
+    fn the_production_slots_are_clickable_controls() {
+        // Both the inventory slots and the hotbar slots carried no `Interaction`
+        // — the inventory had `Control` without `Button`, the hotbar had neither —
+        // so the pointer pipeline could not see either of them. The hotbar keys
+        // worked and the slots themselves were decoration.
+        use super::super::character::InventorySlotButton;
+        use super::super::controls::Control;
+        use super::super::testing;
+
+        let mut app = testing::shell_app(Vec2::new(1280.0, 832.0));
+
+        let inventory: Vec<Entity> = app
+            .world_mut()
+            .query_filtered::<Entity, With<InventorySlotButton>>()
+            .iter(app.world())
+            .collect();
+        assert!(!inventory.is_empty(), "there are no inventory slots to check");
+        for slot in &inventory {
+            assert!(
+                app.world().get::<Interaction>(*slot).is_some(),
+                "an inventory slot has no Interaction, so a click cannot reach it"
+            );
+            assert!(app.world().get::<Control>(*slot).is_some());
+        }
+
+        let hotbar: Vec<Entity> = app
+            .world_mut()
+            .query_filtered::<Entity, With<super::super::hotbar::HotbarSlot>>()
+            .iter(app.world())
+            .collect();
+        assert!(!hotbar.is_empty(), "there are no hotbar slots to check");
+        for slot in &hotbar {
+            assert!(
+                app.world().get::<Interaction>(*slot).is_some(),
+                "a hotbar slot has no Interaction, so a click cannot reach it"
+            );
+            assert!(
+                app.world().get::<Control>(*slot).is_some(),
+                "a hotbar slot is not a control, so Tab passes over it"
+            );
+        }
+    }
+
+    #[test]
     fn every_region_appears_exactly_once_in_the_order() {
         // The order is also the keyboard tab order, so a duplicate or a
         // missing entry is a focus trap rather than a cosmetic problem.

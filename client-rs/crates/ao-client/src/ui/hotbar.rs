@@ -66,18 +66,15 @@ fn slot(index: usize) -> impl Bundle {
         BackgroundColor(surface::WELL),
         BorderColor::all(surface::EDGE),
         HotbarSlot { index },
-        // The key label sits in the slot's top-left, as in every AO client:
-        // it is a reminder, not a caption, so it must not take slot area from
-        // the icon.
-        children![(
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(space::HAIR),
-                top: Val::Px(space::HAIR),
-                ..default()
-            },
-            label(slot_key_label(index), type_scale::MICRO, ink::MUTED),
-        )],
+        // A real control. These slots carried no interaction components at all,
+        // so clicking one did nothing and Tab passed straight over them — the
+        // keys worked and the slots themselves were decoration.
+        super::controls::interactive(200 + index as u32, true),
+        super::controls::ControlKey::indexed("hotbar.slot", index),
+        // The key label sits in the slot's top-left, as in every AO client: it is
+        // a reminder, not a caption, so it must not take slot area from the icon.
+        // Drawn by the shared prompt rather than a second copy of it here.
+        children![super::controls::hotkey_prompt(&slot_key_label(index))],
     )
 }
 
@@ -105,22 +102,6 @@ fn populate(mut commands: Commands, bars: Query<Entity, With<Hotbar>>) {
             ));
         });
     }
-}
-
-/// The selection ring drawn on the active slot.
-pub fn selection_ring() -> impl Bundle {
-    (
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(0.0),
-            top: Val::Px(0.0),
-            right: Val::Px(0.0),
-            bottom: Val::Px(0.0),
-            border: UiRect::all(Val::Px(focus::RING_WIDTH)),
-            ..default()
-        },
-        BorderColor::all(focus::SELECTED),
-    )
 }
 
 #[cfg(test)]

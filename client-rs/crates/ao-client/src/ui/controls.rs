@@ -794,7 +794,6 @@ fn present_text_fields(
 /// A shared text field, rendered.
 pub fn text_field(field: TextField, tab_index: u32) -> impl Bundle {
     (
-        Button,
         Node {
             width: Val::Percent(100.0),
             height: Val::Px(size::STATUS_BAR_HEIGHT + space::SNUG * 2.0),
@@ -806,7 +805,7 @@ pub fn text_field(field: TextField, tab_index: u32) -> impl Bundle {
         },
         BackgroundColor(surface::WELL),
         BorderColor::all(surface::EDGE),
-        Control { tab_index, ..default() },
+        interactive(tab_index, true),
         field,
         children![(
             Text::new(String::new()),
@@ -834,6 +833,21 @@ fn present_controls(
 }
 
 /// A button.
+/// What makes a node a control rather than a picture of one.
+///
+/// `Button` requires `Interaction`, which is the component `track_pointer`
+/// queries; `Control` is what the focus and activation systems read. Three
+/// places carried `Control` alone — the shared builders, the inventory slot and
+/// the hotbar slot — and every one of them was invisible to the pointer: hover
+/// never registered and a click did nothing at all.
+///
+/// Panels keep their own visuals and compose this for the behaviour, so a panel
+/// with bespoke artwork does not have to choose between looking right and being
+/// clickable.
+pub fn interactive(tab_index: u32, enabled: bool) -> impl Bundle {
+    (Button, Control { tab_index, enabled, ..default() })
+}
+
 pub fn button(label_text: &str, state: ControlState, tab_index: u32) -> impl Bundle {
     (
         // `Button` is what makes this a control rather than a picture of one:
@@ -841,7 +855,6 @@ pub fn button(label_text: &str, state: ControlState, tab_index: u32) -> impl Bun
         // queries. Without it the builder produced something carrying `Control`
         // that the pointer pipeline could not see at all — hover, press and
         // pointer activation silently did nothing.
-        Button,
         Node {
             padding: UiRect::axes(Val::Px(space::WIDE), Val::Px(space::SNUG)),
             justify_content: JustifyContent::Center,
@@ -851,7 +864,7 @@ pub fn button(label_text: &str, state: ControlState, tab_index: u32) -> impl Bun
         },
         BackgroundColor(state.surface()),
         BorderColor::all(if state.shows_focus_ring() { focus::RING } else { surface::EDGE }),
-        Control { tab_index, enabled: state.is_actionable(), ..default() },
+        interactive(tab_index, state.is_actionable()),
         children![(
             Text::new(label_text.to_string()),
             TextFont { font_size: type_scale::SMALL, ..default() },
@@ -868,7 +881,6 @@ pub fn tab(label_text: &str, selected: bool, tab_index: u32) -> impl Bundle {
         // queries. Without it the builder produced something carrying `Control`
         // that the pointer pipeline could not see at all — hover, press and
         // pointer activation silently did nothing.
-        Button,
         Node {
             flex_grow: 1.0,
             padding: UiRect::axes(Val::Px(space::BASE), Val::Px(space::SNUG)),
@@ -880,7 +892,7 @@ pub fn tab(label_text: &str, selected: bool, tab_index: u32) -> impl Bundle {
         // The selected tab is marked by its underline, not only by a slightly
         // different fill: two dark browns are not a distinction at a glance.
         BorderColor::all(if selected { focus::SELECTED } else { Color::NONE }),
-        Control { tab_index, ..default() },
+        interactive(tab_index, true),
         children![(
             Text::new(label_text.to_string()),
             TextFont { font_size: type_scale::SMALL, ..default() },
@@ -897,7 +909,6 @@ pub fn slot(state: ControlState, tab_index: u32) -> impl Bundle {
         // queries. Without it the builder produced something carrying `Control`
         // that the pointer pipeline could not see at all — hover, press and
         // pointer activation silently did nothing.
-        Button,
         Node {
             width: Val::Px(size::SLOT),
             height: Val::Px(size::SLOT),
@@ -906,7 +917,7 @@ pub fn slot(state: ControlState, tab_index: u32) -> impl Bundle {
         },
         BackgroundColor(surface::WELL),
         BorderColor::all(if state.shows_focus_ring() { focus::RING } else { surface::EDGE }),
-        Control { tab_index, enabled: state.is_actionable(), ..default() },
+        interactive(tab_index, state.is_actionable()),
     )
 }
 
