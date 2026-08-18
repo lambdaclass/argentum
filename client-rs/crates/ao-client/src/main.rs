@@ -45,6 +45,30 @@ fn winit_settings() -> WinitSettings {
     WinitSettings { focused_mode: UpdateMode::Continuous, unfocused_mode: UpdateMode::Continuous }
 }
 
+/// The window's starting resolution.
+///
+/// On the web the scale factor is pinned to 1, so the canvas's CSS box is one
+/// logical pixel each. Bevy's `fit_canvas_to_parent` installs that CSS box as
+/// the window's *physical* size; left with a scale factor from the display, the
+/// client then computed its logical size as css/ratio. At ratio 2 a 1278px shell
+/// became a 639px window: the character rail collapsed to its icon strip and the
+/// world was drawn at twice the zoom. A device pixel ratio change must not move
+/// the layout at all, and this is what holds it still.
+///
+/// The cost, recorded rather than hidden: the backing store stays at the CSS
+/// size, so a high-DPI display gets an upscale rather than a sharper render. For
+/// the world that is nearly free — it is pixel art under `image-rendering:
+/// pixelated`, so an integer ratio is nearest-neighbour either way — and for
+/// interface text it is a real loss. Fixing it properly means owning the canvas
+/// backing store rather than leaving it to Bevy, and that cannot be verified
+/// without a physical high-DPI display.
+fn host_resolution() -> WindowResolution {
+    let resolution = WindowResolution::new(VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
+    #[cfg(target_arch = "wasm32")]
+    let resolution = resolution.with_scale_factor_override(1.0);
+    resolution
+}
+
 fn main() {
     init_logging();
 
@@ -67,7 +91,7 @@ fn main() {
                 .set(WindowPlugin {
                     primary_window: Some(Window {
                         title: "Argentum".into(),
-                        resolution: WindowResolution::new(VIEWPORT_WIDTH, VIEWPORT_HEIGHT),
+                        resolution: host_resolution(),
                         // Vsync. The renderer has nothing to gain from running
                         // ahead of the display, and uncapped frames on a laptop
                         // just burn battery.
@@ -77,10 +101,7 @@ fn main() {
                         // Track the element. The shell lays out against the
                         // whole window — top bar, world viewport, character
                         // rail — so a window narrower than the page puts the
-                        // rail off the right-hand edge and clips the status
-                        // bar. Stretching is not a risk here: `ui::scale`
-                        // keeps the world on a whole-number pixel grid
-                        // independently of the window size.
+                        // rail off the right-hand edge and clips the status bar.
                         #[cfg(target_arch = "wasm32")]
                         fit_canvas_to_parent: true,
                         // The browser's own shortcuts stay usable.

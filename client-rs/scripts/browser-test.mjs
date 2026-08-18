@@ -297,7 +297,10 @@ async function main() {
     }
 
     // Device pixel ratio is checked only for "the client still works", not for
-    // rasterization sharpness.
+    // rasterization sharpness. What it CAN check, and what the paragraph below
+    // used to deny, is whether the client observes the ratio at all: it reads
+    // window.devicePixelRatio, which the emulation does change. A DPR-only
+    // change must leave the logical layout alone and grow the backing store.
     //
     // Playwright's deviceScaleFactor is an emulation: it changes
     // window.devicePixelRatio, but headless Chromium composites at 1x and winit
@@ -326,8 +329,35 @@ async function main() {
         `shell ${measured.shellWidth}x${measured.shellHeight}, canvas ${measured.cssWidth}x${measured.cssHeight}, window ${measured.innerWidth}x${measured.innerHeight}`
       );
       check(`no scrollbars at ${ratio}x`, !measured.scrollsHorizontally && !measured.scrollsVertically);
+
+      // The client pins its scale factor to 1 on the web, so one CSS pixel is
+      // one logical pixel whatever the display reports. This is the assertion
+      // that the pinning holds: without it Bevy's canvas fitting installed the
+      // CSS box as the *physical* size and the client concluded it had
+      // css/ratio logical pixels — at ratio 2 the rail collapsed to its icon
+      // strip and the world drew at twice the zoom.
+      //
+      // It also states the accepted cost: the backing store equals the CSS box
+      // rather than exceeding it, so a high-DPI display gets an upscale. See
+      // `host_resolution` in main.rs.
+      check(
+        `one css pixel is one logical pixel at ${ratio}x`,
+        Math.abs(measured.backingWidth - measured.cssWidth) <= 2 &&
+          Math.abs(measured.backingHeight - measured.cssHeight) <= 2,
+        `css ${measured.cssWidth}x${measured.cssHeight}, backing ${measured.backingWidth}x${measured.backingHeight}, ratio ${measured.ratio}`
+      );
       await dprContext.close();
     }
+
+    // Layout invariance across ratios is asserted in Bevy, by
+    // a_device_pixel_ratio_change_alone_does_not_change_what_is_framed, which
+    // can read the framing directly. A first attempt to check it here sampled
+    // the rendered pixels for the rail's edge and reported one value at every
+    // ratio while the captures plainly showed the rail collapsing at 2x — a
+    // check that passes for the wrong reason is worse than no check.
+    //
+    // Once the backing store is right the logical size is the CSS size by
+    // construction, which is what the assertion above pins.
 
     // "Update the backing store exactly once per event." A resize that settles
     // through two or three intermediate sizes is a visible flicker, and a

@@ -30,7 +30,18 @@ fn main() {
     let stamp = if dirty { format!("{sha}-dirty") } else { sha };
     println!("cargo:rustc-env=AO_BUILD={stamp}");
 
-    // Rebuild when HEAD moves, or the stamp goes stale and starts lying.
+    // Everything the stamp is computed from, or it goes stale and starts lying.
+    //
+    // Naming any rerun-if-changed turns off cargo's default of re-running when
+    // a package file changes, so the sources have to be listed too. Without
+    // them this script only re-ran when HEAD moved: editing a source file left
+    // the previous stamp baked in, which is precisely when "-dirty" should have
+    // appeared and did not. `./build.sh web` then failed its own check with a
+    // message blaming a stale artifact, and `cargo clean -p` did not help
+    // because the script still had no reason to run again.
+    for source in ["crates", "assets", "Cargo.toml", "Cargo.lock"] {
+        println!("cargo:rerun-if-changed=../../{source}");
+    }
     println!("cargo:rerun-if-changed=../../../.git/HEAD");
     println!("cargo:rerun-if-changed=../../../.git/refs/heads");
 }
