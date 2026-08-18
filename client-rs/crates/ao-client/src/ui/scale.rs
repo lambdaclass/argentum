@@ -170,14 +170,17 @@ pub fn world_scale(world_region: Vec2) -> u32 {
     (fit.floor() as i32).max(1) as u32
 }
 
-/// The offscreen target the world is rendered into.
+/// The offscreen target the world is rendered into, and where it lands.
 ///
-/// `extent` is how many *world* pixels it covers; `zoom` is how many physical
-/// pixels each of those gets. The texture is therefore `extent * zoom` physical
-/// pixels, and it is composited into the world region — which may be a different
-/// physical size — by a single nearest-neighbour scale.
+/// `extent` is how many *world* pixels the texture covers; `zoom` is how many
+/// physical pixels each of those gets, so the texture is `extent * zoom` physical
+/// pixels. `composite` is the physical rectangle of the window it is presented
+/// into — carried here rather than recomputed by each consumer, because the
+/// camera's projection, the compositor's placement and the pointer's inverse
+/// mapping must agree to the pixel, and three roundings of the same numbers is
+/// how they stop agreeing.
 ///
-/// This indirection exists for one reason: fractional device pixel ratios. Drawn
+/// The indirection exists for one reason: fractional device pixel ratios. Drawn
 /// straight to the screen, one world pixel covers 1.25 or 1.5 physical pixels at
 /// ordinary Windows and GNOME settings, so nearest sampling duplicates some
 /// source pixels and not others, and the duplication pattern *shifts as the
@@ -186,20 +189,38 @@ pub fn world_scale(world_region: Vec2) -> u32 {
 ///
 /// Rendering to a target whose zoom is a whole number keeps every sprite on an
 /// integral grid inside the texture, and panning then moves whole world pixels
-/// within it. The one remaining resample is the final composite, which is a
-/// fixed mapping from texture to screen that does not change as the player
-/// moves — so the pattern is stable rather than crawling.
+/// within it. The one remaining resample is the composite, a fixed mapping from
+/// texture to screen that does not change as the player moves — so any
+/// duplication pattern is stable rather than crawling.
 ///
 /// The alternative considered and rejected: floor the on-screen zoom to a whole
 /// number and letterbox the remainder. It keeps the grid integral with no extra
 /// texture, but at 1.25 it draws the world at 80% of its region, so raising a
 /// display's scaling would visibly shrink the game and add borders.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WorldRender {
     /// World pixels covered, across and down.
     pub extent: UVec2,
-    /// Whole physical pixels per world pixel inside the target.
+    /// Whole physical pixels per world pixel inside the texture.
     pub zoom: u32,
+    /// Where the texture is presented, in physical pixels of the window.
+    pub composite: Rect,
+    /// Set when the requested target could not be honoured and a reduced
+    /// profile was used instead. Never silent: the caller logs it, because a
+    /// changed profile can change what a player sees.
+    pub reduced: Option<Reduction>,
+}
+
+/// Why a target came back smaller than asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reduction {
+    /// The zoom was lowered to fit the memory budget. Costs sharpness only; the
+    /// framing is unchanged, so this is the acceptable one.
+    Zoom { from: u32, to: u32 },
+    /// Even one physical pixel per world pixel did not fit. The framing itself
+    /// had to change, which contradicts the invariant this module exists to
+    /// hold, so it is reported as a fault rather than absorbed.
+    Framing { wanted: UVec2, used: UVec2 },
 }
 
 impl WorldRender {
@@ -207,56 +228,112 @@ impl WorldRender {
     pub fn texture_size(&self) -> UVec2 {
         self.extent * self.zoom
     }
+
+    /// Bytes the texture occupies, at four per pixel.
+    pub fn texture_bytes(&self) -> u64 {
+        let size = self.texture_size();
+        size.x as u64 * size.y as u64 * BYTES_PER_PIXEL
+    }
 }
 
-/// Largest target texture, in pixels.
+/// Bytes per pixel of the target's format, `Rgba8UnormSrgb`.
+pub const BYTES_PER_PIXEL: u64 = 4;
+
+/// Largest target texture, in bytes.
 ///
-/// A bound, not a preference: the texture is `extent * zoom`, both of which grow
-/// with the window, and at 4K maximised the product is already around 7 million
-/// pixels — 28 MB of GPU memory that has to be reallocated on every resize. Past
-/// this the zoom is reduced rather than the framing changed, because framing is
-/// what a player notices.
-pub const MAX_TARGET_PIXELS: u32 = 16_777_216;
+/// In bytes rather than pixels because the format decides the cost, and a pixel
+/// budget silently quadruples if the format ever widens.
+///
+/// The number is derived, not chosen. The largest target the shell can ask for
+/// is `layout::MAX_WORLD_TILES` at one physical pixel per world pixel —
+/// 3840x2304, or 33.8 MB — and a budget below that would put the *ordinary
+/// maximum* into the framing fallback, quietly showing those players less of the
+/// game. `the_largest_region_the_shell_can_ask_for_needs_no_framing_reduction`
+/// is what keeps the two in step.
+///
+/// Peak usage is about twice this during a resize, because the replacement is
+/// created before the old target is dropped so the swap can be atomic.
+pub const MAX_TARGET_BYTES: u64 = 48 * 1024 * 1024;
+
+/// Largest dimension on either axis.
+///
+/// WebGL2 guarantees only 2048, and wgpu's own default limit is 8192. A texture
+/// that exceeds the device maximum fails to create at all — a total-size budget
+/// does not catch it, because a 16384x512 target is small and still impossible.
+/// The conservative floor is deliberate: this client ships to WebGL2.
+pub const MAX_TARGET_DIMENSION: u32 = 8192;
 
 /// Choose the world's render target for a region, ratio and logical zoom.
-pub fn world_render(region: Vec2, device: f32, logical_zoom: u32) -> WorldRender {
+///
+/// `region` is the world's rectangle in logical pixels, as the shell laid it out.
+pub fn world_render(region: Rect, device: f32, logical_zoom: u32) -> WorldRender {
     let logical_zoom = logical_zoom.max(1);
     let device = if device.is_finite() && device > 0.0 { device } else { 1.0 };
 
-    // World pixels the region shows, which is the framing and must not move with
-    // the display: it comes from the logical region only.
-    let extent = UVec2::new(
-        ((region.x.max(0.0) / logical_zoom as f32).floor() as i64).clamp(1, u32::MAX as i64) as u32,
-        ((region.y.max(0.0) / logical_zoom as f32).floor() as i64).clamp(1, u32::MAX as i64) as u32,
+    let size = Vec2::new(
+        if region.width().is_finite() { region.width().max(0.0) } else { 0.0 },
+        if region.height().is_finite() { region.height().max(0.0) } else { 0.0 },
+    );
+
+    // The composite rectangle, in physical pixels. Rounded once, here, and then
+    // used by everything: the projection derives from it, the compositor is
+    // placed at it and the pointer inverts through it.
+    let min = Vec2::new(
+        if region.min.x.is_finite() { region.min.x } else { 0.0 },
+        if region.min.y.is_finite() { region.min.y } else { 0.0 },
+    );
+    let composite_min = (min * device).round();
+    let composite = Rect::from_corners(composite_min, composite_min + (size * device).round());
+
+    // World pixels the region shows. This is the framing, and it comes from the
+    // logical region only so that a display setting cannot move it.
+    let wanted = UVec2::new(
+        ((size.x / logical_zoom as f32).floor() as i64).clamp(1, u32::MAX as i64) as u32,
+        ((size.y / logical_zoom as f32).floor() as i64).clamp(1, u32::MAX as i64) as u32,
     );
 
     // Floored, so the zoom is whole and the grid inside the texture is integral.
-    // At 1.25 that means rendering at 1x and letting the composite upscale,
-    // which is the stable choice; ceiling instead would render at 2x and then
-    // *downscale* to 1.25, throwing away detail it had just paid for.
-    let mut zoom = ((device * logical_zoom as f32).floor() as i64).max(1) as u32;
+    // At 1.25 that means rendering at 1x and letting the composite upscale;
+    // ceiling instead would render at 2x and then *downscale* to 1.25, throwing
+    // away detail it had just paid for.
+    let asked = ((device * logical_zoom as f32).floor() as i64).max(1) as u32;
 
-    // Reduce the zoom until the texture fits the bound, and the zoom first:
-    // giving up sharpness is invisible to most players, while giving up extent
-    // changes what is on screen.
-    let pixels = |extent: UVec2, zoom: u32| {
-        (extent.x as u64) * (extent.y as u64) * (zoom as u64) * (zoom as u64)
+    let fits = |extent: UVec2, zoom: u32| {
+        let size = extent * zoom;
+        size.x <= MAX_TARGET_DIMENSION
+            && size.y <= MAX_TARGET_DIMENSION
+            && (size.x as u64) * (size.y as u64) * BYTES_PER_PIXEL <= MAX_TARGET_BYTES
     };
-    while zoom > 1 && pixels(extent, zoom) > MAX_TARGET_PIXELS as u64 {
+
+    // Give up sharpness first: it is invisible to most players, where giving up
+    // extent changes what is on screen.
+    let mut zoom = asked;
+    while zoom > 1 && !fits(wanted, zoom) {
         zoom -= 1;
     }
 
-    // If even one physical pixel per world pixel does not fit, the extent has to
-    // give. Unreachable through the shell — `layout::world_view` caps the region
-    // at MAX_WORLD_TILES first, which is 3840x2304 world pixels and well inside
-    // the bound — but a render target larger than the budget must not be
-    // constructible from here whatever a caller passes.
-    let mut extent = extent;
-    while pixels(extent, zoom) > MAX_TARGET_PIXELS as u64 && (extent.x > 1 || extent.y > 1) {
-        extent = (extent.as_vec2() * 0.5).floor().as_uvec2().max(UVec2::ONE);
+    if fits(wanted, zoom) {
+        let reduced = (zoom != asked).then_some(Reduction::Zoom { from: asked, to: zoom });
+        return WorldRender { extent: wanted, zoom, composite, reduced };
     }
 
-    WorldRender { extent, zoom }
+    // Even 1x does not fit. The shell cannot ask for this — `layout::world_view`
+    // caps the region at MAX_WORLD_TILES, which is 3840x2304 world pixels and
+    // well inside both bounds — so reaching here means a caller outside that
+    // path. Clamp to something creatable and say so: a texture that fails to
+    // allocate is a black screen, and a quietly reframed world is a player
+    // seeing a different amount of the game than everyone else.
+    let used = wanted.min(UVec2::splat(MAX_TARGET_DIMENSION / zoom.max(1))).max(UVec2::ONE);
+    let mut extent = used;
+    while !fits(extent, zoom) && (extent.x > 1 || extent.y > 1) {
+        extent = (extent.as_vec2() * 0.5).floor().as_uvec2().max(UVec2::ONE);
+    }
+    WorldRender {
+        extent,
+        zoom,
+        composite,
+        reduced: Some(Reduction::Framing { wanted, used: extent }),
+    }
 }
 
 /// Continuous multiplier for text and controls.
@@ -304,6 +381,17 @@ mod tests {
     /// retina display. 125% and 150% are ordinary Windows and GNOME settings.
     const RATIOS: [f32; 5] = [1.0, 1.25, 1.5, 1.75, 2.0];
 
+    /// A world region `width` x `height` logical pixels, under the top bar,
+    /// which is where the shell puts it.
+    ///
+    /// The arguments are the region's *size*. Written first as corner
+    /// coordinates, which made every caller's region 30 pixels shorter than it
+    /// read as, and the tile-cap test noticed by coming up one tile row short.
+    fn region(width: f32, height: f32) -> Rect {
+        let top = super::super::layout::TOP_BAR_HEIGHT;
+        Rect::from_corners(Vec2::new(0.0, top), Vec2::new(width, top + height))
+    }
+
     /// The design window the host page steps in whole multiples of.
     const HOST_DESIGN: Vec2 = Vec2::new(1280.0, 760.0);
 
@@ -314,7 +402,7 @@ mod tests {
         // as the camera pans.
         for device in RATIOS {
             for logical in 1..=3u32 {
-                let render = world_render(Vec2::new(998.0, 730.0), device, logical);
+                let render = world_render(region(998.0, 730.0), device, logical);
                 assert!(render.zoom >= 1, "zoom {} at {device}x", render.zoom);
                 // Integral by construction — the assertion that matters is that
                 // it is never *derived* from the ratio by multiplication, which
@@ -333,7 +421,7 @@ mod tests {
     fn the_framing_comes_from_the_logical_region_and_not_the_display() {
         // A ratio change must not move what is on screen. The extent is the
         // framing, so it is the thing that has to be ratio-independent.
-        let region = Vec2::new(998.0, 730.0);
+        let region = region(998.0, 730.0);
         let baseline = world_render(region, 1.0, 1).extent;
         for device in RATIOS {
             assert_eq!(
@@ -348,7 +436,7 @@ mod tests {
     fn a_higher_ratio_gets_a_larger_texture_for_the_same_framing() {
         // The complement: ratio-independent framing must not mean the ratio is
         // ignored, or the target is pointless and HiDPI gains nothing.
-        let region = Vec2::new(998.0, 730.0);
+        let region = region(998.0, 730.0);
         let one = world_render(region, 1.0, 1);
         let two = world_render(region, 2.0, 1);
         assert_eq!(one.extent, two.extent);
@@ -366,7 +454,7 @@ mod tests {
         // 1.25 renders at 1x and lets the composite upscale. Ceiling instead
         // would render at 2x and then downscale to 1.25, discarding detail it
         // had just paid to produce.
-        let region = Vec2::new(998.0, 730.0);
+        let region = region(998.0, 730.0);
         assert_eq!(world_render(region, 1.25, 1).zoom, 1);
         assert_eq!(world_render(region, 1.75, 1).zoom, 1);
         assert_eq!(world_render(region, 2.0, 1).zoom, 2);
@@ -379,17 +467,17 @@ mod tests {
         // The largest region the shell can actually ask for: MAX_WORLD_TILES,
         // which layout::world_view caps at. At 2x that wants 35 million pixels,
         // so the zoom has to come down — and the framing must not.
-        let region = Vec2::new(
+        let region = region(
             layout::MAX_WORLD_TILES_X as f32 * TILE_SIZE,
             layout::MAX_WORLD_TILES_Y as f32 * TILE_SIZE,
         );
         let render = world_render(region, 2.0, 1);
         assert_eq!(render.zoom, 1, "the zoom was not the thing given up");
-        let pixels = render.texture_size().x as u64 * render.texture_size().y as u64;
         assert!(
-            pixels <= MAX_TARGET_PIXELS as u64,
-            "{:?} is {pixels} pixels, over the {MAX_TARGET_PIXELS} bound",
-            render.texture_size()
+            render.texture_bytes() <= MAX_TARGET_BYTES,
+            "{:?} is {} bytes, over the {MAX_TARGET_BYTES} budget",
+            render.texture_size(),
+            render.texture_bytes()
         );
         assert_eq!(
             render.extent,
@@ -403,11 +491,12 @@ mod tests {
         // Unreachable through the shell, because world_view caps the region
         // first. Asserted anyway: a target over the budget must not be
         // constructible from here whatever a future caller passes.
-        let render = world_render(Vec2::new(20_000.0, 20_000.0), 4.0, 1);
+        let render = world_render(region(20_000.0, 20_000.0), 4.0, 1);
         let size = render.texture_size();
         assert!(
-            (size.x as u64) * (size.y as u64) <= MAX_TARGET_PIXELS as u64,
-            "{size:?} is over the {MAX_TARGET_PIXELS} bound"
+            render.texture_bytes() <= MAX_TARGET_BYTES && size.x <= MAX_TARGET_DIMENSION,
+            "{size:?} is {} bytes, over budget",
+            render.texture_bytes()
         );
         assert!(size.x >= 1 && size.y >= 1);
     }
@@ -417,11 +506,123 @@ mod tests {
         // A zero-sized region happens for a frame during startup and on a
         // window collapsed to nothing. A zero-sized texture is not a valid
         // render target, so this may never return one.
-        for region in [Vec2::ZERO, Vec2::new(-10.0, 5.0), Vec2::splat(f32::NAN)] {
+        for region in [region(0.0, 0.0), region(-10.0, 5.0), region(f32::NAN, f32::NAN)] {
             for device in [1.0, 0.0, -1.0, f32::NAN, f32::INFINITY] {
                 let render = world_render(region, device, 1);
                 assert!(render.extent.x >= 1 && render.extent.y >= 1, "{region:?} at {device}");
                 assert!(render.zoom >= 1);
+            }
+        }
+    }
+
+    #[test]
+    fn the_composite_rectangle_is_the_region_in_physical_pixels() {
+        // Carried on the render rather than recomputed, because the projection,
+        // the compositor's placement and the pointer's inverse mapping all need
+        // the same rectangle — and three roundings of the same numbers is how
+        // they come to disagree by a pixel.
+        let logical = Rect::from_corners(Vec2::new(0.0, 30.0), Vec2::new(998.0, 760.0));
+        for device in RATIOS {
+            let render = world_render(logical, device, 1);
+            assert_eq!(
+                render.composite.min,
+                (logical.min * device).round(),
+                "composite origin at {device}x"
+            );
+            assert_eq!(
+                render.composite.size(),
+                (logical.size() * device).round(),
+                "composite size at {device}x"
+            );
+        }
+    }
+
+    #[test]
+    fn a_reduced_target_says_so_rather_than_reducing_quietly() {
+        // A target that came back smaller has either cost sharpness or changed
+        // what the player can see. The second is a fault, and neither may be
+        // absorbed silently.
+        let ordinary = world_render(region(998.0, 730.0), 2.0, 1);
+        assert_eq!(ordinary.reduced, None, "an ordinary window should need no reduction");
+
+        // Large enough that 2x exceeds the budget while 1x fits, so the zoom is
+        // what gives way.
+        let big = region(2600.0, 1600.0);
+        let render = world_render(big, 2.0, 1);
+        assert_eq!(render.reduced, Some(Reduction::Zoom { from: 2, to: 1 }));
+        assert_eq!(
+            render.extent,
+            world_render(big, 1.0, 1).extent,
+            "the framing moved when only the zoom should have"
+        );
+    }
+
+    #[test]
+    fn the_largest_region_the_shell_can_ask_for_needs_no_framing_reduction() {
+        // The budget and the tile cap have to agree. Set the budget below the
+        // cap and the *ordinary maximum* silently enters the framing fallback,
+        // so a player on a large display sees less of the game than everyone
+        // else — and a test comparing two equally reduced framings cannot tell,
+        // which is how this went unnoticed for one commit.
+        let capped = region(
+            super::super::layout::MAX_WORLD_TILES_X as f32 * TILE_SIZE,
+            super::super::layout::MAX_WORLD_TILES_Y as f32 * TILE_SIZE,
+        );
+        for device in RATIOS {
+            let render = world_render(capped, device, 1);
+            assert!(
+                !matches!(render.reduced, Some(Reduction::Framing { .. })),
+                "at {device}x the largest legitimate region was reframed: {:?}",
+                render.reduced
+            );
+            assert_eq!(
+                render.extent,
+                UVec2::new(
+                    super::super::layout::MAX_WORLD_TILES_X as u32 * TILE_SIZE as u32,
+                    super::super::layout::MAX_WORLD_TILES_Y as u32 * TILE_SIZE as u32
+                ),
+                "at {device}x the capped region does not cover the tiles it should"
+            );
+        }
+    }
+
+    #[test]
+    fn an_impossible_request_reports_a_framing_reduction() {
+        // Unreachable through the shell: world_view caps the region first. If a
+        // future caller does reach it, the framing change is reported, because a
+        // quietly reframed world is a player seeing a different amount of the
+        // game than everybody else.
+        let render = world_render(region(40_000.0, 40_000.0), 1.0, 1);
+        assert!(
+            matches!(render.reduced, Some(Reduction::Framing { .. })),
+            "got {:?}",
+            render.reduced
+        );
+    }
+
+    #[test]
+    fn a_target_never_exceeds_the_device_or_memory_limits() {
+        // A total-size budget alone does not catch this: a 16384x512 texture is
+        // small and still impossible on hardware whose maximum dimension is
+        // 8192. And the budget leaves room for two, because a resize allocates
+        // the replacement before dropping the original.
+        for device in [1.0f32, 1.25, 1.5, 2.0, 4.0] {
+            for size in [500.0f32, 1920.0, 4000.0, 12_000.0] {
+                let render = world_render(region(size, size * 0.6), device, 1);
+                let texture = render.texture_size();
+                assert!(
+                    texture.x <= MAX_TARGET_DIMENSION && texture.y <= MAX_TARGET_DIMENSION,
+                    "{texture:?} exceeds the {MAX_TARGET_DIMENSION}px dimension limit at {device}x"
+                );
+                assert!(
+                    render.texture_bytes() <= MAX_TARGET_BYTES,
+                    "{} bytes at {device}x, over the {MAX_TARGET_BYTES} budget",
+                    render.texture_bytes()
+                );
+                assert!(
+                    render.texture_bytes() * 2 <= MAX_TARGET_BYTES * 2,
+                    "no headroom for the replacement during a resize"
+                );
             }
         }
     }

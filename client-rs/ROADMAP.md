@@ -227,7 +227,7 @@ decorative asset is project-owned or licensed for this client.
 
 ### Task W-0003 — Scaling, fullscreen, resize and DPI
 
-- **State:** planned
+- **State:** active
 - **Phase:** 0
 - **Depends on:** W-0002
 
