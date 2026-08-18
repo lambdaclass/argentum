@@ -10,7 +10,11 @@
 //!
 //!   1. clear an image target to a known colour;
 //!   2. draw one colour-only quad into it, needing no asset;
-//!   3. draw one sprite from a generated texture.
+//!   3. draw one sprite from a generated texture — and only that, so a failure
+//!      here is unambiguously about sampling;
+//!   4. two cameras in one frame — one drawing into a texture, a second sampling
+//!      that texture into a different one, which is the production arrangement
+//!      minus the window swapchain.
 //!
 //! Run each separately, and run native and WebGL2 separately, so texture
 //! writing, sampling and camera ordering are never diagnosed together:
@@ -26,9 +30,7 @@ use bevy::app::{AppExit, ScheduleRunnerPlugin};
 use bevy::camera::RenderTarget;
 use bevy::prelude::*;
 use bevy::render::gpu_readback::{Readback, ReadbackComplete};
-use bevy::render::render_resource::{
-    Extent3d, TextureDimension, TextureFormat, TextureUsages,
-};
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
 use bevy::render::RenderPlugin;
 use bevy::window::ExitCondition;
 use std::time::Duration;
@@ -38,6 +40,16 @@ const SIZE: u32 = 64;
 
 /// The clear colour, chosen to be nothing a default would produce.
 const CLEAR: Color = Color::srgb(0.25, 0.0, 0.5);
+/// The same, as the bytes it reads back as.
+const CLEAR_BYTES: [u8; 3] = [64, 0, 128];
+
+/// The colour-only quad of stages 2 and 4.
+const QUAD: Color = Color::srgb(1.0, 1.0, 0.0);
+const QUAD_BYTES: [u8; 3] = [255, 255, 0];
+
+/// The generated texture stage 3 samples. Distinct from the quad on purpose:
+/// stage 3 has to prove sampling, not merely that something was drawn.
+const SAMPLED_BYTES: [u8; 3] = [0, 255, 255];
 
 /// Frames to wait before giving up. Readback is asynchronous.
 const PATIENCE: u32 = 60;
@@ -50,21 +62,34 @@ struct Probe {
     stage: u8,
     frames: u32,
     reported: bool,
+    /// The texture to read, held until the settling frames have passed.
+    ///
+    /// Requesting readback from the start and then ignoring early completions
+    /// was not enough: a completion accepted on frame 12 may describe a copy
+    /// submitted on frame 1. The request itself has to be late.
+    pending: Option<Handle<Image>>,
+    requested: bool,
 }
 
-fn main() {
-    let stage: u8 = std::env::args()
-        .nth(1)
-        .and_then(|a| a.parse().ok())
-        .unwrap_or(1);
-    if !(1..=3).contains(&stage) {
-        eprintln!("stage must be 1, 2 or 3");
-        std::process::exit(2);
+fn main() -> AppExit {
+    // Returned, not discarded: `App::run` hands back an `AppExit` and a `main`
+    // that ignores it exits zero however the probe ended, which is how a FAIL
+    // verdict still reported success.
+    let stage: u8 = std::env::args().nth(1).and_then(|a| a.parse().ok()).unwrap_or(1);
+    if !(1..=4).contains(&stage) {
+        eprintln!("stage must be 1, 2, 3 or 4");
+        return AppExit::from_code(2);
     }
     println!("== render target probe, stage {stage} ==");
 
     App::new()
-        .insert_resource(Probe { stage, frames: 0, reported: false })
+        .insert_resource(Probe {
+            stage,
+            frames: 0,
+            reported: false,
+            pending: None,
+            requested: false,
+        })
         .add_plugins(
             DefaultPlugins
                 .set(WindowPlugin {
@@ -79,11 +104,77 @@ fn main() {
         )
         .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_millis(16)))
         .add_systems(Startup, spawn)
-        .add_systems(Update, (give_up, report).chain())
-        .run();
+        .add_systems(Update, (give_up, request_readback).chain())
+        .run()
 }
 
-fn spawn(mut commands: Commands, mut images: ResMut<Assets<Image>>, probe: Res<Probe>) {
+/// An empty target of `size`, usable as a camera attachment and as a texture.
+fn target_image(size: u32) -> Image {
+    let mut image = Image::new_fill(
+        Extent3d { width: size, height: size, depth_or_array_layers: 1 },
+        TextureDimension::D2,
+        // Opaque black, so "cleared" is distinguishable from "never touched".
+        &[0, 0, 0, 255],
+        TextureFormat::Rgba8UnormSrgb,
+        bevy::asset::RenderAssetUsages::default(),
+    );
+    image.texture_descriptor.usage = TextureUsages::TEXTURE_BINDING
+        | TextureUsages::COPY_DST
+        | TextureUsages::COPY_SRC
+        | TextureUsages::RENDER_ATTACHMENT;
+    image
+}
+
+/// Stage 4: the production shape. One camera draws the scene into a texture; a
+/// second camera, later in the order and on its own layer, samples that texture
+/// through a quad into a second texture. If this passes natively then two target
+/// kinds in one frame are fine and the browser is the differentiator.
+fn spawn_two_cameras(commands: &mut Commands, images: &mut Assets<Image>) -> Handle<Image> {
+    let scene = images.add(target_image(SIZE));
+    let presented = images.add(target_image(SIZE));
+
+    // Layer 1 is the scene; layer 2 is the presentation. Separated exactly as
+    // production separates world from compositor, so a shared layer cannot make
+    // this pass for the wrong reason.
+    commands.spawn((
+        Camera2d,
+        Camera { order: -1, clear_color: ClearColorConfig::Custom(CLEAR), ..default() },
+        RenderTarget::Image(scene.clone().into()),
+        bevy::camera::visibility::RenderLayers::layer(1),
+        Msaa::Off,
+    ));
+    commands.spawn((
+        Sprite::from_color(QUAD, Vec2::splat(16.0)),
+        Transform::default(),
+        bevy::camera::visibility::RenderLayers::layer(1),
+    ));
+
+    commands.spawn((
+        Camera2d,
+        Camera { order: 0, clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() },
+        RenderTarget::Image(presented.clone().into()),
+        bevy::camera::visibility::RenderLayers::layer(2),
+        Msaa::Off,
+    ));
+    commands.spawn((
+        Sprite { image: scene, custom_size: Some(Vec2::splat(SIZE as f32)), ..default() },
+        Transform::default(),
+        // The production quad needed this: sprite bounds come from the image, and
+        // a render target has no useful main-world dimensions.
+        bevy::camera::visibility::NoFrustumCulling,
+        bevy::camera::visibility::RenderLayers::layer(2),
+    ));
+
+    presented
+}
+
+fn spawn(mut commands: Commands, mut images: ResMut<Assets<Image>>, mut probe: ResMut<Probe>) {
+    if probe.stage == 4 {
+        let presented = spawn_two_cameras(&mut commands, &mut images);
+        probe.pending = Some(presented);
+        return;
+    }
+
     let mut target = Image::new_fill(
         Extent3d { width: SIZE, height: SIZE, depth_or_array_layers: 1 },
         TextureDimension::D2,
@@ -107,15 +198,12 @@ fn spawn(mut commands: Commands, mut images: ResMut<Assets<Image>>, probe: Res<P
         Msaa::Off,
     ));
 
-    if probe.stage >= 2 {
+    if probe.stage == 2 {
         // Colour only: no asset to load, nothing to go missing.
-        commands.spawn((
-            Sprite::from_color(Color::srgb(1.0, 1.0, 0.0), Vec2::splat(16.0)),
-            Transform::default(),
-        ));
+        commands.spawn((Sprite::from_color(QUAD, Vec2::splat(16.0)), Transform::default()));
     }
 
-    if probe.stage >= 3 {
+    if probe.stage == 3 {
         // A generated texture, so stage 3 differs from stage 2 only by sampling.
         let mut pixels = Vec::with_capacity(4 * 4 * 4);
         for _ in 0..16 {
@@ -134,26 +222,44 @@ fn spawn(mut commands: Commands, mut images: ResMut<Assets<Image>>, probe: Res<P
         ));
     }
 
-    // Read the texture back every frame until something arrives.
+    // Requested later, by `request_readback`, so the copy that completes cannot
+    // predate the rendering it is supposed to describe.
+    probe.pending = Some(handle);
+}
+
+/// Ask for the texture only once the scene has been rendering for a while.
+fn request_readback(mut commands: Commands, mut probe: ResMut<Probe>) {
+    if probe.requested || probe.frames < SETTLE {
+        return;
+    }
+    let Some(handle) = probe.pending.take() else {
+        return;
+    };
+    probe.requested = true;
     commands.spawn(Readback::texture(handle)).observe(observe);
 }
 
-/// Report what the GPU actually produced.
-fn observe(complete: On<ReadbackComplete>, mut probe: ResMut<Probe>, mut exit: MessageWriter<AppExit>) {
+/// Whether any pixel is within tolerance of `want`.
+fn contains(data: &[u8], want: [u8; 3]) -> bool {
+    data.chunks_exact(4).any(|p| p[..3].iter().zip(want).all(|(a, b)| a.abs_diff(b) <= 6))
+}
+
+/// Report what the GPU actually produced, and say so in the exit code.
+///
+/// Every stage names the exact colour it expects. Stage 3 used to pass on "more
+/// than one colour present", which the stage-2 quad already guarantees — so it
+/// could not fail even if sampling a texture were completely broken.
+fn observe(
+    complete: On<ReadbackComplete>,
+    mut probe: ResMut<Probe>,
+    mut exit: MessageWriter<AppExit>,
+) {
     if probe.reported {
-        return;
-    }
-    // Readback fires every frame, and the earliest completions can describe the
-    // texture before anything has rendered into it. Reporting the first one made
-    // this probe claim a failure it had not observed — the initial fill read back
-    // as "never cleared". Wait for several frames of real rendering first.
-    if probe.frames < SETTLE {
         return;
     }
     probe.reported = true;
 
     let data: &[u8] = &complete.data;
-    let expected_clear = [64u8, 0, 128];
     let centre = ((SIZE as usize / 2) * SIZE as usize + SIZE as usize / 2) * 4;
 
     let distinct = {
@@ -174,37 +280,51 @@ fn observe(complete: On<ReadbackComplete>, mut probe: ResMut<Probe>, mut exit: M
     println!("   centre pixel:    {:?}", &data.get(centre..centre + 4));
     println!("   distinct pixels: {distinct:?}");
 
-    let cleared = data
-        .chunks_exact(4)
-        .any(|p| p[..3].iter().zip(expected_clear).all(|(a, b)| a.abs_diff(b) <= 4));
+    // The colours each stage puts on the screen, by construction.
+    let cleared = contains(data, CLEAR_BYTES);
+    let quad = contains(data, QUAD_BYTES);
+    let sampled = contains(data, SAMPLED_BYTES);
     let untouched = data.chunks_exact(4).all(|p| p[..3] == [0, 0, 0]);
 
-    match probe.stage {
-        1 => {
-            if untouched {
-                println!("   RESULT: FAIL — the target was never cleared. Rendering into an");
-                println!("           image target does not reach the texture at all here.");
-            } else if cleared {
-                println!("   RESULT: PASS — the clear colour reached the texture.");
-            } else {
-                println!("   RESULT: UNCLEAR — the texture changed but not to the clear colour.");
-            }
-        }
-        2 | 3 => {
-            let drew = distinct.len() > 1;
-            if !cleared {
-                println!("   RESULT: FAIL — stage 1 regressed; fix that before reading this.");
-            } else if drew {
-                println!("   RESULT: PASS — geometry reached the texture, not just the clear.");
-            } else {
-                println!("   RESULT: FAIL — cleared, but nothing was drawn into it.");
-                println!("           So the camera writes to the target and the draw does not.");
-            }
-        }
-        _ => {}
-    }
+    let (ok, verdict) = match probe.stage {
+        1 if untouched => (
+            false,
+            "the target was never cleared — rendering into an image target does not reach the texture",
+        ),
+        1 if cleared => (true, "the clear colour reached the texture"),
+        1 => (false, "the texture changed, but not to the clear colour"),
 
-    exit.write(AppExit::Success);
+        2 if !cleared => (false, "stage 1 regressed; fix that before reading this"),
+        2 if quad => (true, "a colour-only quad reached the texture"),
+        2 => (false, "cleared, but the quad was not drawn into it"),
+
+        // Specifically the cyan of the generated texture. "More than one colour"
+        // is satisfied by the quad alone and proves nothing about sampling.
+        3 if !cleared => (false, "stage 1 regressed; fix that before reading this"),
+        3 if sampled => (true, "a sprite sampling a generated texture reached the target"),
+        3 => (
+            false,
+            "cleared, but the sampled texture did not draw — sampling is the broken step",
+        ),
+
+        4 if cleared && quad => (
+            true,
+            "two cameras and two targets in one frame work; the browser, not the arrangement, is the difference",
+        ),
+        4 if !cleared && !quad => (
+            false,
+            "the presented texture has none of the scene — the second camera never sampled the first one's target",
+        ),
+        4 if quad => (false, "the quad arrived but the first target's clear did not"),
+        4 => (false, "the first target's clear arrived but the quad did not"),
+
+        _ => (false, "unknown stage"),
+    };
+
+    println!("   RESULT: {} — {verdict}", if ok { "PASS" } else { "FAIL" });
+    // A diagnostic that exits zero on failure is a diagnostic nothing can gate
+    // on: a script running all four stages would report success throughout.
+    exit.write(if ok { AppExit::Success } else { AppExit::from_code(1) });
 }
 
 /// Do not hang if readback never completes; that is itself the answer.
@@ -217,5 +337,3 @@ fn give_up(mut probe: ResMut<Probe>, mut exit: MessageWriter<AppExit>) {
         exit.write(AppExit::from_code(1));
     }
 }
-
-fn report() {}
