@@ -85,6 +85,13 @@ pub fn shell_app_at(size: Vec2, device_pixel_ratio: f32) -> App {
     ))
     .init_resource::<crate::world::ViewRadius>();
 
+    // A mouse pointer, so picking has something to route input through. Bevy's
+    // input plugin spawns this in production; there is no winit here.
+    app.world_mut().spawn((
+        bevy::picking::pointer::PointerId::Mouse,
+        bevy::picking::pointer::PointerLocation::default(),
+    ));
+
     // The real world camera, from the client's own definition. A hand-written
     // stand-in here could not notice the client getting its render layer, order
     // or projection wrong.
@@ -123,6 +130,53 @@ pub fn point_at(app: &mut App, position: Vec2) {
         position.y as f64 * factor,
     )));
     app.update();
+}
+
+/// The window's own pointer target, for driving real pointer input.
+fn window_target(app: &mut App) -> bevy::camera::NormalizedRenderTarget {
+    let window = app
+        .world_mut()
+        .query_filtered::<Entity, With<bevy::window::PrimaryWindow>>()
+        .iter(app.world())
+        .next()
+        .expect("there is no primary window");
+    bevy::camera::NormalizedRenderTarget::Window(
+        bevy::window::WindowRef::Entity(window)
+            .normalize(Some(window))
+            .expect("a window reference normalises"),
+    )
+}
+
+/// Move the real pointer to a position, in physical pixels of the window.
+///
+/// Drives `PointerInput` through Bevy's own picking, rather than setting
+/// `Interaction` by hand. The difference matters for this: whether the control
+/// *visibly* under the pointer is the one that receives the event is a question
+/// about hit testing, and a test that assigns the answer cannot ask it.
+pub fn move_pointer(app: &mut App, position: Vec2) {
+    let target = window_target(app);
+    app.world_mut().write_message(bevy::picking::pointer::PointerInput::new(
+        bevy::picking::pointer::PointerId::Mouse,
+        bevy::picking::pointer::Location { target, position },
+        bevy::picking::pointer::PointerAction::Move { delta: Vec2::ZERO },
+    ));
+    app.update();
+}
+
+/// Press and release the primary button where the pointer is.
+pub fn click_pointer(app: &mut App, position: Vec2) {
+    use bevy::picking::pointer::{Location, PointerAction, PointerButton, PointerId, PointerInput};
+
+    move_pointer(app, position);
+    let target = window_target(app);
+    for action in [
+        PointerAction::Press(PointerButton::Primary),
+        PointerAction::Release(PointerButton::Primary),
+    ] {
+        let location = Location { target: target.clone(), position };
+        app.world_mut().write_message(PointerInput::new(PointerId::Mouse, location, action));
+        app.update();
+    }
 }
 
 /// The rail mode the shell settled on, which must exist once it has run.

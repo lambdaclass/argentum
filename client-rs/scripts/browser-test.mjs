@@ -396,6 +396,110 @@ async function main() {
     );
     await settleContext.close();
 
+    // Hit testing, in a real browser, because that is the only place the question
+    // can be asked. Headless Bevy's UI picking has no render target to map a
+    // pointer through and reports a hit on the root node whatever the position.
+    //
+    // The client publishes each keyed control's rectangle and the last activation,
+    // so a click can be aimed at a control's actual position and checked against
+    // the control that fired — rather than at a position a test guessed from the
+    // layout it is supposed to be verifying.
+    console.log("  pointer hit testing");
+    const hitContext = await browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      deviceScaleFactor: 1,
+    });
+    const hitPage = await hitContext.newPage();
+    await hitPage.goto(url, { waitUntil: "load" });
+    await waitForClient(hitPage);
+
+    const canvasBox = await hitPage.evaluate(() => {
+      const box = document.getElementById("ao-canvas").getBoundingClientRect();
+      return { x: box.x, y: box.y };
+    });
+    const controls = await hitPage.evaluate(() => window.aoLoaded?.controls ?? []);
+    check("the client publishes its control rectangles", controls.length > 0, `${controls.length}`);
+
+    /// Click a point in canvas coordinates and report what activated, if anything.
+    ///
+    /// Compares the activation *counter* before and after rather than reading the
+    /// last key: the client republishes its report every frame, so the previous
+    /// activation is still there and every "this must not activate" check would
+    /// pass or fail on stale data. Clearing the field from here achieved nothing —
+    /// it is the client's resource that holds it.
+    const clickAt = async (x, y) => {
+      const before = await hitPage.evaluate(() => window.aoLoaded?.activations ?? 0);
+      await hitPage.mouse.click(canvasBox.x + x, canvasBox.y + y);
+
+      // Polled, not slept. Under software rendering this client runs at about six
+      // frames a second, so a fixed 120ms wait was shorter than a single frame and
+      // every click "did not activate" — the same mistake as the capture harness's
+      // four-second sleep, in the other direction. A deadline instead: the answer
+      // arrives when it arrives, and only a genuine non-activation waits out the
+      // whole budget.
+      const deadline = Date.now() + 3_000;
+      while (Date.now() < deadline) {
+        const now = await hitPage.evaluate(() => ({
+          count: window.aoLoaded?.activations ?? 0,
+          key: window.aoLoaded?.lastActivated ?? null,
+        }));
+        if (now.count > before) return now.key;
+        await hitPage.waitForTimeout(50);
+      }
+      return null;
+    };
+
+    // A representative spread rather than every control: an inventory slot, a
+    // hotbar slot and a top-bar icon exercise three different panels and three
+    // different sizes.
+    const sample = ["inventory.slot.0", "hotbar.slot.0", "rail.compact.nav.0"]
+      .map((key) => controls.find((c) => c.key === key && c.enabled && c.w > 4 && c.h > 4))
+      .filter(Boolean);
+    check("a representative control sample is available", sample.length >= 2, `${sample.length}`);
+
+    for (const control of sample) {
+      const cx = control.x + control.w / 2;
+      const cy = control.y + control.h / 2;
+
+      check(
+        `clicking the centre of ${control.key} activates it`,
+        (await clickAt(cx, cy)) === control.key
+      );
+
+      // One pixel inside each edge is still this control.
+      for (const [dx, dy, edge] of [
+        [1, 0, "left"],
+        [-1, 0, "right"],
+        [0, 1, "top"],
+        [0, -1, "bottom"],
+      ]) {
+        const x = dx === 0 ? cx : dx > 0 ? control.x + 1 : control.x + control.w - 1;
+        const y = dy === 0 ? cy : dy > 0 ? control.y + 1 : control.y + control.h - 1;
+        check(
+          `one pixel inside the ${edge} edge of ${control.key} still activates it`,
+          (await clickAt(x, y)) === control.key
+        );
+      }
+
+      // One pixel outside each edge is not. Half-open rectangles mean the pixel
+      // at the far edge belongs to the neighbour, and a grid of controls that each
+      // claim it puts every click one place out along the row.
+      for (const [x, y, edge] of [
+        [control.x - 1, cy, "left"],
+        [control.x + control.w + 1, cy, "right"],
+        [cx, control.y - 1, "top"],
+        [cx, control.y + control.h + 1, "bottom"],
+      ]) {
+        const fired = await clickAt(x, y);
+        check(
+          `one pixel outside the ${edge} edge of ${control.key} does not activate it`,
+          fired !== control.key,
+          `fired ${fired}`
+        );
+      }
+    }
+    await hitContext.close();
+
     // Keyboard focus must not leave the canvas. Tab moving browser focus off it
     // ends the session's keyboard: the player tabs through page furniture with no
     // way back except clicking, and every gameplay key stops working.

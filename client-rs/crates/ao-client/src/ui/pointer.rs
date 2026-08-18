@@ -177,6 +177,63 @@ mod tests {
     use super::super::layout;
     use super::*;
 
+    /// Every inventory slot in the real tree, with the rectangle it occupies.
+    fn solved_slots(app: &mut App) -> Vec<(Entity, Rect)> {
+        use super::super::character::InventorySlotButton;
+        use super::super::testing;
+
+        let entities: Vec<Entity> = app
+            .world_mut()
+            .query_filtered::<Entity, With<InventorySlotButton>>()
+            .iter(app.world())
+            .collect();
+        entities
+            .into_iter()
+            .filter_map(|entity| testing::solved_rect(app, entity).map(|rect| (entity, rect)))
+            .collect()
+    }
+
+    /// What the interaction pipeline says is under the pointer.
+    fn hovered(app: &mut App) -> Vec<Entity> {
+        use super::super::controls::Control;
+        let mut found: Vec<Entity> = app
+            .world_mut()
+            .query::<(Entity, &Control)>()
+            .iter(app.world())
+            .filter(|(_, control)| control.hovered)
+            .map(|(entity, _)| entity)
+            .collect();
+        found.sort();
+        found
+    }
+
+    #[test]
+    fn a_click_on_the_interface_is_never_also_a_click_on_the_world() {
+        // The rule that keeps a click on the rail from also swinging a sword.
+        use super::super::testing;
+
+        let mut app = testing::shell_app(Vec2::new(1280.0, 832.0));
+        let geometry = testing::settled(&app);
+
+        for inside_ui in [
+            geometry.rail.center(),
+            geometry.top_bar.center(),
+            Vec2::new(geometry.rail.min.x + 1.0, geometry.rail.center().y),
+        ] {
+            testing::move_pointer(&mut app, inside_ui);
+            let state = app.world().resource::<PointerState>();
+            assert_ne!(
+                state.target,
+                Some(PointerTarget::World),
+                "{inside_ui:?} is over the interface but was reported as the world"
+            );
+            assert!(
+                state.tile.is_none(),
+                "{inside_ui:?} is over the interface but named a world tile"
+            );
+        }
+    }
+
     /// Ratios a real user is likely to have.
     const RATIOS: [f32; 5] = [1.0, 1.25, 1.5, 1.75, 2.0];
 

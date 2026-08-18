@@ -110,6 +110,11 @@ impl Default for Control {
 pub struct ControlKey(pub String);
 
 impl ControlKey {
+    /// The key as text, for automation and logging.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
     pub fn new(key: impl Into<String>) -> Self {
         Self(key.into())
     }
@@ -474,6 +479,17 @@ pub enum TextEdit {
     CancelComposition,
 }
 
+/// The control a picking `Click` activated this frame, if any.
+///
+/// Exists so the two activation paths cannot both fire for one click. A slow
+/// click spans frames and is seen by both; a fast one is seen only by the event.
+/// Set by the observer, read and cleared by `track_pointer` later in the same
+/// frame, which is exactly one frame's worth of memory — a longer-lived guard
+/// swallowed every *repeat* click on the same control, which is worse than the
+/// double activation it was avoiding.
+#[derive(Resource, Debug, Clone, Copy, Default)]
+struct ClickedThisFrame(Option<Entity>);
+
 /// Whether text input currently owns the keyboard.
 ///
 /// The single definition, and it has to account for both ways that becomes true:
@@ -543,6 +559,8 @@ impl Plugin for ControlsPlugin {
                     .chain()
                     .in_set(ControlSet::Interact),
             )
+            .init_resource::<ClickedThisFrame>()
+            .add_observer(activate_on_click)
             .add_systems(Update, present_controls.in_set(ControlSet::Present))
             .init_resource::<TextInputActive>()
             .init_resource::<FocusNavigation>()
@@ -574,6 +592,7 @@ fn track_pointer(
     mut controls: Query<(Entity, &Interaction, &mut Control, Option<&ControlKey>)>,
     mut focus: ResMut<FocusOwner>,
     mut activated: MessageWriter<Activated>,
+    mut clicked: ResMut<ClickedThisFrame>,
 ) {
     for (entity, interaction, mut control, key) in &mut controls {
         let was_pressed = control.pressed;
@@ -593,10 +612,54 @@ fn track_pointer(
         }
 
         // Released while still over the control.
-        if was_pressed && matches!(interaction, Interaction::Hovered) {
+        //
+        // Polled state only, which is why `activate_on_click` exists alongside it:
+        // a press and release inside one frame is never *observed* as pressed, so
+        // this path alone swallowed fast clicks. It stays because it works without
+        // a picking backend, which is the only thing a headless test has.
+        //
+        // Skipped when the event already reported this click, or a click slow
+        // enough to be seen by both would activate twice — two potions from one
+        // click.
+        if was_pressed && matches!(interaction, Interaction::Hovered) && clicked.0 != Some(entity) {
             activated.write(Activated { entity, source: ActivationSource::Pointer });
         }
     }
+
+    // One frame's worth of memory, cleared here because this system is the last
+    // reader of it.
+    clicked.0 = None;
+}
+
+/// Activate on the picking event rather than on polled state.
+///
+/// `track_pointer` reads `Interaction` once a frame, so a click whose press and
+/// release fall inside the same frame is seen only in its final state and never
+/// as pressed. A real click is 50-100ms and usually spans several frames, so this
+/// looked fine — until a dropped frame ate one, or a test clicked as fast as the
+/// browser allows and nothing happened at all. Frame timing is not something a
+/// click should depend on.
+///
+/// Deduplicated against the polled path: both can describe the same click, and a
+/// control that activates twice on one click uses two potions.
+fn activate_on_click(
+    click: On<bevy::picking::events::Pointer<bevy::picking::events::Click>>,
+    controls: Query<(&Control, Option<&ControlKey>)>,
+    mut focus: ResMut<FocusOwner>,
+    mut activated: MessageWriter<Activated>,
+    mut clicked: ResMut<ClickedThisFrame>,
+) {
+    let entity = click.entity;
+    let Ok((control, key)) = controls.get(entity) else {
+        return;
+    };
+    if !control.enabled {
+        return;
+    }
+
+    clicked.0 = Some(entity);
+    focus.focus(entity, key);
+    activated.write(Activated { entity, source: ActivationSource::Pointer });
 }
 
 /// Tab and Shift+Tab move focus.
