@@ -442,6 +442,164 @@ pub struct SafetyState {
     pub secure_trade: bool,
 }
 
+/// Whether a map view has anything to show, and why not when it does not.
+///
+/// Four states rather than an `Option`, because "not loaded yet", "this map has
+/// no data" and "the fetch failed" are three different things to a player and
+/// only one of them is worth retrying. An unexplained black rectangle is
+/// indistinguishable from a rendering fault, which is the state the shell is in
+/// today and what W-0088 and W-0089 replace.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum MapAvailability {
+    /// No request has been made yet.
+    #[default]
+    Idle,
+    /// A request is in flight.
+    Loading,
+    /// Data arrived and can be drawn.
+    Ready,
+    /// It cannot be drawn, and this is why.
+    Unavailable(MapUnavailable),
+}
+
+/// Why a map cannot be drawn.
+///
+/// Its own vocabulary rather than a `FeedbackKey`: those are gameplay results a
+/// player caused, and these are states of the client. Sharing the enum would
+/// have meant either inventing a free-form key variant — which nothing could
+/// safely branch on — or overloading "blocked" to mean two unrelated things.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MapUnavailable {
+    /// Turned off, or not permitted in this area.
+    Disabled,
+    /// There is no server to ask.
+    Offline,
+    /// The request or the decode failed. The only one worth retrying.
+    Failed,
+    /// This map genuinely has no data to show.
+    NoData,
+}
+
+impl MapUnavailable {
+    /// The localisation key for the label a player is shown.
+    pub fn name_key(self) -> &'static str {
+        match self {
+            MapUnavailable::Disabled => "map.unavailable.disabled",
+            MapUnavailable::Offline => "map.unavailable.offline",
+            MapUnavailable::Failed => "map.unavailable.failed",
+            MapUnavailable::NoData => "map.unavailable.no_data",
+        }
+    }
+
+    /// Whether asking again could succeed.
+    pub fn is_retryable(self) -> bool {
+        matches!(self, MapUnavailable::Failed)
+    }
+}
+
+impl MapAvailability {
+    /// Whether a view built from this can draw map data at all.
+    pub fn is_drawable(&self) -> bool {
+        matches!(self, MapAvailability::Ready)
+    }
+
+    /// Whether a player is waiting rather than being told no.
+    pub fn is_pending(&self) -> bool {
+        matches!(self, MapAvailability::Idle | MapAvailability::Loading)
+    }
+}
+
+/// A marker on a map, in tile coordinates of the map it belongs to.
+///
+/// Deliberately not a colour or a sprite: presentation chooses those from the
+/// kind, so a palette change is one edit in the interface rather than a change
+/// to what the adapter reports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapMarker {
+    pub x: i32,
+    pub y: i32,
+    pub kind: MarkerKind,
+}
+
+/// What a marker represents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkerKind {
+    /// The local player.
+    Player,
+    /// Another member of the party.
+    Party,
+    /// A hostile the server has disclosed.
+    Hostile,
+    /// A named point of interest: a city, a dungeon mouth.
+    Landmark,
+}
+
+/// The minimap: the immediate surroundings, drawn in the rail.
+///
+/// `radius` is in tiles and is a *presentation* bound, not a knowledge bound.
+/// The authoritative limit on what a client may know about other entities is the
+/// server's area of interest, and markers here must already have been filtered
+/// by it — a wider minimap must never become a spyglass. `layout::AOI_RADIUS_X`
+/// and `AOI_RADIUS_Y` are the client-side mirror of that bound.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MinimapState {
+    pub availability: MapAvailability,
+    /// The map the player is standing in.
+    pub map_number: u16,
+    /// Where the player is, in that map's tiles.
+    pub centre: (i32, i32),
+    /// Tiles from the centre this view covers on each axis.
+    pub radius: i32,
+    /// Everything worth drawing, already inside the server's area of interest.
+    pub markers: Vec<MapMarker>,
+}
+
+impl MinimapState {
+    /// Markers actually inside the view, so presentation cannot draw one that
+    /// the radius excludes.
+    pub fn visible_markers(&self) -> impl Iterator<Item = &MapMarker> {
+        let (cx, cy) = self.centre;
+        let radius = self.radius.max(0);
+        self.markers
+            .iter()
+            .filter(move |m| (m.x - cx).abs() <= radius && (m.y - cy).abs() <= radius)
+    }
+
+    /// Whether there is anything to draw beyond the backdrop.
+    pub fn has_content(&self) -> bool {
+        self.availability.is_drawable() && self.visible_markers().next().is_some()
+    }
+}
+
+/// The whole-world map, opened over the world viewport.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct WorldMapState {
+    pub availability: MapAvailability,
+    /// Whether the overlay is open. Separate from availability: a player can
+    /// open it while it is still loading, and should see that rather than
+    /// nothing.
+    pub open: bool,
+    /// The map currently highlighted, which is the player's unless they have
+    /// panned.
+    pub focus_map: u16,
+    /// Size of the whole map in tiles, for placing markers proportionally.
+    pub size: (i32, i32),
+    pub markers: Vec<MapMarker>,
+}
+
+impl WorldMapState {
+    /// Whether the overlay should be drawn at all this frame.
+    pub fn is_presenting(&self) -> bool {
+        self.open
+    }
+
+    /// Whether it is open but has nothing yet, which needs a labelled state
+    /// rather than an empty rectangle.
+    pub fn is_waiting(&self) -> bool {
+        self.open && self.availability.is_pending()
+    }
+}
+
 /// Whether the client is talking to a server, and how well.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ConnectionPhase {
@@ -529,6 +687,8 @@ pub struct UiSnapshot {
     pub skills: SkillsState,
     pub safety: SafetyState,
     pub service: ServiceState,
+    pub minimap: MinimapState,
+    pub world_map: WorldMapState,
     pub feedback: Vec<Feedback>,
     /// True while the snapshot is a placeholder awaiting real data. Distinct
     /// from empty: "no items" and "not loaded yet" look different and mean
@@ -573,6 +733,8 @@ impl UiSnapshot {
             && self.skills == other.skills
             && self.safety == other.safety
             && self.service == other.service
+            && self.minimap == other.minimap
+            && self.world_map == other.world_map
             && self.feedback == other.feedback
             && self.loading == other.loading
             && hotbars_match(&self.hotbar, &other.hotbar)
@@ -827,6 +989,139 @@ mod tests {
         assert!(!snapshot.text_input_has_focus());
         snapshot.chat.composing = true;
         assert!(snapshot.text_input_has_focus());
+    }
+
+    #[test]
+    fn a_map_distinguishes_no_data_from_not_loaded_from_refused() {
+        // Three states a player reacts to differently, and only one is worth
+        // retrying. Collapsing them into an Option was the mistake this replaces:
+        // an unexplained black rectangle is indistinguishable from a rendering
+        // fault, and a player has no way to tell which.
+        assert!(MapAvailability::Idle.is_pending());
+        assert!(MapAvailability::Loading.is_pending());
+        assert!(!MapAvailability::Ready.is_pending());
+        assert!(MapAvailability::Ready.is_drawable());
+
+        let refused = MapAvailability::Unavailable(MapUnavailable::Disabled);
+        assert!(!refused.is_drawable(), "a refused map must not be drawn");
+        assert!(!refused.is_pending(), "a refused map is not still coming");
+    }
+
+    #[test]
+    fn only_a_failure_invites_another_attempt() {
+        // Retrying a map that is disabled or genuinely empty is a request that
+        // can never succeed, repeated forever.
+        assert!(MapUnavailable::Failed.is_retryable());
+        for reason in [MapUnavailable::Disabled, MapUnavailable::Offline, MapUnavailable::NoData] {
+            assert!(!reason.is_retryable(), "{reason:?} should not be retried");
+        }
+    }
+
+    #[test]
+    fn every_map_reason_carries_its_own_key() {
+        // Distinct, because two reasons sharing a key means a player is told the
+        // wrong thing about one of them.
+        let keys: Vec<&str> = [
+            MapUnavailable::Disabled,
+            MapUnavailable::Offline,
+            MapUnavailable::Failed,
+            MapUnavailable::NoData,
+        ]
+        .into_iter()
+        .map(MapUnavailable::name_key)
+        .collect();
+        let mut unique = keys.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), keys.len(), "two map reasons share a key: {keys:?}");
+        assert!(keys.iter().all(|k| k.starts_with("map.unavailable.")));
+    }
+
+    #[test]
+    fn a_minimap_never_reports_a_marker_outside_its_own_radius() {
+        // The malformed fixture carries markers far outside the view and at the
+        // extremes of i32. A consumer that trusts the list rather than the bound
+        // draws outside its rectangle, and computing where to overflows.
+        let snapshot = crate::fixtures::snapshot(crate::fixtures::Scenario::Malformed);
+        let radius = snapshot.minimap.radius;
+        let (cx, cy) = snapshot.minimap.centre;
+
+        assert!(
+            snapshot.minimap.markers.len() > snapshot.minimap.visible_markers().count(),
+            "this fixture is supposed to contain out-of-range markers"
+        );
+        for marker in snapshot.minimap.visible_markers() {
+            assert!(
+                (marker.x - cx).abs() <= radius && (marker.y - cy).abs() <= radius,
+                "{marker:?} is outside a radius of {radius} around {cx},{cy}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_empty_minimap_is_ready_rather_than_unloaded() {
+        // "Nothing in range" and "no data yet" look the same in a rectangle and
+        // mean opposite things about whether to keep waiting.
+        let empty = crate::fixtures::snapshot(crate::fixtures::Scenario::Empty);
+        assert!(empty.minimap.availability.is_drawable());
+        assert!(!empty.minimap.has_content(), "the empty fixture has markers");
+
+        let loading = crate::fixtures::snapshot(crate::fixtures::Scenario::Loading);
+        assert!(loading.minimap.availability.is_pending());
+        assert!(!loading.minimap.availability.is_drawable());
+    }
+
+    #[test]
+    fn a_world_map_open_while_loading_is_a_state_a_player_can_reach() {
+        // Opening the overlay before its data arrives is ordinary, and needs a
+        // label rather than an empty overlay.
+        let loading = crate::fixtures::snapshot(crate::fixtures::Scenario::Loading);
+        assert!(loading.world_map.is_presenting(), "the overlay is not open");
+        assert!(loading.world_map.is_waiting(), "an open, loading overlay is not reported waiting");
+
+        let ready = crate::fixtures::snapshot(crate::fixtures::Scenario::Populated);
+        assert!(!ready.world_map.is_waiting());
+    }
+
+    #[test]
+    fn a_ghost_can_still_read_the_map() {
+        // Death restricts acting, not looking — the same rule the intent filter
+        // applies to chat.
+        let ghost = crate::fixtures::snapshot(crate::fixtures::Scenario::DeadGhost);
+        assert!(ghost.is_dead());
+        assert!(ghost.minimap.availability.is_drawable(), "a ghost lost the minimap");
+    }
+
+    #[test]
+    fn a_disconnected_client_says_why_the_map_is_gone() {
+        for (scenario, expected) in [
+            (crate::fixtures::Scenario::Disconnected, MapUnavailable::Offline),
+            (crate::fixtures::Scenario::Disabled, MapUnavailable::Disabled),
+        ] {
+            let snapshot = crate::fixtures::snapshot(scenario);
+            assert_eq!(
+                snapshot.minimap.availability,
+                MapAvailability::Unavailable(expected),
+                "{scenario:?} does not explain its missing minimap"
+            );
+        }
+    }
+
+    #[test]
+    fn the_map_states_take_part_in_snapshot_equality() {
+        // Added to the snapshot without being added to `same_state_as`, a map
+        // change would never rebuild the interface — the map would freeze and
+        // nothing else would look wrong.
+        let a = crate::fixtures::snapshot(crate::fixtures::Scenario::Populated);
+        let mut b = a.clone();
+        assert!(a.same_state_as(&b));
+
+        b.minimap.centre = (51, 50);
+        assert!(!a.same_state_as(&b), "moving the minimap centre is not a change");
+
+        let mut c = a.clone();
+        c.world_map.open = !c.world_map.open;
+        assert!(!a.same_state_as(&c), "opening the world map is not a change");
     }
 
     #[test]

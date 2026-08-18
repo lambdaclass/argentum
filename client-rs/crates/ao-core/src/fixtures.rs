@@ -147,6 +147,25 @@ fn base_progression(name: &str, level: u16) -> ProgressionState {
 
 fn populated() -> UiSnapshot {
     UiSnapshot {
+        minimap: MinimapState {
+            availability: MapAvailability::Ready,
+            map_number: 1,
+            centre: (50, 50),
+            radius: 11,
+            markers: vec![
+                MapMarker { x: 50, y: 50, kind: MarkerKind::Player },
+                MapMarker { x: 53, y: 48, kind: MarkerKind::Party },
+                MapMarker { x: 46, y: 55, kind: MarkerKind::Hostile },
+                MapMarker { x: 44, y: 44, kind: MarkerKind::Landmark },
+            ],
+        },
+        world_map: WorldMapState {
+            availability: MapAvailability::Ready,
+            open: false,
+            focus_map: 1,
+            size: (100, 100),
+            markers: vec![MapMarker { x: 50, y: 50, kind: MarkerKind::Player }],
+        },
         progression: base_progression("Aldar", 14),
         vitals: PlayerVitals {
             health: Gauge::new(148, 220),
@@ -233,6 +252,22 @@ fn populated() -> UiSnapshot {
 
 fn empty() -> UiSnapshot {
     UiSnapshot {
+        minimap: MinimapState {
+            // Ready with nothing in range. "No markers" is not "no data", and a
+            // consumer that cannot tell them apart shows the wrong thing.
+            availability: MapAvailability::Ready,
+            map_number: 1,
+            centre: (50, 50),
+            radius: 11,
+            markers: Vec::new(),
+        },
+        world_map: WorldMapState {
+            availability: MapAvailability::Ready,
+            open: false,
+            focus_map: 1,
+            size: (100, 100),
+            markers: Vec::new(),
+        },
         progression: base_progression("Novato", 1),
         vitals: PlayerVitals {
             health: Gauge::new(20, 20),
@@ -255,6 +290,13 @@ fn empty() -> UiSnapshot {
 
 fn loading() -> UiSnapshot {
     UiSnapshot {
+        minimap: MinimapState { availability: MapAvailability::Loading, ..Default::default() },
+        world_map: WorldMapState {
+            // Open while still loading, which a player can do and must see.
+            availability: MapAvailability::Loading,
+            open: true,
+            ..Default::default()
+        },
         service: ServiceState {
             phase: ConnectionPhase::Authenticating,
             latency_ms: None,
@@ -267,6 +309,10 @@ fn loading() -> UiSnapshot {
 
 fn disabled() -> UiSnapshot {
     let mut snapshot = populated();
+    // Inherits a ready map from `populated`, which would be wrong: this
+    // scenario is about the interface being told no.
+    snapshot.minimap.availability = MapAvailability::Unavailable(MapUnavailable::Disabled);
+    snapshot.world_map.availability = MapAvailability::Unavailable(MapUnavailable::Disabled);
     snapshot.vitals.mana = Gauge::new(2, 150);
     snapshot.vitals.stamina = Gauge::new(0, 60);
     snapshot.hotbar = hotbar(3, Some(0));
@@ -284,6 +330,10 @@ fn disabled() -> UiSnapshot {
 
 fn rejected() -> UiSnapshot {
     let mut snapshot = disabled();
+    // Inherits a ready map from `populated`, which would be wrong: this
+    // scenario is about the interface being told no.
+    snapshot.minimap.availability = MapAvailability::Unavailable(MapUnavailable::Failed);
+    snapshot.world_map.availability = MapAvailability::Unavailable(MapUnavailable::Failed);
     snapshot.feedback = vec![
         Feedback::new(FeedbackKey::NotEnoughStamina),
         Feedback {
@@ -300,6 +350,10 @@ fn rejected() -> UiSnapshot {
 
 fn disconnected() -> UiSnapshot {
     let mut snapshot = populated();
+    // Inherits a ready map from `populated`, which would be wrong: this
+    // scenario is about the interface being told no.
+    snapshot.minimap.availability = MapAvailability::Unavailable(MapUnavailable::Offline);
+    snapshot.world_map.availability = MapAvailability::Unavailable(MapUnavailable::Offline);
     snapshot.service =
         ServiceState { phase: ConnectionPhase::Failed, latency_ms: None, population: None };
     snapshot.target = TargetState::None;
@@ -329,6 +383,28 @@ fn dead_ghost() -> UiSnapshot {
 /// panicking, dividing by zero or drawing outside its own bounds.
 fn malformed() -> UiSnapshot {
     UiSnapshot {
+        minimap: MinimapState {
+            // Markers outside the radius and at the extremes of the type, so a
+            // consumer that trusts the list instead of the bound draws outside
+            // its own rectangle — or overflows computing where to.
+            availability: MapAvailability::Ready,
+            map_number: 1,
+            centre: (50, 50),
+            radius: 11,
+            markers: vec![
+                MapMarker { x: 50, y: 50, kind: MarkerKind::Player },
+                MapMarker { x: 9_000, y: -9_000, kind: MarkerKind::Hostile },
+                MapMarker { x: i32::MAX, y: i32::MIN, kind: MarkerKind::Landmark },
+            ],
+        },
+        world_map: WorldMapState {
+            // Zero-sized, so placing a marker proportionally divides by zero.
+            availability: MapAvailability::Ready,
+            open: true,
+            focus_map: 1,
+            size: (0, 0),
+            markers: vec![MapMarker { x: -1, y: -1, kind: MarkerKind::Player }],
+        },
         progression: ProgressionState {
             name: String::new(),
             class_key: String::new(),

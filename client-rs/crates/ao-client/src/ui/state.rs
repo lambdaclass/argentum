@@ -218,12 +218,64 @@ mod tests {
 
     #[test]
     fn an_identical_snapshot_does_not_rebuild_the_interface() {
-        // Once for the first real value, never again. A live adapter polling at
-        // 20Hz would otherwise rebuild the whole rail twenty times a second.
+        // The contract's numbers exactly: the first snapshot rebuilds once and
+        // twenty identical writes after it rebuild zero times. Twenty because a
+        // live adapter polling at 20Hz publishes that many in a second, and a
+        // rail that rebuilds twenty times a second is the failure being ruled
+        // out — not a rail that rebuilds five times.
         for scenario in [Scenario::Populated, Scenario::Empty, Scenario::DeadGhost] {
-            let count = rebuilds(&[scenario; 5]);
-            assert_eq!(count, 1, "{} rebuilt {count} times for one value", scenario.key());
+            let mut script = vec![scenario];
+            script.extend(std::iter::repeat_n(scenario, 20));
+            let count = rebuilds(&script);
+            assert_eq!(
+                count,
+                1,
+                "{} rebuilt {count} times across one value written 21 times",
+                scenario.key()
+            );
         }
+    }
+
+    #[test]
+    fn one_changed_field_rebuilds_exactly_once() {
+        // The other half of the contract's numbers. `a_genuine_change_does_rebuild`
+        // changes whole scenarios; this changes a single field, which is the case
+        // a coarse comparison would miss and an over-eager one would double.
+        let base = fixtures::snapshot(Scenario::Populated);
+        let mut changed = base.clone();
+        changed.vitals.health = ao_core::view::Gauge::new(1, 220);
+
+        let script = vec![base.clone(), base.clone(), changed.clone(), changed.clone()];
+        let mut app = App::new();
+        app.init_resource::<UiState>().init_resource::<Rebuilds>();
+
+        let mut frame = 0usize;
+        app.add_systems(
+            Update,
+            (
+                move |mut state: ResMut<UiState>| {
+                    if let Some(snapshot) = script.get(frame) {
+                        UiState::publish(&mut state, snapshot.clone());
+                    }
+                    frame += 1;
+                },
+                |state: Res<UiState>, mut count: ResMut<Rebuilds>| {
+                    if state.is_changed() {
+                        count.0 += 1;
+                    }
+                },
+            )
+                .chain(),
+        );
+        for _ in 0..4 {
+            app.update();
+        }
+
+        assert_eq!(
+            app.world().resource::<Rebuilds>().0,
+            2,
+            "one field changing should rebuild once, on top of the first value"
+        );
     }
 
     #[test]
