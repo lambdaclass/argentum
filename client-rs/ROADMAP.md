@@ -336,6 +336,25 @@ rendered state plus emitted activation. The production control path must be
 reachable outside `#[cfg(test)]`; unused `Control`, `FocusOwner`, builders or
 text-field warnings mean the interaction model is not integrated.
 
+Clarification, from implementing it: the "no unused builder" rule cannot be
+satisfied inside this task alone, because the production *consumers* of several
+shared controls belong elsewhere — the chat and password fields to W-0008, the
+spell row to W-0007, and the gallery that shows every control at once to W-0012.
+What this task owns is that each control is complete and proven through the
+production systems: it carries the components the interaction pipeline queries,
+it is activated in tests by pointer and keyboard through the real plugin, and no
+builder duplicates a control the plugin already provides. Adoption by each panel
+is then the owning task's evidence, not a warning to be silenced here.
+
+The text field is complete rather than merely present: a typed `TextEdit`
+boundary the platform adapters in W-0015..W-0017 will write to, editing applied
+only to the focused field, an IME preview held apart from the value so
+cancellation can withdraw it, masking that never alters the value, a rendered
+caret only where the keyboard actually is, and `TextInputActive` as the single
+definition of "a field owns the keyboard" so gameplay input is suppressed in one
+place. No DOM input exists, and none may be added: a hidden `<input>` would be a
+second source of truth for caret, selection and composition, and the two drift.
+
 ### Task W-0085 — Pointer and hit-test coordinate integrity
 
 - **State:** planned

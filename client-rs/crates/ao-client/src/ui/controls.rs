@@ -214,6 +214,12 @@ pub fn next_focus(
 #[derive(Component, Debug, Clone, Default, PartialEq, Eq)]
 pub struct TextField {
     value: String,
+    /// Text being composed but not yet committed — an IME preview.
+    ///
+    /// Held apart from `value` because a preview is not content: cancelling
+    /// composition must leave the field exactly as it was, and a preview merged
+    /// into `value` cannot be withdrawn.
+    composing: String,
     /// Caret position, as a character index rather than a byte index — a byte
     /// caret lands inside a multi-byte character and panics on the next slice.
     caret: usize,
@@ -249,11 +255,46 @@ impl TextField {
     /// the character count rather than the byte length so an accented password
     /// does not leak its composition through a longer row of dots.
     pub fn display(&self) -> String {
-        if self.masked {
-            "\u{2022}".repeat(self.char_count())
-        } else {
-            self.value.clone()
+        let mut shown =
+            if self.masked { "\u{2022}".repeat(self.char_count()) } else { self.value.clone() };
+        // The preview is shown even when masked, as bullets: a player needs to
+        // see that composition is happening without the characters leaking.
+        if !self.composing.is_empty() {
+            if self.masked {
+                shown.push_str(&"\u{2022}".repeat(self.composing.chars().count()));
+            } else {
+                shown.push_str(&self.composing);
+            }
         }
+        shown
+    }
+
+    /// Text currently being composed, if any.
+    pub fn composing(&self) -> &str {
+        &self.composing
+    }
+
+    /// Whether an IME composition is in progress.
+    pub fn is_composing(&self) -> bool {
+        !self.composing.is_empty()
+    }
+
+    /// Replace the composition preview.
+    pub fn compose(&mut self, preview: impl Into<String>) {
+        self.composing = preview.into();
+    }
+
+    /// Commit the preview into the value at the caret.
+    pub fn commit_composition(&mut self) {
+        let preview = std::mem::take(&mut self.composing);
+        for character in preview.chars() {
+            self.insert(character);
+        }
+    }
+
+    /// Discard the preview, leaving the value untouched.
+    pub fn cancel_composition(&mut self) {
+        self.composing.clear();
     }
 
     pub fn insert(&mut self, character: char) {
@@ -375,6 +416,39 @@ pub struct Activated {
     pub source: ActivationSource,
 }
 
+/// One editing step, as data.
+///
+/// The boundary the platform adapters in W-0015..W-0017 will write to. Typed and
+/// deterministic on purpose: editing is then testable with no browser and no
+/// second DOM field. There is exactly one text field in this client and it is a
+/// Bevy control — a hidden `<input>` would be a second source of truth for the
+/// caret, the selection and the composition state, and they would drift.
+#[derive(Message, Debug, Clone, PartialEq, Eq)]
+pub enum TextEdit {
+    /// Committed text, which may be several characters at once from a paste.
+    Insert(String),
+    Backspace,
+    DeleteForward,
+    CaretLeft,
+    CaretRight,
+    CaretToStart,
+    CaretToEnd,
+    /// An IME preview, replacing any previous one.
+    Compose(String),
+    /// The preview is now real text.
+    CommitComposition,
+    /// The preview is abandoned; the value must be untouched.
+    CancelComposition,
+}
+
+/// Whether a text field currently owns the keyboard.
+///
+/// Read by gameplay input so typing "s" in chat does not also walk south. A
+/// resource rather than each system asking the focus owner, so the rule has one
+/// definition and a system added later cannot forget to apply it.
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TextInputActive(pub bool);
+
 /// Ordering for the interaction pipeline.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ControlSet {
@@ -397,7 +471,24 @@ impl Plugin for ControlsPlugin {
                     .chain()
                     .in_set(ControlSet::Interact),
             )
-            .add_systems(Update, present_controls.in_set(ControlSet::Present));
+            .add_systems(Update, present_controls.in_set(ControlSet::Present))
+            .init_resource::<TextInputActive>()
+            .add_message::<TextEdit>()
+            // Registered here so this plugin stands alone: without InputPlugin
+            // the keyboard message is uninitialised and the reader below fails
+            // validation rather than simply seeing nothing.
+            .add_message::<bevy::input::keyboard::KeyboardInput>()
+            // Ownership is decided before the keys are read, so the frame a
+            // field gains focus is not the frame its first keystroke walks the
+            // player south.
+            .add_systems(
+                Update,
+                (track_text_input, keyboard_to_text_edits, apply_text_edits)
+                    .chain()
+                    .in_set(ControlSet::Interact)
+                    .after(resolve_focus),
+            )
+            .add_systems(Update, present_text_fields.in_set(ControlSet::Present));
     }
 }
 
@@ -533,6 +624,147 @@ fn resolve_focus(
 }
 
 /// Redraw controls from their resolved state.
+/// Turn keyboard input into typed editing steps.
+///
+/// Reads `KeyboardInput` rather than `ButtonInput<KeyCode>` for text, because
+/// only the logical key carries the character a layout actually produces —
+/// `KeyCode` is a physical position, and typing on a French keyboard through it
+/// inserts the wrong letters.
+fn keyboard_to_text_edits(
+    active: Res<TextInputActive>,
+    mut keys: MessageReader<bevy::input::keyboard::KeyboardInput>,
+    mut edits: MessageWriter<TextEdit>,
+) {
+    use bevy::input::keyboard::Key;
+    use bevy::input::ButtonState;
+
+    if !active.0 {
+        // Not focused: the keys belong to the game. Drained anyway so a burst
+        // typed before focusing does not arrive all at once afterwards.
+        keys.clear();
+        return;
+    }
+
+    for key in keys.read() {
+        if key.state != ButtonState::Pressed {
+            continue;
+        }
+        let edit = match &key.logical_key {
+            Key::Character(text) => Some(TextEdit::Insert(text.to_string())),
+            Key::Space => Some(TextEdit::Insert(" ".into())),
+            Key::Backspace => Some(TextEdit::Backspace),
+            Key::Delete => Some(TextEdit::DeleteForward),
+            Key::ArrowLeft => Some(TextEdit::CaretLeft),
+            Key::ArrowRight => Some(TextEdit::CaretRight),
+            Key::Home => Some(TextEdit::CaretToStart),
+            Key::End => Some(TextEdit::CaretToEnd),
+            Key::Escape => Some(TextEdit::CancelComposition),
+            _ => None,
+        };
+        if let Some(edit) = edit {
+            edits.write(edit);
+        }
+    }
+}
+
+/// Apply editing steps to whichever field has focus.
+///
+/// Only the focused one, so two fields on screen cannot both receive the same
+/// keystroke.
+fn apply_text_edits(
+    focus: Res<FocusOwner>,
+    mut edits: MessageReader<TextEdit>,
+    mut fields: Query<&mut TextField>,
+) {
+    let Some(entity) = focus.entity() else {
+        edits.clear();
+        return;
+    };
+    let Ok(mut field) = fields.get_mut(entity) else {
+        edits.clear();
+        return;
+    };
+
+    for edit in edits.read() {
+        match edit {
+            TextEdit::Insert(text) => {
+                for character in text.chars() {
+                    field.insert(character);
+                }
+            }
+            TextEdit::Backspace => field.backspace(),
+            TextEdit::DeleteForward => field.delete_forward(),
+            TextEdit::CaretLeft => field.move_caret(-1),
+            TextEdit::CaretRight => field.move_caret(1),
+            TextEdit::CaretToStart => field.caret_to_start(),
+            TextEdit::CaretToEnd => field.caret_to_end(),
+            TextEdit::Compose(preview) => field.compose(preview.clone()),
+            TextEdit::CommitComposition => field.commit_composition(),
+            TextEdit::CancelComposition => field.cancel_composition(),
+        }
+    }
+}
+
+/// Record whether a text field owns the keyboard.
+fn track_text_input(
+    focus: Res<FocusOwner>,
+    fields: Query<(), With<TextField>>,
+    mut active: ResMut<TextInputActive>,
+) {
+    let owned = focus.entity().is_some_and(|entity| fields.get(entity).is_ok());
+    if active.0 != owned {
+        active.0 = owned;
+    }
+}
+
+/// Draw a field's value, masked if it is a password, with a caret when focused.
+fn present_text_fields(
+    focus: Res<FocusOwner>,
+    fields: Query<(Entity, &TextField, &Children)>,
+    mut text: Query<&mut Text>,
+) {
+    for (entity, field, children) in &fields {
+        // A caret only where the keyboard is: two carets on screen is a lie
+        // about which field a keystroke will reach.
+        let focused = focus.entity() == Some(entity);
+        let shown = field.display();
+        let rendered = if focused { format!("{shown}\u{2502}") } else { shown };
+
+        for child in children.iter() {
+            if let Ok(mut label) = text.get_mut(child) {
+                if label.0 != rendered {
+                    label.0 = rendered.clone();
+                }
+            }
+        }
+    }
+}
+
+/// A shared text field, rendered.
+pub fn text_field(field: TextField, tab_index: u32) -> impl Bundle {
+    (
+        Button,
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Px(size::STATUS_BAR_HEIGHT + space::SNUG * 2.0),
+            padding: UiRect::axes(Val::Px(space::SNUG), Val::Px(space::HAIR)),
+            align_items: AlignItems::Center,
+            border: UiRect::all(Val::Px(size::BORDER)),
+            overflow: Overflow::clip(),
+            ..default()
+        },
+        BackgroundColor(surface::WELL),
+        BorderColor::all(surface::EDGE),
+        Control { tab_index, ..default() },
+        field,
+        children![(
+            Text::new(String::new()),
+            TextFont { font_size: type_scale::SMALL, ..default() },
+            TextColor(ink::PRIMARY),
+        )],
+    )
+}
+
 fn present_controls(
     focus: Res<FocusOwner>,
     mut controls: Query<(Entity, &Control, &mut BackgroundColor, &mut BorderColor)>,
@@ -777,6 +1009,160 @@ mod tests {
             .expect("the builder produced a control with no Interaction to drive");
         *found = interaction;
         app.update();
+    }
+
+    /// Spawn the production text field and give it focus.
+    fn focused_field(app: &mut App, field: TextField) -> Entity {
+        let entity = app.world_mut().spawn(text_field(field, 1)).id();
+        app.update();
+        press_key(app, KeyCode::Tab);
+        assert_eq!(
+            app.world().resource::<FocusOwner>().entity(),
+            Some(entity),
+            "the field is not focusable, so nothing below tests editing"
+        );
+        entity
+    }
+
+    fn value_of(app: &App, entity: Entity) -> String {
+        app.world().get::<TextField>(entity).expect("a text field").value().to_string()
+    }
+
+    fn rendered(app: &mut App, entity: Entity) -> String {
+        let children: Vec<Entity> =
+            app.world().get::<Children>(entity).expect("children").iter().collect();
+        children
+            .into_iter()
+            .filter_map(|child| app.world().get::<Text>(child).map(|t| t.0.clone()))
+            .next()
+            .expect("the field renders no text")
+    }
+
+    #[test]
+    fn typing_reaches_the_focused_field_and_is_drawn() {
+        let mut app = controls_app();
+        let entity = focused_field(&mut app, TextField::new());
+
+        app.world_mut().write_message(TextEdit::Insert("hola".into()));
+        app.update();
+
+        assert_eq!(value_of(&app, entity), "hola");
+        // Drawn, with a caret, because a field that holds text and shows nothing
+        // is indistinguishable from one that dropped it.
+        assert_eq!(rendered(&mut app, entity), "hola\u{2502}");
+    }
+
+    #[test]
+    fn a_password_field_draws_bullets_and_keeps_its_value() {
+        let mut app = controls_app();
+        let entity = focused_field(&mut app, TextField::password());
+
+        app.world_mut().write_message(TextEdit::Insert("secreto".into()));
+        app.update();
+
+        assert_eq!(value_of(&app, entity), "secreto", "masking must not alter the value");
+        let shown = rendered(&mut app, entity);
+        assert!(!shown.contains("secreto"), "the password is drawn in clear: {shown}");
+        assert_eq!(shown.chars().filter(|c| *c == '\u{2022}').count(), 7);
+    }
+
+    #[test]
+    fn editing_moves_the_caret_and_deletes_in_both_directions() {
+        let mut app = controls_app();
+        let entity = focused_field(&mut app, TextField::new());
+
+        app.world_mut().write_message(TextEdit::Insert("año".into()));
+        app.update();
+        // A multi-byte character, deliberately: a byte caret lands inside it.
+        assert_eq!(value_of(&app, entity), "año");
+
+        app.world_mut().write_message(TextEdit::CaretLeft);
+        app.world_mut().write_message(TextEdit::Backspace);
+        app.update();
+        assert_eq!(value_of(&app, entity), "ao", "backspace at a caret inside the text");
+
+        app.world_mut().write_message(TextEdit::CaretToStart);
+        app.world_mut().write_message(TextEdit::DeleteForward);
+        app.update();
+        assert_eq!(value_of(&app, entity), "o");
+    }
+
+    #[test]
+    fn a_cancelled_composition_leaves_the_value_exactly_as_it_was() {
+        // The reason a preview is held apart from the value: cancelling must be
+        // able to withdraw it, and text merged into the value cannot be.
+        let mut app = controls_app();
+        let entity = focused_field(&mut app, TextField::new());
+
+        app.world_mut().write_message(TextEdit::Insert("a".into()));
+        app.update();
+        app.world_mut().write_message(TextEdit::Compose("ño".into()));
+        app.update();
+
+        assert_eq!(value_of(&app, entity), "a", "a preview was committed early");
+        assert!(rendered(&mut app, entity).contains("ño"), "the preview is not shown");
+
+        app.world_mut().write_message(TextEdit::CancelComposition);
+        app.update();
+        assert_eq!(value_of(&app, entity), "a");
+        assert!(!rendered(&mut app, entity).contains("ño"));
+    }
+
+    #[test]
+    fn a_committed_composition_becomes_real_text() {
+        let mut app = controls_app();
+        let entity = focused_field(&mut app, TextField::new());
+
+        app.world_mut().write_message(TextEdit::Compose("año".into()));
+        app.update();
+        app.world_mut().write_message(TextEdit::CommitComposition);
+        app.update();
+
+        assert_eq!(value_of(&app, entity), "año");
+        assert!(!app.world().get::<TextField>(entity).expect("a field").is_composing());
+    }
+
+    #[test]
+    fn gameplay_keys_are_suppressed_only_while_a_field_owns_them() {
+        // Typing "s" in chat must not also walk the player south. Enforced in
+        // one place, so a movement system added later cannot forget it.
+        let mut app = controls_app();
+        assert!(!app.world().resource::<TextInputActive>().0, "nothing is focused yet");
+
+        let field = app.world_mut().spawn(text_field(TextField::new(), 1)).id();
+        let button = app.world_mut().spawn(button("Attack", ControlState::Normal, 2)).id();
+        app.update();
+
+        press_key(&mut app, KeyCode::Tab);
+        assert_eq!(app.world().resource::<FocusOwner>().entity(), Some(field));
+        assert!(
+            app.world().resource::<TextInputActive>().0,
+            "a focused field does not claim the keyboard"
+        );
+
+        // Tab still moves on: it belongs to focus traversal, not to the text.
+        press_key(&mut app, KeyCode::Tab);
+        assert_eq!(app.world().resource::<FocusOwner>().entity(), Some(button));
+        assert!(
+            !app.world().resource::<TextInputActive>().0,
+            "the keyboard is still claimed after focus left the field"
+        );
+    }
+
+    #[test]
+    fn an_edit_with_nothing_focused_is_discarded_rather_than_queued() {
+        // Otherwise a burst typed before focusing arrives all at once the moment
+        // a field is focused, inserting text the player did not type into it.
+        let mut app = controls_app();
+        let entity = app.world_mut().spawn(text_field(TextField::new(), 1)).id();
+        app.update();
+
+        app.world_mut().write_message(TextEdit::Insert("ghost".into()));
+        app.update();
+        press_key(&mut app, KeyCode::Tab);
+        app.update();
+
+        assert_eq!(value_of(&app, entity), "", "an unfocused edit was replayed on focus");
     }
 
     #[test]
