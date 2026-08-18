@@ -19,6 +19,85 @@ Never reuse a completed ID in the active roadmap.
 
 ## Closed tasks
 
+### Completed Task W-0005 — Design tokens and Bevy primitives
+
+Closed: 2026-08-18 (`401cfca`, `f13fdb1`, `8427db0`, `89d3c66`, `9436dea`,
+`c54a079`, `646162f`, `71f72ed`, `21e0c0d`)
+
+Versioned tokens for typography, colour, borders, spacing, icon and slot sizes,
+focus, disabled, rarity and status, and the shared Bevy controls that use them:
+button, tab, slot, status bar, list and list row, text and password field,
+tooltip, menu, dialog, notification, drag ghost, progress/cooldown and hotkey
+prompt. One focus, activation and state model, the same systems on WASM and
+native with no `cfg` between them.
+
+Three faults found while building it, each of which made a control look finished
+and behave as decoration:
+
+- `button`, `tab` and `slot` attached `Control` but not `Button` — and `Button` is
+  what requires the `Interaction` that `track_pointer` queries. Everything they
+  produced was invisible to the pointer: hover never registered, a click did
+  nothing. The panels that worked did so by adding `Button` themselves, which is
+  the duplication this task exists to remove.
+- The inventory slot had the same gap, so clicking an inventory slot did nothing.
+  The hotbar slots had neither component: the number keys worked while the slots
+  themselves were decoration that Tab passed over. `controls::interactive` now
+  names the contract and all three use it.
+- `TextInputActive` was described as the single definition of who owns the
+  keyboard while movement had no rule at all — typing "w" walked the player — and
+  the hotbar consulted the snapshot directly. It is now computed from both sources
+  that can make it true and read by movement, hotbar keys and spell disarm in a
+  `GameplayInput` set ordered after the interaction pipeline, so a keystroke
+  cannot be taken as movement in the frame a field gains focus.
+
+Behaviour, with the reasoning in the code:
+
+- F6 enters and leaves focus navigation. Tab traversal was unconditional, which
+  took a gameplay key — the whole-world map opens on Tab (W-0089) — and a focus
+  ring walking the interface mid-fight is not what a player pressing it wanted.
+  Leaving navigation drops the ring, unless a text field holds it, since dropping
+  focus mid-sentence would discard what was being written. The host suppresses Tab
+  and F6 only while the canvas has focus: with default handling left on, Tab moved
+  browser focus off the canvas and ended the session's keyboard entirely.
+- `Modal` confines traversal to the topmost dialog or menu. Tab walking out of a
+  dialog into the panel it covers is the difference between a modal and a floating
+  box.
+- The text field is complete rather than present: a typed `TextEdit` boundary for
+  the adapters in W-0015..W-0017, editing applied only to the focused field, an IME
+  preview held apart from the value so cancellation can withdraw it, masking that
+  never alters the value, and the caret drawn *at* `caret()` — it was appended to
+  the end, so pressing left moved the model and nothing on screen. Character
+  indices throughout, because a byte index lands inside "año".
+- Tooltips are placed below by preference and above when below would leave the
+  viewport, using the tooltip's measured size once it has one. They were always
+  below with no check, which put them off-screen exactly where they are needed:
+  the bottom of the compact rail and the right of the top bar.
+- Status is never colour alone. Focus adds border *width* — it was a colour change
+  and nothing else, and focus is the one state a player cannot play without
+  knowing. Selection marks a leading-edge bar via the `Selected` state, notice
+  levels carry a text marker, and locked slots draw a mark.
+
+Evidence: 372 client tests, 79 core tests, 0 failures. The interaction tests spawn
+the exact production builder and add nothing by hand — their pointer helper reads
+the `Interaction` the builder should have supplied, so an omission fails with "the
+builder produced a control with no Interaction to drive". Browser checks confirm
+Tab, Shift+Tab and F6 leave focus on the canvas. Every behavioural claim above was
+verified by mutation: removing the fix makes the test fail.
+
+**Builders with no production consumer yet, and who owns each.** This task's
+"no unused builder" rule cannot be satisfied here, because the consumers belong
+to tasks that depend on this one: `spell_row` and `cooldown_overlay` to W-0007
+and W-0010, `dialog`, `menu`, `notification` and the chat/password fields to
+W-0008, `list` and `list_row` to W-0007 and W-0008, `drag_ghost` to W-0009, and
+`button`, `tab`, `slot` and `progress` to those panels and to the gallery in
+W-0012. What this task owns — each control complete, carrying the components the
+pipeline queries, activated in tests through the real plugin, and no builder
+duplicating something the plugin already does — is met. Adoption is each owning
+task's evidence. `shell::focus_ring` was deleted rather than adopted, since
+`present_controls` already renders focus; `hotbar::selection_ring` and a second
+`slot_key_code` were byte-identical copies, and the `Tooltip` marker was never
+constructed.
+
 ### Completed Task W-0003 — Scaling, fullscreen, resize and DPI
 
 Closed: 2026-08-18 (`c99ed51`, `df4a563`, `ec7fa8f`, `6d0db91`, `87441d5`,
