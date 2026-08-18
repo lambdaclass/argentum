@@ -109,8 +109,14 @@
          back on a fractional pixel grid. */
       #ao-canvas {
         display: block;
-        width: 100%;
-        height: 100%;
+        /* `!important` because the client sets an inline size from its *backing
+           store*, which is the CSS size times the device pixel ratio. Presented at
+           that size the canvas overflows its host — 2556px inside a 1278px shell at
+           2x — and only the left-hand part of the game is visible. The split is:
+           the page decides how large the canvas is presented, the client decides how
+           many pixels it renders into. */
+        width: 100% !important;
+        height: 100% !important;
         image-rendering: pixelated;
         background: #000;
         outline: none;

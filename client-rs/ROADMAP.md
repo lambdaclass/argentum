@@ -1605,21 +1605,36 @@ which reference artifacts were retained and why.
 - **Phase:** 11
 - **Depends on:** W-0003
 
-Deferred from W-0003 by decision on 2026-08-18, and placed at the end of the
-sequence deliberately: the interim path satisfies every scaling requirement in
-the Phase 0 exit gate, so this is quality rather than correctness, and it should
-not hold up gameplay work.
+Deferred from W-0003 by decision on 2026-08-18, then largely delivered during
+W-0085 — because it turned out not to be a quality question.
 
-Today the web build pins its scale factor to 1, so one CSS pixel is one logical
-pixel and the canvas backing store is the CSS size. The world is unaffected in
-kind — it is pixel art on an integral grid, and an integer ratio is
-nearest-neighbour either way — but interface text is drawn at CSS resolution and
-upscaled by the compositor, which on a 2x display is visibly soft.
+The interim path pinned the web build's scale factor to 1. That held the layout
+steady and gave up the extra resolution, which read as a cosmetic trade. It also
+left Bevy's *input* paths in device pixels while the layout was in CSS pixels, and
+the two agree only at ratio 1: on a 125% display, an ordinary Windows setting, a
+click 400 pixels from the left edge was treated as 800 and landed in the character
+rail instead of the world. Correctness, not sharpness, and found by driving real
+clicks in a browser at 1.25x rather than by reasoning about it.
 
-Implement physical-resolution rendering:
+`ui::shell::track_host_canvas` now owns the relationship: logical size is the host
+element's CSS box, physical size is that times the device pixel ratio, the scale
+factor is the ratio, and every consumer — layout, cursor, picking — works in units
+that agree. Measured at 1.0, 1.25 and 2.0: the backing store is exactly `css ×
+ratio`, the layout is unchanged, and the pointer lands where it was put.
 
-- The canvas backing store is `round(css × devicePixelRatio)`, set once per
-  resize or ratio change, with Bevy's logical size remaining the CSS size.
+What remains:
+
+- **The world's grid at fractional ratios.** One world pixel now covers 1.25 or 1.5
+  physical pixels at those settings, so nearest sampling duplicates some source
+  pixels and not others and the pattern shifts as the camera pans.
+  `scale::world_render` decides the integer-zoom target that fixes it and is
+  tested; the wiring is what is missing, and `examples/render_target_probe.rs`
+  records that all four of its stages pass natively so the mechanism is sound.
+- **Hardware validation.** Text sharpness and compositor behaviour cannot be judged
+  where every ratio is emulated and headless Chromium composites at 1x.
+
+Still to prove, for the parts above:
+
 - Interface text and controls render at physical resolution.
 - The world keeps a whole number of physical pixels per world pixel, so a
   fractional ratio cannot make the sampling grid shift while the camera pans.
@@ -1629,8 +1644,9 @@ Implement physical-resolution rendering:
   second derivation of the same rectangle.
 - Render-target dimensions and memory stay inside `scale::TargetLimits`, which
   reads the device's own maximum.
-- The pinned scale-factor-1 path is retained as a tested fallback for devices
-  that cannot support the above.
+- A tested fallback for devices that cannot support the above. The pinned
+  scale-factor-1 path is *not* it: it breaks pointer accuracy on scaled displays,
+  which is why it was replaced rather than kept.
 
 Known before starting, from `examples/render_target_probe.rs`: clearing an image
 target, drawing a colour-only quad into it, drawing a textured sprite into it,

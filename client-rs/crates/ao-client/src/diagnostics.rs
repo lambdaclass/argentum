@@ -116,6 +116,9 @@ fn publish(
     player: Res<crate::world::LocalPlayer>,
     last: Res<LastActivation>,
     controls: Query<(&ControlKey, &Control, &ComputedNode, &UiGlobalTransform)>,
+    pointer: Res<crate::ui::pointer::PointerState>,
+    geometry: Res<crate::ui::shell::AppliedGeometry>,
+    windows: Query<&Window>,
 ) {
     // Republished every frame: `hovered` changes with the pointer and nothing
     // else here tracks it, so gating on the other resources would freeze it.
@@ -152,8 +155,14 @@ fn publish(
         );
     }
 
-    // Where every keyed control actually is, in CSS pixels of the canvas, so a
-    // test can click a control by position rather than by guessing at layout.
+    // Where every keyed control actually is, in CSS pixels of the canvas, so a test
+    // can click a control by position rather than by guessing at layout.
+    //
+    // `ComputedNode` is in *physical* pixels, so it is divided by the scale factor
+    // here. Published raw, the rectangles matched CSS coordinates only at ratio 1 —
+    // and every click at 1.25x and above missed by a quarter of the distance from
+    // the origin, which looked exactly like a hit-testing bug in the client.
+    let scale = windows.iter().next().map(|w| w.scale_factor()).unwrap_or(1.0).max(0.001);
     let rects = js_sys::Array::new();
     for (key, control, computed, transform) in &controls {
         let half = computed.size() / 2.0;
@@ -171,10 +180,10 @@ fn publish(
             &wasm_bindgen::JsValue::from_str("key"),
             &wasm_bindgen::JsValue::from_str(key.as_str()),
         );
-        set_num("x", centre.x - half.x);
-        set_num("y", centre.y - half.y);
-        set_num("w", computed.size().x);
-        set_num("h", computed.size().y);
+        set_num("x", (centre.x - half.x) / scale);
+        set_num("y", (centre.y - half.y) / scale);
+        set_num("w", computed.size().x / scale);
+        set_num("h", computed.size().y / scale);
         let _ = js_sys::Reflect::set(
             &entry,
             &wasm_bindgen::JsValue::from_str("enabled"),
@@ -183,6 +192,45 @@ fn publish(
         rects.push(&entry);
     }
     let _ = js_sys::Reflect::set(&report, &wasm_bindgen::JsValue::from_str("controls"), &rects);
+
+    // The world's rectangle, from the shell's own geometry. A test that derived it
+    // from a control's position instead measured into the rail and off the top bar,
+    // and then blamed the client for the tiles it got back.
+    if let Some(shell) = geometry.0 {
+        set("worldX", shell.world.min.x as f64);
+        set("worldY", shell.world.min.y as f64);
+        set("worldW", shell.world.width() as f64);
+        set("worldH", shell.world.height() as f64);
+    }
+
+    // Where the pointer resolves in the world, so a test can check that clicking
+    // the centre of the viewport selects the tile that is drawn there rather than
+    // one next to it.
+    let _ = js_sys::Reflect::set(
+        &report,
+        &wasm_bindgen::JsValue::from_str("pointerTarget"),
+        &wasm_bindgen::JsValue::from_str(match pointer.target {
+            Some(crate::ui::pointer::PointerTarget::World) => "world",
+            Some(crate::ui::pointer::PointerTarget::Interface) => "interface",
+            Some(crate::ui::pointer::PointerTarget::Outside) => "outside",
+            None => "none",
+        }),
+    );
+    // The position the client currently believes the pointer is at, so a test can
+    // wait for the move it just made to arrive rather than reading whatever was
+    // published for the previous one. Without this, every reading was one move
+    // stale and the world mapping looked inverted.
+    if let Some(position) = pointer.position {
+        set("pointerX", position.x as f64);
+        set("pointerY", position.y as f64);
+    }
+    if let Some(tile) = pointer.tile {
+        let pair = js_sys::Array::new();
+        pair.push(&wasm_bindgen::JsValue::from_f64(tile.x as f64));
+        pair.push(&wasm_bindgen::JsValue::from_f64(tile.y as f64));
+        let _ =
+            js_sys::Reflect::set(&report, &wasm_bindgen::JsValue::from_str("pointerTile"), &pair);
+    }
 
     // What the interaction pipeline believes is under the pointer right now.
     let hovered = js_sys::Array::new();

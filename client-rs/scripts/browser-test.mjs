@@ -138,6 +138,211 @@ async function measure(page) {
   });
 }
 
+
+/// Click-accuracy checks against the client's published geometry.
+///
+/// Takes the page rather than building one, so the same checks run at every device
+/// pixel ratio and in both reachable host modes.
+async function runHitTests(hitPage, label, ratio) {
+    const canvasBox = await hitPage.evaluate(() => {
+      const box = document.getElementById("ao-canvas").getBoundingClientRect();
+      return { x: box.x, y: box.y };
+    });
+    // Polled, because the grid is built as the snapshot and geometry settle and at a
+    // device pixel ratio of 2 this software renderer takes seconds to get there.
+    // Read once, immediately after boot, the list was sometimes published before the
+    // inventory existed — and the test then reported a missing control as a client
+    // fault rather than as its own impatience.
+    const wanted = ["inventory.slot.0", "hotbar.slot.0"];
+    let controls = [];
+    const controlsDeadline = Date.now() + 20_000;
+    while (Date.now() < controlsDeadline) {
+      controls = await hitPage.evaluate(() => window.aoLoaded?.controls ?? []);
+      const laidOut = wanted.every((key) =>
+        controls.some((c) => c.key === key && c.w > 4 && c.h > 4)
+      );
+      if (laidOut) break;
+      await hitPage.waitForTimeout(100);
+    }
+    check(`${label}: `+"the client publishes its control rectangles", controls.length > 0, `${controls.length}`);
+
+    /// Click a point in canvas coordinates and report what activated, if anything.
+    ///
+    /// Compares the activation *counter* before and after rather than reading the
+    /// last key: the client republishes its report every frame, so the previous
+    /// activation is still there and every "this must not activate" check would
+    /// pass or fail on stale data. Clearing the field from here achieved nothing —
+    /// it is the client's resource that holds it.
+    const clickAt = async (x, y) => {
+      const before = await hitPage.evaluate(() => window.aoLoaded?.activations ?? 0);
+      await hitPage.mouse.click(canvasBox.x + x, canvasBox.y + y);
+
+      // Polled, not slept. Under software rendering this client runs at about six
+      // frames a second, so a fixed 120ms wait was shorter than a single frame and
+      // every click "did not activate" — the same mistake as the capture harness's
+      // four-second sleep, in the other direction. A deadline instead: the answer
+      // arrives when it arrives, and only a genuine non-activation waits out the
+      // whole budget.
+      // Ten seconds, not three. Measured: at a device pixel ratio of 2 this
+      // software renderer takes about 2.4 seconds to process a click and republish,
+      // and the suite's pages are busier than a bare probe. The loop returns as
+      // soon as the counter moves, so a fast click costs nothing and only a genuine
+      // non-activation waits out the budget.
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const now = await hitPage.evaluate(() => ({
+          count: window.aoLoaded?.activations ?? 0,
+          key: window.aoLoaded?.lastActivated ?? null,
+        }));
+        if (now.count > before) return now.key;
+        await hitPage.waitForTimeout(50);
+      }
+      return null;
+    };
+
+    // A representative spread rather than every control: an inventory slot, a
+    // hotbar slot and a top-bar icon exercise three different panels and three
+    // different sizes.
+    const sample = ["inventory.slot.0", "hotbar.slot.0", "rail.compact.nav.0"]
+      .map((key) => controls.find((c) => c.key === key && c.enabled && c.w > 4 && c.h > 4))
+      .filter(Boolean);
+    check(`${label}: `+"a representative control sample is available", sample.length >= 2, `${sample.length}`);
+
+    for (const control of sample) {
+      const cx = control.x + control.w / 2;
+      const cy = control.y + control.h / 2;
+
+      check(
+        `clicking the centre of ${control.key} activates it`,
+        (await clickAt(cx, cy)) === control.key
+      );
+
+      // One pixel inside each edge is still this control.
+      for (const [dx, dy, edge] of [
+        [1, 0, "left"],
+        [-1, 0, "right"],
+        [0, 1, "top"],
+        [0, -1, "bottom"],
+      ]) {
+        const inset = ratio === 1 ? 1 : 2;
+        const x = dx === 0 ? cx : dx > 0 ? control.x + inset : control.x + control.w - inset;
+        const y = dy === 0 ? cy : dy > 0 ? control.y + inset : control.y + control.h - inset;
+        check(
+          `${inset}px inside the ${edge} edge of ${control.key} still activates it`,
+          (await clickAt(x, y)) === control.key
+        );
+      }
+
+      // Outside each edge is not. Half-open rectangles mean the pixel at the far
+      // edge belongs to the neighbour, and a grid of controls that each claim it
+      // puts every click one place out along the row.
+      //
+      // The margin is one CSS pixel only at ratio 1, where a CSS pixel *is* a device
+      // pixel and the boundary is exact. Above it a control's edge can fall
+      // mid-pixel — at 2x the published rectangle is a physical one halved — so a
+      // one-pixel probe measures the browser's rounding rather than the client's hit
+      // testing. Two pixels is still far finer than anything a player can aim.
+      const margin = ratio === 1 ? 1 : 2;
+      for (const [x, y, edge] of [
+        [control.x - margin, cy, "left"],
+        [control.x + control.w + margin, cy, "right"],
+        [cx, control.y - margin, "top"],
+        [cx, control.y + control.h + margin, "bottom"],
+      ]) {
+        const fired = await clickAt(x, y);
+        check(
+          `${margin}px outside the ${edge} edge of ${control.key} does not activate it`,
+          fired !== control.key,
+          `fired ${fired}`
+        );
+      }
+    }
+
+    // The world half of the same question: clicking the middle of the viewport must
+    // select the tile drawn in the middle of the viewport. The camera follows the
+    // player, so that tile is the player's own — an off-by-one anywhere in the
+    // chain shows up as a neighbour.
+    // The world's rectangle as the shell computed it, not as a test guessed from a
+    // control's position — which measured into the rail and off the top bar.
+    const worldRect = await hitPage.evaluate(() => ({
+      x: window.aoLoaded?.worldX,
+      y: window.aoLoaded?.worldY,
+      w: window.aoLoaded?.worldW,
+      h: window.aoLoaded?.worldH,
+    }));
+    check(
+      "the client publishes its world rectangle",
+      typeof worldRect.w === "number" && worldRect.w > 0,
+      JSON.stringify(worldRect)
+    );
+
+    /// Move the pointer and read the tile the client resolves *for that position*.
+    ///
+    /// Waits for the client's published pointer position to match the one just
+    /// moved to. Returning as soon as the target says "world" read whatever was
+    /// published for the *previous* position, so every measurement was one move
+    /// stale — which made the world mapping look inverted.
+    const tileAt = async (x, y) => {
+      await hitPage.mouse.move(canvasBox.x + x, canvasBox.y + y);
+      const deadline = Date.now() + 3_000;
+      while (Date.now() < deadline) {
+        const report = await hitPage.evaluate(() => ({
+          target: window.aoLoaded?.pointerTarget,
+          tile: window.aoLoaded?.pointerTile,
+          px: window.aoLoaded?.pointerX,
+          py: window.aoLoaded?.pointerY,
+        }));
+        const arrived =
+          typeof report.px === "number" &&
+          Math.abs(report.px - x) <= 1.5 &&
+          Math.abs(report.py - y) <= 1.5;
+        if (arrived) {
+          if (report.target === "world" && report.tile) return report.tile;
+          if (report.target !== "world") return null;
+        }
+        await hitPage.waitForTimeout(50);
+      }
+      throw new Error(`the client never reported the pointer at ${x},${y}`);
+    };
+
+    const player = await hitPage.evaluate(() => [
+      window.aoLoaded?.playerX,
+      window.aoLoaded?.playerY,
+    ]);
+    const centre = await tileAt(worldRect.x + worldRect.w / 2, worldRect.y + worldRect.h / 2);
+    check(
+      "the centre of the world viewport selects the player's own tile",
+      Array.isArray(centre) && centre[0] === player[0] && centre[1] === player[1],
+      `centre selected ${JSON.stringify(centre)}, player is at ${JSON.stringify(player)}`
+    );
+
+    // The four edges, one pixel inside. Each must be a different tile, and each
+    // must lie on the expected side of the centre — a sign error in the mapping
+    // passes a "different tile" check and fails this one.
+    const edges = {
+      left: await tileAt(worldRect.x + 1, worldRect.y + worldRect.h / 2),
+      right: await tileAt(worldRect.x + worldRect.w - 2, worldRect.y + worldRect.h / 2),
+      top: await tileAt(worldRect.x + worldRect.w / 2, worldRect.y + 1),
+      bottom: await tileAt(worldRect.x + worldRect.w / 2, worldRect.y + worldRect.h - 2),
+    };
+    check(`${label}: `+"the left edge of the world is west of centre", edges.left?.[0] < centre?.[0],
+      `left ${JSON.stringify(edges.left)} vs centre ${JSON.stringify(centre)}`);
+    check(`${label}: `+"the right edge of the world is east of centre", edges.right?.[0] > centre?.[0],
+      `right ${JSON.stringify(edges.right)}`);
+    check(`${label}: `+"the top edge of the world is north of centre", edges.top?.[1] < centre?.[1],
+      `top ${JSON.stringify(edges.top)}`);
+    check(`${label}: `+"the bottom edge of the world is south of centre", edges.bottom?.[1] > centre?.[1],
+      `bottom ${JSON.stringify(edges.bottom)}`);
+
+    // And the interface is not the world, however close to the seam.
+    check(
+      "a pixel just inside the rail is not a world tile",
+      (await tileAt(worldRect.x + worldRect.w + 2, worldRect.y + worldRect.h / 2)) === null
+    );
+
+
+}
+
 async function main() {
   if (!skipVersionCheck) {
     const head = headStamp();
@@ -330,22 +535,26 @@ async function main() {
       );
       check(`no scrollbars at ${ratio}x`, !measured.scrollsHorizontally && !measured.scrollsVertically);
 
-      // The client pins its scale factor to 1 on the web, so one CSS pixel is
-      // one logical pixel whatever the display reports. This is the assertion
-      // that the pinning holds: without it Bevy's canvas fitting installed the
-      // CSS box as the *physical* size and the client concluded it had
-      // css/ratio logical pixels — at ratio 2 the rail collapsed to its icon
-      // strip and the world drew at twice the zoom.
+      // A retina display is more physical pixels for the same CSS box, so the
+      // backing store must be the CSS size times the ratio. Equal to the CSS size
+      // means the client renders at a fraction of the resolution it has and the
+      // browser upscales pixel art to fill the gap.
       //
-      // It also states the accepted cost: the backing store equals the CSS box
-      // rather than exceeding it, so a high-DPI display gets an upscale. See
-      // `host_resolution` in main.rs.
+      // This asserted the opposite until now, which was right while the client
+      // pinned its scale factor to 1 — an interim measure that held the layout
+      // steady and gave up the resolution. It also left the cursor and Bevy's
+      // picking in device pixels while the layout was in CSS pixels, so clicks
+      // drifted further off the further they were from the origin on any scaled
+      // display. `track_host_canvas` owns the backing store now, and the three
+      // agree.
       check(
-        `one css pixel is one logical pixel at ${ratio}x`,
-        Math.abs(measured.backingWidth - measured.cssWidth) <= 2 &&
-          Math.abs(measured.backingHeight - measured.cssHeight) <= 2,
+        `the backing store is ${ratio}x the css size`,
+        Math.abs(measured.backingWidth - measured.cssWidth * ratio) <= 2 &&
+          Math.abs(measured.backingHeight - measured.cssHeight * ratio) <= 2,
         `css ${measured.cssWidth}x${measured.cssHeight}, backing ${measured.backingWidth}x${measured.backingHeight}, ratio ${measured.ratio}`
       );
+
+
       await dprContext.close();
     }
 
@@ -400,105 +609,40 @@ async function main() {
     // can be asked. Headless Bevy's UI picking has no render target to map a
     // pointer through and reports a hit on the root node whatever the position.
     //
-    // The client publishes each keyed control's rectangle and the last activation,
-    // so a click can be aimed at a control's actual position and checked against
-    // the control that fired — rather than at a position a test guessed from the
-    // layout it is supposed to be verifying.
-    console.log("  pointer hit testing");
-    const hitContext = await browser.newContext({
-      viewport: { width: 1280, height: 800 },
-      deviceScaleFactor: 1,
-    });
-    const hitPage = await hitContext.newPage();
-    await hitPage.goto(url, { waitUntil: "load" });
-    await waitForClient(hitPage);
+    // The client publishes each keyed control's rectangle, the world's rectangle,
+    // the pointer's own position and an activation counter, so a click can be aimed
+    // at a control's actual position and checked against the control that fired —
+    // rather than at a position a test guessed from the layout it is verifying.
+    //
+    // Run across the device pixel ratio matrix and both reachable host modes.
+    // Fullscreen is not among them: it needs a user gesture the automation cannot
+    // supply, and the refusal path is covered above.
+    const hitConfigurations = [
+      { label: "windowed 1x", ratio: 1, mode: "windowed" },
+      { label: "windowed 1.25x", ratio: 1.25, mode: "windowed" },
+      { label: "windowed 1.5x", ratio: 1.5, mode: "windowed" },
+      { label: "windowed 1.75x", ratio: 1.75, mode: "windowed" },
+      { label: "windowed 2x", ratio: 2, mode: "windowed" },
+      { label: "maximized 1x", ratio: 1, mode: "maximized" },
+      { label: "maximized 2x", ratio: 2, mode: "maximized" },
+    ];
 
-    const canvasBox = await hitPage.evaluate(() => {
-      const box = document.getElementById("ao-canvas").getBoundingClientRect();
-      return { x: box.x, y: box.y };
-    });
-    const controls = await hitPage.evaluate(() => window.aoLoaded?.controls ?? []);
-    check("the client publishes its control rectangles", controls.length > 0, `${controls.length}`);
-
-    /// Click a point in canvas coordinates and report what activated, if anything.
-    ///
-    /// Compares the activation *counter* before and after rather than reading the
-    /// last key: the client republishes its report every frame, so the previous
-    /// activation is still there and every "this must not activate" check would
-    /// pass or fail on stale data. Clearing the field from here achieved nothing —
-    /// it is the client's resource that holds it.
-    const clickAt = async (x, y) => {
-      const before = await hitPage.evaluate(() => window.aoLoaded?.activations ?? 0);
-      await hitPage.mouse.click(canvasBox.x + x, canvasBox.y + y);
-
-      // Polled, not slept. Under software rendering this client runs at about six
-      // frames a second, so a fixed 120ms wait was shorter than a single frame and
-      // every click "did not activate" — the same mistake as the capture harness's
-      // four-second sleep, in the other direction. A deadline instead: the answer
-      // arrives when it arrives, and only a genuine non-activation waits out the
-      // whole budget.
-      const deadline = Date.now() + 3_000;
-      while (Date.now() < deadline) {
-        const now = await hitPage.evaluate(() => ({
-          count: window.aoLoaded?.activations ?? 0,
-          key: window.aoLoaded?.lastActivated ?? null,
-        }));
-        if (now.count > before) return now.key;
-        await hitPage.waitForTimeout(50);
+    for (const configuration of hitConfigurations) {
+      console.log(`  pointer hit testing — ${configuration.label}`);
+      const hitContext = await browser.newContext({
+        viewport: { width: 1280, height: 800 },
+        deviceScaleFactor: configuration.ratio,
+      });
+      const hitPage = await hitContext.newPage();
+      await hitPage.goto(url, { waitUntil: "load" });
+      await waitForClient(hitPage);
+      if (configuration.mode === "maximized") {
+        await hitPage.evaluate(() => window.aoWindow?.setMode("maximized"));
+        await hitPage.waitForTimeout(1_500);
       }
-      return null;
-    };
-
-    // A representative spread rather than every control: an inventory slot, a
-    // hotbar slot and a top-bar icon exercise three different panels and three
-    // different sizes.
-    const sample = ["inventory.slot.0", "hotbar.slot.0", "rail.compact.nav.0"]
-      .map((key) => controls.find((c) => c.key === key && c.enabled && c.w > 4 && c.h > 4))
-      .filter(Boolean);
-    check("a representative control sample is available", sample.length >= 2, `${sample.length}`);
-
-    for (const control of sample) {
-      const cx = control.x + control.w / 2;
-      const cy = control.y + control.h / 2;
-
-      check(
-        `clicking the centre of ${control.key} activates it`,
-        (await clickAt(cx, cy)) === control.key
-      );
-
-      // One pixel inside each edge is still this control.
-      for (const [dx, dy, edge] of [
-        [1, 0, "left"],
-        [-1, 0, "right"],
-        [0, 1, "top"],
-        [0, -1, "bottom"],
-      ]) {
-        const x = dx === 0 ? cx : dx > 0 ? control.x + 1 : control.x + control.w - 1;
-        const y = dy === 0 ? cy : dy > 0 ? control.y + 1 : control.y + control.h - 1;
-        check(
-          `one pixel inside the ${edge} edge of ${control.key} still activates it`,
-          (await clickAt(x, y)) === control.key
-        );
-      }
-
-      // One pixel outside each edge is not. Half-open rectangles mean the pixel
-      // at the far edge belongs to the neighbour, and a grid of controls that each
-      // claim it puts every click one place out along the row.
-      for (const [x, y, edge] of [
-        [control.x - 1, cy, "left"],
-        [control.x + control.w + 1, cy, "right"],
-        [cx, control.y - 1, "top"],
-        [cx, control.y + control.h + 1, "bottom"],
-      ]) {
-        const fired = await clickAt(x, y);
-        check(
-          `one pixel outside the ${edge} edge of ${control.key} does not activate it`,
-          fired !== control.key,
-          `fired ${fired}`
-        );
-      }
+      await runHitTests(hitPage, configuration.label, configuration.ratio);
+      await hitContext.close();
     }
-    await hitContext.close();
 
     // Keyboard focus must not leave the canvas. Tab moving browser focus off it
     // ends the session's keyboard: the player tabs through page furniture with no

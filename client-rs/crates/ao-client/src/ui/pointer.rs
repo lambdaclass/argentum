@@ -31,6 +31,29 @@ pub enum PointerTarget {
     Outside,
 }
 
+/// Put the cursor in the same units as the layout.
+///
+/// A guard, currently a no-op, kept for the failure it prevents. Overriding the
+/// window's scale factor makes the window report one unit while `cursor_position`
+/// keeps dividing the backend's physical cursor by the *override*, so the two
+/// disagree by the real ratio: with the factor pinned to 1 on a 2x display, a click
+/// 400 pixels from the left edge was treated as 800 and landed in the character
+/// rail instead of the world.
+///
+/// The error is exactly zero at ratio 1, which is why it survived every test until
+/// clicks were driven in a browser at 1.25x. `track_host_canvas` no longer
+/// overrides anything, so `base` and `applied` are equal and this returns 1.0 —
+/// and if an override is ever reintroduced, the cursor stays correct.
+fn cursor_correction(window: &Window) -> f32 {
+    let reported = window.resolution.base_scale_factor();
+    let applied = window.resolution.scale_factor();
+    if reported > 0.0 && applied > 0.0 {
+        applied / reported
+    } else {
+        1.0
+    }
+}
+
 /// Decide what a logical-pixel pointer position is over.
 ///
 /// The world is checked against the *view* rectangle rather than the whole
@@ -159,6 +182,7 @@ fn resolve_pointer(
         *pointer = PointerState::default();
         return;
     };
+    let position = position * cursor_correction(window);
 
     let camera_centre =
         cameras.iter().next().map(|t| t.translation.truncate()).unwrap_or(Vec2::ZERO);

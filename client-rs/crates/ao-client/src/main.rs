@@ -48,26 +48,13 @@ fn winit_settings() -> WinitSettings {
 
 /// The window's starting resolution.
 ///
-/// On the web the scale factor is pinned to 1, so the canvas's CSS box is one
-/// logical pixel each. Bevy's `fit_canvas_to_parent` installs that CSS box as
-/// the window's *physical* size; left with a scale factor from the display, the
-/// client then computed its logical size as css/ratio. At ratio 2 a 1278px shell
-/// became a 639px window: the character rail collapsed to its icon strip and the
-/// world was drawn at twice the zoom. A device pixel ratio change must not move
-/// the layout at all, and this is what holds it still.
-///
-/// The cost, recorded rather than hidden: the backing store stays at the CSS
-/// size, so a high-DPI display gets an upscale rather than a sharper render. For
-/// the world that is nearly free — it is pixel art under `image-rendering:
-/// pixelated`, so an integer ratio is nearest-neighbour either way — and for
-/// interface text it is a real loss. Fixing it properly means owning the canvas
-/// backing store rather than leaving it to Bevy, and that cannot be verified
-/// without a physical high-DPI display.
+/// No scale-factor override any more. Pinning it to 1 made the window report CSS
+/// pixels while every input path kept receiving device pixels, and the two only
+/// agree at ratio 1 — so on a 125% display, an ordinary Windows setting, clicks
+/// landed progressively further from the cursor. `ui::shell::track_host_canvas`
+/// keeps logical size, physical size and the device ratio consistent instead.
 fn host_resolution() -> WindowResolution {
-    let resolution = WindowResolution::new(VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
-    #[cfg(target_arch = "wasm32")]
-    let resolution = resolution.with_scale_factor_override(1.0);
-    resolution
+    WindowResolution::new(VIEWPORT_WIDTH, VIEWPORT_HEIGHT)
 }
 
 fn main() {
@@ -99,12 +86,13 @@ fn main() {
                         present_mode: PresentMode::AutoVsync,
                         #[cfg(target_arch = "wasm32")]
                         canvas: Some(CANVAS_SELECTOR.into()),
-                        // Track the element. The shell lays out against the
-                        // whole window — top bar, world viewport, character
-                        // rail — so a window narrower than the page puts the
-                        // rail off the right-hand edge and clips the status bar.
+                        // Off, because `ui::shell::track_host_canvas` does this
+                        // instead. Bevy's fitting installs the parent's *CSS* box
+                        // as the window's *physical* size, which leaves the logical
+                        // size, the backing store and the cursor in three different
+                        // units on any display whose ratio is not 1.
                         #[cfg(target_arch = "wasm32")]
-                        fit_canvas_to_parent: true,
+                        fit_canvas_to_parent: false,
                         // The browser's own shortcuts stay usable.
                         #[cfg(target_arch = "wasm32")]
                         prevent_default_event_handling: false,

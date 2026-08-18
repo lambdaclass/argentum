@@ -101,6 +101,11 @@ impl Plugin for ShellPlugin {
             .add_systems(Update, adopt_device_limits)
             .add_systems(Startup, spawn_shell)
             .add_systems(Update, (apply_geometry, apply_rail_mode).chain());
+
+        // Before the geometry, so a ratio change is laid out in the frame it is
+        // observed rather than the next one.
+        #[cfg(target_arch = "wasm32")]
+        app.add_systems(Update, track_host_canvas.before(apply_geometry));
     }
 }
 
@@ -248,6 +253,65 @@ fn adopt_device_limits(
         *limits = next;
     }
     *adopted = true;
+}
+
+/// Keep the Bevy window, the canvas backing store and the device ratio in step.
+///
+/// One rule, applied once per change: the window's *logical* size is the host
+/// element's CSS box, its *physical* size is that times the device pixel ratio,
+/// and the scale factor is the ratio. Every Bevy consumer — layout, cursor,
+/// picking — then works in units that agree.
+///
+/// Two earlier attempts are worth knowing about. Bevy's `fit_canvas_to_parent`
+/// installs the CSS box as the *physical* size, so at ratio 2 the client believed
+/// it had half the window it had. Pinning the scale factor to 1 fixed the layout
+/// and left the input paths in device pixels, so clicks drifted further off the
+/// further they were from the origin — invisible at ratio 1, which is why it
+/// survived until clicks were driven in a browser at 1.25x.
+///
+/// It reads the *parent*, deliberately. Reading the canvas fed Bevy's own sizing
+/// of the canvas back into the measurement and the element grew without bound —
+/// 7628 pixels wide before I stopped it.
+#[cfg(target_arch = "wasm32")]
+fn track_host_canvas(mut windows: Query<&mut Window>) {
+    let Some((css, ratio)) = host_shell_box() else {
+        return;
+    };
+    let Ok(mut window) = windows.single_mut() else {
+        return;
+    };
+
+    // `WindowResolution::set` takes a *logical* size and multiplies by the scale
+    // factor itself, so the CSS box goes in unmodified. Pre-multiplying applied the
+    // ratio twice: at 2x the backing store came out 5112 pixels wide instead of
+    // 2556 — four times the pixels, and enough that the software renderer drew
+    // nothing at all.
+    let current = Vec2::new(window.width(), window.height());
+    // Guarded, or this is a resize event every frame and the shell rebuilds on one.
+    if (current - css).abs().max_element() < 0.5
+        && (window.resolution.base_scale_factor() - ratio).abs() < f32::EPSILON
+    {
+        return;
+    }
+
+    window.resolution.set_scale_factor(ratio);
+    window.resolution.set(css.x, css.y);
+}
+
+/// The host element's CSS box and the display's device pixel ratio.
+///
+/// The shell, not the canvas: the canvas's size is what Bevy is being told to set,
+/// and measuring it produces a feedback loop.
+#[cfg(target_arch = "wasm32")]
+fn host_shell_box() -> Option<(Vec2, f32)> {
+    let window = web_sys::window()?;
+    let ratio = window.device_pixel_ratio() as f32;
+    let element = window.document()?.query_selector("#shell").ok()??;
+    let css = Vec2::new(element.client_width() as f32, element.client_height() as f32);
+    if css.x <= 0.0 || css.y <= 0.0 || !ratio.is_finite() || ratio <= 0.0 {
+        return None;
+    }
+    Some((css, ratio))
 }
 
 /// Resize the regions and the world camera when the window changes.
