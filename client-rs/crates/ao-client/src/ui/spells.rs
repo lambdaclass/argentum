@@ -35,10 +35,17 @@ pub struct SpellPanelPlugin;
 
 impl Plugin for SpellPanelPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ArmedSpell>().add_systems(
-            Update,
-            (trigger_hotbar_keys, disarm_on_escape, disarm_when_unusable).chain(),
-        );
+        app.init_resource::<ArmedSpell>()
+            // Ownership of the keyboard is decided before these read it, so a
+            // keystroke cannot be taken as a hotbar activation in the same frame
+            // a text field gains focus.
+            .init_resource::<super::controls::TextInputActive>()
+            .add_systems(
+                Update,
+                (trigger_hotbar_keys, disarm_on_escape, disarm_when_unusable)
+                    .chain()
+                    .in_set(super::controls::GameplayInput),
+            );
     }
 }
 
@@ -112,11 +119,16 @@ pub fn slot_key_code(index: usize) -> Option<KeyCode> {
 /// chat must not cast a spell, and that rule belongs here rather than in every
 /// key handler.
 fn trigger_hotbar_keys(
+    text_input: Res<super::controls::TextInputActive>,
     keys: Res<ButtonInput<KeyCode>>,
     state: Res<UiState>,
     mut intents: MessageWriter<IntentMessage>,
 ) {
-    if state.get().text_input_has_focus() {
+    // `TextInputActive`, not the snapshot directly. This read the snapshot while
+    // the control layer maintained its own answer, which is two rules for one
+    // question — and they disagreed the moment a Bevy field held focus without
+    // the snapshot knowing.
+    if text_input.0 {
         return;
     }
 
@@ -133,7 +145,15 @@ fn trigger_hotbar_keys(
     }
 }
 
-fn disarm_on_escape(keys: Res<ButtonInput<KeyCode>>, mut armed: ResMut<ArmedSpell>) {
+fn disarm_on_escape(
+    text_input: Res<super::controls::TextInputActive>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut armed: ResMut<ArmedSpell>,
+) {
+    // While typing, Escape belongs to the composition it is cancelling.
+    if text_input.0 {
+        return;
+    }
     if armed.0.is_some() && keys.just_pressed(KeyCode::Escape) {
         armed.clear();
     }
@@ -374,13 +394,62 @@ mod tests {
 
     fn app_with(scenario: Scenario) -> App {
         let mut app = App::new();
-        app.init_resource::<UiState>()
+        // The real interaction pipeline, so `TextInputActive` is maintained by
+        // `track_text_input` exactly as in production. Setting the resource by
+        // hand here would test the gate while leaving the thing that decides it
+        // unexercised — and the snapshot path is precisely what regressed when
+        // this moved off the snapshot.
+        app.add_plugins(super::super::controls::ControlsPlugin)
+            .init_resource::<UiState>()
             .init_resource::<ArmedSpell>()
             .insert_resource(ButtonInput::<KeyCode>::default())
             .add_message::<IntentMessage>()
-            .add_systems(Update, (trigger_hotbar_keys, disarm_on_escape, disarm_when_unusable));
+            .add_systems(
+                Update,
+                (trigger_hotbar_keys, disarm_on_escape, disarm_when_unusable)
+                    .chain()
+                    .in_set(super::super::controls::GameplayInput),
+            );
         app.world_mut().resource_mut::<UiState>().set(fixtures::snapshot(scenario));
         app
+    }
+
+    #[test]
+    fn a_focused_text_field_stops_a_number_key_firing_a_hotbar_slot() {
+        // The complement of `typing_in_chat_does_not_cast_spells`, which drives
+        // the snapshot. This drives the *control* path: a Bevy field holding focus
+        // with the snapshot knowing nothing about it, which is exactly the case
+        // where the two rules disagreed and the hotbar fired anyway.
+        use super::super::controls::{text_field, FocusOwner, TextField};
+
+        let mut app = app_with(Scenario::Populated);
+        let field = app.world_mut().spawn(text_field(TextField::new(), 1)).id();
+        app.update();
+        app.world_mut().resource_mut::<FocusOwner>().focus(field, None);
+
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::Digit1);
+        app.update();
+
+        assert_eq!(
+            intent_count(&app),
+            0,
+            "a hotbar slot fired while a text field held the keyboard"
+        );
+
+        // And the key works again once the field lets go, or suppression would be
+        // a way to disable the hotbar permanently.
+        app.world_mut().resource_mut::<FocusOwner>().clear();
+        // Released, not merely cleared: `clear` drops the just-pressed edge but
+        // leaves the key held, and pressing a held key produces no new edge.
+        {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.release(KeyCode::Digit1);
+            keys.clear();
+        }
+        app.update();
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::Digit1);
+        app.update();
+        assert!(intent_count(&app) > 0, "the hotbar never recovered");
     }
 
     fn intent_count(app: &App) -> usize {

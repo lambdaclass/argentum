@@ -269,6 +269,39 @@ impl TextField {
         shown
     }
 
+    /// The field as it should be drawn.
+    ///
+    /// The caret goes *at* `caret()`, and the composition preview goes there too,
+    /// because that is where both of them are. Appending them to the end instead
+    /// meant moving the caret left changed the model and nothing on screen — the
+    /// player pressed left, saw no movement, and typed into the wrong place.
+    ///
+    /// Character indices throughout: a byte index lands inside a multi-byte
+    /// character, which for this game's first language is "año" and every accented
+    /// item name.
+    pub fn rendered(&self, show_caret: bool) -> String {
+        let base: Vec<char> = if self.masked {
+            core::iter::repeat_n('\u{2022}', self.char_count()).collect()
+        } else {
+            self.value.chars().collect()
+        };
+        let caret = self.caret.min(base.len());
+
+        let preview: Vec<char> = if self.masked {
+            core::iter::repeat_n('\u{2022}', self.composing.chars().count()).collect()
+        } else {
+            self.composing.chars().collect()
+        };
+
+        let mut out: String = base[..caret].iter().collect();
+        out.extend(preview.iter());
+        if show_caret {
+            out.push('\u{2502}');
+        }
+        out.extend(base[caret..].iter());
+        out
+    }
+
     /// Text currently being composed, if any.
     pub fn composing(&self) -> &str {
         &self.composing
@@ -441,13 +474,26 @@ pub enum TextEdit {
     CancelComposition,
 }
 
-/// Whether a text field currently owns the keyboard.
+/// Whether text input currently owns the keyboard.
 ///
-/// Read by gameplay input so typing "s" in chat does not also walk south. A
-/// resource rather than each system asking the focus owner, so the rule has one
-/// definition and a system added later cannot forget to apply it.
+/// The single definition, and it has to account for both ways that becomes true:
+/// a Bevy `TextField` holding focus, and the snapshot reporting the player as
+/// composing — which is the server-visible state and can be set by an adapter
+/// with no focused control at all. Consumers read this and nothing else.
+///
+/// Claiming "one definition" while gameplay systems each applied their own rule
+/// was wrong: movement had no rule whatsoever, so typing "w" walked the player,
+/// and the hotbar consulted the snapshot directly.
 #[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TextInputActive(pub bool);
+
+/// Systems that read the keyboard as *gameplay* rather than as text.
+///
+/// Ordered after [`ControlSet::Interact`], so ownership for this frame is already
+/// decided. Without the ordering a keystroke can be read as movement in the same
+/// frame a field takes focus, which is the leak this set exists to prevent.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GameplayInput;
 
 /// Ordering for the interaction pipeline.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -465,6 +511,7 @@ impl Plugin for ControlsPlugin {
         app.init_resource::<FocusOwner>()
             .add_message::<Activated>()
             .configure_sets(Update, ControlSet::Interact.before(ControlSet::Present))
+            .configure_sets(Update, GameplayInput.after(ControlSet::Interact))
             .add_systems(
                 Update,
                 (track_pointer, move_focus_with_tab, activate_with_keyboard, resolve_focus)
@@ -709,9 +756,14 @@ fn apply_text_edits(
 fn track_text_input(
     focus: Res<FocusOwner>,
     fields: Query<(), With<TextField>>,
+    state: Option<Res<super::state::UiState>>,
     mut active: ResMut<TextInputActive>,
 ) {
-    let owned = focus.entity().is_some_and(|entity| fields.get(entity).is_ok());
+    let focused_field = focus.entity().is_some_and(|entity| fields.get(entity).is_ok());
+    // The snapshot's own view, so an adapter that reports the player as composing
+    // suppresses gameplay keys even with no control focused.
+    let composing = state.is_some_and(|state| state.get().text_input_has_focus());
+    let owned = focused_field || composing;
     if active.0 != owned {
         active.0 = owned;
     }
@@ -727,8 +779,7 @@ fn present_text_fields(
         // A caret only where the keyboard is: two carets on screen is a lie
         // about which field a keystroke will reach.
         let focused = focus.entity() == Some(entity);
-        let shown = field.display();
-        let rendered = if focused { format!("{shown}\u{2502}") } else { shown };
+        let rendered = field.rendered(focused);
 
         for child in children.iter() {
             if let Ok(mut label) = text.get_mut(child) {
@@ -1120,6 +1171,92 @@ mod tests {
 
         assert_eq!(value_of(&app, entity), "año");
         assert!(!app.world().get::<TextField>(entity).expect("a field").is_composing());
+    }
+
+    #[test]
+    fn the_visual_caret_follows_the_model_caret() {
+        // It used to be appended to the end unconditionally, so pressing left
+        // moved the model and nothing on screen: the player saw no movement and
+        // typed into the wrong place.
+        let mut app = controls_app();
+        let entity = focused_field(&mut app, TextField::new());
+
+        app.world_mut().write_message(TextEdit::Insert("abcd".into()));
+        app.update();
+        assert_eq!(rendered(&mut app, entity), "abcd\u{2502}");
+
+        app.world_mut().write_message(TextEdit::CaretLeft);
+        app.world_mut().write_message(TextEdit::CaretLeft);
+        app.update();
+        assert_eq!(
+            rendered(&mut app, entity),
+            "ab\u{2502}cd",
+            "the caret moved in the model but not on screen"
+        );
+
+        app.world_mut().write_message(TextEdit::CaretToStart);
+        app.update();
+        assert_eq!(rendered(&mut app, entity), "\u{2502}abcd");
+    }
+
+    #[test]
+    fn a_masked_field_draws_its_caret_in_the_right_place_too() {
+        // The bullets stand in for characters one for one, so the caret index is
+        // still meaningful — and a password field where the caret cannot be seen
+        // to move is as confusing as any other.
+        let mut app = controls_app();
+        let entity = focused_field(&mut app, TextField::password());
+
+        app.world_mut().write_message(TextEdit::Insert("año".into()));
+        app.update();
+        assert_eq!(rendered(&mut app, entity), "\u{2022}\u{2022}\u{2022}\u{2502}");
+
+        app.world_mut().write_message(TextEdit::CaretLeft);
+        app.update();
+        assert_eq!(
+            rendered(&mut app, entity),
+            "\u{2022}\u{2022}\u{2502}\u{2022}",
+            "a masked caret does not move"
+        );
+    }
+
+    #[test]
+    fn a_composition_preview_appears_at_the_caret_not_at_the_end() {
+        let mut app = controls_app();
+        let entity = focused_field(&mut app, TextField::new());
+
+        app.world_mut().write_message(TextEdit::Insert("ab".into()));
+        app.world_mut().write_message(TextEdit::CaretToStart);
+        app.update();
+        app.world_mut().write_message(TextEdit::Compose("ñ".into()));
+        app.update();
+
+        assert_eq!(
+            rendered(&mut app, entity),
+            "ñ\u{2502}ab",
+            "the preview was drawn somewhere other than the caret"
+        );
+    }
+
+    #[test]
+    fn an_unfocused_field_draws_no_caret() {
+        // Two carets on screen is a lie about which field the next keystroke
+        // reaches.
+        let mut app = controls_app();
+        let first = app.world_mut().spawn(text_field(TextField::new(), 1)).id();
+        let second = app.world_mut().spawn(text_field(TextField::new(), 2)).id();
+        app.update();
+        press_key(&mut app, KeyCode::Tab);
+        assert_eq!(app.world().resource::<FocusOwner>().entity(), Some(first));
+
+        app.world_mut().write_message(TextEdit::Insert("x".into()));
+        app.update();
+
+        assert!(rendered(&mut app, first).contains('\u{2502}'));
+        assert!(
+            !rendered(&mut app, second).contains('\u{2502}'),
+            "an unfocused field drew a caret"
+        );
     }
 
     #[test]

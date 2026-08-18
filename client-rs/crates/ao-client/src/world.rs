@@ -118,6 +118,12 @@ impl Plugin for WorldPlugin {
             // boolean that also served as the log-once guard, so the two
             // concerns could not be changed independently.
             .add_systems(Update, apply_loaded_map.run_if(in_state(AppState::LoadingWorld)))
+            // Gameplay input, ordered after the interaction pipeline has decided
+            // who owns the keyboard this frame. Registered separately from the
+            // painting chain for that reason: inside it, the ordering would have
+            // to be imposed on the whole chain.
+            .init_resource::<crate::ui::controls::TextInputActive>()
+            .add_systems(Update, handle_input.in_set(crate::ui::controls::GameplayInput))
             .add_systems(
                 Update,
                 (
@@ -126,7 +132,6 @@ impl Plugin for WorldPlugin {
                     paint_entities,
                     paint_character,
                     apply_server_messages,
-                    handle_input,
                     animate_character,
                     fade_overlays,
                     follow_camera,
@@ -325,6 +330,7 @@ fn setup(mut commands: Commands, player: Res<LocalPlayer>, blockmap: Res<Blockma
 
 #[allow(clippy::too_many_arguments)]
 fn handle_input(
+    text_input: Res<crate::ui::controls::TextInputActive>,
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     blockmap: Res<Blockmap>,
@@ -336,6 +342,16 @@ fn handle_input(
     mut held: ResMut<HeldDirections>,
     session: Res<Session>,
 ) {
+    // Typing must never move the player. This had no such rule: with a chat field
+    // focused, "w" both inserted a character and walked north.
+    //
+    // Held directions are cleared rather than left standing, or a direction held
+    // when the field took focus keeps stepping for as long as the player types.
+    if text_input.0 {
+        held.0.clear();
+        return;
+    }
+
     // Held keys drive movement from the frame loop, never from key auto-repeat.
     // The web client originally stepped at the OS repeat rate, which meant a
     // ~500ms stall on a default Linux desktop before the second step.
@@ -1428,8 +1444,66 @@ mod tests {
             .insert_resource(SceneDirty::default())
             .insert_resource(Motion::default())
             .insert_resource(Session::default())
+            // Nothing is typing in these tests; `typing_never_moves_the_player`
+            // is the one that sets it.
+            .init_resource::<crate::ui::controls::TextInputActive>()
             .add_systems(Update, handle_input);
         app
+    }
+
+    #[test]
+    fn typing_never_moves_the_player() {
+        // "w" is both a movement key and a letter. Before this, a focused chat
+        // field received the character *and* the player walked north.
+        let mut app = input_app();
+        let start = {
+            let p = app.world().resource::<LocalPlayer>();
+            (p.x, p.y)
+        };
+
+        app.world_mut().resource_mut::<crate::ui::controls::TextInputActive>().0 = true;
+        for _ in 0..8 {
+            press(&mut app, KeyCode::KeyW);
+            advance(&mut app, 200);
+            app.update();
+        }
+
+        let after = {
+            let p = app.world().resource::<LocalPlayer>();
+            (p.x, p.y)
+        };
+        assert_eq!(after, start, "typing moved the player from {start:?} to {after:?}");
+
+        // And releasing the keyboard resumes movement, or the suppression would
+        // be a way to strand the player.
+        app.world_mut().resource_mut::<crate::ui::controls::TextInputActive>().0 = false;
+        for _ in 0..8 {
+            press(&mut app, KeyCode::KeyW);
+            advance(&mut app, 200);
+            app.update();
+        }
+        let moved = {
+            let p = app.world().resource::<LocalPlayer>();
+            (p.x, p.y)
+        };
+        assert_ne!(moved, start, "the player never moved again after typing ended");
+    }
+
+    #[test]
+    fn a_direction_held_when_typing_starts_does_not_keep_stepping() {
+        // Held directions are state, not an edge. Left standing, a key held as a
+        // field took focus walked the player for as long as they typed.
+        let mut app = input_app();
+        press(&mut app, KeyCode::KeyW);
+        advance(&mut app, 50);
+        app.update();
+
+        app.world_mut().resource_mut::<crate::ui::controls::TextInputActive>().0 = true;
+        app.update();
+        assert!(
+            app.world().resource::<HeldDirections>().0.is_empty(),
+            "a held direction survived the keyboard being taken away"
+        );
     }
 
     fn advance(app: &mut App, ms: u64) {
