@@ -553,6 +553,12 @@ fn present_controls(
 /// A button.
 pub fn button(label_text: &str, state: ControlState, tab_index: u32) -> impl Bundle {
     (
+        // `Button` is what makes this a control rather than a picture of one:
+        // it requires `Interaction`, which is the component `track_pointer`
+        // queries. Without it the builder produced something carrying `Control`
+        // that the pointer pipeline could not see at all — hover, press and
+        // pointer activation silently did nothing.
+        Button,
         Node {
             padding: UiRect::axes(Val::Px(space::WIDE), Val::Px(space::SNUG)),
             justify_content: JustifyContent::Center,
@@ -574,6 +580,12 @@ pub fn button(label_text: &str, state: ControlState, tab_index: u32) -> impl Bun
 /// A tab in a strip.
 pub fn tab(label_text: &str, selected: bool, tab_index: u32) -> impl Bundle {
     (
+        // `Button` is what makes this a control rather than a picture of one:
+        // it requires `Interaction`, which is the component `track_pointer`
+        // queries. Without it the builder produced something carrying `Control`
+        // that the pointer pipeline could not see at all — hover, press and
+        // pointer activation silently did nothing.
+        Button,
         Node {
             flex_grow: 1.0,
             padding: UiRect::axes(Val::Px(space::BASE), Val::Px(space::SNUG)),
@@ -597,6 +609,12 @@ pub fn tab(label_text: &str, selected: bool, tab_index: u32) -> impl Bundle {
 /// An inventory or spell slot.
 pub fn slot(state: ControlState, tab_index: u32) -> impl Bundle {
     (
+        // `Button` is what makes this a control rather than a picture of one:
+        // it requires `Interaction`, which is the component `track_pointer`
+        // queries. Without it the builder produced something carrying `Control`
+        // that the pointer pipeline could not see at all — hover, press and
+        // pointer activation silently did nothing.
+        Button,
         Node {
             width: Val::Px(size::SLOT),
             height: Val::Px(size::SLOT),
@@ -737,6 +755,113 @@ mod tests {
     fn set_interaction(app: &mut App, entity: Entity, interaction: Interaction) {
         *app.world_mut().get_mut::<Interaction>(entity).unwrap() = interaction;
         app.update();
+    }
+
+    /// An app with the production interaction pipeline and nothing else.
+    fn controls_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(ControlsPlugin).insert_resource(ButtonInput::<KeyCode>::default());
+        app
+    }
+
+    /// Drive the `Interaction` the builder was supposed to provide.
+    ///
+    /// Deliberately not inserted by the test: if a builder omits `Button`, and
+    /// therefore `Interaction`, this returns `None` and the test fails — which is
+    /// the whole point. Every builder here was carrying `Control` without
+    /// `Interaction`, so the pointer pipeline could not see any of them.
+    fn point_at(app: &mut App, entity: Entity, interaction: Interaction) {
+        let mut found = app
+            .world_mut()
+            .get_mut::<Interaction>(entity)
+            .expect("the builder produced a control with no Interaction to drive");
+        *found = interaction;
+        app.update();
+    }
+
+    #[test]
+    fn a_button_from_the_shared_builder_activates_by_pointer() {
+        // Spawned exactly as production spawns it, with nothing added by hand.
+        let mut app = controls_app();
+        let entity = app.world_mut().spawn(button("Attack", ControlState::Normal, 1)).id();
+        app.update();
+
+        point_at(&mut app, entity, Interaction::Hovered);
+        assert!(
+            app.world().get::<Control>(entity).expect("a control").hovered,
+            "hover never reached the control"
+        );
+
+        point_at(&mut app, entity, Interaction::Pressed);
+        assert!(app.world().get::<Control>(entity).expect("a control").pressed);
+
+        // Release is the activation, not press: a press dragged off the control
+        // and released elsewhere must not fire.
+        point_at(&mut app, entity, Interaction::Hovered);
+        let fired = activations(&mut app);
+        assert_eq!(fired.len(), 1, "a pointer release produced {} activations", fired.len());
+        assert_eq!(fired[0].entity, entity);
+        assert_eq!(fired[0].source, ActivationSource::Pointer);
+    }
+
+    #[test]
+    fn a_tab_from_the_shared_builder_activates_by_keyboard() {
+        // Tab to it, then Enter. Both through the production systems.
+        let mut app = controls_app();
+        let entity = app.world_mut().spawn(tab("Inventory", false, 1)).id();
+        app.update();
+
+        press_key(&mut app, KeyCode::Tab);
+        assert_eq!(
+            app.world().resource::<FocusOwner>().entity(),
+            Some(entity),
+            "Tab did not reach a control built by the shared builder"
+        );
+
+        press_key(&mut app, KeyCode::Enter);
+        let fired = activations(&mut app);
+        assert_eq!(fired.len(), 1, "Enter produced {} activations", fired.len());
+        assert_eq!(fired[0].source, ActivationSource::Keyboard);
+    }
+
+    #[test]
+    fn a_slot_from_the_shared_builder_is_focusable_and_a_disabled_one_is_not() {
+        let mut app = controls_app();
+        let enabled = app.world_mut().spawn(slot(ControlState::Normal, 1)).id();
+        let locked = app.world_mut().spawn(slot(ControlState::Disabled, 2)).id();
+        app.update();
+
+        assert!(app.world().get::<Control>(enabled).expect("a control").enabled);
+        assert!(
+            !app.world().get::<Control>(locked).expect("a control").enabled,
+            "a disabled slot is offered as actionable"
+        );
+
+        // Focus skips the locked one rather than landing on something inert.
+        press_key(&mut app, KeyCode::Tab);
+        assert_eq!(app.world().resource::<FocusOwner>().entity(), Some(enabled));
+        press_key(&mut app, KeyCode::Tab);
+        assert_eq!(
+            app.world().resource::<FocusOwner>().entity(),
+            Some(enabled),
+            "focus moved onto a disabled slot"
+        );
+    }
+
+    #[test]
+    fn a_disabled_button_from_the_shared_builder_never_activates() {
+        let mut app = controls_app();
+        let entity = app.world_mut().spawn(button("Cast", ControlState::Disabled, 1)).id();
+        app.update();
+
+        point_at(&mut app, entity, Interaction::Pressed);
+        point_at(&mut app, entity, Interaction::Hovered);
+        assert!(activations(&mut app).is_empty(), "a disabled button activated");
+        assert_ne!(
+            app.world().resource::<FocusOwner>().entity(),
+            Some(entity),
+            "a disabled button took focus"
+        );
     }
 
     #[test]
