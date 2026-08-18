@@ -415,7 +415,7 @@ fn rebuild_on_change(
             }
             RailRegion::Equipment => {
                 commands.entity(entity).with_children(|parent| {
-                    parent.spawn((PanelContent, equipment_summary(snapshot)));
+                    parent.spawn((PanelContent, equipment_summary(snapshot, &mut icon_for)));
                 });
             }
             RailRegion::Vitals => {
@@ -831,12 +831,16 @@ fn selected_details(snapshot: &UiSnapshot, selected: Option<usize>) -> impl Bund
 ///
 /// Empty slots are drawn rather than hidden, so the shape of the row is constant
 /// and a missing shield is visibly missing rather than absent.
-fn equipment_summary(snapshot: &UiSnapshot) -> impl Bundle {
+fn equipment_summary(
+    snapshot: &UiSnapshot,
+    icon_for: &mut dyn FnMut(&ItemView) -> Option<ItemIcon>,
+) -> impl Bundle {
     let cells: Vec<_> = EquipSlot::ALL
         .iter()
         .map(|slot| {
             let worn = snapshot.equipment.in_slot(*slot);
-            equipment_cell(*slot, worn)
+            let icon = worn.and_then(|item| icon_for(item));
+            equipment_cell(*slot, worn, icon)
         })
         .collect();
 
@@ -855,7 +859,7 @@ fn equipment_summary(snapshot: &UiSnapshot) -> impl Bundle {
 }
 
 /// One equipment slot.
-fn equipment_cell(slot: EquipSlot, worn: Option<&ItemView>) -> impl Bundle {
+fn equipment_cell(slot: EquipSlot, worn: Option<&ItemView>, icon: Option<ItemIcon>) -> impl Bundle {
     // Until item artwork is drawn here, the first characters of the derived name
     // stand in — enough to tell an oak staff from an apprentice robe at a glance,
     // which is what the row is for. The full name is one hover away.
@@ -885,6 +889,17 @@ fn equipment_cell(slot: EquipSlot, worn: Option<&ItemView>) -> impl Bundle {
         // Equipped is marked by the border as well as the fill, since two dark
         // browns are not a distinction.
         BorderColor::all(if filled { focus::SELECTED } else { surface::EDGE }),
+        match &icon {
+            Some(icon) => ImageNode {
+                image: icon.image.clone(),
+                texture_atlas: Some(TextureAtlas {
+                    layout: icon.layout.clone(),
+                    index: icon.index,
+                }),
+                ..default()
+            },
+            None => ImageNode { color: Color::NONE, ..default() },
+        },
         super::icons::AccessibleName::new(&name_key),
         super::icons::ShowsTooltip,
         children![(

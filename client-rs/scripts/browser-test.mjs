@@ -173,6 +173,19 @@ async function runHitTests(hitPage, label, ratio) {
     /// activation is still there and every "this must not activate" check would
     /// pass or fail on stale data. Clearing the field from here achieved nothing —
     /// it is the client's resource that holds it.
+    /// The control's rectangle as of right now.
+    ///
+    /// Re-read before every click rather than sampled once. Selecting a slot rebuilds
+    /// the panel, which respawns its entities, so a cached rectangle can describe a
+    /// control that no longer exists — and clicks then land a couple of pixels out,
+    /// which reads as a hit-testing fault in the client rather than as a stale
+    /// measurement in the test.
+    const rectOf = async (key) =>
+      hitPage.evaluate(
+        (wanted) => (window.aoLoaded?.controls ?? []).find((c) => c.key === wanted) ?? null,
+        key
+      );
+
     const clickAt = async (x, y) => {
       const before = await hitPage.evaluate(() => window.aoLoaded?.activations ?? 0);
       await hitPage.mouse.click(canvasBox.x + x, canvasBox.y + y);
@@ -208,7 +221,8 @@ async function runHitTests(hitPage, label, ratio) {
       .filter(Boolean);
     check(`${label}: `+"a representative control sample is available", sample.length >= 2, `${sample.length}`);
 
-    for (const control of sample) {
+    for (const sampled of sample) {
+      const control = (await rectOf(sampled.key)) ?? sampled;
       const cx = control.x + control.w / 2;
       const cy = control.y + control.h / 2;
 
@@ -224,9 +238,12 @@ async function runHitTests(hitPage, label, ratio) {
         [0, 1, "top"],
         [0, -1, "bottom"],
       ]) {
+        const now = (await rectOf(sampled.key)) ?? control;
         const inset = ratio === 1 ? 1 : 2;
-        const x = dx === 0 ? cx : dx > 0 ? control.x + inset : control.x + control.w - inset;
-        const y = dy === 0 ? cy : dy > 0 ? control.y + inset : control.y + control.h - inset;
+        const centreX = now.x + now.w / 2;
+        const centreY = now.y + now.h / 2;
+        const x = dx === 0 ? centreX : dx > 0 ? now.x + inset : now.x + now.w - inset;
+        const y = dy === 0 ? centreY : dy > 0 ? now.y + inset : now.y + now.h - inset;
         check(
           `${inset}px inside the ${edge} edge of ${control.key} still activates it`,
           (await clickAt(x, y)) === control.key
@@ -243,11 +260,14 @@ async function runHitTests(hitPage, label, ratio) {
       // one-pixel probe measures the browser's rounding rather than the client's hit
       // testing. Two pixels is still far finer than anything a player can aim.
       const margin = ratio === 1 ? 1 : 2;
+      const outer = (await rectOf(sampled.key)) ?? control;
+      const ox = outer.x + outer.w / 2;
+      const oy = outer.y + outer.h / 2;
       for (const [x, y, edge] of [
-        [control.x - margin, cy, "left"],
-        [control.x + control.w + margin, cy, "right"],
-        [cx, control.y - margin, "top"],
-        [cx, control.y + control.h + margin, "bottom"],
+        [outer.x - margin, oy, "left"],
+        [outer.x + outer.w + margin, oy, "right"],
+        [ox, outer.y - margin, "top"],
+        [ox, outer.y + outer.h + margin, "bottom"],
       ]) {
         const fired = await clickAt(x, y);
         check(
