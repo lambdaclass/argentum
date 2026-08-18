@@ -287,37 +287,15 @@ fn half_width(inner: impl Bundle) -> impl Bundle {
 
 /// One vital, with its numbers inside the bar.
 ///
+/// Delegates to the shared control rather than repeating it. This panel had its
+/// own copy — same track, same absolute fill, same centred label — which is two
+/// implementations of one control and therefore two places for a token change to
+/// land or not land.
+///
 /// The label is always present, so colour is never the only thing carrying the
-/// meaning — which is what makes the palette usable for colour-blind players.
+/// meaning, which is what makes the palette usable for colour-blind players.
 fn vital_bar(prefix: &str, gauge: Gauge, fill: Color) -> impl Bundle {
-    (
-        Node {
-            width: Val::Percent(100.0),
-            align_self: AlignSelf::Stretch,
-            height: Val::Px(size::STATUS_BAR_HEIGHT),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            border: UiRect::all(Val::Px(size::BORDER)),
-            overflow: Overflow::clip(),
-            ..default()
-        },
-        BackgroundColor(surface::WELL),
-        BorderColor::all(surface::EDGE),
-        children![
-            (
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(0.0),
-                    top: Val::Px(0.0),
-                    bottom: Val::Px(0.0),
-                    width: Val::Percent(gauge.fraction() * 100.0),
-                    ..default()
-                },
-                BackgroundColor(fill),
-            ),
-            text(bar_label(prefix, gauge), type_scale::SMALL, ink::PRIMARY),
-        ],
-    )
+    super::controls::status_bar(prefix, gauge, fill)
 }
 
 /// Width the slot grid actually has, inside a rail of `rail_width`.

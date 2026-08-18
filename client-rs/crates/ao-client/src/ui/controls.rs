@@ -328,6 +328,7 @@ impl TextField {
 ///
 /// Rounded to whole pixels: a fractional fill leaves a blurred edge against the
 /// track, which on a 18px bar is most of what a player sees.
+#[cfg(test)]
 pub fn bar_fill_width(gauge: Gauge, track_width: f32) -> f32 {
     (track_width.max(0.0) * gauge.fraction()).round()
 }
@@ -614,12 +615,20 @@ pub fn status_bar(prefix: &str, gauge: Gauge, fill: Color) -> impl Bundle {
     (
         Node {
             width: Val::Percent(100.0),
+            // Stretched, so a bar in a row of them fills its share rather than
+            // shrinking to its text.
+            align_self: AlignSelf::Stretch,
             height: Val::Px(size::STATUS_BAR_HEIGHT),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
+            border: UiRect::all(Val::Px(size::BORDER)),
+            // The label is centred and the track is fixed height, so a long
+            // label must be cut rather than pushing the bar wider than its row.
+            overflow: Overflow::clip(),
             ..default()
         },
         BackgroundColor(surface::WELL),
+        BorderColor::all(surface::EDGE),
         children![
             (
                 Node {

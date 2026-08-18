@@ -337,22 +337,6 @@ pub fn label(text: impl Into<String>, font_size: f32, color: Color) -> impl Bund
     (Text::new(text), TextFont { font_size, ..default() }, TextColor(color))
 }
 
-/// The standard focus ring, added to whichever control currently has focus.
-pub fn focus_ring() -> impl Bundle {
-    (
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(-focus::RING_WIDTH),
-            top: Val::Px(-focus::RING_WIDTH),
-            right: Val::Px(-focus::RING_WIDTH),
-            bottom: Val::Px(-focus::RING_WIDTH),
-            border: UiRect::all(Val::Px(focus::RING_WIDTH)),
-            ..default()
-        },
-        BorderColor::all(focus::RING),
-    )
-}
-
 /// Convenience for the common "small muted label" used throughout the rail.
 pub fn muted_label(text: impl Into<String>) -> impl Bundle {
     label(text, type_scale::SMALL, ink::MUTED)
