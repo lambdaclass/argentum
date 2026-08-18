@@ -608,6 +608,8 @@ fn move_focus_with_tab(
     navigation: Res<FocusNavigation>,
     keys: Res<ButtonInput<KeyCode>>,
     controls: Query<(Entity, &Control, Option<&ControlKey>)>,
+    modals: Query<Entity, With<Modal>>,
+    children: Query<&Children>,
     mut focus: ResMut<FocusOwner>,
 ) {
     // Only while focus navigation owns the keyboard. Tab is a gameplay key
@@ -618,8 +620,18 @@ fn move_focus_with_tab(
     }
     let backwards = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
 
+    // A modal confines traversal to itself. Without this, Tab inside a dialog
+    // walks into the panel behind it — and that is the whole difference between a
+    // modal and a floating box: the player is answering a question and the
+    // keyboard has wandered off to something the dialog is covering.
+    let trapped: Option<Vec<Entity>> = modals
+        .iter()
+        .last()
+        .map(|modal| core::iter::once(modal).chain(children.iter_descendants(modal)).collect());
+
     let candidates: Vec<FocusCandidate> = controls
         .iter()
+        .filter(|(entity, _, _)| trapped.as_ref().is_none_or(|inside| inside.contains(entity)))
         .map(|(entity, control, _)| FocusCandidate {
             entity,
             tab_index: control.tab_index,
@@ -845,6 +857,235 @@ fn present_text_fields(
     }
 }
 
+/// A bounded vertical list.
+///
+/// Bounded because every list in this client is fed by the server: a spellbook, a
+/// chat log, a ranking. `max_height` and clipping mean a list that arrives longer
+/// than expected is cut off rather than pushing the panel it sits in off the
+/// screen — which is what an unbounded list does the first time real data is
+/// larger than the fixture.
+pub fn list(max_height: f32) -> impl Bundle {
+    (
+        Node {
+            width: Val::Percent(100.0),
+            max_height: Val::Px(max_height),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(space::HAIR),
+            overflow: Overflow::clip(),
+            ..default()
+        },
+        BackgroundColor(surface::WELL),
+    )
+}
+
+/// One row of a list, selectable.
+pub fn list_row(label_text: &str, selected: bool, tab_index: u32) -> impl Bundle {
+    (
+        Selected(selected),
+        Node {
+            width: Val::Percent(100.0),
+            padding: UiRect::axes(Val::Px(space::SNUG), Val::Px(space::HAIR)),
+            align_items: AlignItems::Center,
+            border: UiRect::left(Val::Px(focus::RING_WIDTH)),
+            overflow: Overflow::clip(),
+            ..default()
+        },
+        BackgroundColor(if selected { surface::RAISED } else { surface::WELL }),
+        // A bar down the leading edge, not only a slightly lighter fill: two dark
+        // browns are not a distinction. The colour comes from `present_controls`
+        // via `Selected`, since it owns every control's border.
+        BorderColor::all(surface::EDGE),
+        interactive(tab_index, true),
+        children![(
+            Text::new(label_text.to_string()),
+            TextFont { font_size: type_scale::SMALL, ..default() },
+            TextColor(if selected { ink::PRIMARY } else { ink::MUTED }),
+        )],
+    )
+}
+
+/// Marks a subtree that owns the keyboard while it is open.
+///
+/// Focus traversal is confined to the topmost one, so Tab inside a dialog cannot
+/// wander into the panel behind it — which is the whole difference between a
+/// modal and a floating box.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct Modal;
+
+/// A modal dialog: a scrim, a titled panel, and whatever is put inside it.
+///
+/// The scrim is not decoration. It covers the interface so a click cannot reach
+/// what the dialog is asking about, and it makes the dialog's exclusivity visible
+/// rather than something a player discovers by clicking and being ignored.
+pub fn dialog(title_text: &str) -> impl Bundle {
+    (
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.0),
+            top: Val::Px(0.0),
+            right: Val::Px(0.0),
+            bottom: Val::Px(0.0),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
+        GlobalZIndex(500),
+        Modal,
+        children![(
+            Node {
+                min_width: Val::Px(280.0),
+                max_width: Val::Px(480.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(space::SNUG),
+                padding: UiRect::all(Val::Px(space::BASE)),
+                border: UiRect::all(Val::Px(size::BORDER)),
+                ..default()
+            },
+            BackgroundColor(surface::PANEL),
+            BorderColor::all(surface::EDGE),
+            children![(
+                Text::new(title_text.to_string()),
+                TextFont { font_size: type_scale::HEADING, ..default() },
+                TextColor(ink::GOLD),
+            )],
+        )],
+    )
+}
+
+/// A popup list of actions, anchored by whoever opens it.
+///
+/// A `Modal` too: a menu that leaves Tab wandering into the panel behind it is a
+/// menu a player can lose track of while it is still open and still acting on
+/// their keystrokes.
+pub fn menu() -> impl Bundle {
+    (
+        Node {
+            position_type: PositionType::Absolute,
+            min_width: Val::Px(160.0),
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::all(Val::Px(space::HAIR)),
+            border: UiRect::all(Val::Px(size::BORDER)),
+            ..default()
+        },
+        BackgroundColor(surface::PANEL),
+        BorderColor::all(surface::EDGE),
+        GlobalZIndex(600),
+        Modal,
+    )
+}
+
+/// How urgent a notification is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoticeLevel {
+    Info,
+    Warning,
+    Danger,
+}
+
+impl NoticeLevel {
+    fn ink(self) -> Color {
+        match self {
+            NoticeLevel::Info => ink::PRIMARY,
+            NoticeLevel::Warning => status::NOTICE,
+            NoticeLevel::Danger => status::DANGER,
+        }
+    }
+
+    /// A prefix, so urgency is not carried by colour alone.
+    ///
+    /// Text rather than an icon glyph: the vendored font covers Spanish and this
+    /// interface's punctuation, and a symbol outside that coverage renders as an
+    /// empty box — which is exactly what a warning must not look like.
+    fn marker(self) -> &'static str {
+        match self {
+            NoticeLevel::Info => "\u{00b7}",
+            NoticeLevel::Warning => "!",
+            NoticeLevel::Danger => "!!",
+        }
+    }
+}
+
+/// A transient message.
+pub fn notification(text: &str, level: NoticeLevel) -> impl Bundle {
+    (
+        Node {
+            max_width: Val::Px(420.0),
+            padding: UiRect::axes(Val::Px(space::SNUG), Val::Px(space::HAIR)),
+            column_gap: Val::Px(space::SNUG),
+            align_items: AlignItems::Center,
+            border: UiRect::left(Val::Px(focus::RING_WIDTH)),
+            overflow: Overflow::clip(),
+            ..default()
+        },
+        BackgroundColor(surface::PANEL),
+        BorderColor::all(level.ink()),
+        children![
+            (
+                Text::new(level.marker().to_string()),
+                TextFont { font_size: type_scale::SMALL, ..default() },
+                TextColor(level.ink()),
+            ),
+            (
+                Text::new(text.to_string()),
+                TextFont { font_size: type_scale::SMALL, ..default() },
+                TextColor(ink::PRIMARY),
+            ),
+        ],
+    )
+}
+
+/// The thing that follows the pointer during a drag.
+///
+/// Never a pointer target itself: a ghost that can be hovered takes the pointer
+/// from whatever it is being dragged onto, so the drop target never lights up.
+pub fn drag_ghost(label_text: &str) -> impl Bundle {
+    (
+        Node {
+            position_type: PositionType::Absolute,
+            padding: UiRect::all(Val::Px(space::HAIR)),
+            border: UiRect::all(Val::Px(size::BORDER)),
+            ..default()
+        },
+        BackgroundColor(surface::RAISED),
+        BorderColor::all(focus::SELECTED),
+        GlobalZIndex(900),
+        Pickable::IGNORE,
+        children![(
+            Text::new(label_text.to_string()),
+            TextFont { font_size: type_scale::MICRO, ..default() },
+            TextColor(ink::PRIMARY),
+        )],
+    )
+}
+
+/// A determinate progress or cooldown bar, with no numbers.
+///
+/// Distinct from [`status_bar`], which carries its values as text because a
+/// player reads them. Progress here is the shape of the fill and nothing else —
+/// a cast timer with "0.4/1.0" written across it is noise.
+pub fn progress(fraction: f32, fill: Color) -> impl Bundle {
+    (
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Px(space::WIDE),
+            border: UiRect::all(Val::Px(size::BORDER)),
+            overflow: Overflow::clip(),
+            ..default()
+        },
+        BackgroundColor(surface::WELL),
+        BorderColor::all(surface::EDGE),
+        children![(
+            Node {
+                width: Val::Percent(fraction.clamp(0.0, 1.0) * 100.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+            BackgroundColor(fill),
+        )],
+    )
+}
+
 /// A shared text field, rendered.
 pub fn text_field(field: TextField, tab_index: u32) -> impl Bundle {
     (
@@ -871,9 +1112,17 @@ pub fn text_field(field: TextField, tab_index: u32) -> impl Bundle {
 
 fn present_controls(
     focus: Res<FocusOwner>,
-    mut controls: Query<(Entity, &Control, &mut Node, &mut BackgroundColor, &mut BorderColor)>,
+    mut controls: Query<(
+        Entity,
+        &Control,
+        Option<&Selected>,
+        &mut Node,
+        &mut BackgroundColor,
+        &mut BorderColor,
+    )>,
 ) {
-    for (entity, control, mut node, mut background, mut border) in &mut controls {
+    for (entity, control, selection, mut node, mut background, mut border) in &mut controls {
+        let selected = selection.is_some_and(|s| s.0);
         let state = ControlState::resolve(
             control.enabled,
             control.hovered,
@@ -882,22 +1131,55 @@ fn present_controls(
         );
         background.0 = state.surface();
 
+        // Focus outranks selection: they are different questions — what the player
+        // has chosen, and where the next keystroke goes — and when they disagree
+        // the keyboard's position is the one that must be visible.
         let focused = state.shows_focus_ring();
-        *border = BorderColor::all(if focused { focus::RING } else { surface::EDGE });
+        *border = BorderColor::all(if focused {
+            focus::RING
+        } else if selected {
+            focus::SELECTED
+        } else {
+            surface::EDGE
+        });
 
-        // Thickness as well as colour. Focus was previously a colour change and
-        // nothing else, which this task forbids for exactly the reason it is worth
-        // forbidding: a player who cannot distinguish the two browns has no way to
-        // tell where the keyboard is, and that is the one state you cannot play
-        // without knowing.
-        let width = Val::Px(if focused { focus::RING_WIDTH } else { size::BORDER });
-        if node.border.top != width {
-            node.border = UiRect::all(width);
+        // Thickness as well as colour, because this task forbids status carried by
+        // colour alone and focus is the state you cannot play without knowing.
+        //
+        // Applied per edge, preserving which edges the builder chose: a list row
+        // marks selection with a bar down its leading edge only, and replacing that
+        // with a full outline would make every row look like a button.
+        let width = if focused || selected { focus::RING_WIDTH } else { size::BORDER };
+        let thicken = |edge: Val| match edge {
+            Val::Px(px) if px > 0.0 => Val::Px(width),
+            other => other,
+        };
+        let next = UiRect {
+            left: thicken(node.border.left),
+            right: thicken(node.border.right),
+            top: thicken(node.border.top),
+            bottom: thicken(node.border.bottom),
+        };
+        if node.border != next {
+            node.border = next;
         }
     }
 }
 
 /// A button.
+/// Whether the player has chosen this control, as distinct from where the
+/// keyboard is.
+///
+/// A value rather than a marker whose presence is conditional: a bundle cannot
+/// contain a component conditionally, and splitting every builder into two shapes
+/// to express one boolean is worse than carrying the boolean.
+///
+/// It exists at all because `present_controls` owns every control's border, so a
+/// builder that encoded selection in the border colour itself lost it on the next
+/// frame — which is exactly what happened to the list row.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Selected(pub bool);
+
 /// What makes a node a control rather than a picture of one.
 ///
 /// `Button` requires `Interaction`, which is the component `track_pointer`
@@ -1392,6 +1674,163 @@ mod tests {
         app.update();
 
         assert_eq!(value_of(&app, entity), "", "an unfocused edit was replayed on focus");
+    }
+
+    #[test]
+    fn tab_cannot_escape_an_open_dialog() {
+        // The difference between a modal and a floating box. Without the trap, a
+        // player answering a dialog tabs into the panel the dialog is covering,
+        // and the keyboard is somewhere they cannot see.
+        let mut app = controls_app();
+        let behind = app.world_mut().spawn(button("Behind", ControlState::Normal, 1)).id();
+        app.update();
+
+        press_key(&mut app, KeyCode::Tab);
+        assert_eq!(app.world().resource::<FocusOwner>().entity(), Some(behind));
+
+        // Open a dialog with two actions inside it.
+        let inside_a = app.world_mut().spawn(button("Confirm", ControlState::Normal, 10)).id();
+        let inside_b = app.world_mut().spawn(button("Cancel", ControlState::Normal, 11)).id();
+        let modal = app.world_mut().spawn(dialog("Really?")).id();
+        app.world_mut().entity_mut(modal).add_children(&[inside_a, inside_b]);
+        app.update();
+
+        // Tabbing now only ever reaches the dialog's own actions.
+        let mut seen = Vec::new();
+        for _ in 0..6 {
+            press_key(&mut app, KeyCode::Tab);
+            if let Some(entity) = app.world().resource::<FocusOwner>().entity() {
+                seen.push(entity);
+            }
+        }
+        assert!(!seen.is_empty(), "Tab reached nothing at all inside the dialog");
+        assert!(
+            !seen.contains(&behind),
+            "Tab escaped the dialog and reached the control behind it"
+        );
+        assert!(
+            seen.contains(&inside_a) && seen.contains(&inside_b),
+            "Tab did not reach both dialog actions: {seen:?}"
+        );
+
+        // Closing it hands the interface back.
+        app.world_mut().entity_mut(modal).despawn();
+        app.update();
+        press_key(&mut app, KeyCode::Tab);
+        assert_eq!(
+            app.world().resource::<FocusOwner>().entity(),
+            Some(behind),
+            "closing the dialog did not return focus to the interface"
+        );
+    }
+
+    #[test]
+    fn a_menu_traps_focus_the_same_way_a_dialog_does() {
+        // A menu that leaves Tab wandering is a menu a player loses track of while
+        // it is still open and still acting on their keystrokes.
+        let mut app = controls_app();
+        let behind = app.world_mut().spawn(button("Behind", ControlState::Normal, 1)).id();
+        let item = app.world_mut().spawn(list_row("Drop", false, 10)).id();
+        let menu_root = app.world_mut().spawn(menu()).id();
+        app.world_mut().entity_mut(menu_root).add_children(&[item]);
+        app.update();
+
+        for _ in 0..4 {
+            press_key(&mut app, KeyCode::Tab);
+            assert_ne!(
+                app.world().resource::<FocusOwner>().entity(),
+                Some(behind),
+                "Tab escaped an open menu"
+            );
+        }
+    }
+
+    #[test]
+    fn a_list_row_and_a_notification_do_not_rely_on_colour_alone() {
+        // Selection is a bar down the leading edge; urgency is a text marker.
+        // Both because the palette separates surfaces by very little, and a player
+        // who cannot tell two browns apart still has to know which row is chosen.
+        let mut app = controls_app();
+        let selected = app.world_mut().spawn(list_row("Curar", true, 1)).id();
+        let plain = app.world_mut().spawn(list_row("Dardo", false, 2)).id();
+        app.update();
+
+        let border =
+            |app: &App, entity: Entity| app.world().get::<BorderColor>(entity).expect("a row").top;
+        assert_ne!(border(&app, selected), border(&app, plain));
+        assert_eq!(border(&app, selected), focus::SELECTED);
+
+        // And the difference is not only the colour: the chosen row's bar is
+        // thicker, so a player who cannot separate the two hues still sees which
+        // row is chosen.
+        let bar =
+            |app: &App, entity: Entity| app.world().get::<Node>(entity).expect("a row").border.left;
+        assert_eq!(bar(&app, selected), Val::Px(focus::RING_WIDTH));
+        assert_eq!(bar(&app, plain), Val::Px(size::BORDER));
+
+        // The bar stays on the leading edge rather than becoming an outline, or
+        // every row would look like a button.
+        let node = app.world().get::<Node>(selected).expect("a row");
+        assert_eq!(node.border.top, Val::Px(0.0), "a selected row grew a top border");
+        assert_eq!(node.border.right, Val::Px(0.0));
+
+        assert_eq!(NoticeLevel::Info.marker(), "\u{00b7}");
+        assert_eq!(NoticeLevel::Warning.marker(), "!");
+        assert_eq!(NoticeLevel::Danger.marker(), "!!");
+        let markers =
+            [NoticeLevel::Info, NoticeLevel::Warning, NoticeLevel::Danger].map(NoticeLevel::marker);
+        assert_eq!(
+            markers.iter().collect::<std::collections::BTreeSet<_>>().len(),
+            3,
+            "two notice levels share a marker, so the text does not distinguish them"
+        );
+    }
+
+    #[test]
+    fn a_bounded_list_cannot_push_its_panel_off_the_screen() {
+        // Every list here is fed by the server. An unbounded one grows to whatever
+        // arrives, which is fine against a fixture and wrong the first time real
+        // data is larger.
+        let mut app = controls_app();
+        let root = app.world_mut().spawn(list(120.0)).id();
+        app.update();
+
+        let node = app.world().get::<Node>(root).expect("a list");
+        assert_eq!(node.max_height, Val::Px(120.0));
+        assert!(
+            matches!(
+                node.overflow.y,
+                OverflowAxis::Clip | OverflowAxis::Hidden | OverflowAxis::Scroll
+            ),
+            "a list that is not clipped will overflow its panel: {:?}",
+            node.overflow
+        );
+    }
+
+    #[test]
+    fn a_progress_bar_carries_its_value_in_its_width() {
+        // And is clamped, because a cooldown fraction arriving above one or below
+        // zero is a server rounding away from a sane value, not a reason to draw a
+        // bar wider than its track.
+        let mut app = controls_app();
+        for (fraction, expected) in
+            [(0.0, 0.0), (0.5, 50.0), (1.0, 100.0), (2.0, 100.0), (-1.0, 0.0)]
+        {
+            let bar = app.world_mut().spawn(progress(fraction, status::HEALTH)).id();
+            app.update();
+            let fill = app
+                .world()
+                .get::<Children>(bar)
+                .expect("a fill")
+                .iter()
+                .next()
+                .expect("a fill child");
+            assert_eq!(
+                app.world().get::<Node>(fill).expect("a fill node").width,
+                Val::Percent(expected),
+                "a fraction of {fraction} drew {expected}%"
+            );
+        }
     }
 
     #[test]
