@@ -396,6 +396,38 @@ async function main() {
     );
     await settleContext.close();
 
+    // Keyboard focus must not leave the canvas. Tab moving browser focus off it
+    // ends the session's keyboard: the player tabs through page furniture with no
+    // way back except clicking, and every gameplay key stops working.
+    console.log("  keyboard focus stays on the canvas");
+    const focusContext = await browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      deviceScaleFactor: 1,
+    });
+    const focusPage = await focusContext.newPage();
+    await focusPage.goto(url, { waitUntil: "load" });
+    await waitForClient(focusPage);
+
+    await focusPage.evaluate(() => document.getElementById("ao-canvas").focus());
+    check(
+      "the canvas can hold focus",
+      await focusPage.evaluate(() => document.activeElement?.id === "ao-canvas")
+    );
+
+    for (const key of ["Tab", "F6"]) {
+      await focusPage.keyboard.press(key);
+      const still = await focusPage.evaluate(() => document.activeElement?.id);
+      check(`${key} leaves focus on the canvas`, still === "ao-canvas", `focus moved to ${still}`);
+    }
+
+    // Shift+Tab too: it is the same escape in the other direction.
+    await focusPage.keyboard.press("Shift+Tab");
+    check(
+      "Shift+Tab leaves focus on the canvas",
+      (await focusPage.evaluate(() => document.activeElement?.id)) === "ao-canvas"
+    );
+    await focusContext.close();
+
     // The stepped windowed size, at the sizes where it changes answer. 1440p is
     // included because it is the case most likely to be assumed: a large
     // display that still only fits one step, because two need 1520 pixels of

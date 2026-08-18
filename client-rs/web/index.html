@@ -234,6 +234,29 @@
       // step. Bevy picks the new rectangle up from its own resize observer.
       window.addEventListener("resize", applyShellSteps);
 
+      // Keys the client owns, which the browser would otherwise act on first.
+      //
+      // Tab moves browser focus out of the canvas, which ends the game session's
+      // keyboard entirely — the player is then tabbing through page furniture with
+      // no way back except clicking. F6 is a browser shortcut on some platforms.
+      // Both are the client's, and only while the canvas actually has focus, so
+      // keyboard access to the rest of the page is untouched.
+      //
+      // This is a capability adapter, not UI: it suppresses a default and nothing
+      // more. The client decides what the keys mean.
+      const CLIENT_OWNED_KEYS = new Set(["Tab", "F6"]);
+      window.addEventListener(
+        "keydown",
+        (event) => {
+          const canvas = document.getElementById("ao-canvas");
+          if (canvas && document.activeElement === canvas && CLIENT_OWNED_KEYS.has(event.key)) {
+            event.preventDefault();
+          }
+        },
+        // Capture, so this runs before anything else can act on the key.
+        true
+      );
+
       // Browser-capability adapter, not application UI. Bevy owns every screen
       // and cannot resize or fullscreen its own host element; this exposes the
       // two things only the page can do.

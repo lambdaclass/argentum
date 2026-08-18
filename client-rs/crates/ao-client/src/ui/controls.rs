@@ -487,6 +487,25 @@ pub enum TextEdit {
 #[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TextInputActive(pub bool);
 
+/// Whether keyboard focus navigation owns the keyboard.
+///
+/// Off during play, so Tab belongs to the world — the whole-world map opens on it
+/// (W-0089) and a player mid-fight has no use for walking a focus ring. F6 turns
+/// it on and off, which is the documented action the task asks for: one key, said
+/// out loud, rather than focus navigation that is either always stealing Tab or
+/// never available.
+///
+/// Leaving it on by default was the alternative and is worse: Tab is a gameplay
+/// key here, and silently taking it is the kind of thing a player cannot discover
+/// or undo.
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FocusNavigation {
+    pub active: bool,
+}
+
+/// The key that enters and leaves focus navigation.
+pub const FOCUS_NAVIGATION_KEY: KeyCode = KeyCode::F6;
+
 /// Systems that read the keyboard as *gameplay* rather than as text.
 ///
 /// Ordered after [`ControlSet::Interact`], so ownership for this frame is already
@@ -514,12 +533,19 @@ impl Plugin for ControlsPlugin {
             .configure_sets(Update, GameplayInput.after(ControlSet::Interact))
             .add_systems(
                 Update,
-                (track_pointer, move_focus_with_tab, activate_with_keyboard, resolve_focus)
+                (
+                    toggle_focus_navigation,
+                    track_pointer,
+                    move_focus_with_tab,
+                    activate_with_keyboard,
+                    resolve_focus,
+                )
                     .chain()
                     .in_set(ControlSet::Interact),
             )
             .add_systems(Update, present_controls.in_set(ControlSet::Present))
             .init_resource::<TextInputActive>()
+            .init_resource::<FocusNavigation>()
             .add_message::<TextEdit>()
             // Registered here so this plugin stands alone: without InputPlugin
             // the keyboard message is uninitialised and the reader below fails
@@ -579,11 +605,15 @@ fn track_pointer(
 /// is how a player leaves a field. Text fields swallow ordinary characters, not
 /// navigation.
 fn move_focus_with_tab(
+    navigation: Res<FocusNavigation>,
     keys: Res<ButtonInput<KeyCode>>,
     controls: Query<(Entity, &Control, Option<&ControlKey>)>,
     mut focus: ResMut<FocusOwner>,
 ) {
-    if !keys.just_pressed(KeyCode::Tab) {
+    // Only while focus navigation owns the keyboard. Tab is a gameplay key
+    // otherwise, and taking it unconditionally is what made the whole-world map
+    // unreachable.
+    if !navigation.active || !keys.just_pressed(KeyCode::Tab) {
         return;
     }
     let backwards = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
@@ -671,6 +701,30 @@ fn resolve_focus(
 }
 
 /// Redraw controls from their resolved state.
+/// Enter and leave focus navigation on F6.
+///
+/// Leaving it also drops focus: a focus ring left standing on a control that no
+/// longer responds to Tab is a lie about where the keyboard is going.
+fn toggle_focus_navigation(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut navigation: ResMut<FocusNavigation>,
+    mut focus: ResMut<FocusOwner>,
+    fields: Query<(), With<TextField>>,
+) {
+    if !keys.just_pressed(FOCUS_NAVIGATION_KEY) {
+        return;
+    }
+    navigation.active = !navigation.active;
+    if !navigation.active {
+        // Except when a text field holds it: dropping focus mid-sentence would
+        // discard what the player was typing.
+        let typing = focus.entity().is_some_and(|entity| fields.get(entity).is_ok());
+        if !typing {
+            focus.clear();
+        }
+    }
+}
+
 /// Turn keyboard input into typed editing steps.
 ///
 /// Reads `KeyboardInput` rather than `ButtonInput<KeyCode>` for text, because
@@ -1008,6 +1062,7 @@ mod tests {
     fn control_app(count: usize) -> (App, Vec<Entity>) {
         let mut app = App::new();
         app.add_plugins(ControlsPlugin).insert_resource(ButtonInput::<KeyCode>::default());
+        app.world_mut().resource_mut::<FocusNavigation>().active = true;
 
         let entities: Vec<Entity> = (0..count)
             .map(|index| {
@@ -1051,8 +1106,25 @@ mod tests {
         app.update();
     }
 
-    /// An app with the production interaction pipeline and nothing else.
+    /// An app with the production interaction pipeline and nothing else,
+    /// already in focus navigation.
+    ///
+    /// Entered by pressing F6 rather than by setting the resource, so every test
+    /// that tabs also exercises the way a player gets there.
+    /// `tab_does_nothing_until_focus_navigation_is_entered` covers the state
+    /// before it.
     fn controls_app() -> App {
+        let mut app = raw_controls_app();
+        press_key(&mut app, FOCUS_NAVIGATION_KEY);
+        assert!(
+            app.world().resource::<FocusNavigation>().active,
+            "F6 did not enter focus navigation"
+        );
+        app
+    }
+
+    /// The same, before F6.
+    fn raw_controls_app() -> App {
         let mut app = App::new();
         app.add_plugins(ControlsPlugin).insert_resource(ButtonInput::<KeyCode>::default());
         app
@@ -1314,6 +1386,68 @@ mod tests {
     }
 
     #[test]
+    fn tab_does_nothing_until_focus_navigation_is_entered() {
+        // Tab is a gameplay key: the whole-world map opens on it. Taking it
+        // unconditionally made that unreachable, and a focus ring walking the
+        // interface mid-fight is not what a player pressing Tab wanted.
+        let mut app = raw_controls_app();
+        let entity = app.world_mut().spawn(button("Attack", ControlState::Normal, 1)).id();
+        app.update();
+
+        press_key(&mut app, KeyCode::Tab);
+        assert_eq!(
+            app.world().resource::<FocusOwner>().entity(),
+            None,
+            "Tab moved focus before focus navigation was entered"
+        );
+
+        press_key(&mut app, FOCUS_NAVIGATION_KEY);
+        press_key(&mut app, KeyCode::Tab);
+        assert_eq!(
+            app.world().resource::<FocusOwner>().entity(),
+            Some(entity),
+            "Tab did nothing after F6"
+        );
+    }
+
+    #[test]
+    fn leaving_focus_navigation_drops_the_focus_ring() {
+        // A ring left standing on a control that no longer answers Tab is a lie
+        // about where the keyboard is going.
+        let mut app = controls_app();
+        let entity = app.world_mut().spawn(button("Attack", ControlState::Normal, 1)).id();
+        app.update();
+        press_key(&mut app, KeyCode::Tab);
+        assert_eq!(app.world().resource::<FocusOwner>().entity(), Some(entity));
+
+        press_key(&mut app, FOCUS_NAVIGATION_KEY);
+        assert!(!app.world().resource::<FocusNavigation>().active);
+        assert_eq!(
+            app.world().resource::<FocusOwner>().entity(),
+            None,
+            "focus survived leaving focus navigation"
+        );
+    }
+
+    #[test]
+    fn leaving_focus_navigation_does_not_interrupt_typing() {
+        // Dropping focus mid-sentence would discard what the player was writing,
+        // so a field keeps the keyboard even as navigation ends.
+        let mut app = controls_app();
+        let field = focused_field(&mut app, TextField::new());
+        app.world_mut().write_message(TextEdit::Insert("hola".into()));
+        app.update();
+
+        press_key(&mut app, FOCUS_NAVIGATION_KEY);
+        assert_eq!(
+            app.world().resource::<FocusOwner>().entity(),
+            Some(field),
+            "leaving focus navigation stole the keyboard from a field being typed in"
+        );
+        assert_eq!(value_of(&app, field), "hola");
+    }
+
+    #[test]
     fn a_button_from_the_shared_builder_activates_by_pointer() {
         // Spawned exactly as production spawns it, with nothing added by hand.
         let mut app = controls_app();
@@ -1406,6 +1540,7 @@ mod tests {
         // inventory slot silently loses their place when the window moves.
         let mut app = App::new();
         app.add_plugins(ControlsPlugin).insert_resource(ButtonInput::<KeyCode>::default());
+        app.world_mut().resource_mut::<FocusNavigation>().active = true;
 
         let original = app
             .world_mut()
@@ -1450,6 +1585,7 @@ mod tests {
         // gap loses the player's place for a reason they cannot see.
         let mut app = App::new();
         app.add_plugins(ControlsPlugin).insert_resource(ButtonInput::<KeyCode>::default());
+        app.world_mut().resource_mut::<FocusNavigation>().active = true;
 
         let control = app
             .world_mut()
@@ -1499,6 +1635,7 @@ mod tests {
         // appear to do nothing.
         let mut app = App::new();
         app.add_plugins(ControlsPlugin).insert_resource(ButtonInput::<KeyCode>::default());
+        app.world_mut().resource_mut::<FocusNavigation>().active = true;
 
         let control = app
             .world_mut()
@@ -1525,6 +1662,7 @@ mod tests {
         // put the ring on something that cannot be activated.
         let mut app = App::new();
         app.add_plugins(ControlsPlugin).insert_resource(ButtonInput::<KeyCode>::default());
+        app.world_mut().resource_mut::<FocusNavigation>().active = true;
 
         let key = ControlKey::indexed("inventory.slot", 0);
         let original = app
