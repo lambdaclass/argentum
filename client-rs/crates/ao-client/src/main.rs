@@ -8,6 +8,7 @@
 //! backwards in the web client.
 
 mod config;
+mod diagnostics;
 mod graphics;
 mod hud;
 mod net;
@@ -121,6 +122,7 @@ fn main() {
         // so movement appears to lag and then jump a whole tile at a time.
         .insert_resource(winit_settings())
         .add_plugins((world::WorldPlugin, ui::UiPlugin, hud::HudPlugin))
+        .add_plugins(diagnostics::DiagnosticsPlugin)
         .run();
 }
 

@@ -212,6 +212,21 @@ an emulation headless Chromium does not rasterize at, so the canvas backing
 store measures identically at 1x and 2x. Verifying that it follows a real device
 pixel ratio needs a physical high-DPI display.
 
+Correction, 2026-08-18 (`c99ed51`): the paragraph above is wrong in its
+reasoning, and left in place because this file records what was believed at the
+time. The claim that the emulated ratio is not observed is false — the client
+reads `window.devicePixelRatio`, and that reading was the bug: Bevy's
+`fit_canvas_to_parent` installs the parent's CSS box as the window's *physical*
+size, so at ratio 2 a 1278px shell became a 639px logical window, the character
+rail collapsed to its icon strip and the world drew at double zoom. The backing
+store measuring the same at 1x and 2x was the symptom, not an artefact of the
+harness. It was found by taking the W-0003 DPR captures and looking at them,
+which the note above would have discouraged.
+
+What is genuinely unverifiable here is rasterisation *sharpness*, since headless
+Chromium composites at 1x. That, and the HiDPI render path itself, remain open
+on W-0003.
+
 ## Pre-stable-ID foundation
 
 ### 2026-08-16 — Honest login request encoders

@@ -135,6 +135,60 @@ async function servedStamp() {
   return (await response.text()).trim();
 }
 
+/// Check the asset origin is actually there before opening a browser at all.
+///
+/// This is the failure that produced twenty-four screenshots of a bare green
+/// grid: the game server was down, every asset fetch failed, the client drew its
+/// placeholder grid, and the harness waited four seconds and called it loaded.
+/// Nothing downstream can recover from a dead origin, so it is worth failing
+/// here with the reason rather than later with a picture.
+async function preflight(page) {
+  const origin = await page.evaluate(
+    () =>
+      document.querySelector('meta[name="ao:asset-origin"]')?.content || window.location.origin
+  );
+
+  const manifestUrl = `${origin}/api/meta/world-pack`;
+  // Named explicitly: a bare `fetch failed` from a refused connection is what a
+  // dead asset origin looks like, and it is the single most likely reason a
+  // capture run is worthless. Say which host and what to start.
+  let response;
+  try {
+    response = await fetch(manifestUrl, { cache: "no-store" });
+  } catch (error) {
+    throw new Error(
+      `cannot reach the asset origin at ${origin} (${error.message}).\n` +
+        `The client would draw its placeholder grid and the captures would be ` +
+        `worthless. Start the game server: nix develop --command mix phx.server, ` +
+        `from server/ — the umbrella root, not apps/arena, or the endpoint that ` +
+        `serves /api/meta/world-pack is not loaded.`
+    );
+  }
+  if (!response.ok) {
+    throw new Error(
+      `${manifestUrl} returned ${response.status}. The asset origin is not serving the ` +
+        `world; a capture taken now would be of the placeholder grid.`
+    );
+  }
+  const manifest = await response.json();
+  for (const field of ["filename", "hash", "maps"]) {
+    if (manifest[field] === undefined) {
+      throw new Error(`${manifestUrl} has no ${field}: ${JSON.stringify(manifest)}`);
+    }
+  }
+
+  // The pack itself and one index, by HEAD: a manifest that names a file the
+  // server cannot serve is the same outage one step later.
+  for (const path of [`/data/packs/${manifest.filename}`, "/indices/graficos.json"]) {
+    const probe = await fetch(`${origin}${path}`, { method: "HEAD", cache: "no-store" });
+    if (!probe.ok) {
+      throw new Error(`${origin}${path} returned ${probe.status}`);
+    }
+  }
+
+  return { origin, ...manifest };
+}
+
 /// Wait until the client is actually presenting, not merely loaded.
 async function waitForClient(page) {
   await page.waitForSelector("#ao-canvas", { timeout: 30_000 });
@@ -150,9 +204,23 @@ async function waitForClient(page) {
     },
     { timeout: 30_000 }
   );
-  // Map data and texture sheets arrive over HTTP; without this the capture is
-  // of an empty world that has technically finished booting.
-  await page.waitForTimeout(4_000);
+
+  // And that the world is painted from the real artwork, which the client
+  // reports on `window.aoLoaded`. This replaces a four-second sleep. The
+  // distinction that matters is `painted` against `placeholders`: the
+  // placeholder grid is present from the first frame and is not evidence of
+  // anything, which is exactly why a timer could not tell the difference.
+  await page.waitForFunction(
+    () => {
+      const loaded = window.aoLoaded;
+      return loaded && loaded.sheets > 0 && loaded.painted > 0;
+    },
+    { timeout: 60_000 }
+  );
+
+  // A short settle so the visible tiles finish arriving, now that readiness
+  // itself is no longer a guess.
+  await page.waitForTimeout(1_500);
 }
 
 async function shoot(page, name) {
@@ -187,7 +255,18 @@ async function main() {
 
   const shots = [];
   const dprMatrix = [];
+  let world = null;
   try {
+    // Before anything is captured: is the world even being served?
+    {
+      const context = await browser.newContext({ viewport: { width: 800, height: 600 } });
+      const page = await context.newPage();
+      await page.goto(url, { waitUntil: "load" });
+      world = await preflight(page);
+      console.log(`==> world ${world.filename} (${world.maps} maps, hash ${world.hash})`);
+      await context.close();
+    }
+
     for (const viewport of VIEWPORTS) {
       console.log(`  ${viewport.name} (${viewport.width}x${viewport.height})`);
       const context = await browser.newContext({
@@ -284,13 +363,20 @@ async function main() {
       await context.close();
     }
 
-    // The device pixel ratio matrix. Labelled emulated, and it matters:
-    // Playwright's deviceScaleFactor changes window.devicePixelRatio but
-    // headless Chromium composites at 1x and winit never observes it, so these
-    // show the CSS side holding — no resampling, no scrollbars, the same
-    // framing — and cannot show backing-store sharpness. Proving that needs a
-    // physical high-DPI display and is recorded as an environment limitation on
-    // W-0003 rather than claimed from here.
+    // The device pixel ratio matrix. Labelled emulated, because it is — but not
+    // for the reason this comment used to give.
+    //
+    // It said winit never observes deviceScaleFactor. That was wrong, and the
+    // wrongness mattered: the client reads window.devicePixelRatio, and reading
+    // it was how a ratio change came to halve the client's logical window and
+    // collapse the character rail (fixed in c99ed51). A note explaining the
+    // evidence away would have buried that.
+    //
+    // What the emulation genuinely cannot show is rasterisation sharpness:
+    // headless Chromium composites at 1x, so a sharper backing store would look
+    // no different here. These captures therefore prove the layout holds at
+    // every ratio, and say nothing about HiDPI crispness. That needs physical
+    // high-DPI hardware and stays open on W-0003.
     for (const ratio of [1, 1.25, 1.5, 1.75, 2]) {
       const name = `dpr-${String(ratio).replace(".", "_")}-emulated`;
       console.log(`  ${name}`);
@@ -340,15 +426,26 @@ async function main() {
   const manifest = {
     build: served,
     capturedFrom: url,
+    // The world these captures are of, so a screenshot can be tied to a map
+    // pack as well as to a commit.
+    world: world && {
+      assetOrigin: world.origin,
+      pack: world.filename,
+      hash: world.hash,
+      maps: world.maps,
+    },
     shots: shots.map(({ name, bytes }) => ({ name, bytes })),
     // Recorded rather than asserted: see the note above the DPR loop. Written
     // down so a reader can see what this environment actually reported instead
     // of inferring that the matrix was verified.
     devicePixelRatioMatrix: {
       note:
-        "deviceScaleFactor is a Playwright emulation; headless Chromium " +
-        "composites at 1x and winit does not observe it. These entries show " +
-        "the CSS geometry holding, not backing-store sharpness.",
+        "deviceScaleFactor is a Playwright emulation, and the client DOES " +
+        "observe it — reading window.devicePixelRatio is how a ratio change " +
+        "once halved the logical window (fixed in c99ed51). What the " +
+        "emulation cannot show is rasterisation sharpness, because headless " +
+        "Chromium composites at 1x. These entries show the layout holding at " +
+        "every ratio, not backing-store crispness.",
       observed: dprMatrix,
     },
   };

@@ -273,7 +273,7 @@ fn heading_delta(heading: Heading) -> (i32, i32) {
 struct PlayerSprite;
 
 #[derive(Component)]
-struct TileSprite;
+pub struct TileSprite;
 
 /// The world camera, as the client spawns it.
 ///
@@ -495,8 +495,12 @@ struct SheetAtlases {
 }
 
 /// Tiles drawn from the real graphics, as opposed to the placeholder grid.
+///
+/// Public because it is the only honest answer to "has the world actually been
+/// painted?" — `crate::diagnostics` reports it so automation can refuse a
+/// screenshot of the placeholder grid.
 #[derive(Component)]
-struct SceneTile;
+pub struct SceneTile;
 
 /// Depth of the character. Map layers sit either side of it.
 const CHARACTER_Z: f32 = 10.0;
