@@ -741,6 +741,135 @@ mod tests {
         assert_eq!(viewport.physical_size.y, geometry.world.height() as u32);
     }
 
+    /// The world region's node and the camera that draws into it, in physical
+    /// pixels, from one solved app.
+    fn world_node_and_viewport(app: &mut App) -> (Rect, bevy::camera::Viewport) {
+        use super::super::testing;
+
+        let node = app
+            .world_mut()
+            .query::<(Entity, &Region)>()
+            .iter(app.world())
+            .find(|(_, region)| **region == Region::World)
+            .map(|(entity, _)| entity)
+            .expect("the shell has no world region");
+        let rect = testing::solved_rect(app, node).expect("the world region was never solved");
+
+        let viewport = app
+            .world_mut()
+            .query_filtered::<&Camera, With<WorldCamera>>()
+            .iter(app.world())
+            .next()
+            .and_then(|camera| camera.viewport.clone())
+            .expect("the world camera has no viewport");
+
+        (rect, viewport)
+    }
+
+    #[test]
+    fn the_camera_viewport_is_the_world_node_at_every_ui_scale() {
+        // The closure requirement for this task, and the fault it names: global
+        // UiScale multiplies every Val::Px the shell declares, while a camera
+        // viewport is set in physical pixels and is not multiplied by anything.
+        // Get that wrong and the world is drawn into a rectangle the interface
+        // does not agree exists — which is how the entire shell ended up inside
+        // a clipped viewport once already.
+        //
+        // Compared as solved bounds against the real viewport, not as the
+        // arithmetic that produced both, because they were produced by the same
+        // arithmetic and would agree with each other while both being wrong.
+        use super::super::testing;
+
+        for window in [Vec2::new(1280.0, 760.0), Vec2::new(2560.0, 1520.0)] {
+            let mut app = testing::shell_app(window);
+            let scale = app.world().resource::<UiScale>().0;
+            let (rect, viewport) = world_node_and_viewport(&mut app);
+
+            assert!(
+                (rect.width() - viewport.physical_size.x as f32).abs() <= 1.0
+                    && (rect.height() - viewport.physical_size.y as f32).abs() <= 1.0,
+                "at {window:?} (UI scale {scale}) the world node is {}x{} and the viewport is {}x{}",
+                rect.width(),
+                rect.height(),
+                viewport.physical_size.x,
+                viewport.physical_size.y
+            );
+            assert!(
+                (rect.min.x - viewport.physical_position.x as f32).abs() <= 1.0
+                    && (rect.min.y - viewport.physical_position.y as f32).abs() <= 1.0,
+                "at {window:?} (UI scale {scale}) the world node starts at {:?} and the viewport at {:?}",
+                rect.min,
+                viewport.physical_position
+            );
+        }
+
+        // And that the two windows really did exercise different scales, or the
+        // test is one case written twice.
+        assert_eq!(
+            testing::shell_app(Vec2::new(1280.0, 760.0)).world().resource::<UiScale>().0,
+            1.0,
+            "the first case is not at UI scale 1"
+        );
+        let large = testing::shell_app(Vec2::new(2560.0, 1520.0)).world().resource::<UiScale>().0;
+        assert!(large > 1.0, "the second case is at UI scale {large}, not above 1");
+    }
+
+    #[test]
+    fn a_device_pixel_ratio_change_alone_does_not_change_what_is_framed() {
+        // The other half: a sharper display is more pixels for the same scene,
+        // never a different amount of scene. If the logical framing moves with
+        // the ratio, a player on a 150% display is playing a different game —
+        // seeing more or less of the world than everyone else.
+        use super::super::layout;
+        use super::super::testing;
+
+        let window = Vec2::new(1280.0, 760.0);
+        let mut baseline = None;
+
+        for ratio in [1.0f32, 1.25, 1.5, 1.75, 2.0] {
+            let app = testing::shell_app_at(window, ratio);
+            let geometry = testing::settled(&app);
+            let view = layout::world_view(geometry.world);
+
+            match baseline {
+                None => baseline = Some((geometry.world, view.tiles)),
+                Some((world, tiles)) => {
+                    assert_eq!(
+                        geometry.world, world,
+                        "at {ratio}x the world is framed at {:?} instead of {world:?}",
+                        geometry.world
+                    );
+                    assert_eq!(
+                        view.tiles, tiles,
+                        "at {ratio}x the player sees {:?} tiles instead of {tiles:?}",
+                        view.tiles
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_higher_ratio_buys_more_physical_pixels_for_the_same_world() {
+        // The complement of the test above, so "nothing changed" cannot pass by
+        // the ratio being ignored altogether. The logical framing holds; the
+        // backing store the camera draws into grows with the ratio.
+        use super::super::testing;
+
+        let window = Vec2::new(1280.0, 760.0);
+        let mut previous = 0u32;
+        for ratio in [1.0f32, 2.0] {
+            let mut app = testing::shell_app_at(window, ratio);
+            let (_, viewport) = world_node_and_viewport(&mut app);
+            assert!(
+                viewport.physical_size.x > previous,
+                "at {ratio}x the viewport is {} physical pixels wide, no more than at the last ratio ({previous})",
+                viewport.physical_size.x
+            );
+            previous = viewport.physical_size.x;
+        }
+    }
+
     #[test]
     fn a_host_mode_change_and_back_preserves_what_the_player_was_doing() {
         // From inside the client, maximise-and-restore is two window resizes and

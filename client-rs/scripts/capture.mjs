@@ -186,6 +186,7 @@ async function main() {
   });
 
   const shots = [];
+  const dprMatrix = [];
   try {
     for (const viewport of VIEWPORTS) {
       console.log(`  ${viewport.name} (${viewport.width}x${viewport.height})`);
@@ -283,6 +284,41 @@ async function main() {
       await context.close();
     }
 
+    // The device pixel ratio matrix. Labelled emulated, and it matters:
+    // Playwright's deviceScaleFactor changes window.devicePixelRatio but
+    // headless Chromium composites at 1x and winit never observes it, so these
+    // show the CSS side holding — no resampling, no scrollbars, the same
+    // framing — and cannot show backing-store sharpness. Proving that needs a
+    // physical high-DPI display and is recorded as an environment limitation on
+    // W-0003 rather than claimed from here.
+    for (const ratio of [1, 1.25, 1.5, 1.75, 2]) {
+      const name = `dpr-${String(ratio).replace(".", "_")}-emulated`;
+      console.log(`  ${name}`);
+      const context = await browser.newContext({
+        viewport: { width: 1280, height: 800 },
+        deviceScaleFactor: ratio,
+      });
+      const page = await context.newPage();
+      await page.goto(url, { waitUntil: "load" });
+      await waitForClient(page);
+
+      const observed = await page.evaluate(() => {
+        const canvas = document.getElementById("ao-canvas");
+        return {
+          ratio: window.devicePixelRatio,
+          css: [canvas.clientWidth, canvas.clientHeight],
+          backing: [canvas.width, canvas.height],
+        };
+      });
+      // The canvas must never be a different size than its backing store
+      // divided by the ratio the client believes in — that is CSS resampling,
+      // which for pixel art is a blur.
+      dprMatrix.push({ requested: ratio, ...observed });
+
+      shots.push(await shoot(page, name));
+      await context.close();
+    }
+
     // A resize while running, which is the case a fixed-size layout survives
     // by accident and a responsive one has to handle.
     console.log("  resize 1280x720 -> 1920x1080");
@@ -305,6 +341,16 @@ async function main() {
     build: served,
     capturedFrom: url,
     shots: shots.map(({ name, bytes }) => ({ name, bytes })),
+    // Recorded rather than asserted: see the note above the DPR loop. Written
+    // down so a reader can see what this environment actually reported instead
+    // of inferring that the matrix was verified.
+    devicePixelRatioMatrix: {
+      note:
+        "deviceScaleFactor is a Playwright emulation; headless Chromium " +
+        "composites at 1x and winit does not observe it. These entries show " +
+        "the CSS geometry holding, not backing-store sharpness.",
+      observed: dprMatrix,
+    },
   };
   writeFileSync(join(outDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(`==> ${shots.length} captures in ${outDir}`);

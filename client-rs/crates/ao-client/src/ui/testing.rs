@@ -24,8 +24,23 @@ use super::shell::{AppliedGeometry, ShellPlugin};
 
 /// A running shell, laid out for a window of `size` logical pixels.
 pub fn shell_app(size: Vec2) -> App {
+    shell_app_at(size, 1.0)
+}
+
+/// The same, on a display with `device_pixel_ratio` physical pixels per logical.
+///
+/// The window keeps `size` *logical* pixels and grows its backing store, which
+/// is what a higher-DPI display actually is. Setting the physical size alone
+/// would be a smaller window, not a sharper one, and the test would then be
+/// measuring the wrong thing while appearing to cover DPI.
+///
+/// Worth having natively: Playwright's `deviceScaleFactor` is an emulation that
+/// changes `window.devicePixelRatio` without winit observing it, so the browser
+/// harness cannot check this at all.
+pub fn shell_app_at(size: Vec2, device_pixel_ratio: f32) -> App {
     let mut resolution = bevy::window::WindowResolution::default();
-    resolution.set(size.x, size.y);
+    resolution.set(size.x * device_pixel_ratio, size.y * device_pixel_ratio);
+    resolution.set_scale_factor(device_pixel_ratio);
 
     let mut app = App::new();
     app.add_plugins((

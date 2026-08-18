@@ -329,6 +329,43 @@ async function main() {
       await dprContext.close();
     }
 
+    // "Update the backing store exactly once per event." A resize that settles
+    // through two or three intermediate sizes is a visible flicker, and a
+    // resize that lands on the right size after oscillating looks identical to
+    // one that did it cleanly in any screenshot taken afterwards.
+    console.log("  backing store settles once per resize");
+    const settleContext = await browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      deviceScaleFactor: 1,
+    });
+    const settlePage = await settleContext.newPage();
+    await settlePage.goto(url, { waitUntil: "load" });
+    await waitForClient(settlePage);
+
+    // Record every distinct backing-store size from now on, one sample per
+    // frame. Started after the client has settled so boot is not counted.
+    await settlePage.evaluate(() => {
+      const canvas = document.getElementById("ao-canvas");
+      window.__sizes = [`${canvas.width}x${canvas.height}`];
+      const sample = () => {
+        const now = `${canvas.width}x${canvas.height}`;
+        if (now !== window.__sizes[window.__sizes.length - 1]) window.__sizes.push(now);
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+
+    await settlePage.setViewportSize({ width: 1000, height: 700 });
+    await settlePage.waitForTimeout(2_000);
+
+    const sizes = await settlePage.evaluate(() => window.__sizes);
+    check(
+      "one resize moves the backing store to one new size",
+      sizes.length === 2,
+      `backing store went through ${JSON.stringify(sizes)}`
+    );
+    await settleContext.close();
+
     // The stepped windowed size, at the sizes where it changes answer. 1440p is
     // included because it is the case most likely to be assumed: a large
     // display that still only fits one step, because two need 1520 pixels of
