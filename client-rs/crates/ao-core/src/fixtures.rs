@@ -98,6 +98,15 @@ fn item_doing(
     }
 }
 
+/// The same, already worn.
+///
+/// An item the equipment summary lists must say so in the inventory too. It did
+/// not: the staff was worn in one view and stowed in the other, so the rail showed
+/// it in the player's hand while the slot drew no equipped marker.
+fn worn(item_id: i32, name_key: &str, rarity: Rarity) -> ItemView {
+    ItemView { equipped: true, ..item_doing(item_id, name_key, 1, rarity, ItemAction::Equip) }
+}
+
 /// A grid with `filled` items, the rest empty, and the tail locked.
 fn grid(filled: Vec<ItemView>) -> InventoryState {
     let mut slots = Vec::with_capacity(TOTAL_SLOTS);
@@ -208,25 +217,13 @@ fn populated() -> UiSnapshot {
             // in the shipped asset set — so this item exercises the missing-artwork
             // fallback in every capture, which the task requires to be visible and
             // stable. Kept deliberately rather than swapped for one that resolves.
-            item_doing(1352, "item.staff.oak", 1, Rarity::Rare, ItemAction::Equip),
-            item_doing(3502, "item.robe.apprentice", 1, Rarity::Uncommon, ItemAction::Equip),
+            worn(1352, "item.staff.oak", Rarity::Rare),
+            worn(3502, "item.robe.apprentice", Rarity::Uncommon),
         ]),
         equipment: EquipmentState {
             worn: vec![
-                (
-                    EquipSlot::Weapon,
-                    item_doing(1352, "item.staff.oak", 1, Rarity::Rare, ItemAction::Equip),
-                ),
-                (
-                    EquipSlot::Armour,
-                    item_doing(
-                        3502,
-                        "item.robe.apprentice",
-                        1,
-                        Rarity::Uncommon,
-                        ItemAction::Equip,
-                    ),
-                ),
+                (EquipSlot::Weapon, worn(1352, "item.staff.oak", Rarity::Rare)),
+                (EquipSlot::Armour, worn(3502, "item.robe.apprentice", Rarity::Uncommon)),
             ],
         },
         spellbook: SpellbookState {

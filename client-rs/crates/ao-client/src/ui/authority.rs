@@ -1,0 +1,304 @@
+//! A stand-in for the server, so the prototype is operable without claiming to be
+//! live gameplay.
+//!
+//! The task this exists for is explicit about the order: the snapshot changes only
+//! *after* an authority accepts an intent, and a rejection leaves the item where it
+//! was and says why. That order is the whole point. An interface that decrements a
+//! stack the moment the player clicks looks identical to one that works, right up
+//! until the server refuses — and then it has to put something back, which is how
+//! items appear to duplicate and vanish.
+//!
+//! So this consumes [`IntentMessage`] and produces the next snapshot, exactly as the
+//! real adapter will. It is not gameplay: nothing here talks to a socket, and every
+//! decision is a fixture's. When the real adapter lands it replaces this system and
+//! nothing else changes, because the panels already read the snapshot and write
+//! intents.
+
+use bevy::prelude::*;
+
+use super::state::{ActiveScenario, IntentMessage, IntentSet, UiState};
+use ao_core::fixtures::Scenario;
+use ao_core::view::{Feedback, FeedbackKey, Intent, SlotState, UiSnapshot};
+
+pub struct SimulatedAuthorityPlugin;
+
+impl Plugin for SimulatedAuthorityPlugin {
+    fn build(&self, app: &mut App) {
+        // A consumer, in the same set as any other: intents reach it only after the
+        // filter has had its say, so a ghost's forbidden action never gets applied.
+        app.add_systems(Update, apply_accepted_intents.in_set(IntentSet::Consume));
+    }
+}
+
+/// Whether the active scenario is one where the authority refuses.
+///
+/// Refusal is a property of the fixture rather than of the intent: the point is to
+/// exercise the interface's behaviour when an action is declined, and the scenarios
+/// named "rejected" and "disabled" are where that is being demonstrated.
+fn refuses(scenario: Scenario) -> bool {
+    matches!(scenario, Scenario::Rejected | Scenario::Disabled | Scenario::Disconnected)
+}
+
+fn apply_accepted_intents(
+    mut intents: MessageReader<IntentMessage>,
+    scenario: Res<ActiveScenario>,
+    mut state: ResMut<UiState>,
+) {
+    for message in intents.read() {
+        let mut next = state.get().clone();
+
+        if refuses(scenario.0) {
+            // The item stays exactly where it was. Only the feedback changes, and it
+            // is a key rather than prose so it can be translated and so a test can
+            // assert on it without matching a sentence.
+            next.feedback = vec![Feedback::new(rejection_for(&message.0))];
+            UiState::publish(&mut state, next);
+            continue;
+        }
+
+        if apply(&mut next, &message.0) {
+            UiState::publish(&mut state, next);
+        }
+    }
+}
+
+/// Why an action was refused, as a semantic key.
+fn rejection_for(intent: &Intent) -> FeedbackKey {
+    match intent {
+        Intent::CastSpell { .. } => FeedbackKey::NotEnoughMana,
+        Intent::UseInventorySlot { .. } | Intent::EquipInventorySlot { .. } => FeedbackKey::Blocked,
+        _ => FeedbackKey::Blocked,
+    }
+}
+
+/// Apply an accepted intent to a snapshot, returning whether anything changed.
+///
+/// Only the inventory actions are modelled. The rest are accepted silently: an
+/// unmodelled intent that quietly reverted the snapshot would be indistinguishable
+/// from a rejection, and this stand-in must not invent refusals the real server
+/// would not send.
+fn apply(snapshot: &mut UiSnapshot, intent: &Intent) -> bool {
+    match intent {
+        Intent::UseInventorySlot { slot } => consume(snapshot, *slot, 1),
+        Intent::DropInventorySlot { slot, amount } => consume(snapshot, *slot, (*amount).max(1)),
+        Intent::EquipInventorySlot { slot } => equip(snapshot, *slot),
+        _ => false,
+    }
+}
+
+/// Remove `amount` from a stack, emptying the slot when it runs out.
+fn consume(snapshot: &mut UiSnapshot, index: usize, amount: i32) -> bool {
+    let Some(SlotState::Filled(item)) = snapshot.inventory.slots.get_mut(index) else {
+        return false;
+    };
+    // A worn item is not consumed by using it. Without this, double-clicking an
+    // equipped staff would eat it.
+    if item.equipped {
+        return false;
+    }
+
+    item.quantity -= amount;
+    if item.quantity <= 0 {
+        snapshot.inventory.slots[index] = SlotState::Empty;
+    }
+    true
+}
+
+/// Toggle whether the item in a slot is worn.
+fn equip(snapshot: &mut UiSnapshot, index: usize) -> bool {
+    let Some(SlotState::Filled(item)) = snapshot.inventory.slots.get_mut(index) else {
+        return false;
+    };
+    item.equipped = !item.equipped;
+    let worn = item.equipped;
+    let item = item.clone();
+
+    // The equipment summary is a second view of the same fact, so it has to move
+    // with it — otherwise the rail shows a staff in hand that the inventory says is
+    // stowed.
+    if worn {
+        snapshot.equipment.worn.retain(|(_, existing)| existing.item_id != item.item_id);
+        if let Some(slot) = slot_for(&item) {
+            snapshot.equipment.worn.retain(|(existing, _)| *existing != slot);
+            snapshot.equipment.worn.push((slot, item));
+        }
+    } else {
+        snapshot.equipment.worn.retain(|(_, existing)| existing.item_id != item.item_id);
+    }
+    true
+}
+
+/// Which equipment slot an item belongs in.
+///
+/// Guessed from the name key, because the view model does not carry it yet. A
+/// stand-in inside a stand-in, and deliberately narrow: an item it cannot place is
+/// left unplaced rather than put somewhere plausible, so the guess cannot be
+/// mistaken for knowledge.
+fn slot_for(item: &ao_core::view::ItemView) -> Option<ao_core::view::EquipSlot> {
+    use ao_core::view::EquipSlot;
+    let key = item.name_key.as_str();
+    if key.contains("staff") || key.contains("sword") || key.contains("axe") {
+        Some(EquipSlot::Weapon)
+    } else if key.contains("robe") || key.contains("armour") || key.contains("armor") {
+        Some(EquipSlot::Armour)
+    } else if key.contains("helmet") {
+        Some(EquipSlot::Helmet)
+    } else if key.contains("shield") {
+        Some(EquipSlot::Shield)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ao_core::fixtures;
+
+    fn authority_app(scenario: Scenario) -> App {
+        let mut app = App::new();
+        app.add_plugins(super::super::state::UiStatePlugin).add_plugins(SimulatedAuthorityPlugin);
+        *app.world_mut().resource_mut::<ActiveScenario>() = ActiveScenario(scenario);
+        app.update();
+        app
+    }
+
+    fn quantity(app: &App, index: usize) -> Option<i32> {
+        match app.world().resource::<UiState>().get().inventory.slots.get(index) {
+            Some(SlotState::Filled(item)) => Some(item.quantity),
+            _ => None,
+        }
+    }
+
+    fn send(app: &mut App, intent: Intent) {
+        app.world_mut().write_message(IntentMessage(intent));
+        app.update();
+    }
+
+    #[test]
+    fn using_an_item_changes_the_snapshot_only_through_the_authority() {
+        // The order the task insists on. An interface that decremented on click
+        // would look identical until the server refused, and then it would have to
+        // put something back.
+        let mut app = authority_app(Scenario::Populated);
+        let before = quantity(&app, 0).expect("a stack");
+
+        send(&mut app, Intent::UseInventorySlot { slot: 0 });
+
+        assert_eq!(
+            quantity(&app, 0),
+            Some(before - 1),
+            "the authority accepted but the snapshot did not change"
+        );
+    }
+
+    #[test]
+    fn a_refused_action_leaves_the_item_exactly_where_it_was() {
+        let mut app = authority_app(Scenario::Rejected);
+        let before = quantity(&app, 0);
+
+        send(&mut app, Intent::UseInventorySlot { slot: 0 });
+
+        assert_eq!(quantity(&app, 0), before, "a refused action still consumed the item");
+    }
+
+    #[test]
+    fn a_refusal_says_why_in_a_key_rather_than_a_sentence() {
+        let mut app = authority_app(Scenario::Rejected);
+        send(&mut app, Intent::UseInventorySlot { slot: 0 });
+
+        let feedback = app.world().resource::<UiState>().get().feedback.clone();
+        assert!(!feedback.is_empty(), "a refusal said nothing at all");
+        assert!(
+            feedback.iter().all(|entry| entry.key != FeedbackKey::Untranslated),
+            "a refusal arrived as prose rather than a key: {feedback:?}"
+        );
+    }
+
+    #[test]
+    fn the_last_of_a_stack_empties_its_slot() {
+        // Not a stack of zero, which would draw "0" in a slot that still looks full.
+        let mut app = authority_app(Scenario::Populated);
+        let mut remaining = quantity(&app, 0).expect("a stack");
+        // Two at a time, so the loop is bounded well below the stack size.
+        while remaining > 1 {
+            send(&mut app, Intent::DropInventorySlot { slot: 0, amount: remaining - 1 });
+            remaining = quantity(&app, 0).unwrap_or(0);
+        }
+
+        send(&mut app, Intent::UseInventorySlot { slot: 0 });
+        assert_eq!(quantity(&app, 0), None, "the slot still holds an empty stack");
+        assert!(matches!(
+            app.world().resource::<UiState>().get().inventory.slots[0],
+            SlotState::Empty
+        ));
+    }
+
+    #[test]
+    fn equipping_moves_the_equipment_summary_too() {
+        // The rail shows the same fact twice. If they disagree, one of them is lying
+        // about what is in the player's hand.
+        let mut app = authority_app(Scenario::Populated);
+        let staff = fixtures::snapshot(Scenario::Populated)
+            .inventory
+            .slots
+            .iter()
+            .position(|slot| slot.item().is_some_and(|item| item.name_key.contains("staff")))
+            .expect("the fixture carries a staff");
+
+        // It starts worn in this fixture, so the first toggle takes it off.
+        send(&mut app, Intent::EquipInventorySlot { slot: staff });
+        let worn_after_first = app
+            .world()
+            .resource::<UiState>()
+            .get()
+            .equipment
+            .worn
+            .iter()
+            .any(|(_, item)| item.name_key.contains("staff"));
+
+        send(&mut app, Intent::EquipInventorySlot { slot: staff });
+        let worn_after_second = app
+            .world()
+            .resource::<UiState>()
+            .get()
+            .equipment
+            .worn
+            .iter()
+            .any(|(_, item)| item.name_key.contains("staff"));
+
+        assert_ne!(
+            worn_after_first, worn_after_second,
+            "equipping did not move the equipment summary"
+        );
+    }
+
+    #[test]
+    fn using_a_worn_item_does_not_eat_it() {
+        let mut app = authority_app(Scenario::Populated);
+        let staff = fixtures::snapshot(Scenario::Populated)
+            .inventory
+            .slots
+            .iter()
+            .position(|slot| slot.item().is_some_and(|item| item.equipped))
+            .expect("the fixture wears something");
+        let before = quantity(&app, staff);
+
+        send(&mut app, Intent::UseInventorySlot { slot: staff });
+        assert_eq!(quantity(&app, staff), before, "using a worn item consumed it");
+    }
+
+    #[test]
+    fn an_unmodelled_intent_is_not_a_refusal() {
+        // Reverting the snapshot for something this stand-in does not model would be
+        // indistinguishable from the server saying no, and it must not invent
+        // refusals the server would not send.
+        let mut app = authority_app(Scenario::Populated);
+        let before = app.world().resource::<UiState>().get().clone();
+
+        send(&mut app, Intent::RequestReconnect);
+
+        let after = app.world().resource::<UiState>().get();
+        assert!(before.same_state_as(after), "an unmodelled intent changed the snapshot");
+    }
+}

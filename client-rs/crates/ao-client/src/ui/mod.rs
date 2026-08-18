@@ -6,6 +6,7 @@
 //! of any screen here, and therefore no second source of UI state to keep in
 //! sync with this one.
 
+pub mod authority;
 pub mod character;
 pub mod controls;
 pub mod fonts;
@@ -59,6 +60,7 @@ impl Plugin for UiPlugin {
             pointer::PointerPlugin,
             icons::TooltipPlugin,
             state::UiStatePlugin,
+            authority::SimulatedAuthorityPlugin,
             shell::ShellPlugin,
             topbar::TopBarPlugin,
             rail::RailPlugin,
