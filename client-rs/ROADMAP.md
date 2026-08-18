@@ -277,15 +277,28 @@ is required:
   maximum-dimension budget.
 - Where it stalled, so the next attempt does not repeat it: with the compositor
   camera and the presenting quad on a shared render layer, the world rendered
-  nothing into the texture. Diagnosed in the browser rather than guessed —
-  `ViewVisibility` was false until `NoFrustumCulling` was added, because
-  `calculate_bounds_2d` derives a sprite's bounds from its image and a render
-  target has no useful main-world dimensions. After that the quad drew but the
-  texture was still empty, and `RenderAssetUsages::default()` plus `Msaa::Off`
-  on the world camera did not change it. No wgpu validation error appeared at
-  any point. The remaining suspects are the 2D render graph's handling of an
-  image target under WebGL2/software rasterisation, and camera ordering across
-  two different target kinds.
+  nothing into the texture. `ViewVisibility` was false until `NoFrustumCulling`
+  was added, because `calculate_bounds_2d` derives a sprite's bounds from its
+  image and a render target has no useful main-world dimensions. After that the
+  quad drew but the texture was still empty, and `RenderAssetUsages::default()`
+  plus `Msaa::Off` did not change it. No wgpu validation error appeared at any
+  point.
+- What has since been ruled out. `examples/render_target_probe.rs` isolates the
+  question into three stages — clear an image target, draw a colour-only quad
+  into it, draw a textured sprite into it — and reads the texture back so the
+  answer is pixels rather than a screenshot. **All three pass natively.** So the
+  image-target mechanism itself is sound, and the production failure is not
+  clearing, not culling, not sampling and not MSAA.
+- What that leaves. The failing observation was made in the browser, so WebGL2 is
+  now the prime suspect, along with the two-camera arrangement the probe does not
+  reproduce: one camera rendering to a texture while a second presents it to the
+  window, which is two different target kinds in one frame. The next step is the
+  same staged probe under WASM, then the two-camera arrangement natively.
+- Worth knowing about the probe: its first version reported a false failure. The
+  readback fires every frame and the earliest completion describes the texture
+  before anything has rendered into it, so the initial fill read back as "never
+  cleared". It now waits for several frames of rendering before believing a
+  result.
 - **The HiDPI path is not implemented.** This is an implementation gap, not a
   validation one, and an earlier note here wrongly described the task as blocked
   only on hardware. The pinned scale factor deliberately keeps the backing store
