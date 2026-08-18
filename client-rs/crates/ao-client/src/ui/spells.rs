@@ -96,23 +96,6 @@ pub fn hotbar_intent(slot: HotbarSlotState, index: usize) -> Option<Intent> {
     Some(Intent::TriggerHotbarSlot { index })
 }
 
-/// The key that fires a slot: 1-9 then 0.
-pub fn slot_key_code(index: usize) -> Option<KeyCode> {
-    Some(match index {
-        0 => KeyCode::Digit1,
-        1 => KeyCode::Digit2,
-        2 => KeyCode::Digit3,
-        3 => KeyCode::Digit4,
-        4 => KeyCode::Digit5,
-        5 => KeyCode::Digit6,
-        6 => KeyCode::Digit7,
-        7 => KeyCode::Digit8,
-        8 => KeyCode::Digit9,
-        9 => KeyCode::Digit0,
-        _ => return None,
-    })
-}
-
 /// Fire hotbar slots from the number row.
 ///
 /// Suppressed entirely while a text field owns the keyboard: typing "1" in
@@ -133,7 +116,7 @@ fn trigger_hotbar_keys(
     }
 
     for index in 0..SLOTS_PER_PAGE {
-        let Some(key) = slot_key_code(index) else {
+        let Some(key) = super::hotbar::slot_key_code(index) else {
             continue;
         };
         if !keys.just_pressed(key) {
@@ -385,11 +368,12 @@ mod tests {
 
     #[test]
     fn slots_are_bound_to_the_number_row_in_order() {
-        let keys: Vec<KeyCode> = (0..SLOTS_PER_PAGE).filter_map(slot_key_code).collect();
+        let keys: Vec<KeyCode> =
+            (0..SLOTS_PER_PAGE).filter_map(super::super::hotbar::slot_key_code).collect();
         assert_eq!(keys.len(), SLOTS_PER_PAGE);
         assert_eq!(keys[0], KeyCode::Digit1);
         assert_eq!(keys[9], KeyCode::Digit0);
-        assert_eq!(slot_key_code(SLOTS_PER_PAGE), None);
+        assert_eq!(super::super::hotbar::slot_key_code(SLOTS_PER_PAGE), None);
     }
 
     fn app_with(scenario: Scenario) -> App {

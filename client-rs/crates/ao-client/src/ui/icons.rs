@@ -255,9 +255,6 @@ fn stroke_node(stroke: Stroke, box_size: f32, colour: Color) -> impl Bundle {
 /// A hover tooltip.
 ///
 /// Positioned below its control and bounded so a long translation cannot run
-/// off the edge of the window.
-#[derive(Component, Debug, Clone, Copy)]
-pub struct Tooltip;
 
 /// Marks a control that shows `AccessibleName` on hover.
 #[derive(Component, Debug, Clone, Copy)]
@@ -311,10 +308,10 @@ fn follow_hovered_control(
         With<ShowsTooltip>,
     >,
     windows: Query<&Window>,
-    mut layer: Query<(&mut Node, &Children), With<TooltipLayer>>,
+    mut layer: Query<(&mut Node, &Children, &ComputedNode), With<TooltipLayer>>,
     mut text: Query<&mut Text>,
 ) {
-    let Ok((mut node, children)) = layer.single_mut() else {
+    let Ok((mut node, children, computed_layer)) = layer.single_mut() else {
         return;
     };
 
@@ -337,17 +334,69 @@ fn follow_hovered_control(
 
     let size = computed.size();
     let centre = transform.translation;
-    let below = centre.y + size.y / 2.0 + super::tokens::space::TIGHT;
 
-    // Clamped so a wide tooltip on the right-hand end of the bar stays on
-    // screen rather than being cut off by the window edge.
-    let window_width = windows.iter().next().map(|w| w.width()).unwrap_or(f32::MAX);
-    let left = (centre.x - 60.0).clamp(0.0, (window_width - 120.0).max(0.0));
+    let window = windows.iter().next();
+    let window_width = window.map(|w| w.width()).unwrap_or(f32::MAX);
+    let window_height = window.map(|w| w.height()).unwrap_or(f32::MAX);
+
+    // Below by preference, above when below would not fit. A tooltip is a label
+    // for the thing under the cursor, so leaving the viewport makes it useless in
+    // exactly the place it is needed: the icons at the bottom of the compact rail
+    // and the right-hand end of the top bar are precisely where it would overflow.
+    // The tooltip's own measured size once it has one, so the decision is about
+    // the label actually being drawn rather than an assumed one.
+    let measured = computed_layer.size();
+    let tip = Vec2::new(
+        if measured.x > 0.0 { measured.x } else { TOOLTIP_FALLBACK_WIDTH },
+        if measured.y > 0.0 { measured.y } else { TOOLTIP_FALLBACK_HEIGHT },
+    );
+
+    let at = tooltip_placement(centre, size, tip, Vec2::new(window_width, window_height));
 
     node.display = Display::Flex;
-    node.left = Val::Px(left);
-    node.top = Val::Px(below);
+    node.left = Val::Px(at.x);
+    node.top = Val::Px(at.y);
 }
+
+/// Where a tooltip of `tip` goes, for a control of `control` centred at `centre`
+/// inside a `window`.
+///
+/// A function rather than arithmetic inside the system, so the tests exercise
+/// *this* and not a copy of it. The first version of those tests reimplemented
+/// the decision, which would have kept passing while the system drifted.
+///
+/// Below by preference, because that is where the eye expects it; above when
+/// below would leave the viewport. A tooltip is a label for the thing under the
+/// cursor, so overflowing makes it useless exactly where it is needed — the icons
+/// at the bottom of the compact rail and the right-hand end of the top bar are
+/// precisely where that happens.
+pub fn tooltip_placement(centre: Vec2, control: Vec2, tip: Vec2, window: Vec2) -> Vec2 {
+    let gap = super::tokens::space::TIGHT;
+    let below = centre.y + control.y / 2.0 + gap;
+    let above = centre.y - control.y / 2.0 - gap - tip.y;
+    let top = if below + tip.y <= window.y {
+        below
+    } else if above >= 0.0 {
+        above
+    } else {
+        // Neither side fits, which a very short window can produce. Clamped, so
+        // it is on screen and overlapping rather than gone.
+        (window.y - tip.y).max(0.0)
+    };
+
+    let left = (centre.x - tip.x / 2.0).clamp(0.0, (window.x - tip.x).max(0.0));
+    Vec2::new(left, top)
+}
+
+/// Fallback bounds for the first frame a tooltip is shown.
+///
+/// The node sizes itself to its text under a 260px cap, so its real size is only
+/// known once the layout has solved it — and on the frame it appears there is no
+/// solved size yet. These are a plausible one-line label, used only until the
+/// measured size arrives, so the first frame is placed sensibly rather than at
+/// zero.
+const TOOLTIP_FALLBACK_WIDTH: f32 = 120.0;
+const TOOLTIP_FALLBACK_HEIGHT: f32 = 22.0;
 
 pub fn tooltip_text(name: &str) -> impl Bundle {
     (
@@ -448,6 +497,66 @@ mod tests {
                 assert!(smallest >= 1.0, "{icon:?} has a {smallest}px stroke");
             }
         }
+    }
+
+    #[test]
+    fn a_tooltip_stays_inside_the_viewport_wherever_its_control_is() {
+        // A tooltip is a label for the thing under the cursor, so leaving the
+        // viewport makes it useless exactly where it is needed: the icons at the
+        // bottom of the compact rail and the right-hand end of the top bar are
+        // precisely where it would overflow. Vertical placement was previously
+        // always below, with no check at all.
+        let tip = Vec2::new(120.0, 22.0);
+        let control = Vec2::splat(24.0);
+
+        for window in [Vec2::new(1280.0, 760.0), Vec2::new(792.0, 638.0), Vec2::new(3440.0, 1440.0)]
+        {
+            // Every corner and edge midpoint of the window.
+            for x in [0.0, 12.0, window.x / 2.0, window.x - 12.0, window.x] {
+                for y in [0.0, 12.0, window.y / 2.0, window.y - 12.0, window.y] {
+                    let at = tooltip_placement(Vec2::new(x, y), control, tip, window);
+                    assert!(
+                        at.x >= 0.0 && at.x + tip.x <= window.x + 0.5,
+                        "in {window:?} a tooltip for a control at {x},{y} spans {}..{}",
+                        at.x,
+                        at.x + tip.x
+                    );
+                    assert!(
+                        at.y >= 0.0 && at.y + tip.y <= window.y + 0.5,
+                        "in {window:?} a tooltip for a control at {x},{y} spans {}..{} vertically",
+                        at.y,
+                        at.y + tip.y
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_tooltip_flips_above_its_control_rather_than_leaving_the_window() {
+        // Below by preference, because that is where the eye expects it.
+        let tip = Vec2::new(120.0, 22.0);
+        let control = Vec2::splat(24.0);
+        let window = Vec2::new(1280.0, 760.0);
+
+        let middle = tooltip_placement(Vec2::new(640.0, 300.0), control, tip, window);
+        assert!(middle.y > 300.0, "a tooltip with room below was not placed below");
+
+        let bottom = tooltip_placement(Vec2::new(640.0, 750.0), control, tip, window);
+        assert!(bottom.y < 750.0, "a tooltip at the bottom edge was not flipped above");
+    }
+
+    #[test]
+    fn a_window_too_short_for_either_side_still_places_it_on_screen() {
+        // Overlapping the control is worse than useless only if it is invisible.
+        let tip = Vec2::new(120.0, 22.0);
+        let at = tooltip_placement(
+            Vec2::new(100.0, 15.0),
+            Vec2::splat(24.0),
+            tip,
+            Vec2::new(400.0, 30.0),
+        );
+        assert!(at.y >= 0.0 && at.y + tip.y <= 30.5, "placed at {at:?} in a 30px window");
     }
 
     #[test]
