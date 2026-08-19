@@ -343,7 +343,7 @@ fn populated() -> UiSnapshot {
             latency_ms: Some(8),
             population: Some(417),
         },
-        feedback: Vec::new(),
+        feedback: vec![Feedback::new(FeedbackKey::LevelUp)],
         loading: false,
     }
 }

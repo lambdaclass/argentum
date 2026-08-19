@@ -307,11 +307,11 @@ pub fn notice_key(feedback: &Feedback) -> String {
 pub fn notice_level(key: FeedbackKey) -> super::controls::NoticeLevel {
     use super::controls::NoticeLevel;
     match key {
-        // Something good, and the only two of these that are not a refusal.
-        FeedbackKey::LevelUp => NoticeLevel::Info,
         // Death is not a warning.
         FeedbackKey::Died => NoticeLevel::Danger,
-        FeedbackKey::Untranslated => NoticeLevel::Info,
+        // Good news and unclassifiable news are both drawn quietly, for opposite reasons:
+        // one is known to be fine, the other is not known at all.
+        key if !key.is_refusal() => NoticeLevel::Info,
         _ => NoticeLevel::Warning,
     }
 }

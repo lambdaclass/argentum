@@ -777,6 +777,30 @@ pub struct Feedback {
     pub literal: Option<String>,
 }
 
+impl FeedbackKey {
+    /// Whether this says an action did not happen.
+    ///
+    /// The distinction earns its place: an armed spell disarms on a refusal, and a client
+    /// that treated *any* feedback as one disarmed the moment a level-up arrived. A
+    /// success and an unclassifiable line are both "not a refusal", and for opposite
+    /// reasons — one is known to be good news, the other is not known at all.
+    pub fn is_refusal(self) -> bool {
+        match self {
+            FeedbackKey::LevelUp | FeedbackKey::Untranslated => false,
+            FeedbackKey::NotEnoughMana
+            | FeedbackKey::NotEnoughStamina
+            | FeedbackKey::NotEnoughGold
+            | FeedbackKey::InventoryFull
+            | FeedbackKey::TooFarAway
+            | FeedbackKey::TargetInvalid
+            | FeedbackKey::ActionTooSoon
+            | FeedbackKey::Muted
+            | FeedbackKey::Blocked
+            | FeedbackKey::Died => true,
+        }
+    }
+}
+
 impl Feedback {
     pub fn new(key: FeedbackKey) -> Self {
         Self { key, params: Vec::new(), literal: None }

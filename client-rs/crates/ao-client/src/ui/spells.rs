@@ -201,7 +201,11 @@ fn disarm_when_unusable(state: Res<UiState>, mut armed: ResMut<ArmedSpell>) {
     // A refusal disarms as well. The authority saying no is an answer about what the
     // player was trying to do, and a ring left pointing at nothing invites them to click
     // again into the same refusal.
-    let refused = !snapshot.feedback.is_empty();
+    //
+    // A *refusal*, not any feedback: treating every notice as one disarmed the spell the
+    // moment a level-up arrived, which the populated fixture found the day it started
+    // carrying one.
+    let refused = snapshot.feedback.iter().any(|feedback| feedback.key.is_refusal());
 
     if !still_usable || refused {
         armed.clear();
