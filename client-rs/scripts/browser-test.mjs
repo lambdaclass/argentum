@@ -197,6 +197,9 @@ async function runHitTests(hitPage, label, ratio) {
     // wrong, and saying so is the point: a failure here is about the machine.
     const SLOWEST_USABLE_FRAME_MS = 3_000;
     const CLICK_BUDGET_MS = Math.min(Math.max(20 * frameMs, 10_000), 60_000);
+    // Six frames. Measured: an activation is published within one to three frames of
+    // the release, so a control that has not answered in six did not answer.
+    const NEGATIVE_BUDGET_MS = Math.min(Math.max(6 * frameMs, 3_000), 20_000);
     check(
       `${label}: `+"the client renders fast enough to time a click against",
       frameMs <= SLOWEST_USABLE_FRAME_MS,
@@ -263,7 +266,15 @@ async function runHitTests(hitPage, label, ratio) {
       return false;
     };
 
-    const clickAt = async (x, y) => {
+    /// Click a point in canvas coordinates and report what activated, if anything.
+    ///
+    /// `budget` is how long to wait for an answer. A probe that expects an activation
+    /// waits generously, because a missed one would be charged to the client. A probe
+    /// that expects *nothing* waits only a few frames: it is conclusive as soon as the
+    /// client has had time to answer, and giving every negative probe the full budget
+    /// made a single configuration at ratio 2 take half an hour — which is its own kind
+    /// of wrong answer, since nobody runs a suite that slow often enough to trust it.
+    const clickAt = async (x, y, budget = CLICK_BUDGET_MS) => {
       const before = await settle();
 
       // Moved, seen, then pressed — not `mouse.click`, which delivers move, press and
@@ -297,7 +308,7 @@ async function runHitTests(hitPage, label, ratio) {
       // is this harness being impatient and mis-attributing the result to the next
       // probe.
       const started = Date.now();
-      const deadline = started + CLICK_BUDGET_MS;
+      const deadline = started + budget;
       while (Date.now() < deadline) {
         const now = await hitPage.evaluate(() => ({
           count: window.aoLoaded?.activations ?? 0,
@@ -393,7 +404,7 @@ async function runHitTests(hitPage, label, ratio) {
         [ox, outer.y - margin, "top"],
         [ox, outer.y + outer.h + margin, "bottom"],
       ]) {
-        const fired = await clickAt(x, y);
+        const fired = await clickAt(x, y, NEGATIVE_BUDGET_MS);
         check(
           `${margin}px outside the ${edge} edge of ${control.key} does not activate it`,
           fired.key !== control.key,
