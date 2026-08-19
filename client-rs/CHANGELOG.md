@@ -19,6 +19,45 @@ Never reuse a completed ID in the active roadmap.
 
 ## Closed tasks
 
+### Completed Task W-0006 — Character, vitals, inventory and equipment prototype
+
+Closed: 2026-08-19 (`c850253`, `6308dcb`, `55229e2`, `973c4a0`, `c9f03ca`,
+`41ddf0e`, `b2fda64`, `a6a7ee0`, `e1bc28b`, `fe356a1`, `f60787d`)
+
+The character rail, fixture-backed and operable: name, class and level, XP,
+world time and area status, currency, the inventory grid with real item artwork
+resolved through the game's own object table, quantities in corners, equipped
+markers, visible locked slots, an equipment summary of icons rather than a list
+of names, selected item detail, vitals, and the character's skills behind a
+real tab strip.
+
+Interaction goes through the shared controls from W-0005. A single click
+selects; a double click emits exactly one use or equip intent, decided by the
+item's action metadata rather than inferred from its stack size; Shift-click
+applies the drop-one rule; a drag emits a move only for a valid distinct
+destination, and Escape, the pointer leaving the window, focus loss, a closed
+panel or a rebuilt grid all cancel it. While an intent is unanswered its slot
+is guarded against a duplicate and says so with an ellipsis; a refusal marks
+the slot with an exclamation and a danger border rather than only a line of
+text elsewhere.
+
+The snapshot changes only after the simulated authority accepts. A refusal
+leaves the item exactly where it was and answers with a semantic feedback key,
+which is the order that keeps items from appearing to duplicate and vanish when
+the real server says no.
+
+Evidence: 415 tests in `ao-client`, including interaction tests that activate
+and drag the production slot entities and assert the resulting `IntentMessage`
+and cleanup, and 548 browser checks against build `d0e5af2` — among them a
+pointer-driven drag between two slots that exchanges their contents, run at
+device pixel ratios 1.0 through 2.0, windowed and maximized, and again after a
+mid-session resize and ratio change.
+
+Two defects found by that evidence and fixed rather than accommodated: one
+click activating a control twice whenever the press and the `Interaction`
+transition fell in different frames, and a mid-session device pixel ratio
+change leaving the whole interface laid out at half scale.
+
 ### Completed Task W-0005 — Design tokens and Bevy primitives
 
 Closed: 2026-08-18 (`401cfca`, `f13fdb1`, `8427db0`, `89d3c66`, `9436dea`,

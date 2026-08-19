@@ -250,15 +250,21 @@ the window and cancel cleanly on focus loss, pointer exit, panel removal or an
 invalidating resize. Close with browser-driven input tests plus Bevy app tests;
 screenshots and pure coordinate arithmetic alone are insufficient.
 
-Delivered and verified in the browser at ratios 1.0, 1.25, 1.5, 1.75 and 2.0,
-windowed and maximized, and again after a mid-session resize and a mid-session
-device pixel ratio change: centre and per-edge probes for an inventory slot, a
-hotbar slot and a top-bar icon; exactly-once activation; world centre and four
-edges; the world/rail seam; interception by a control floating over the world;
-and a pointer-driven inventory drag. Two defects were found and fixed rather
-than accommodated — one click activating a control twice whenever the press
-and the `Interaction` transition fell in different frames, and a click on the
-hotbar also selecting the tile beneath it.
+Delivered and verified by 548 browser checks against build `d0e5af2`, at ratios
+1.0, 1.25, 1.5, 1.75 and 2.0, windowed and maximized, and again after a
+mid-session resize and a mid-session device pixel ratio change: centre and
+per-edge probes for an inventory slot, a hotbar slot, a rail tab and a top-bar
+icon; exactly-once activation; world centre and four edges; the world/rail seam;
+interception by a control floating over the world; a pointer-driven inventory
+drag; and a control keeping its size in CSS pixels across a ratio change.
+
+Three defects were found by that evidence and fixed rather than accommodated: a
+click on the hotbar also selecting the tile beneath it; one click activating a
+control twice whenever the picking event and the first observed press shared a
+frame; and a mid-session ratio change leaving the whole interface laid out at
+half scale, because `camera_system` refreshes a camera's cached scale factor
+only for windows named in a window message and the client changed its own
+window silently.
 
 Three probes this contract names remain unwritten because they have nothing to
 aim at yet, and this task stays open until they exist:
@@ -267,48 +273,6 @@ aim at yet, and this task stays open until they exist:
 - a dialog control, which arrives with the product screens in W-0009;
 - fullscreen, which needs a user gesture the automation cannot supply. The
   refusal path is covered; the hit tests are not.
-
-### Task W-0006 — Character, vitals, inventory and equipment prototype
-
-- **State:** planned
-- **Phase:** 0
-- **Depends on:** W-0004, W-0005
-
-Implement fixture-backed character/XP, HP, mana, stamina, hunger, thirst,
-skills, currency, inventory, equipment, selected item detail, quantities and
-visible locked slots. Exercise selection, equip/use/drop intent, splitting,
-drag cancellation, insufficient state and authoritative rejection/rollback
-presentation without claiming mock actions are live gameplay.
-
-The rail uses a deliberate information hierarchy: prominent character name;
-secondary class and level; XP bar; world time/status; compact currency and
-equipment summaries; then vitals and navigation. Gold does not consume the
-identity header when it can be scanned in the currency row. Equipment state is
-shown with recognizable slot/item icons and concise counters, not a permanent
-list of raw item names; full names, statistics and durability live in selection
-details or tooltips.
-
-Connect rendered slots to the W-0005 interaction system. Single click selects,
-double click emits exactly one use/equip intent, Shift-click opens or applies an
-explicit split/drop quantity rule, and drag/drop emits a move only for a valid
-distinct destination. Escape, pointer leaving the window, focus loss, panel
-close and grid rebuild all cancel a drag and remove its ghost.
-
-Do not infer item behavior from stack quantity. Item action/category metadata
-in the view model decides whether activation equips, uses or opens an item;
-tests cover a single-use consumable and a non-stackable piece of equipment.
-Render item GRH icons, corner quantity overlays, equipped markers, visible
-locked slots and distinct hover/focus/selection/pending/rejected states in the
-actual rail. Unknown GRHs use a stable visible fallback. Selection is keyed by
-stable item/slot identity and survives an unrelated snapshot update; removal,
-replacement or panel close clears it deterministically. While an action is
-pending, accidental double activation cannot emit a duplicate command. The
-fixture snapshot changes only after simulated authority accepts an intent;
-rejection leaves the authoritative item in place and shows semantic feedback.
-
-Close with Bevy interaction tests that click and drag spawned slot entities and
-assert `IntentMessage` output and cleanup. Testing an intent-mapping helper or
-`DragState` alone does not prove that the interface is operable.
 
 ### Task W-0007 — Spellbook and hotbar prototype
 
