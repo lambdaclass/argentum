@@ -166,6 +166,31 @@ async function runHitTests(hitPage, label, ratio) {
     }
     check(`${label}: `+"the client publishes its control rectangles", controls.length > 0, `${controls.length}`);
 
+    /// Wait until the client is running steadily, not merely loaded.
+    ///
+    /// Controls appear as soon as the panels are laid out, but at that point the client
+    /// is still decoding sheets and a frame can take seconds. A click then activates
+    /// correctly and republishes after the probe's budget has expired, so the *next*
+    /// probe reads it — which is how a click one pixel outside a control came to
+    /// "activate" it while the same click, measured in isolation, behaved perfectly.
+    /// Measured against the published frame counter rather than a sleep, because the
+    /// speed of a software renderer on a loaded machine is not a constant.
+    const frames = () => hitPage.evaluate(() => window.aoLoaded?.frames ?? 0);
+    const WANTED_FPS = 4;
+    let fps = 0;
+    const readyDeadline = Date.now() + 45_000;
+    while (Date.now() < readyDeadline) {
+      const first = await frames();
+      await hitPage.waitForTimeout(1_000);
+      fps = (await frames()) - first;
+      if (fps >= WANTED_FPS) break;
+    }
+    check(
+      `${label}: `+"the client renders fast enough to time a click against",
+      fps >= WANTED_FPS,
+      `${fps} frames per second`
+    );
+
     /// Click a point in canvas coordinates and report what activated, if anything.
     ///
     /// Compares the activation *counter* before and after rather than reading the
@@ -219,17 +244,30 @@ async function runHitTests(hitPage, label, ratio) {
       // and the suite's pages are busier than a bare probe. The loop returns as
       // soon as the counter moves, so a fast click costs nothing and only a genuine
       // non-activation waits out the budget.
-      const deadline = Date.now() + 10_000;
+      // Reports the measurement alongside the answer. A bare null cannot distinguish
+      // "nothing activated" from "the activation arrived after we gave up", and those
+      // are opposite faults: the first is the client hit-testing correctly, the second
+      // is this harness being impatient and mis-attributing the result to the next
+      // probe.
+      const started = Date.now();
+      const deadline = started + 10_000;
       while (Date.now() < deadline) {
         const now = await hitPage.evaluate(() => ({
           count: window.aoLoaded?.activations ?? 0,
           key: window.aoLoaded?.lastActivated ?? null,
         }));
-        if (now.count > before) return now.key;
+        if (now.count > before) {
+          return { key: now.key, ms: Date.now() - started, before, after: now.count };
+        }
         await hitPage.waitForTimeout(50);
       }
-      return null;
+      return { key: null, ms: Date.now() - started, before, after: before };
     };
+
+    /// How a click came out, for a failure message.
+    const shown = (at, result) =>
+      `at ${at.map((v) => v.toFixed(1)).join(",")} -> ${result.key ?? "nothing"}` +
+      ` after ${result.ms}ms (${result.before}->${result.after})`;
 
     // A representative spread rather than every control: an inventory slot, a
     // hotbar slot and a top-bar icon exercise three different panels and three
@@ -244,9 +282,11 @@ async function runHitTests(hitPage, label, ratio) {
       const cx = control.x + control.w / 2;
       const cy = control.y + control.h / 2;
 
+      const centred = await clickAt(cx, cy);
       check(
         `clicking the centre of ${control.key} activates it`,
-        (await clickAt(cx, cy)) === control.key
+        centred.key === control.key,
+        shown([cx, cy], centred)
       );
 
       // One pixel inside each edge is still this control.
@@ -262,9 +302,11 @@ async function runHitTests(hitPage, label, ratio) {
         const centreY = now.y + now.h / 2;
         const x = dx === 0 ? centreX : dx > 0 ? now.x + inset : now.x + now.w - inset;
         const y = dy === 0 ? centreY : dy > 0 ? now.y + inset : now.y + now.h - inset;
+        const inside = await clickAt(x, y);
         check(
           `${inset}px inside the ${edge} edge of ${control.key} still activates it`,
-          (await clickAt(x, y)) === control.key
+          inside.key === control.key,
+          shown([x, y], inside)
         );
       }
 
@@ -290,8 +332,8 @@ async function runHitTests(hitPage, label, ratio) {
         const fired = await clickAt(x, y);
         check(
           `${margin}px outside the ${edge} edge of ${control.key} does not activate it`,
-          fired !== control.key,
-          `fired ${fired}`
+          fired.key !== control.key,
+          shown([x, y], fired)
         );
       }
     }

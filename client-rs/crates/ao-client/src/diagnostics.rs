@@ -119,6 +119,7 @@ fn publish(
     pointer: Res<crate::ui::pointer::PointerState>,
     geometry: Res<crate::ui::shell::AppliedGeometry>,
     windows: Query<&Window>,
+    mut frames: Local<u64>,
 ) {
     // Republished every frame: `hovered` changes with the pointer and nothing
     // else here tracks it, so gating on the other resources would freeze it.
@@ -135,6 +136,14 @@ fn publish(
             &wasm_bindgen::JsValue::from_f64(value),
         );
     };
+    // Frames, so automation can tell a client that is running from one that is
+    // merely loaded. A harness that starts clicking as soon as the controls appear is
+    // aiming at a client still decoding its graphics, where a single frame can take
+    // seconds: the click lands, but the activation is republished long after the probe
+    // gave up, and the result is then charged to the *next* probe. Published from this
+    // system's own invocation count, which is once per frame by construction.
+    *frames += 1;
+    set("frames", *frames as f64);
     set("sheets", scene.sheets as f64);
     set("painted", scene.painted as f64);
     set("placeholders", scene.placeholders as f64);
