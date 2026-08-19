@@ -321,7 +321,23 @@ async function runHitTests(hitPage, label, ratio) {
           key: window.aoLoaded?.lastActivated ?? null,
         }));
         if (now.count > before) {
-          return { key: now.key, ms: Date.now() - started, before, after: now.count };
+          // Kept watching for three more frames. This task requires that the expected
+          // entity activates *exactly once*, and a second activation arrives a frame
+          // or two after the first — the whole shape of the double-activation bug was
+          // that the extra one appeared too late for the probe that caused it and was
+          // charged to the next. Returning at the first sight of movement is how a
+          // click that fired twice reads as a click that fired.
+          await hitPage.waitForTimeout(Math.min(Math.max(3 * frameMs, 200), 6_000));
+          const settled = await hitPage.evaluate(() => ({
+            count: window.aoLoaded?.activations ?? 0,
+            key: window.aoLoaded?.lastActivated ?? null,
+          }));
+          return {
+            key: settled.count > now.count ? settled.key : now.key,
+            ms: Date.now() - started,
+            before,
+            after: settled.count,
+          };
         }
         await hitPage.waitForTimeout(50);
       }
@@ -374,6 +390,11 @@ async function runHitTests(hitPage, label, ratio) {
         centred.key === control.key,
         shown([cx, cy], centred)
       );
+      check(
+        `clicking the centre of ${control.key} activates it exactly once`,
+        centred.after - centred.before === 1,
+        shown([cx, cy], centred)
+      );
 
       // One pixel inside each edge is still this control.
       for (const [dx, dy, edge] of [
@@ -391,7 +412,7 @@ async function runHitTests(hitPage, label, ratio) {
         const inside = await clickAt(x, y);
         check(
           `${inset}px inside the ${edge} edge of ${control.key} still activates it`,
-          inside.key === control.key,
+          inside.key === control.key && inside.after - inside.before === 1,
           shown([x, y], inside)
         );
       }
@@ -444,20 +465,32 @@ async function runHitTests(hitPage, label, ratio) {
     if (from && onto) {
       // Seen before pressed, for the same reason as a click: a press attributed to
       // where the pointer used to be starts a drag on the wrong slot, or on none.
-      await pointerTo(from.x + from.w / 2, from.y + from.h / 2);
+      const startX = from.x + from.w / 2;
+      const startY = from.y + from.h / 2;
+      const endX = onto.x + onto.w / 2;
+      const endY = onto.y + onto.h / 2;
+      await pointerTo(startX, startY);
       await hitPage.mouse.down();
-      await hitPage.waitForTimeout(Math.min(Math.max(frameMs, 60), 1_500));
-      // In steps, because a single jump can arrive as one event and a drag that is
-      // never seen to move is indistinguishable from a click that happened to end
-      // somewhere else.
-      await hitPage.mouse.move(
-        canvasBox.x + onto.x + onto.w / 2,
-        canvasBox.y + onto.y + onto.h / 2,
-        { steps: 12 }
-      );
-      // A frame between arriving and releasing, so the drop is attributed to the
-      // destination rather than to whatever the last frame had under the pointer.
-      await hitPage.waitForTimeout(Math.min(Math.max(2 * frameMs, 120), 3_000));
+
+      // Paced by frames rather than delivered as twelve events in a few milliseconds.
+      // A drag is only a drag if the client *observes* movement while the button is
+      // held; at three seconds a frame — which is what a device pixel ratio change to 2
+      // leaves this software renderer — a burst of moves and a release can all land in
+      // one frame, and the gesture reads as a click that ended somewhere else. That is
+      // the one configuration in which this check failed.
+      const STEPS = 4;
+      for (let step = 1; step <= STEPS; step += 1) {
+        const at = step / STEPS;
+        await hitPage.mouse.move(
+          canvasBox.x + startX + (endX - startX) * at,
+          canvasBox.y + startY + (endY - startY) * at
+        );
+        await hitPage.waitForTimeout(Math.min(Math.max(1.5 * frameMs, 120), 4_000));
+      }
+      const held = await hitPage.evaluate(() => ({
+        from: window.aoLoaded?.dragFrom ?? -1,
+        over: window.aoLoaded?.dragOver ?? -1,
+      }));
       await hitPage.mouse.up();
 
       const wanted = [before[target], before[source]];
@@ -468,6 +501,11 @@ async function runHitTests(hitPage, label, ratio) {
         if (after[source] === wanted[0] && after[target] === wanted[1]) break;
         await hitPage.waitForTimeout(50);
       }
+      check(
+        `${label}: `+`the client saw the drag from slot ${source} reach slot ${target}`,
+        held.from === source && held.over === target,
+        `mid-drag the client held from=${held.from} over=${held.over}`
+      );
       check(
         `dragging inventory.slot.${source} onto inventory.slot.${target} exchanges them`,
         after[source] === wanted[0] && after[target] === wanted[1],

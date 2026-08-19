@@ -250,6 +250,24 @@ the window and cancel cleanly on focus loss, pointer exit, panel removal or an
 invalidating resize. Close with browser-driven input tests plus Bevy app tests;
 screenshots and pure coordinate arithmetic alone are insufficient.
 
+Delivered and verified in the browser at ratios 1.0, 1.25, 1.5, 1.75 and 2.0,
+windowed and maximized, and again after a mid-session resize and a mid-session
+device pixel ratio change: centre and per-edge probes for an inventory slot, a
+hotbar slot and a top-bar icon; exactly-once activation; world centre and four
+edges; the world/rail seam; interception by a control floating over the world;
+and a pointer-driven inventory drag. Two defects were found and fixed rather
+than accommodated — one click activating a control twice whenever the press
+and the `Interaction` transition fell in different frames, and a click on the
+hotbar also selecting the tile beneath it.
+
+Three probes this contract names remain unwritten because they have nothing to
+aim at yet, and this task stays open until they exist:
+
+- a spell control, which arrives with the spellbook in W-0007;
+- a dialog control, which arrives with the product screens in W-0009;
+- fullscreen, which needs a user gesture the automation cannot supply. The
+  refusal path is covered; the hit tests are not.
+
 ### Task W-0006 — Character, vitals, inventory and equipment prototype
 
 - **State:** planned

@@ -120,6 +120,7 @@ fn publish(
     geometry: Res<crate::ui::shell::AppliedGeometry>,
     windows: Query<&Window>,
     state: Res<crate::ui::state::UiState>,
+    drag: Res<crate::ui::character::DragState>,
     mut frames: Local<u64>,
 ) {
     // Republished every frame: `hovered` changes with the pointer and nothing
@@ -181,6 +182,14 @@ fn publish(
         &wasm_bindgen::JsValue::from_str("inventorySlots"),
         &slots,
     );
+
+    // Whether a drag is in progress, and over what. Published because a drag that
+    // produced no move has two very different causes — the client never saw the gesture
+    // as a drag at all, or it saw it and the destination refused — and the slots alone
+    // cannot tell them apart. `-1` for absent, since these are indices.
+    let dragging = drag.from.map(|from| from as f64).unwrap_or(-1.0);
+    set("dragFrom", dragging);
+    set("dragOver", drag.over.map(|over| over as f64).unwrap_or(-1.0));
 
     // Where every keyed control actually is, in CSS pixels of the canvas, so a test
     // can click a control by position rather than by guessing at layout.
