@@ -10,14 +10,16 @@ earlier.
 ## Related Roadmaps
 
 `client-rs/ROADMAP.md` tracks the Rust/Bevy client (browser wasm plus native
-desktop). It also lists the **server** changes that client needs, tagged
-`[server]`, so the dependency is visible from one place rather than split. Two
-of those benefit the existing browser client independently: shipping map
-`triggers` in the client map pack (neither client can hide roofs without them)
-and immutable cache headers on content-hashed assets (neither client caches
-assets between sessions today).
+desktop). This root roadmap is the canonical owner of server, protocol,
+security, operations, deployment, and cross-boundary integration work. A
+cross-boundary server task is scheduled here and cites the Rust/Bevy task IDs
+that consume it; the client roadmap may describe that dependency, but does not
+own or close the server half.
 
-Server work accepted from that list should be scheduled into a phase here.
+The old TypeScript client may be consulted as a reference, but preserving it is
+not a release requirement. Unless a future product decision explicitly restores
+that requirement, compatibility and end-to-end acceptance target the Rust/Bevy
+client.
 
 ## Current Priority
 
@@ -27,6 +29,11 @@ confirmation. The deterministic harness, snapshot/diff tooling, all golden
 gameplay fixtures, the map-layer effects migration, VB6 source anchors, packet
 byte-level fixtures, and RNG guardrails are all shipped; the source-data
 parity tail has explicit fixtures.
+
+Within Phase 2, finish the protocol contract (#13) before the modern launch,
+transport, bootstrap, receipt, and reconnect path (#16-#20). Do not broaden the
+Rust/Bevy packet surface until one existing character can authenticate and
+receive a complete authoritative bootstrap without relying on fixture state.
 
 ## Phase 1: Deterministic Parity Harness
 
@@ -119,12 +126,19 @@ Work:
       can prove the same behavior
 
 13. Add a versioned protocol compatibility contract.
-    - One manifest for packet IDs, binary layouts, direction, and support
-      status
-    - Shared Elixir and Rust fixtures generated from or checked against the
-      manifest
+    - One canonical manifest or schema for packet IDs, binary layouts,
+      direction, maximum length, version, capability, and support status
+    - Decide explicitly whether the schema is hand-authored or extracted from
+      the Elixir source of truth; either way, add a drift check against the
+      actual Elixir encoder/decoder
+    - Shared Elixir and Rust fixtures generated from or checked against that
+      contract
+    - Classify every WebSocket-only extension as an intentional divergence
+      before assigning or shipping its packet ID
     - Explicit backward-compatibility and packet-deprecation rules
     - Defined handling for unknown, unsupported, and retired packets
+    - CI fails when the manifest, Elixir implementation, Rust implementation,
+      or byte fixtures disagree
 
 14. Turn benchmark results into performance regression budgets.
     - Store versioned baselines for representative hardware and scenarios
@@ -140,6 +154,73 @@ Work:
     - State snapshots and first meaningful diff
     - Logs, metrics, commit, and runtime configuration
 
+16. Replace the current long-lived per-character launch token with secure game
+    launch credentials. *(Rust/Bevy: W-0024, W-0025, W-0027.)*
+    - Issue an opaque, short-lived credential through the authenticated account
+      API, scoped to the account, selected character, and permitted protocol
+    - Store only a hash, consume it atomically once, enforce expiry, and support
+      revocation and signing-key rotation without logging the secret
+    - Log an existing character through packet 73 after the REST launch flow;
+      packet 74 remains new-character creation and must never be used as an
+      implicit login shortcut
+    - Return explicit authentication success and stable rejection reasons
+    - Keep password-over-game-socket or legacy token login behind a separately
+      named compatibility boundary; it is not the Rust/Bevy production path
+    - Cover issue, successful consume, expiry, replay, revocation, wrong
+      character, and concurrent double-consume end to end
+
+17. Add a negotiated, length-framed WebSocket protocol without changing the AO
+    gameplay payloads unnecessarily. *(Rust/Bevy: W-0021-W-0024, W-0029.)*
+    - Negotiate protocol version and capabilities before authentication
+    - Frame each message with enough length information to skip an unknown
+      optional packet without losing stream alignment
+    - Define explicit login accepted/rejected, world-pack signature, session,
+      bootstrap, ping/pong, and protocol-error messages
+    - Bound frame size, buffered bytes, decoded messages per tick, and ingress
+      and egress queues before allocating or enqueueing
+    - Specify required-versus-optional capability behavior, downgrade policy,
+      and clean close reasons for incompatible clients
+    - Add hostile-length, truncated-frame, unknown-packet, queue-pressure, and
+      Elixir/Rust byte-fixture coverage
+
+18. Send a complete, ordered, authoritative bootstrap snapshot after login.
+    *(Rust/Bevy: W-0024, W-0025, W-0030.)*
+    - Include snapshot version, world epoch, character identity, map and
+      position, visible entities, inventory, equipment, spells, hotbar, vitals,
+      cooldowns, quests, and relevant party/guild/faction state
+    - Use explicit begin/end or an equivalent atomic envelope so the client
+      never guesses that bootstrap has finished
+    - Route every member through one ordered, non-sheddable session path; no
+      producer may send bootstrap packets out of band
+    - Define oversize-snapshot chunking, cancellation, timeout, and failure
+      semantics without exposing a partially initialized playable world
+    - Pin the full sequence with byte fixtures and a live login test
+
+19. Add correlated authoritative receipts for client commands.
+    *(Rust/Bevy: W-0026, W-0030 and the owning UI workflow tasks.)*
+    - Carry a request/operation ID, command kind, success or rejection, stable
+      reason code/localization key, affected entity or slot, and authoritative
+      state version or delta
+    - Cover inventory use/equip/drop, hotbar changes, spell casts, commerce,
+      bank, trade, crafting, quests, and social mutations before those screens
+      claim live completion
+    - Define duplicate, retry, timeout, late-reply, and stale-version behavior
+      so the client never treats an unrelated state change as its response
+    - Preserve server authority: optimistic presentation may be reconciled, but
+      it may not invent a successful gameplay mutation
+
+20. Define and prove reconnect and resnapshot semantics.
+    *(Rust/Bevy: W-0027, W-0033.)*
+    - Give each accepted world session a fresh epoch and discard queued or late
+      events from previous epochs
+    - Reauthenticate with a fresh credential, rebuild from an authoritative
+      snapshot, and never replay unsafe mutations implicitly
+    - Return stable close/retry reasons for maintenance, server full, ban,
+      protocol mismatch, expired credential, replacement login, and overload
+    - Bound retry hints and server-side reconnect state
+    - Prove reconnect leaves one session, one visible entity, and no duplicated
+      inventory, trade, guild, party, or combat effects
+
 Exit criteria:
 
 - Fast and slow parity gates are documented and runnable.
@@ -150,7 +231,15 @@ Exit criteria:
 - Time-dependent parity tests run against a controllable clock without
   timing-sensitive sleeps in the critical path.
 - The protocol compatibility manifest is versioned and checked by both server
-  and browser tests.
+  and Rust tests.
+- Existing-character launch uses expiring, single-use credentials and completes
+  a real authenticated Rust/Bevy session without packet 74 or fixture authority.
+- The framed WebSocket transport is negotiated, bounded, forward-compatible for
+  optional packets, and protected by hostile-input tests.
+- Bootstrap is explicit, complete, ordered, and atomic from the player's point
+  of view.
+- Mutating client commands receive correlated authoritative results, and
+  reconnect creates a fresh epoch without duplicate or stale state.
 - Performance regressions have stored baselines, explicit budgets, and a
   failing gate.
 - Failed proof-gate runs preserve enough evidence to reproduce the failure
@@ -174,10 +263,16 @@ Work:
    - Autosave task failures
    - Egress shed counters
    - Egress coalesce counters
+   - Launch-credential issue, consume, expiry, replay rejection, and revocation
+   - Protocol-version and capability mix
+   - Authentication-to-bootstrap latency and bootstrap failures
+   - Command-receipt rejection, timeout, and stale-version counts
 
 3. Add alerts.
    - Sustained shedding
    - Forced backpressure disconnects
+   - Launch-credential replay spikes and authentication abuse
+   - Bootstrap failure or latency budget violations
 
 4. Add runtime admin tools.
    - Map inspection
@@ -249,12 +344,26 @@ Work:
    - Secret and signing-key rotation
    - Account recovery and deletion flows
 
+5. Adversarially harden the modern game-launch and WebSocket authentication
+   path introduced in Phase 2.
+   - Rate-limit credential issuance and socket authentication by account, IP,
+     character, and risk signal without creating an enumeration oracle
+   - Test stolen, expired, replayed, revoked, cross-character, malformed, and
+     concurrently consumed credentials
+   - Redact credentials, passwords, session identifiers, and recovery secrets
+     from logs, telemetry, traces, crash reports, and audit exports
+   - Require HTTPS/WSS in production and reject insecure or unexpected origins
+     according to an explicit deployment policy
+   - Exercise key rotation and emergency global/session revocation
+
 Exit criteria:
 
 - Abuse checks are represented by automated tests or executable audit tasks.
 - New hardening does not silently break VB6 protocol parity.
 - Account recovery, session control, administrative MFA, and secret rotation
   are implemented and covered by adversarial tests.
+- The modern game-launch path resists replay, theft, enumeration, brute force,
+  malformed input, secret leakage, and unsafe transport downgrade.
 
 ## Phase 5: Runtime Performance And Architecture
 
@@ -275,11 +384,31 @@ Work:
    - Keep guild writes synchronous until a separate UX/semantics design is
      approved
 
+8. Make login bootstrap and map handoff use one structured snapshot boundary.
+   *(Rust/Bevy: W-0030, W-0062-W-0067.)*
+   - Refactor map entry so it returns structured snapshot data instead of
+     sending nearby NPCs or other members out of band
+   - Make the session process the single ordered writer for begin, snapshot
+     members, end, and failure
+   - Key map-local character/entity identifiers by world epoch and reject
+     queued envelopes from a previous map or epoch
+   - Keep snapshot and handoff messages non-sheddable and forbid egress
+     coalescing from reordering or crossing the atomic boundary
+   - On timeout, crash, overload, or rejected entry, either retain/recover the
+     source world or terminate cleanly; never expose a half-entered destination
+   - Add a deterministic delay-injection test: with destination loading delayed
+     by two seconds, the old world remains visible, input is paused, and the
+     destination appears atomically after the matching end marker
+
 Exit criteria:
 
 - NPC and pet targeting avoid full-map scans on hot paths.
 - Guild code has clear module boundaries.
 - Persistence writes have explicit ownership and failure semantics.
+- Login bootstrap and map transfer share a structured, ordered snapshot path;
+  no out-of-band map producer can race the completion marker.
+- Delayed and failed transfers preserve one authoritative world and never leave
+  duplicate entities or mixed epochs.
 
 ## Phase 6: Release And Deployment
 
@@ -292,6 +421,11 @@ Work:
 3. Add backup and restore runbook.
 4. Add TLS for HTTPS and WSS.
 5. Add asset CDN and static-delivery strategy.
+   - Send long-lived immutable cache headers for content-hashed packs, indices,
+     sprites, audio, and wasm artifacts
+   - Keep manifests and mutable entry points short-lived and revalidated
+   - Define cache purge, rollback, integrity, range-request, and cross-origin
+     policy
 6. Add automated backups.
 7. Tune database connection pools.
 8. Define the live database migration strategy.
@@ -300,19 +434,21 @@ Work:
     - Elixir version
     - Erlang/OTP version
     - Hex version
-    - Node/npm version
+    - Rust, Cargo, clippy, rustfmt, wasm-bindgen, and browser-harness versions
     - Nix and non-Nix setup paths
 
 11. Add a dev-environment verification command.
     - Check Elixir/Erlang/Hex compatibility
-    - Check Node/npm availability
+    - Check the pinned Rust/wasm toolchain and browser-harness availability
     - Check map-pack build prerequisites
     - Fail with actionable setup output
 
 12. Make client build failure modes explicit.
     - Surface map-pack prebuild failures clearly
-    - Distinguish toolchain failures from Vite failures
-    - Document the direct Vite fallback for client-only verification
+    - Distinguish Nix/Rust, wasm-bindgen, asset, and browser-harness failures
+    - Keep the shipped build stamp tied to the exact clean source revision
+    - Document a client-only Rust/wasm verification path that does not require
+      starting unrelated services
 
 13. Make restore drills a release gate.
     - Restore from backup into a clean environment
@@ -320,8 +456,8 @@ Work:
     - Record drill result before public release
 
 14. Add a production-shaped staging and upgrade-compatibility gate.
-    - Previous browser client against the candidate server
-    - Candidate browser client against the previous server where supported
+    - Previous supported Rust/Bevy client against the candidate server
+    - Candidate Rust/Bevy client against the previous server where supported
     - Rolling deployment and graceful session drain
     - Database migration while the previous release is still running
     - Rollback after a failed application release or migration
@@ -330,6 +466,8 @@ Work:
     - Broken map exits and unreachable spawn points
     - Invalid or duplicate object, NPC, spell, recipe, and drop references
     - Client/server asset-hash mismatches
+    - Missing map trigger data required for roof hiding and other client-side
+      map presentation rules
     - World-pack and client-build version compatibility
     - Fail release builds with actionable diagnostics
 
@@ -341,40 +479,42 @@ Exit criteria:
 - Pre-public soak has a documented pass/fail threshold.
 - Toolchain verification catches local setup drift before build/test commands.
 - Restore drills pass before a public release is cut.
-- Staging proves supported old/new client-server combinations, rolling deploy,
-  migration, drain, and rollback behavior.
+- Staging proves supported Rust/Bevy client-server combinations, rolling
+  deploy, migration, drain, and rollback behavior.
 - Invalid world data or incompatible client/server assets cannot enter a
   release artifact.
 
-## Phase 7: Browser Product
+## Phase 7: Rust/Bevy Client Product
 
-Goal: make the browser client releasable as a product, not only playable as a
-technical client.
+Goal: make the Rust/Bevy browser-wasm and native client releasable as a product,
+not only playable as a technical client. All production game UI and workflow
+state live in Bevy; JavaScript remains a narrow browser-capability adapter, and
+the old TypeScript client is neither a runtime dependency nor an acceptance
+gate.
 
 Work:
 
-1. Add live-backend browser E2E for existing account and lobby flows.
+1. Add live-backend Rust/Bevy E2E for existing account and lobby flows.
    - Register or log in through the real browser API
    - Create a character through the lobby
    - Launch the character and receive session credentials
    - Reach the gameplay/reconnect-ready state from those credentials
 
-2. Prove browser protocol and reducer correctness.
-   - Clean `typecheck`
-   - Clean `build`
+2. Prove Rust protocol, model, and Bevy workflow correctness.
+   - Clean formatting, clippy, native tests, wasm tests, and production build
    - Shared packet fixtures and fuzzing
-   - Reducer/state tests
+   - Model/state-transition tests
    - Visual fixtures
    - Browser E2E smoke coverage
 
-3. Make the browser UI reflect authoritative server state.
+3. Make the Bevy UI reflect authoritative server state.
    - Authoritative party panel
    - Authoritative clan panel
    - Responsive layout passes
    - Live-backend E2E for party snapshots
    - Live-backend E2E for clan details/news/online state
 
-4. Complete the remaining browser account surface.
+4. Complete the remaining Rust/Bevy account surface.
    - Google auth endpoint and flows
    - Google-only and linked-account support
    - Manual stat allocation during character creation if product scope
@@ -396,7 +536,7 @@ Work:
    - Locale preference and persistence
    - Unicode and IME coverage
 
-8. Make the browser client releasable.
+8. Make the Rust/Bevy client releasable.
    - Supported browser matrix
    - Shared protocol contract tests
    - Deterministic browser harness
@@ -404,7 +544,7 @@ Work:
    - Visual baseline discipline
    - Client telemetry and performance budgets
 
-9. Add browser/server packet contract fixtures shared in CI.
+9. Add Rust/server packet contract fixtures shared in CI.
    - Packet examples shared by server and client tests
    - Contract failures reported before browser E2E runs
 
@@ -421,7 +561,7 @@ Work:
    - Changed client build hash
    - Reload/retry paths
 
-12. Add browser accessibility and performance release gates.
+12. Add client accessibility and performance release gates.
     - Keyboard-only navigation
     - Screen-reader labels and announcements
     - Automated color-contrast checks
@@ -430,21 +570,38 @@ Work:
     - Asset-size, startup-time, and frame-time budgets
     - Low-bandwidth and degraded-network coverage
 
+13. Replace presentation-ready server prose with typed semantic events for the
+    modern protocol. *(Rust/Bevy: W-0069 and the owning workflow tasks.)*
+    - Send a stable event/reason key plus typed parameters for gameplay,
+      commerce, inventory, spell, quest, party, guild, faction, moderation, and
+      connection outcomes
+    - Localize in the client; do not require the server to choose Spanish,
+      English, or Portuguese presentation text for the Rust/Bevy path
+    - Keep an explicitly tested legacy text adapter only where an old protocol
+      contract still requires one
+    - Define severity, channel, accessibility announcement behavior, and a
+      safe fallback for an unknown key
+    - Extract and audit remaining hard-coded player-facing server strings
+
 Exit criteria:
 
-- Browser account, lobby, character creation, and launch flows have live-backend
-  E2E coverage.
-- Browser state is driven by authoritative server packets where available.
-- Browser E2E and visual checks cover the release-critical flows.
-- Shared packet fixtures protect browser/server protocol compatibility in CI.
+- Rust/Bevy account, lobby, character creation, and launch flows have
+  live-backend E2E coverage.
+- Rust/Bevy state is driven by authoritative server packets; fixture/gallery
+  data cannot act as production authority.
+- Browser-wasm E2E and visual checks cover the release-critical flows, while
+  native builds share the same Bevy UI and state paths.
+- Shared packet fixtures protect Rust/server protocol compatibility in CI.
 - Asset and cache mismatch recovery is covered by tests.
 - Supported browser surfaces pass the accessibility checks and stay within
   documented asset, startup, and frame-time budgets.
+- Player-facing modern-protocol outcomes are semantic and localizable, with no
+  dependency on the old TypeScript client.
 
 ## Phase 8: Optional Legacy And Multi-Realm
 
 These are real product items, but they are not prerequisites for the next
-backend or browser release.
+backend or Rust/Bevy release.
 
 Work:
 
@@ -455,7 +612,7 @@ Work:
 3. Add explicit regional realm support.
    - Realm architecture
    - Backend realm selection
-   - Browser realm selection
+   - Rust/Bevy realm selection
    - Realm-aware monitoring
    - Controlled transfer policy
 
