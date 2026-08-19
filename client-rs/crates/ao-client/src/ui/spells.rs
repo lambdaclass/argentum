@@ -236,7 +236,12 @@ pub struct SpellRowButton {
 /// stable key, so the pointer pipeline can see it, Tab reaches it, and a browser test
 /// can aim at it. The builder existed for some time with neither, which meant a
 /// spellbook that could be rendered and not used.
-pub fn spell_row(spell: &SpellView, index: usize, armed: bool) -> impl Bundle {
+pub fn spell_row(
+    spell: &SpellView,
+    index: usize,
+    armed: bool,
+    icon: Option<super::character::ItemIcon>,
+) -> impl Bundle {
     let castable = spell.is_castable();
     // Localised at this boundary. The blocker keys are semantic — `spell.blocked.mana`
     // — and this task forbids showing them raw; the fallback is derived from the key
@@ -250,7 +255,11 @@ pub fn spell_row(spell: &SpellView, index: usize, armed: bool) -> impl Bundle {
     (
         Node {
             width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Column,
+            // A row, so the graphic sits beside the words rather than above them: a
+            // spellbook is scanned by icon and read by name.
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(space::TIGHT),
             padding: UiRect::all(Val::Px(space::TIGHT)),
             border: UiRect::all(Val::Px(size::BORDER)),
             ..default()
@@ -265,23 +274,51 @@ pub fn spell_row(spell: &SpellView, index: usize, armed: bool) -> impl Bundle {
         SpellRowButton { spell_id: spell.spell_id, index },
         children![
             (
-                Text::new(name),
-                TextFont { font_size: type_scale::SMALL, ..default() },
-                TextColor(if castable { ink::PRIMARY } else { ink::DISABLED }),
+                Node {
+                    width: Val::Px(size::ICON_BUTTON),
+                    height: Val::Px(size::ICON_BUTTON),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+                super::character::ItemIcon::node(icon.as_ref()),
+                Pickable::IGNORE,
             ),
             (
-                Text::new(detail),
-                TextFont { font_size: type_scale::MICRO, ..default() },
-                TextColor(ink::MUTED),
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    flex_grow: 1.0,
+                    overflow: Overflow::clip(),
+                    ..default()
+                },
+                Pickable::IGNORE,
+                children![
+                    (
+                        Text::new(name),
+                        TextFont { font_size: type_scale::SMALL, ..default() },
+                        TextColor(if castable { ink::PRIMARY } else { ink::DISABLED }),
+                    ),
+                    (
+                        Text::new(detail),
+                        TextFont { font_size: type_scale::MICRO, ..default() },
+                        TextColor(ink::MUTED),
+                    ),
+                ],
             ),
         ],
     )
 }
 
 /// The spellbook, as the snapshot reports it.
-pub fn spellbook_panel(snapshot: &UiSnapshot, armed: Option<i32>) -> impl Bundle {
+pub fn spellbook_panel(
+    snapshot: &UiSnapshot,
+    armed: Option<i32>,
+    icons: &[Option<super::character::ItemIcon>],
+) -> impl Bundle {
     let spells = snapshot.spellbook.spells.clone();
     let empty = spells.is_empty();
+    // Cloned into the iterator: the closure that spawns each row runs later, after the
+    // caller's borrow of the graphics resources has ended.
+    let icons: Vec<Option<super::character::ItemIcon>> = icons.to_vec();
     (
         Node {
             width: Val::Percent(100.0),
@@ -295,7 +332,7 @@ pub fn spellbook_panel(snapshot: &UiSnapshot, armed: Option<i32>) -> impl Bundle
         Children::spawn((
             SpawnIter(spells.into_iter().enumerate().map(move |(index, spell)| {
                 let armed_here = armed == Some(spell.spell_id);
-                spell_row(&spell, index, armed_here)
+                spell_row(&spell, index, armed_here, icons[index].clone())
             })),
             SpawnIter(
                 empty

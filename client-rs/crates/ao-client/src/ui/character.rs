@@ -620,7 +620,22 @@ fn rebuild_on_change(
                 .and_then(|index| index.resolve(grh_id))
                 .is_some_and(|grh| sheets.0.contains_key(&grh.sheet))
         })
-        .count();
+        .count()
+        // Spells too, and for the same reason: a spellbook drawn before its sheets
+        // arrived would keep its blank icons for the rest of the session, because
+        // nothing else in this condition changes when artwork lands.
+        + state
+            .get()
+            .spellbook
+            .spells
+            .iter()
+            .filter(|spell| {
+                index
+                    .as_ref()
+                    .and_then(|index| index.resolve(spell.icon_grh))
+                    .is_some_and(|grh| sheets.0.contains_key(&grh.sheet))
+            })
+            .count();
     let artwork_arrived = *last_drawable != drawable;
     *last_drawable = drawable;
 
@@ -665,17 +680,28 @@ fn rebuild_on_change(
     // that are not real graphics — every one resolved to nothing, and every slot
     // drew its fallback. The field remains the override for items the table does
     // not cover.
-    let objects = graphics.objects();
-    let mut icon_for = |item: &ItemView| -> Option<ItemIcon> {
-        let grh_id = objects
-            .as_ref()
-            .and_then(|table| table.get(&item.item_id).copied())
-            .unwrap_or(item.icon_grh);
-        let grh = index.as_ref()?.resolve(grh_id)?;
-        let (image, layout, atlas_index) =
-            crate::world::resolve_grh(&sheets, &mut atlases, &mut layouts, &grh)?;
-        Some(ItemIcon { image, layout, index: atlas_index })
-    };
+    // Resolved up front, once per item and once per spell, rather than through a
+    // closure that holds the graphics resources: the spellbook needs the same resolution
+    // and two closures cannot borrow the atlas store at the same time.
+    let mut item_icons: std::collections::HashMap<i32, Option<ItemIcon>> =
+        std::collections::HashMap::new();
+    let worn = snapshot.equipment.worn.iter().map(|(_, item)| item);
+    for item in snapshot.inventory.slots.iter().filter_map(|slot| slot.item()).chain(worn) {
+        if item_icons.contains_key(&item.item_id) {
+            continue;
+        }
+        let grh_id = item_grh(item.item_id, item.icon_grh, &graphics);
+        let resolved = icon_for_grh(grh_id, &graphics, &sheets, &mut atlases, &mut layouts);
+        item_icons.insert(item.item_id, resolved);
+    }
+    let spell_icons: Vec<Option<ItemIcon>> = snapshot
+        .spellbook
+        .spells
+        .iter()
+        .map(|spell| icon_for_grh(spell.icon_grh, &graphics, &sheets, &mut atlases, &mut layouts))
+        .collect();
+    let mut icon_for =
+        |item: &ItemView| -> Option<ItemIcon> { item_icons.get(&item.item_id).cloned().flatten() };
     for (entity, region) in &regions {
         match region {
             RailRegion::CharacterHeader => {
@@ -697,7 +723,11 @@ fn rebuild_on_change(
                 commands.entity(entity).with_children(|parent| {
                     parent.spawn((
                         PanelContent,
-                        super::spells::spellbook_panel(snapshot, marks.armed.0),
+                        super::spells::spellbook_panel(
+                            snapshot,
+                            marks.armed.0,
+                            &spell_icons,
+                        ),
                     ));
                 });
             }
@@ -1706,6 +1736,128 @@ mod tests {
             );
         }
         assert_eq!(*app.world().resource::<RailTab>(), RailTab::Inventory);
+    }
+
+    #[test]
+    fn the_tabs_are_equal_width_and_the_active_one_is_marked() {
+        use super::super::testing;
+
+        let mut app = testing::shell_app(Vec2::new(1280.0, 832.0));
+        for _ in 0..4 {
+            app.update();
+        }
+
+        let widths: Vec<f32> = RailTab::ORDER
+            .into_iter()
+            .map(|tab| {
+                let entity = tab_entity(&mut app, tab);
+                testing::solved_rect(&app, entity).expect("a laid-out tab").width()
+            })
+            .collect();
+        let first = widths[0];
+        for (tab, width) in RailTab::ORDER.into_iter().zip(&widths) {
+            assert!(
+                (width - first).abs() <= 1.0,
+                "the {tab:?} tab is {width} wide against {first}: {widths:?}"
+            );
+        }
+
+        for tab in RailTab::ORDER {
+            let entity = tab_entity(&mut app, tab);
+            let selected = app.world().get::<super::super::controls::Selected>(entity);
+            assert_eq!(
+                selected.map(|s| s.0),
+                Some(tab == RailTab::Inventory),
+                "the {tab:?} tab's selection is not what the rail is showing"
+            );
+        }
+    }
+
+    #[test]
+    fn the_chosen_tab_survives_a_snapshot_that_has_nothing_to_do_with_it() {
+        // The snapshot arrives many times a second. A tab that reset to the inventory on
+        // every heartbeat would be unusable, and the rail is rebuilt by those very
+        // snapshots — so this is not a given.
+        use super::super::testing;
+
+        let mut app = testing::shell_app(Vec2::new(1280.0, 832.0));
+        for _ in 0..4 {
+            app.update();
+        }
+        let skills = tab_entity(&mut app, RailTab::Skills);
+        app.world_mut().write_message(super::super::controls::Activated {
+            entity: skills,
+            source: super::super::controls::ActivationSource::Pointer,
+        });
+        app.update();
+        app.update();
+
+        let mut unrelated = app.world().resource::<UiState>().get().clone();
+        unrelated.vitals.health.current -= 1;
+        UiState::set(&mut app.world_mut().resource_mut::<UiState>(), unrelated);
+        app.update();
+        app.update();
+
+        assert_eq!(
+            *app.world().resource::<RailTab>(),
+            RailTab::Skills,
+            "an unrelated snapshot sent the rail back to the inventory"
+        );
+        assert!(
+            rail_text(&mut app).contains("42"),
+            "the skills panel did not survive the snapshot: {}",
+            rail_text(&mut app)
+        );
+    }
+
+    #[test]
+    fn switching_tabs_does_not_move_the_rest_of_the_rail() {
+        // The regions below the grid are pinned to the bottom edge. If the panel above
+        // them changed their position, every vital and every navigation control would
+        // jump under the pointer as the player switched tabs.
+        use super::super::testing;
+
+        let mut app = testing::shell_app(Vec2::new(1280.0, 832.0));
+        for _ in 0..4 {
+            app.update();
+        }
+        let anchors: Vec<(Entity, Rect)> = app
+            .world_mut()
+            .query::<(Entity, &super::super::rail::RailRegion)>()
+            .iter(app.world())
+            .filter(|(_, region)| {
+                matches!(
+                    region,
+                    super::super::rail::RailRegion::Vitals
+                        | super::super::rail::RailRegion::Navigation
+                        | super::super::rail::RailRegion::Equipment
+                )
+            })
+            .map(|(entity, _)| entity)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .filter_map(|entity| testing::solved_rect(&app, entity).map(|rect| (entity, rect)))
+            .collect();
+        assert!(!anchors.is_empty(), "the rail has no regions below the grid");
+
+        for tab in [RailTab::Skills, RailTab::Spells, RailTab::Inventory] {
+            let entity = tab_entity(&mut app, tab);
+            app.world_mut().write_message(super::super::controls::Activated {
+                entity,
+                source: super::super::controls::ActivationSource::Pointer,
+            });
+            app.update();
+            app.update();
+
+            for (region, before) in &anchors {
+                let now = testing::solved_rect(&app, *region).expect("still laid out");
+                assert!(
+                    (now.min - before.min).abs().max_element() <= 0.5
+                        && (now.size() - before.size()).abs().max_element() <= 0.5,
+                    "showing {tab:?} moved a region from {before:?} to {now:?}"
+                );
+            }
+        }
     }
 
     #[test]

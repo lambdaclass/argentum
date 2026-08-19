@@ -1338,6 +1338,15 @@ pub fn tab(label_text: &str, selected: bool, tab_index: u32) -> impl Bundle {
         // pointer activation silently did nothing.
         Node {
             flex_grow: 1.0,
+            // From zero, not from the label's own width. `flex_grow` alone shares only
+            // the *spare* space, so three tabs reading "Inventory", "Skills" and
+            // "Spells" came out 95, 75 and 78 pixels wide — a strip that looks
+            // misaligned and gives the longest name the largest target.
+            flex_basis: Val::Px(0.0),
+            // So a long translation clips instead of forcing its tab wider than the
+            // others, which is the same failure by another route.
+            min_width: Val::Px(0.0),
+            overflow: Overflow::clip(),
             padding: UiRect::axes(Val::Px(space::BASE), Val::Px(space::SNUG)),
             justify_content: JustifyContent::Center,
             border: UiRect::bottom(Val::Px(focus::RING_WIDTH)),
