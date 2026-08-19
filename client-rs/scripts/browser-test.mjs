@@ -241,9 +241,44 @@ async function runHitTests(hitPage, label, ratio) {
       return last;
     };
 
+    /// Put the pointer somewhere and wait until the client agrees it is there.
+    ///
+    /// The published pointer position is the client's own answer to "where is the
+    /// cursor", so this is the only way to know a subsequent press will be attributed
+    /// to the right place rather than to wherever the pointer was last frame.
+    const pointerTo = async (x, y) => {
+      await hitPage.mouse.move(canvasBox.x + x, canvasBox.y + y);
+      const deadline = Date.now() + Math.max(4 * frameMs, 3_000);
+      while (Date.now() < deadline) {
+        const at = await hitPage.evaluate(() => [window.aoLoaded?.pointerX, window.aoLoaded?.pointerY]);
+        if (
+          typeof at[0] === "number" &&
+          Math.abs(at[0] - x) <= 1.5 &&
+          Math.abs(at[1] - y) <= 1.5
+        ) {
+          return true;
+        }
+        await hitPage.waitForTimeout(50);
+      }
+      return false;
+    };
+
     const clickAt = async (x, y) => {
       const before = await settle();
-      await hitPage.mouse.click(canvasBox.x + x, canvasBox.y + y);
+
+      // Moved, seen, then pressed — not `mouse.click`, which delivers move, press and
+      // release within a few milliseconds. At one frame a second, which is what this
+      // software renderer manages at a device pixel ratio of 1.5, all three arrive in
+      // a single frame: the press is then attributed using a hover map computed before
+      // the pointer had moved, so the click belongs to nothing and vanishes. A player
+      // moves the cursor, sees the control light up, and only then presses.
+      const arrived = await pointerTo(x, y);
+      await hitPage.mouse.down();
+      await hitPage.waitForTimeout(Math.min(Math.max(frameMs, 60), 1_500));
+      await hitPage.mouse.up();
+      if (!arrived) {
+        return { key: null, ms: 0, before, after: before, note: "the client never saw the pointer arrive" };
+      }
 
       // Polled, not slept. Under software rendering this client runs at about six
       // frames a second, so a fixed 120ms wait was shorter than a single frame and
@@ -279,15 +314,32 @@ async function runHitTests(hitPage, label, ratio) {
     /// How a click came out, for a failure message.
     const shown = (at, result) =>
       `at ${at.map((v) => v.toFixed(1)).join(",")} -> ${result.key ?? "nothing"}` +
-      ` after ${result.ms}ms (${result.before}->${result.after})`;
+      ` after ${result.ms}ms (${result.before}->${result.after})` +
+      (result.note ? ` — ${result.note}` : "");
 
-    // A representative spread rather than every control: an inventory slot, a
-    // hotbar slot and a top-bar icon exercise three different panels and three
-    // different sizes.
-    const sample = ["inventory.slot.0", "hotbar.slot.0", "rail.compact.nav.0"]
-      .map((key) => controls.find((c) => c.key === key && c.enabled && c.w > 4 && c.h > 4))
-      .filter(Boolean);
-    check(`${label}: `+"a representative control sample is available", sample.length >= 2, `${sample.length}`);
+    // A representative spread rather than every control: four different panels, four
+    // different sizes and four different builders. The top-bar icon goes last, because
+    // activating it is the one that may put something else on screen.
+    //
+    // Spell and dialog controls are named in this task's contract and are absent from
+    // the sample because they do not exist yet — the spellbook is W-0007 and dialogs
+    // are W-0009. Missing keys are reported rather than dropped: a sample that quietly
+    // shrinks to one control still passes a "sample is available" check.
+    const WANTED_CONTROLS = [
+      "inventory.slot.0",
+      "hotbar.slot.0",
+      "rail.compact.nav.0",
+      "action.settings",
+    ];
+    const sample = WANTED_CONTROLS.map((key) =>
+      controls.find((c) => c.key === key && c.enabled && c.w > 4 && c.h > 4)
+    ).filter(Boolean);
+    const absent = WANTED_CONTROLS.filter((key) => !sample.some((c) => c.key === key));
+    check(
+      `${label}: `+"every sampled control kind is on screen",
+      absent.length === 0,
+      `missing ${JSON.stringify(absent)} of ${JSON.stringify(WANTED_CONTROLS)}`
+    );
 
     for (const sampled of sample) {
       const control = (await rectOf(sampled.key)) ?? sampled;
@@ -368,8 +420,11 @@ async function runHitTests(hitPage, label, ratio) {
     const from = source >= 0 ? await rectOf(`inventory.slot.${source}`) : null;
     const onto = target > source ? await rectOf(`inventory.slot.${target}`) : null;
     if (from && onto) {
-      await hitPage.mouse.move(canvasBox.x + from.x + from.w / 2, canvasBox.y + from.y + from.h / 2);
+      // Seen before pressed, for the same reason as a click: a press attributed to
+      // where the pointer used to be starts a drag on the wrong slot, or on none.
+      await pointerTo(from.x + from.w / 2, from.y + from.h / 2);
       await hitPage.mouse.down();
+      await hitPage.waitForTimeout(Math.min(Math.max(frameMs, 60), 1_500));
       // In steps, because a single jump can arrive as one event and a drag that is
       // never seen to move is indistinguishable from a click that happened to end
       // somewhere else.
@@ -378,6 +433,9 @@ async function runHitTests(hitPage, label, ratio) {
         canvasBox.y + onto.y + onto.h / 2,
         { steps: 12 }
       );
+      // A frame between arriving and releasing, so the drop is attributed to the
+      // destination rather than to whatever the last frame had under the pointer.
+      await hitPage.waitForTimeout(Math.min(Math.max(2 * frameMs, 120), 3_000));
       await hitPage.mouse.up();
 
       const wanted = [before[target], before[source]];
@@ -476,6 +534,28 @@ async function runHitTests(hitPage, label, ratio) {
       "a pixel just inside the rail is not a world tile",
       (await tileAt(worldRect.x + worldRect.w + 2, worldRect.y + worldRect.h / 2)) === null
     );
+
+    // Interception, which is the other half of "the control under the pointer receives
+    // the event": the hotbar floats *inside* the world viewport, so a click on a slot
+    // must not also be a click on the ground under it. A player who means to drink a
+    // potion and walks two tiles instead has met this bug.
+    const floating = await rectOf("hotbar.slot.0");
+    if (floating) {
+      const inside =
+        floating.x > worldRect.x &&
+        floating.x + floating.w < worldRect.x + worldRect.w &&
+        floating.y > worldRect.y &&
+        floating.y + floating.h < worldRect.y + worldRect.h;
+      check(
+        `${label}: `+"the hotbar is inside the world viewport, where interception matters",
+        inside,
+        `hotbar ${JSON.stringify(floating)} against world ${JSON.stringify(worldRect)}`
+      );
+      check(
+        "a control floating over the world intercepts the click",
+        (await tileAt(floating.x + floating.w / 2, floating.y + floating.h / 2)) === null
+      );
+    }
 
 
 }
@@ -780,6 +860,43 @@ async function main() {
       await runHitTests(hitPage, configuration.label, configuration.ratio);
       await hitContext.close();
     }
+
+    // The same battery again after the display changes under a *running* client,
+    // which is a different question from starting at that ratio: every cached
+    // rectangle, viewport and scale domain has to be rebuilt rather than merely
+    // computed once. This is also what browser zoom is, seen from inside the page —
+    // Chrome delivers a zoom as a device pixel ratio change — so it is not claimed
+    // separately below.
+    console.log("  pointer hit testing — after a resize and a DPR change mid-session");
+    const changedContext = await browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      deviceScaleFactor: 1,
+    });
+    const changedPage = await changedContext.newPage();
+    await changedPage.goto(url, { waitUntil: "load" });
+    await waitForClient(changedPage);
+
+    await changedPage.setViewportSize({ width: 1100, height: 740 });
+    await changedPage.waitForTimeout(2_000);
+    await runHitTests(changedPage, "after a resize", 1);
+
+    const cdp = await changedContext.newCDPSession(changedPage);
+    await cdp.send("Emulation.setDeviceMetricsOverride", {
+      width: 1100,
+      height: 740,
+      deviceScaleFactor: 2,
+      mobile: false,
+    });
+    await changedPage.waitForTimeout(3_000);
+    const changedRatio = await changedPage.evaluate(() => window.devicePixelRatio);
+    check(
+      "a mid-session DPR change reaches the page",
+      changedRatio === 2,
+      `devicePixelRatio is ${changedRatio}`
+    );
+    await runHitTests(changedPage, "after a DPR change to 2x", 2);
+    await cdp.detach();
+    await changedContext.close();
 
     // Keyboard focus must not leave the canvas. Tab moving browser focus off it
     // ends the session's keyboard: the player tabs through page furniture with no
