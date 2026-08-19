@@ -465,6 +465,44 @@ async function runHitTests(hitPage, label, ratio) {
       }
     }
 
+    // The spell control this task's contract names, which needs the spellbook on screen:
+    // the tab is switched, the row is probed, and the inventory is put back for the
+    // checks below. Done here rather than in the sample above because activating the
+    // Skills or Spells tab replaces the grid those checks aim at.
+    const edge = ratio === 1 ? 1 : 2;
+    const tabRect = await rectOf("rail.tab.spells");
+    if (tabRect) {
+      const at = [tabRect.x + tabRect.w / 2, tabRect.y + tabRect.h / 2];
+      const opened = await clickAt(at[0], at[1]);
+      check(
+        `${label}: `+"the spells tab activates",
+        opened.key === "rail.tab.spells" && opened.after - opened.before === 1,
+        shown(at, opened)
+      );
+
+      const row = await rectOf("spell.row.0");
+      check(`${label}: `+"the spellbook publishes a row to aim at", row !== null);
+      if (row) {
+        const centred = await clickAt(row.x + row.w / 2, row.y + row.h / 2);
+        check(
+          "clicking the centre of spell.row.0 activates it exactly once",
+          centred.key === "spell.row.0" && centred.after - centred.before === 1,
+          shown([row.x + row.w / 2, row.y + row.h / 2], centred)
+        );
+        const outside = await clickAt(row.x - edge, row.y + row.h / 2, NEGATIVE_BUDGET_MS);
+        check(
+          `${edge}px outside the left edge of spell.row.0 does not activate it`,
+          outside.key !== "spell.row.0",
+          shown([row.x - edge, row.y + row.h / 2], outside)
+        );
+      }
+
+      const back = await rectOf("rail.tab.inventory");
+      if (back) {
+        await clickAt(back.x + back.w / 2, back.y + back.h / 2);
+      }
+    }
+
     // Dragging an item, driven by a real pointer.
     //
     // This cannot be tested in a headless Bevy app for the same reason clicking
