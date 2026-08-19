@@ -28,6 +28,18 @@ const flag = (name, fallback) => {
 const url = flag("url", "http://127.0.0.1:8080");
 const skipVersionCheck = args.includes("--any-build");
 
+/// Run one section instead of all of them.
+///
+/// `--only hits` runs the pointer battery alone. The whole suite takes the better part
+/// of an hour under software rendering, and iterating on one question at that cost is
+/// how a harness stops being run at all.
+const only = flag("only", null);
+const SECTIONS = ["layout", "hits"];
+if (only && !SECTIONS.includes(only)) {
+  throw new Error(`--only takes one of ${SECTIONS.join(", ")}`);
+}
+const runs = (section) => !only || only === section;
+
 /// Sizes the task requires, plus a deliberately awkward one.
 const VIEWPORTS = [
   { name: "720p", width: 1280, height: 720 },
@@ -641,6 +653,7 @@ async function main() {
   });
 
   try {
+    if (runs("layout")) {
     for (const viewport of VIEWPORTS) {
       console.log(`  ${viewport.name} (${viewport.width}x${viewport.height})`);
       const context = await browser.newContext({
@@ -885,7 +898,9 @@ async function main() {
       `backing store went through ${JSON.stringify(sizes)}`
     );
     await settleContext.close();
+    }
 
+    if (runs("hits")) {
     // Hit testing, in a real browser, because that is the only place the question
     // can be asked. Headless Bevy's UI picking has no render target to map a
     // pointer through and reports a hit on the root node whatever the position.
@@ -1073,6 +1088,7 @@ async function main() {
     );
     check("no scrollbars at 4K", !big.scrollsHorizontally && !big.scrollsVertically);
     await bigContext.close();
+    }
   } finally {
     await browser.close();
   }

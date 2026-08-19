@@ -500,14 +500,6 @@ pub enum TextEdit {
 
 /// The control a picking `Click` activated this frame, if any.
 ///
-/// Exists so the two activation paths cannot both fire for one click. A slow
-/// click spans frames and is seen by both; a fast one is seen only by the event.
-/// Set by the observer, read and cleared by `track_pointer` later in the same
-/// frame, which is exactly one frame's worth of memory — a longer-lived guard
-/// swallowed every *repeat* click on the same control, which is worse than the
-/// double activation it was avoiding.
-#[derive(Resource, Debug, Clone, Copy, Default)]
-struct ClickedThisFrame(Option<Entity>);
 
 /// Whether text input currently owns the keyboard.
 ///
@@ -578,7 +570,6 @@ impl Plugin for ControlsPlugin {
                     .chain()
                     .in_set(ControlSet::Interact),
             )
-            .init_resource::<ClickedThisFrame>()
             .add_observer(activate_on_click)
             .add_systems(Update, present_controls.in_set(ControlSet::Present))
             .init_resource::<TextInputActive>()
@@ -611,7 +602,6 @@ fn track_pointer(
     mut controls: Query<(Entity, &Interaction, &mut Control, Option<&ControlKey>)>,
     mut focus: ResMut<FocusOwner>,
     mut activated: MessageWriter<Activated>,
-    mut clicked: ResMut<ClickedThisFrame>,
 ) {
     for (entity, interaction, mut control, key) in &mut controls {
         let was_pressed = control.pressed;
@@ -628,38 +618,38 @@ fn track_pointer(
 
         if matches!(interaction, Interaction::Pressed) {
             focus.focus(entity, key);
-            // A new press earns a new action. Cleared on the rising edge only, so the
-            // guard lasts exactly as long as the press it describes however many
-            // frames that takes.
-            if !was_pressed {
-                control.activated_in_press = false;
+            // Deliberately *not* cleared here. Clearing on the rising edge looks
+            // right — a new press earns a new action — but the click event and the
+            // first observed press can land in the same frame: under load the
+            // browser delivers press and release together, the event fires during
+            // picking, and this system then runs afterwards and sees `Pressed` for
+            // the first time. Clearing there wiped the flag the event had just set,
+            // and the release frame activated a second time. Measured, twice per
+            // click, with both activations naming the same entity.
+            continue;
+        }
+
+        // Everything below is the frame in which the control is no longer pressed.
+        if was_pressed {
+            // Released. Over the control it is an activation; anywhere else the press
+            // slid off and is a cancellation, as every desktop toolkit behaves.
+            //
+            // Polled state only, which is why `activate_on_click` exists alongside it:
+            // a press and release inside one frame is never *observed* as pressed, so
+            // this path alone swallowed fast clicks. It stays because it works without
+            // a picking backend, which is the only thing a headless test has.
+            if matches!(interaction, Interaction::Hovered) && !control.activated_in_press {
+                activated.write(Activated { entity, source: ActivationSource::Pointer });
             }
         }
 
-        // Released while still over the control.
-        //
-        // Polled state only, which is why `activate_on_click` exists alongside it:
-        // a press and release inside one frame is never *observed* as pressed, so
-        // this path alone swallowed fast clicks. It stays because it works without
-        // a picking backend, which is the only thing a headless test has.
-        //
-        // Skipped when the event already reported this press, or a click slow
-        // enough to be seen by both would activate twice — two potions from one
-        // click.
-        if was_pressed
-            && matches!(interaction, Interaction::Hovered)
-            && !control.activated_in_press
-            && clicked.0 != Some(entity)
-        {
-            control.activated_in_press = true;
-            activated.write(Activated { entity, source: ActivationSource::Pointer });
-        }
+        // The press is over either way, so the guard ends with it. Ending it here
+        // rather than at the next press is what makes it survive a click whose event
+        // and first observed press share a frame — and clearing it when the control is
+        // merely idle is what keeps a *repeat* click working after a fast click the
+        // polled path never saw as pressed at all.
+        control.activated_in_press = false;
     }
-
-    // One frame's worth of memory, cleared here because this system is the last
-    // reader of it. It remains as the same-frame fast path; the per-press flag on
-    // the control is what survives a press that spans frames.
-    clicked.0 = None;
 }
 
 /// Activate on the picking event rather than on polled state.
@@ -678,7 +668,6 @@ fn activate_on_click(
     mut controls: Query<(&mut Control, Option<&ControlKey>)>,
     mut focus: ResMut<FocusOwner>,
     mut activated: MessageWriter<Activated>,
-    mut clicked: ResMut<ClickedThisFrame>,
 ) {
     let entity = click.entity;
     let Ok((mut control, key)) = controls.get_mut(entity) else {
@@ -694,7 +683,6 @@ fn activate_on_click(
     }
 
     control.activated_in_press = true;
-    clicked.0 = Some(entity);
     focus.focus(entity, key);
     activated.write(Activated { entity, source: ActivationSource::Pointer });
 }
@@ -2362,6 +2350,70 @@ mod tests {
             app.world().resource::<Counted>().0,
             1,
             "one click produced more than one activation"
+        );
+    }
+
+    #[test]
+    fn a_click_whose_event_and_first_observed_press_share_a_frame_activates_once() {
+        // The hole in the first attempt at this guard, found in a browser under load
+        // and reproduced here. When a frame takes half a second the browser delivers
+        // press and release together: the picking event fires during `PreUpdate`, and
+        // the polled path then runs in the same frame and sees `Pressed` for the very
+        // first time. Clearing the guard on that rising edge wiped what the event had
+        // just recorded, and the release frame activated a second time — twice per
+        // click, both naming the same entity.
+        #[derive(Resource, Default)]
+        struct Counted(usize);
+        fn count(mut activated: MessageReader<Activated>, mut counted: ResMut<Counted>) {
+            counted.0 += activated.read().count();
+        }
+
+        let (mut app, controls) = control_app(1);
+        app.init_resource::<Counted>().add_systems(Update, count);
+        let entity = controls[0];
+
+        // The event first, then the frame in which the press is finally observed.
+        *app.world_mut().get_mut::<Interaction>(entity).expect("interactive") =
+            Interaction::Pressed;
+        fire_click_event(&mut app, entity);
+        app.update();
+
+        // Then the release.
+        set_interaction(&mut app, entity, Interaction::Hovered);
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<Counted>().0,
+            1,
+            "a click whose event and press shared a frame activated more than once"
+        );
+    }
+
+    #[test]
+    fn a_fast_click_the_polled_path_never_sees_does_not_block_the_next_one() {
+        // The opposite failure, and the reason the guard ends with the press rather
+        // than at the next one: a click delivered inside a single frame is never
+        // observed as pressed at all, so nothing would ever release a guard that only
+        // a press could clear — and the control would work exactly once.
+        #[derive(Resource, Default)]
+        struct Counted(usize);
+        fn count(mut activated: MessageReader<Activated>, mut counted: ResMut<Counted>) {
+            counted.0 += activated.read().count();
+        }
+
+        let (mut app, controls) = control_app(1);
+        app.init_resource::<Counted>().add_systems(Update, count);
+        let entity = controls[0];
+
+        for _ in 0..3 {
+            fire_click_event(&mut app, entity);
+            app.update();
+        }
+
+        assert_eq!(
+            app.world().resource::<Counted>().0,
+            3,
+            "a control that is only ever clicked quickly stopped responding"
         );
     }
 
