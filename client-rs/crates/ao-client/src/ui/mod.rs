@@ -13,6 +13,7 @@ pub mod controls;
 pub mod fonts;
 pub mod hotbar;
 pub mod icons;
+pub mod labels;
 pub mod layout;
 pub mod pointer;
 pub mod rail;
@@ -70,6 +71,7 @@ impl Plugin for UiPlugin {
             spells::SpellPanelPlugin,
             chat::ChatPanelPlugin,
             target::TargetPanelPlugin,
+            labels::LabelPlugin,
             hotbar::HotbarPlugin,
         ));
     }

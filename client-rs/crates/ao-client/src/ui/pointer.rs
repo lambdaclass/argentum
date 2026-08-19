@@ -119,6 +119,33 @@ pub fn world_position_at(
     camera_centre + Vec2::new(from_centre.x, -from_centre.y) / per_world_unit
 }
 
+/// Where a world position lands on screen, in logical pixels.
+///
+/// The inverse of [`world_position_at`], and here rather than in the panel that needs it
+/// for the reason this module exists: every transform between the world and the screen is
+/// applied in one place, exactly once. A label that computed its own position would be a
+/// second copy of the device ratio and the zoom.
+pub fn screen_of_world(
+    world: Vec2,
+    view: Rect,
+    domains: ScaleDomains,
+    camera_centre: Vec2,
+) -> Vec2 {
+    let per_world_unit = domains.world as f32;
+    let from_centre = (world - camera_centre) * per_world_unit;
+    // Screen y grows downward and world y grows upward, the same flip as the forward
+    // direction and the one thing that must not be applied twice.
+    view.center() + Vec2::new(from_centre.x, -from_centre.y)
+}
+
+/// The centre of a tile, in world units.
+///
+/// `tile_to_world` gives a tile's top-left corner, which is where a sprite is anchored. A
+/// label belongs over the middle of the thing it names.
+pub fn tile_centre(tile: IVec2) -> Vec2 {
+    tile_to_world(tile) + Vec2::new(TILE_SIZE / 2.0, -TILE_SIZE / 2.0)
+}
+
 /// Tile containing a world position.
 ///
 /// Tiles are addressed from 1 and `tile_to_world` returns a tile's top-left
@@ -355,15 +382,6 @@ mod tests {
         ("fullscreen", Vec2::new(2560.0, 1440.0)),
     ];
 
-    /// Centre of a tile in world units.
-    ///
-    /// Not `splat(TILE_SIZE / 2)`: tile y grows downward while world y grows
-    /// upward, so the centre is half a tile right and half a tile *down*, which
-    /// is negative. Getting this wrong in a test reports an off-by-one in the
-    /// code that is really an off-by-one in the expectation.
-    fn tile_centre(tile: IVec2) -> Vec2 {
-        tile_to_world(tile) + Vec2::new(TILE_SIZE / 2.0, -TILE_SIZE / 2.0)
-    }
 
     /// The world's share of a window, as the shell lays it out.
     fn world_region_of(window: Vec2) -> Vec2 {

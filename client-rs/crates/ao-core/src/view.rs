@@ -417,12 +417,36 @@ impl HotbarState {
 }
 
 /// What kind of thing is targeted, which decides what actions are offered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TargetKind {
+    #[default]
     Player,
     Npc,
     Hostile,
     Item,
+}
+
+/// Someone or something standing on the map, as the interface needs to label it.
+///
+/// Not the world renderer's entity: this is the small part of a presence the *interface*
+/// draws — a name over a head, a line of speech, a number rising off a hit. The renderer
+/// owns sprites and animation; a name is text, and text is the UI's problem.
+///
+/// Tiles rather than pixels, because a screen position depends on the camera and this is
+/// what the server actually says.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PresenceView {
+    pub id: i32,
+    pub name: String,
+    pub kind: TargetKind,
+    pub tile_x: u8,
+    pub tile_y: u8,
+    /// What they just said, if anything. Shown as a bubble over their head.
+    pub bubble: Option<String>,
+    /// Damage or healing that just landed on them, as a signed amount: negative is
+    /// damage. `None` when nothing did — a zero would be drawn as a hit for no damage,
+    /// which is a real event and a different one.
+    pub combat: Option<i32>,
 }
 
 /// The current target.
@@ -783,6 +807,8 @@ pub struct UiSnapshot {
     pub minimap: MinimapState,
     pub world_map: WorldMapState,
     pub world: WorldStatus,
+    /// Everyone the client can see, for names, bubbles and combat text.
+    pub presences: Vec<PresenceView>,
     pub feedback: Vec<Feedback>,
     /// True while the snapshot is a placeholder awaiting real data. Distinct
     /// from empty: "no items" and "not loaded yet" look different and mean
@@ -830,6 +856,7 @@ impl UiSnapshot {
             && self.minimap == other.minimap
             && self.world_map == other.world_map
             && self.world == other.world
+            && self.presences == other.presences
             && self.feedback == other.feedback
             && self.loading == other.loading
             && hotbars_match(&self.hotbar, &other.hotbar)

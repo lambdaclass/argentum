@@ -194,6 +194,56 @@ fn populated() -> UiSnapshot {
             markers: vec![MapMarker { x: 50, y: 50, kind: MarkerKind::Player }],
         },
         progression: base_progression("Aldar", 14),
+        // Enough company to judge the HUD under real density rather than on an empty
+        // map: two citizens, a merchant, two hostiles, one of them speaking and one of
+        // them taking a hit. The player is at 50,50 and the camera follows them.
+        presences: vec![
+            PresenceView {
+                id: 1,
+                name: "Borzug".to_string(),
+                kind: TargetKind::Player,
+                tile_x: 52,
+                tile_y: 49,
+                bubble: Some("cuidado con el lobo".to_string()),
+                combat: None,
+            },
+            PresenceView {
+                id: 2,
+                name: "Nithal".to_string(),
+                kind: TargetKind::Player,
+                tile_x: 48,
+                tile_y: 52,
+                bubble: None,
+                combat: Some(-12),
+            },
+            PresenceView {
+                id: 3,
+                name: "Provisiones".to_string(),
+                kind: TargetKind::Npc,
+                tile_x: 47,
+                tile_y: 47,
+                bubble: None,
+                combat: None,
+            },
+            PresenceView {
+                id: 4,
+                name: "Lobo".to_string(),
+                kind: TargetKind::Hostile,
+                tile_x: 51,
+                tile_y: 53,
+                bubble: None,
+                combat: Some(-34),
+            },
+            PresenceView {
+                id: 5,
+                name: "Serpiente".to_string(),
+                kind: TargetKind::Hostile,
+                tile_x: 54,
+                tile_y: 51,
+                bubble: None,
+                combat: None,
+            },
+        ],
         vitals: PlayerVitals {
             health: Gauge::new(148, 220),
             mana: Gauge::new(130, 150),
@@ -271,6 +321,14 @@ fn populated() -> UiSnapshot {
         chat: chat(vec![
             line(ChatChannel::System, "", "chat.welcome"),
             line(ChatChannel::Say, "Borzug", "chat.sample.greeting"),
+            line(ChatChannel::Say, "Borzug", "cuidado con el lobo"),
+            line(ChatChannel::Whisper, "Nithal", "tengo pociones si necesitas"),
+            line(ChatChannel::Party, "Nithal", "vamos al norte"),
+            line(ChatChannel::Guild, "Aldar", "reunion en la plaza"),
+            line(ChatChannel::Faction, "Heraldo", "las puertas de Nix estan abiertas"),
+            // Combat text belongs in the log as well as over the head: a player who
+            // looked away needs to be able to read what hit them.
+            line(ChatChannel::System, "", "el lobo te quita 34 puntos de vida"),
         ]),
         skills: SkillsState {
             skills: vec![

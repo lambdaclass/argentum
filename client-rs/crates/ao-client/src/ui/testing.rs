@@ -82,11 +82,16 @@ pub fn shell_app_at(size: Vec2, device_pixel_ratio: f32) -> App {
         super::spells::SpellPanelPlugin,
         super::chat::ChatPanelPlugin,
         super::target::TargetPanelPlugin,
+        super::labels::LabelPlugin,
         // The hotbar is part of the shell, so a harness without it answers
         // questions about a shell that does not exist.
         super::hotbar::HotbarPlugin,
     ))
     .init_resource::<crate::world::ViewRadius>()
+    // The player the harness's camera is already looking at. `WorldPlugin` provides this
+    // in production; without it the label layer has nobody to measure distance from, and
+    // every shell test fails on a missing resource rather than on its own question.
+    .init_resource::<crate::world::LocalPlayer>()
     // The graphics resources the rail's rebuild reads to resolve item artwork.
     // Empty here: no sheets have arrived, which is the case every slot's fallback
     // exists for, and the one a headless test can actually reproduce.

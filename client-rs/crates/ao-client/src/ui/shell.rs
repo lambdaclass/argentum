@@ -211,6 +211,23 @@ pub fn spawn_shell(mut commands: Commands) {
                         TargetStrip,
                     ));
 
+                    // Names, bubbles and combat text, in their own layer over the world
+                    // and under the panels: a bubble may cover the ground and must never
+                    // cover the rail.
+                    world.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(0.0),
+                            top: Val::Px(0.0),
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            overflow: Overflow::clip(),
+                            ..default()
+                        },
+                        Pickable::IGNORE,
+                        super::labels::LabelLayer,
+                    ));
+
                     // Notices, above where the hotbar sits: low and central, where a
                     // player's attention already is during a fight.
                     world.spawn((
