@@ -84,6 +84,7 @@ impl Plugin for CharacterPanelPlugin {
             .init_resource::<DragState>()
             .init_resource::<SplitAmount>()
             .init_resource::<PendingSlot>()
+            .init_resource::<RefusedSlot>()
             .add_observer(begin_slot_drag)
             .add_observer(track_slot_drag_over)
             .add_observer(finish_slot_drag)
@@ -234,6 +235,38 @@ impl PendingSlot {
 /// How long an unanswered intent blocks its slot.
 const PENDING_TIMEOUT_SECS: f32 = 2.0;
 
+/// The slot whose action the authority refused, and for how long that is worth
+/// saying.
+///
+/// Separate from the feedback list because the two answer different questions. The
+/// feedback says *what* was refused, in words, somewhere the player has to read; this
+/// says *where*, on the thing they clicked. A rejection that only appears as a line of
+/// text leaves the slot looking exactly as it did when the action was accepted, which
+/// is how a player comes to believe the interface ignored them and clicks again.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct RefusedSlot {
+    pub slot: Option<usize>,
+    pub expires_in: f32,
+}
+
+impl RefusedSlot {
+    fn mark(&mut self, slot: usize) {
+        self.slot = Some(slot);
+        self.expires_in = REFUSAL_VISIBLE_SECS;
+    }
+
+    fn clear(&mut self) {
+        self.slot = None;
+        self.expires_in = 0.0;
+    }
+}
+
+/// How long a refusal stays marked on its slot.
+///
+/// Long enough to be seen after the click that caused it, short enough that it cannot
+/// be mistaken for the slot's resting state.
+const REFUSAL_VISIBLE_SECS: f32 = 2.5;
+
 /// How close together two activations count as a double click.
 const DOUBLE_CLICK_SECS: f32 = 0.4;
 
@@ -301,9 +334,34 @@ fn apply_slot_activations(
 ///
 /// Any snapshot change counts: the server's reply is a new snapshot, and an
 /// accepted action and a rejected one both produce one.
-fn clear_pending_on_answer(state: Res<UiState>, mut pending: ResMut<PendingSlot>) {
-    if state.is_changed() && pending.slot.is_some() {
-        pending.clear();
+fn clear_pending_on_answer(
+    state: Res<UiState>,
+    time: Res<Time>,
+    mut pending: ResMut<PendingSlot>,
+    mut refused: ResMut<RefusedSlot>,
+) {
+    // Expire first, so a refusal marked by this same answer keeps its full life.
+    if refused.expires_in > 0.0 {
+        let remaining = (refused.expires_in - time.delta_secs()).max(0.0);
+        refused.expires_in = remaining;
+        if remaining == 0.0 {
+            refused.clear();
+        }
+    }
+
+    if state.is_changed() {
+        if let Some(slot) = pending.slot {
+            // A refusal is an answer that changed nothing but the feedback. Told apart
+            // by the feedback the authority attaches to it: an acceptance carries none.
+            // This is a fixture-backed rule — the real adapter will answer per intent,
+            // and then this reads the answer rather than inferring it.
+            if !state.get().feedback.is_empty() {
+                refused.mark(slot);
+            } else {
+                refused.clear();
+            }
+            pending.clear();
+        }
     }
 }
 
@@ -394,7 +452,10 @@ fn rebuild_on_change(
     sheets: Res<crate::graphics::SheetTextures>,
     mut atlases: ResMut<crate::world::SheetAtlases>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
+    pending: Res<PendingSlot>,
+    refused: Res<RefusedSlot>,
     mut last_drawable: Local<usize>,
+    mut last_marks: Local<(Option<usize>, Option<usize>)>,
     mut commands: Commands,
 ) {
     // Artwork arrives asynchronously, long after the snapshot that named it, and
@@ -429,11 +490,20 @@ fn rebuild_on_change(
     let artwork_arrived = *last_drawable != drawable;
     *last_drawable = drawable;
 
+    // Which slot is waiting and which was refused, compared by value rather than by
+    // change tick: both resources count down every frame, so `is_changed` is true every
+    // frame and gating on it would rebuild the whole rail continuously — throwing away
+    // focus and artwork sixty times a second to show a mark that has not moved.
+    let marks = (pending.slot, refused.slot);
+    let marks_moved = *last_marks != marks;
+    *last_marks = marks;
+
     if !state.is_changed()
         && !selected.is_changed()
         && !drag.is_changed()
         && !geometry.is_changed()
         && !artwork_arrived
+        && !marks_moved
     {
         return;
     }
@@ -487,7 +557,15 @@ fn rebuild_on_change(
                 commands.entity(entity).with_children(|parent| {
                     parent.spawn((
                         PanelContent,
-                        inventory_grid(snapshot, selected.0, drag.over, inner, &mut icon_for),
+                        inventory_grid(
+                            snapshot,
+                            selected.0,
+                            drag.over,
+                            pending.slot,
+                            refused.slot,
+                            inner,
+                            &mut icon_for,
+                        ),
                     ));
                 });
             }
@@ -723,6 +801,8 @@ fn inventory_grid(
     snapshot: &UiSnapshot,
     selected: Option<usize>,
     drag_over: Option<usize>,
+    waiting: Option<usize>,
+    refused: Option<usize>,
     rail_width: f32,
     icon_for: &mut dyn FnMut(&ItemView) -> Option<ItemIcon>,
 ) -> impl Bundle {
@@ -768,6 +848,8 @@ fn inventory_grid(
                         index,
                         selected,
                         drag_over,
+                        waiting,
+                        refused,
                         slot,
                         icons[index].clone(),
                     )
@@ -781,14 +863,22 @@ fn inventory_slot(
     index: usize,
     selected: Option<usize>,
     drag_over: Option<usize>,
+    waiting: Option<usize>,
+    refused: Option<usize>,
     size_px: f32,
     icon: Option<ItemIcon>,
 ) -> impl Bundle {
     let is_selected = selected == Some(index);
     let is_drop_target = drag_over == Some(index) && slot.accepts_drop();
+    let is_waiting = waiting == Some(index);
+    let was_refused = refused == Some(index);
     let locked = matches!(slot, SlotState::Locked);
 
-    let border = if is_selected {
+    // A refusal outranks the rest: it is the newest thing that happened and the only
+    // one the player may not have expected.
+    let border = if was_refused {
+        status::DANGER
+    } else if is_selected {
         focus::SELECTED
     } else if is_drop_target {
         focus::RING
@@ -857,6 +947,25 @@ fn inventory_slot(
         SlotState::Empty => {}
     }
 
+    // Waiting and refused are marked with a glyph as well as a colour, because this
+    // phase's gates forbid state carried by colour alone — and because the two states
+    // mean opposite things to a player deciding whether to click again.
+    if is_waiting {
+        children.push((
+            corner_leading(),
+            Text::new("\u{2026}"),
+            TextFont { font_size: type_scale::MICRO, ..default() },
+            TextColor(ink::MUTED),
+        ));
+    } else if was_refused {
+        children.push((
+            corner_leading(),
+            Text::new("!"),
+            TextFont { font_size: type_scale::MICRO, ..default() },
+            TextColor(status::DANGER),
+        ));
+    }
+
     (
         Node {
             width: Val::Px(size_px),
@@ -906,6 +1015,16 @@ fn inventory_slot(
         super::controls::interactive(100 + index as u32, !locked),
         Children::spawn(SpawnIter(children.into_iter())),
     )
+}
+
+/// The slot's free corner: the quantity and equipped markers own the trailing edge.
+fn corner_leading() -> Node {
+    Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(space::HAIR),
+        top: Val::Px(space::HAIR),
+        ..default()
+    }
 }
 
 /// The last segment of a localisation key, as a stand-in until the catalogue
@@ -1246,6 +1365,7 @@ mod tests {
         app.init_resource::<UiState>()
             .init_resource::<SelectedSlot>()
             .init_resource::<PendingSlot>()
+            .init_resource::<RefusedSlot>()
             .insert_resource(ButtonInput::<KeyCode>::default())
             .insert_resource(Time::<()>::default())
             .add_message::<super::super::controls::Activated>()
@@ -1294,6 +1414,147 @@ mod tests {
 
     fn intents(app: &App) -> Vec<Intent> {
         app.world().resource::<Recorded>().0.clone()
+    }
+
+    /// Every text a slot's children carry, for asserting on what it shows.
+    fn slot_glyphs(app: &mut App, index: usize) -> Vec<String> {
+        let grid = app
+            .world_mut()
+            .query::<(&InventorySlotButton, &Children)>()
+            .iter(app.world())
+            .find(|(button, _)| button.index == index)
+            .map(|(_, children)| children.iter().collect::<Vec<_>>())
+            .unwrap_or_default();
+        grid.into_iter()
+            .filter_map(|child| app.world().get::<Text>(child).map(|text| text.0.clone()))
+            .collect()
+    }
+
+    /// The slot's border colour, which is how selection and refusal differ at a glance.
+    fn slot_border(app: &mut App, index: usize) -> Option<Color> {
+        let entity = app
+            .world_mut()
+            .query::<(Entity, &InventorySlotButton)>()
+            .iter(app.world())
+            .find(|(_, button)| button.index == index)
+            .map(|(entity, _)| entity)?;
+        app.world().get::<BorderColor>(entity).map(|border| border.top)
+    }
+
+    #[test]
+    fn a_slot_waiting_for_an_answer_says_so() {
+        // The pending guard already refuses a second intent. Silently: the slot looked
+        // exactly as it had before the click, so the one thing a player does when an
+        // interface appears to ignore them — click again — was met with nothing at all.
+        use super::super::testing;
+
+        let mut app = testing::shell_app(Vec2::new(1280.0, 832.0));
+        for _ in 0..4 {
+            app.update();
+        }
+        assert!(
+            !slot_glyphs(&mut app, 0).iter().any(|glyph| glyph == "\u{2026}"),
+            "a resting slot already claims to be waiting"
+        );
+
+        app.world_mut().resource_mut::<PendingSlot>().mark(0);
+        app.update();
+
+        assert!(
+            slot_glyphs(&mut app, 0).iter().any(|glyph| glyph == "\u{2026}"),
+            "a slot waiting for the authority shows nothing: {:?}",
+            slot_glyphs(&mut app, 0)
+        );
+    }
+
+    #[test]
+    fn a_refused_action_is_marked_on_the_slot_it_was_refused_for() {
+        // Rollback presentation, on the thing the player clicked. A refusal that
+        // appears only as a line of text somewhere else leaves the slot looking like
+        // one whose action was accepted.
+        use super::super::testing;
+
+        let mut app = testing::shell_app(Vec2::new(1280.0, 832.0));
+        for _ in 0..4 {
+            app.update();
+        }
+        let resting = slot_border(&mut app, 0);
+
+        app.world_mut().resource_mut::<RefusedSlot>().mark(0);
+        app.update();
+
+        assert!(
+            slot_glyphs(&mut app, 0).iter().any(|glyph| glyph == "!"),
+            "a refused slot shows no mark: {:?}",
+            slot_glyphs(&mut app, 0)
+        );
+        assert_ne!(
+            slot_border(&mut app, 0),
+            resting,
+            "a refused slot is drawn exactly like a resting one"
+        );
+    }
+
+    #[test]
+    fn a_refusal_marks_the_slot_and_an_acceptance_does_not() {
+        // Driven through the production systems: the authority answers, and the
+        // difference between the two answers is what decides the mark.
+        let mut app = activation_app();
+        let slot = app.1;
+        let app = &mut app.0;
+
+        // Accepted: the snapshot changes and carries no feedback.
+        app.world_mut().resource_mut::<PendingSlot>().mark(0);
+        let mut accepted = app.world().resource::<UiState>().get().clone();
+        accepted.feedback.clear();
+        accepted.inventory.slots[0] = SlotState::Empty;
+        UiState::set(&mut app.world_mut().resource_mut::<UiState>(), accepted);
+        app.update();
+        assert_eq!(
+            app.world().resource::<RefusedSlot>().slot,
+            None,
+            "an accepted action was marked as refused"
+        );
+
+        // Refused: the answer changes nothing but the feedback.
+        app.world_mut().resource_mut::<PendingSlot>().mark(2);
+        let mut refused = app.world().resource::<UiState>().get().clone();
+        refused.feedback =
+            vec![ao_core::view::Feedback::new(ao_core::view::FeedbackKey::Blocked)];
+        UiState::set(&mut app.world_mut().resource_mut::<UiState>(), refused);
+        app.update();
+        assert_eq!(
+            app.world().resource::<RefusedSlot>().slot,
+            Some(2),
+            "a refusal left no mark on the slot it refused"
+        );
+        assert_eq!(
+            app.world().resource::<PendingSlot>().slot,
+            None,
+            "the guard outlived the answer that released it"
+        );
+    }
+
+    #[test]
+    fn selection_survives_a_snapshot_that_does_not_touch_it() {
+        // Selection is keyed by slot, and the snapshot arrives many times a second
+        // for reasons that have nothing to do with the inventory. A selection that
+        // cleared on every heartbeat would be unusable, and the details panel would
+        // blink back to "select an item" while the player was reading it.
+        let (mut app, slot) = activation_app();
+        activate(&mut app, slot);
+        assert_eq!(app.world().resource::<SelectedSlot>().0, Some(0));
+
+        let mut unrelated = app.world().resource::<UiState>().get().clone();
+        unrelated.vitals.health.current -= 1;
+        UiState::set(&mut app.world_mut().resource_mut::<UiState>(), unrelated);
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<SelectedSlot>().0,
+            Some(0),
+            "an unrelated snapshot cleared the selection"
+        );
     }
 
     #[test]
