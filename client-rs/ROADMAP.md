@@ -227,7 +227,7 @@ decorative asset is project-owned or licensed for this client.
 
 ### Task W-0085 — Pointer and hit-test coordinate integrity
 
-- **State:** planned
+- **State:** active
 - **Phase:** 0
 - **Depends on:** W-0003, W-0005
 

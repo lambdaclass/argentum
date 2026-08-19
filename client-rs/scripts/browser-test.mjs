@@ -175,8 +175,14 @@ async function runHitTests(hitPage, label, ratio) {
     /// "activate" it while the same click, measured in isolation, behaved perfectly.
     /// Measured against the published frame counter rather than a sleep, because the
     /// speed of a software renderer on a loaded machine is not a constant.
+    /// The rate is not a round number picked for comfort: a click is answered within a
+    /// few frames, so the ten-second budget below is only meaningful while a frame is a
+    /// small fraction of it. Twenty frames inside the budget is the requirement, which
+    /// on this software renderer means two a second. Measured, not assumed — a machine
+    /// slower than that invalidates the timing rather than the client.
     const frames = () => hitPage.evaluate(() => window.aoLoaded?.frames ?? 0);
-    const WANTED_FPS = 4;
+    const CLICK_BUDGET_MS = 10_000;
+    const WANTED_FPS = Math.ceil(20 / (CLICK_BUDGET_MS / 1_000));
     let fps = 0;
     const readyDeadline = Date.now() + 45_000;
     while (Date.now() < readyDeadline) {
@@ -188,7 +194,7 @@ async function runHitTests(hitPage, label, ratio) {
     check(
       `${label}: `+"the client renders fast enough to time a click against",
       fps >= WANTED_FPS,
-      `${fps} frames per second`
+      `${fps} frames per second, ${WANTED_FPS} needed`
     );
 
     /// Click a point in canvas coordinates and report what activated, if anything.
@@ -250,7 +256,7 @@ async function runHitTests(hitPage, label, ratio) {
       // is this harness being impatient and mis-attributing the result to the next
       // probe.
       const started = Date.now();
-      const deadline = started + 10_000;
+      const deadline = started + CLICK_BUDGET_MS;
       while (Date.now() < deadline) {
         const now = await hitPage.evaluate(() => ({
           count: window.aoLoaded?.activations ?? 0,
@@ -336,6 +342,51 @@ async function runHitTests(hitPage, label, ratio) {
           shown([x, y], fired)
         );
       }
+    }
+
+    // Dragging an item, driven by a real pointer.
+    //
+    // This cannot be tested in a headless Bevy app for the same reason clicking
+    // cannot: with no render target there is nothing to map a pointer through, so the
+    // drag events never name a slot. And its whole observable result is that two slots
+    // exchanged contents, which is why the client publishes them.
+    const slotIds = () => hitPage.evaluate(() => window.aoLoaded?.inventorySlots ?? []);
+    const before = await slotIds();
+    const source = before.findIndex((id) => id > 0);
+    const target = before.findIndex((id, at) => at > source && id > 0 && id !== before[source]);
+    check(
+      `${label}: `+"two distinguishable items are available to drag between",
+      source >= 0 && target > source,
+      `slots ${JSON.stringify(before.slice(0, 8))}`
+    );
+    const from = source >= 0 ? await rectOf(`inventory.slot.${source}`) : null;
+    const onto = target > source ? await rectOf(`inventory.slot.${target}`) : null;
+    if (from && onto) {
+      await hitPage.mouse.move(canvasBox.x + from.x + from.w / 2, canvasBox.y + from.y + from.h / 2);
+      await hitPage.mouse.down();
+      // In steps, because a single jump can arrive as one event and a drag that is
+      // never seen to move is indistinguishable from a click that happened to end
+      // somewhere else.
+      await hitPage.mouse.move(
+        canvasBox.x + onto.x + onto.w / 2,
+        canvasBox.y + onto.y + onto.h / 2,
+        { steps: 12 }
+      );
+      await hitPage.mouse.up();
+
+      const wanted = [before[target], before[source]];
+      let after = before;
+      const dragDeadline = Date.now() + 15_000;
+      while (Date.now() < dragDeadline) {
+        after = await slotIds();
+        if (after[source] === wanted[0] && after[target] === wanted[1]) break;
+        await hitPage.waitForTimeout(50);
+      }
+      check(
+        `dragging inventory.slot.${source} onto inventory.slot.${target} exchanges them`,
+        after[source] === wanted[0] && after[target] === wanted[1],
+        `${JSON.stringify(before.slice(0, 8))} -> ${JSON.stringify(after.slice(0, 8))}`
+      );
     }
 
     // The world half of the same question: clicking the middle of the viewport must

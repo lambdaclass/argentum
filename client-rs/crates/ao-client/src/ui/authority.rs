@@ -82,6 +82,7 @@ fn apply(snapshot: &mut UiSnapshot, intent: &Intent) -> bool {
         Intent::UseInventorySlot { slot } => consume(snapshot, *slot, 1),
         Intent::DropInventorySlot { slot, amount } => consume(snapshot, *slot, (*amount).max(1)),
         Intent::EquipInventorySlot { slot } => equip(snapshot, *slot),
+        Intent::MoveInventorySlot { from, to } => move_slot(snapshot, *from, *to),
         _ => false,
     }
 }
@@ -101,6 +102,29 @@ fn consume(snapshot: &mut UiSnapshot, index: usize, amount: i32) -> bool {
     if item.quantity <= 0 {
         snapshot.inventory.slots[index] = SlotState::Empty;
     }
+    true
+}
+
+/// Exchange the contents of two inventory slots.
+///
+/// A swap rather than an overwrite, because the destination may hold something and
+/// destroying it would be the one outcome the player can never undo. Dropping onto an
+/// empty slot is the same operation with nothing coming back.
+///
+/// Refuses rather than reorders when either index is out of range or the destination
+/// will not take a drop: an index arrives from a gesture, and a locked slot is locked.
+fn move_slot(snapshot: &mut UiSnapshot, from: usize, to: usize) -> bool {
+    if from == to {
+        return false;
+    }
+    let slots = &mut snapshot.inventory.slots;
+    if from >= slots.len() || to >= slots.len() {
+        return false;
+    }
+    if !slots[from].accepts_drop() || !slots[to].accepts_drop() {
+        return false;
+    }
+    slots.swap(from, to);
     true
 }
 
@@ -286,6 +310,71 @@ mod tests {
 
         send(&mut app, Intent::UseInventorySlot { slot: staff });
         assert_eq!(quantity(&app, staff), before, "using a worn item consumed it");
+    }
+
+    #[test]
+    fn dragging_an_item_onto_an_occupied_slot_swaps_rather_than_destroys() {
+        // Overwriting is the one outcome the player cannot undo, so a drop onto
+        // something exchanges the two.
+        let mut app = authority_app(Scenario::Populated);
+        let before = app.world().resource::<UiState>().get().inventory.slots.clone();
+        let (from, to) = (0usize, 1usize);
+        assert!(
+            before[from].item().is_some() && before[to].item().is_some(),
+            "this test needs two occupied slots"
+        );
+
+        send(&mut app, Intent::MoveInventorySlot { from, to });
+
+        let after = app.world().resource::<UiState>().get().inventory.slots.clone();
+        assert_eq!(after[to], before[from], "the dragged item did not arrive");
+        assert_eq!(after[from], before[to], "the displaced item was destroyed");
+    }
+
+    #[test]
+    fn dragging_an_item_onto_an_empty_slot_leaves_the_origin_empty() {
+        let mut app = authority_app(Scenario::Populated);
+        let before = app.world().resource::<UiState>().get().inventory.slots.clone();
+        let from = before.iter().position(|slot| slot.item().is_some()).expect("an item");
+        let to = before
+            .iter()
+            .position(|slot| matches!(slot, SlotState::Empty))
+            .expect("an empty slot");
+
+        send(&mut app, Intent::MoveInventorySlot { from, to });
+
+        let after = app.world().resource::<UiState>().get().inventory.slots.clone();
+        assert_eq!(after[to], before[from], "the item did not move");
+        assert_eq!(after[from], SlotState::Empty, "the item was left behind as well");
+    }
+
+    #[test]
+    fn a_move_to_a_slot_that_refuses_drops_changes_nothing() {
+        let mut app = authority_app(Scenario::Populated);
+        let before = app.world().resource::<UiState>().get().inventory.slots.clone();
+        let locked = before
+            .iter()
+            .position(|slot| matches!(slot, SlotState::Locked))
+            .expect("the fixture carries a locked slot");
+
+        send(&mut app, Intent::MoveInventorySlot { from: 0, to: locked });
+
+        assert_eq!(
+            app.world().resource::<UiState>().get().inventory.slots,
+            before,
+            "a locked slot took a drop"
+        );
+    }
+
+    #[test]
+    fn an_out_of_range_move_is_refused_rather_than_panicking() {
+        // The indices come from a gesture, and a stale rebuild can outlive a slot.
+        let mut app = authority_app(Scenario::Populated);
+        let before = app.world().resource::<UiState>().get().inventory.slots.clone();
+
+        send(&mut app, Intent::MoveInventorySlot { from: 0, to: 9_999 });
+
+        assert_eq!(app.world().resource::<UiState>().get().inventory.slots, before);
     }
 
     #[test]

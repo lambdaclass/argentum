@@ -490,6 +490,33 @@ mod tests {
     }
 
     #[test]
+    fn no_two_controls_share_a_key() {
+        // A key names one control. Two entities answering to the same one is
+        // undetectable from inside the client and ruinous outside it: the published
+        // rectangles are looked up by key, so automation measures the first entity and
+        // the pointer hits whichever is actually there — which reads as a hit-testing
+        // error a couple of pixels wide rather than as a duplicated panel.
+        //
+        // The same ambiguity reaches players through the keyboard: Tab visits both,
+        // and the second visit looks like a control that swallowed the focus ring.
+        let mut app = camera_app(Vec2::new(1280.0, 800.0));
+        for _ in 0..8 {
+            app.update();
+        }
+
+        let mut counts = std::collections::BTreeMap::<String, usize>::new();
+        let mut keys = app.world_mut().query::<&crate::ui::controls::ControlKey>();
+        for key in keys.iter(app.world()) {
+            *counts.entry(key.as_str().to_string()).or_default() += 1;
+        }
+
+        let duplicated: Vec<_> =
+            counts.iter().filter(|(_, count)| **count > 1).map(|(key, count)| format!("{key} x{count}")).collect();
+        assert!(!counts.is_empty(), "the shell published no keyed controls at all");
+        assert!(duplicated.is_empty(), "these keys name more than one entity: {duplicated:?}");
+    }
+
+    #[test]
     fn the_world_camera_is_clipped_and_the_shell_camera_is_not() {
         // The regression, checked against the real system rather than a
         // hand-built stand-in: one camera with the world's viewport clipped

@@ -119,6 +119,7 @@ fn publish(
     pointer: Res<crate::ui::pointer::PointerState>,
     geometry: Res<crate::ui::shell::AppliedGeometry>,
     windows: Query<&Window>,
+    state: Res<crate::ui::state::UiState>,
     mut frames: Local<u64>,
 ) {
     // Republished every frame: `hovered` changes with the pointer and nothing
@@ -163,6 +164,23 @@ fn publish(
             &wasm_bindgen::JsValue::from_str(key),
         );
     }
+
+    // What is in each inventory slot, as object ids with zero for empty.
+    //
+    // A drag has no other observable outcome: the gesture is a pointer sequence and
+    // its whole result is that two slots exchanged contents. Without this the only
+    // browser-side evidence available is that the client did not crash, which is not
+    // evidence that anything moved.
+    let slots = js_sys::Array::new();
+    for slot in state.get().inventory.slots.iter() {
+        let id = slot.item().map(|item| item.item_id).unwrap_or(0);
+        slots.push(&wasm_bindgen::JsValue::from_f64(id as f64));
+    }
+    let _ = js_sys::Reflect::set(
+        &report,
+        &wasm_bindgen::JsValue::from_str("inventorySlots"),
+        &slots,
+    );
 
     // Where every keyed control actually is, in CSS pixels of the canvas, so a test
     // can click a control by position rather than by guessing at layout.
