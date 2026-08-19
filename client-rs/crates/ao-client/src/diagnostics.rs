@@ -228,6 +228,20 @@ fn publish(
         set("worldY", shell.world.min.y as f64);
         set("worldW", shell.world.width() as f64);
         set("worldH", shell.world.height() as f64);
+        // Which rail the shell chose. Automation needs it to know *which* controls
+        // ought to exist: the compact navigation strip is deliberately absent from the
+        // full rail, where those actions live in the top bar. Without this a harness
+        // either hard-codes the breakpoint — a copy of client logic that can drift — or
+        // treats a control's absence as unremarkable, which is how a shrinking sample
+        // passes a "the sample is available" check.
+        let _ = js_sys::Reflect::set(
+            &report,
+            &wasm_bindgen::JsValue::from_str("railCompact"),
+            &wasm_bindgen::JsValue::from_bool(matches!(
+                shell.rail_mode,
+                crate::ui::layout::RailMode::Compact
+            )),
+        );
     }
 
     // Where the pointer resolves in the world, so a test can check that clicking

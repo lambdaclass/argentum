@@ -233,13 +233,19 @@ async function runHitTests(hitPage, label, ratio) {
     /// "activated" it, using the previous click's result. The failures that produced
     /// were real observations of the wrong thing: measured in isolation, every one of
     /// those clicks behaved correctly.
+    /// The gap between reads is a frame and a half, not a fixed 150ms: two reads inside
+    /// one frame cannot see a counter move, so at one frame a second "quiet" meant
+    /// nothing at all and an activation still in flight was charged to the next probe —
+    /// which reported a hit one pixel outside a control after 1ms, from a click that had
+    /// happened before it.
     const settle = async () => {
+      const gap = Math.max(1.5 * frameMs, 200);
       let last = -1;
       for (let attempt = 0; attempt < 40; attempt += 1) {
         const now = await hitPage.evaluate(() => window.aoLoaded?.activations ?? 0);
         if (now === last) return now;
         last = now;
-        await hitPage.waitForTimeout(150);
+        await hitPage.waitForTimeout(gap);
       }
       return last;
     };
@@ -336,11 +342,16 @@ async function runHitTests(hitPage, label, ratio) {
     // the sample because they do not exist yet — the spellbook is W-0007 and dialogs
     // are W-0009. Missing keys are reported rather than dropped: a sample that quietly
     // shrinks to one control still passes a "sample is available" check.
+    // The compact navigation strip exists only in the compact rail — in the full rail
+    // those actions live in the top bar — so which controls *ought* to be present
+    // depends on the mode the shell chose, which it publishes rather than this harness
+    // re-deriving the breakpoint.
+    const compactRail = await hitPage.evaluate(() => window.aoLoaded?.railCompact === true);
     const WANTED_CONTROLS = [
       "inventory.slot.0",
       "hotbar.slot.0",
-      "rail.compact.nav.0",
       "action.settings",
+      ...(compactRail ? ["rail.compact.nav.0"] : []),
     ];
     const sample = WANTED_CONTROLS.map((key) =>
       controls.find((c) => c.key === key && c.enabled && c.w > 4 && c.h > 4)

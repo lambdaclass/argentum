@@ -70,6 +70,24 @@ pub fn target_at(pointer: Vec2, geometry: ShellGeometry, view: Rect) -> PointerT
     PointerTarget::Interface
 }
 
+/// A control under the pointer wins, even inside the world's rectangle.
+///
+/// The geometric classification above cannot answer this: the hotbar is anchored to
+/// the bottom centre of the *world viewport*, so every one of its slots is inside the
+/// world rectangle and classified as world. The consequence is not subtle — a click
+/// meant for a potion also selected the ground under it, so one click both drank and
+/// walked. The same applies to anything else the shell floats over the world.
+///
+/// Kept as a function of the two facts rather than folded into `target_at`, because
+/// `target_at` is pure geometry that a test can sweep exhaustively, while "is a
+/// control under the pointer" is a question only the running interface can answer.
+pub fn intercept(geometric: PointerTarget, over_control: bool) -> PointerTarget {
+    match geometric {
+        PointerTarget::World if over_control => PointerTarget::Interface,
+        other => other,
+    }
+}
+
 /// Half-open containment.
 ///
 /// A rectangle owns its left and top edges and not its right and bottom, so
@@ -162,6 +180,12 @@ fn resolve_pointer(
     applied: Res<super::shell::AppliedGeometry>,
     domains: Res<ScaleDomains>,
     cameras: Query<&Transform, With<super::shell::WorldCamera>>,
+    // Interaction rather than the hover map: it is the same state the controls
+    // themselves act on, so the world and the interface cannot disagree about which of
+    // them the pointer is over. Only controls count — the world region is a UI node
+    // too, and treating every hovered node as interface would make the world
+    // permanently unclickable.
+    controls: Query<&Interaction, With<super::controls::Control>>,
     mut pointer: ResMut<PointerState>,
 ) {
     let Ok(window) = windows.single() else {
@@ -186,7 +210,8 @@ fn resolve_pointer(
 
     let camera_centre =
         cameras.iter().next().map(|t| t.translation.truncate()).unwrap_or(Vec2::ZERO);
-    let target = target_at(position, geometry, view);
+    let over_control = controls.iter().any(|interaction| !matches!(interaction, Interaction::None));
+    let target = intercept(target_at(position, geometry, view), over_control);
 
     *pointer = PointerState {
         position: Some(position),
@@ -256,6 +281,68 @@ mod tests {
                 "{inside_ui:?} is over the interface but named a world tile"
             );
         }
+    }
+
+    #[test]
+    fn a_control_floating_over_the_world_takes_the_click_from_it() {
+        // The hotbar is anchored to the bottom centre of the world viewport, so every
+        // slot sits inside the world rectangle. Geometry alone therefore calls it
+        // world, and one click drank a potion *and* walked onto the tile underneath.
+        //
+        // Driven through the production system with the control hovered, because the
+        // rule is about the running interface: a headless picking backend has no render
+        // target to hover anything through, which is why the browser suite checks the
+        // same thing from the outside.
+        use super::super::testing;
+
+        let mut app = testing::shell_app(Vec2::new(1280.0, 832.0));
+        let geometry = testing::settled(&app);
+        let over_world = geometry.world.center();
+
+        testing::move_pointer(&mut app, over_world);
+        assert_eq!(
+            app.world().resource::<PointerState>().target,
+            Some(PointerTarget::World),
+            "the centre of the world is not over the world"
+        );
+
+        let slot = app
+            .world_mut()
+            .query_filtered::<Entity, With<super::super::hotbar::HotbarSlot>>()
+            .iter(app.world())
+            .next()
+            .expect("the shell has hotbar slots");
+        *app.world_mut().get_mut::<Interaction>(slot).expect("a slot is interactive") =
+            Interaction::Hovered;
+        // The production system, run directly rather than through a frame: Bevy's
+        // picking backend rewrites `Interaction` from its hover map every update, and
+        // headless there is no render target to hover anything through — so a whole
+        // frame would clear the state under test. The system is the real one; only its
+        // scheduling belongs to the test.
+        use bevy::ecs::system::RunSystemOnce;
+        app.world_mut().run_system_once(resolve_pointer).expect("the system runs");
+
+        let state = *app.world().resource::<PointerState>();
+        assert_eq!(
+            state.target,
+            Some(PointerTarget::Interface),
+            "a hovered control did not take the pointer from the world"
+        );
+        assert!(state.tile.is_none(), "an intercepted pointer still named a tile");
+        assert!(!state.over_world(), "the world would still act on this click");
+    }
+
+    #[test]
+    fn interception_leaves_the_interface_and_the_outside_alone() {
+        // The rule only ever takes the world's side away. A control cannot make a
+        // pointer that is outside the window into an interface pointer, and the
+        // interface staying the interface is not something to re-decide.
+        for geometric in [PointerTarget::Interface, PointerTarget::Outside] {
+            assert_eq!(intercept(geometric, true), geometric);
+            assert_eq!(intercept(geometric, false), geometric);
+        }
+        assert_eq!(intercept(PointerTarget::World, false), PointerTarget::World);
+        assert_eq!(intercept(PointerTarget::World, true), PointerTarget::Interface);
     }
 
     /// Ratios a real user is likely to have.

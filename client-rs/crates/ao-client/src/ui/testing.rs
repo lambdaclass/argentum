@@ -162,6 +162,28 @@ fn window_target(app: &mut App) -> bevy::camera::NormalizedRenderTarget {
 /// about hit testing, and a test that assigns the answer cannot ask it.
 pub fn move_pointer(app: &mut App, position: Vec2) {
     let target = window_target(app);
+
+    // The window's own cursor as well as the picking pointer. They are two different
+    // facts and production reads both: picking hovers controls, while the pointer
+    // pipeline reads `Window::cursor_position`. Feeding only picking left
+    // `PointerState` empty for the whole test, so every assertion of the form "this
+    // position is not the world" passed on a pointer that was nowhere at all.
+    let scale = app
+        .world_mut()
+        .query::<&Window>()
+        .iter(app.world())
+        .next()
+        .map(|window| window.resolution.scale_factor())
+        .unwrap_or(1.0);
+    if let Some(mut window) = app
+        .world_mut()
+        .query_filtered::<&mut Window, With<bevy::window::PrimaryWindow>>()
+        .iter_mut(app.world_mut())
+        .next()
+    {
+        window.set_physical_cursor_position(Some((position * scale).as_dvec2()));
+    }
+
     app.world_mut().write_message(bevy::picking::pointer::PointerInput::new(
         bevy::picking::pointer::PointerId::Mouse,
         bevy::picking::pointer::Location { target, position },
