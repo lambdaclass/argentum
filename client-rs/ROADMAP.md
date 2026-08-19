@@ -277,25 +277,6 @@ The spell control this contract also named is covered as of W-0007: the battery
 switches to the Spells tab, checks that a row activates exactly once and that a
 click just outside it does not, and puts the inventory back.
 
-### Task W-0088 — Fixture-backed minimap presentation
-
-- **State:** active
-- **Phase:** 0
-- **Depends on:** W-0004, W-0005, W-0008
-
-Replace the unexplained black minimap well with a fixture-backed Bevy minimap
-contract while keeping unavailable/loading/error states honest. Render the
-current map outline or tile abstraction, player marker, permitted party/NPC or
-objective markers, orientation and coordinates from typed presentation data;
-do not derive hidden authoritative entities from downloaded map assets.
-
-Markers use stable icon/shape distinctions in addition to color, stay clipped
-to the minimap, and expose localized tooltips where interaction is supported.
-Resize, compact mode, UI scale, map change and malformed/missing map data cannot
-stretch the map, leak state from the previous map or leave an unlabeled black
-rectangle. Phase 0 closes the presentation and fixture behavior; W-0039 owns
-the later authoritative live-world connection.
-
 ### Task W-0089 — Tab world-map overlay
 
 - **State:** planned

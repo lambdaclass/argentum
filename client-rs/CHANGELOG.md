@@ -19,6 +19,41 @@ Never reuse a completed ID in the active roadmap.
 
 ## Closed tasks
 
+### Completed Task W-0088 — Fixture-backed minimap presentation
+
+Closed: 2026-08-19 (`e94832e`)
+
+The well in the world's upper right said "minimap unavailable" from W-0002
+onwards. That was honest while nothing read the map data and a lie the moment
+something did: the snapshot has carried an availability, a map number, a centre,
+a radius and four markers all along.
+
+It draws them now — player, party, hostile and landmark — each with its own
+*shape* as well as its own colour, because a player who cannot distinguish two of
+the colours still has to be able to tell a party member from a wolf. North is
+marked and the coordinates are written out, since a map you cannot read your
+position off is one you cannot use to tell anyone where you are.
+
+What it draws is what the server disclosed and nothing else. No map asset is read
+to find entities the server did not mention; a minimap showing withheld hostiles
+would be a wall-hack built out of presentation code.
+
+Idle, loading and the four reasons a map can be unavailable each say which one
+they are, because "nothing yet" and "nothing here" send a player to different
+places. A marker beyond the radius is dropped rather than clamped to the edge,
+which would read as a crowd gathering at the border. A radius of zero covers one
+tile instead of dividing by nothing — the malformed fixture sends one, and
+dividing produced infinities.
+
+Evidence: 499 tests in `ao-client`, including placement, orientation, the
+malformed radius, every fixture's markers, per-kind shape and colour
+distinctness, and app tests for the drawn map, the unavailable state and a map
+change leaving nothing behind; 584 browser checks against build `e94832e`, all
+green. The well is square and clipped at every supported window size including
+the compact rail.
+
+W-0039 owns the later authoritative live-world connection.
+
 ### Completed Task W-0008 — Chat, target, safety and feedback prototype
 
 Closed: 2026-08-19 (`bf74d6e`, `afab30c`, `b5ae76b`, `ada0f73`, `c0fb8ff`,
