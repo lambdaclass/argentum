@@ -8,6 +8,7 @@
 
 pub mod authority;
 pub mod character;
+pub mod chat;
 pub mod controls;
 pub mod fonts;
 pub mod hotbar;
@@ -66,6 +67,7 @@ impl Plugin for UiPlugin {
             rail::RailPlugin,
             character::CharacterPanelPlugin,
             spells::SpellPanelPlugin,
+            chat::ChatPanelPlugin,
             hotbar::HotbarPlugin,
         ));
     }

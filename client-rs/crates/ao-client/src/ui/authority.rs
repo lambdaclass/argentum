@@ -130,6 +130,14 @@ fn apply(snapshot: &mut UiSnapshot, intent: &Intent, pages: &mut HotbarPages) ->
         }
         Intent::ClearHotbarSlot { index } => bind_hotbar(snapshot, pages, *index, None),
         Intent::ChangeHotbarPage { page } => change_page(snapshot, pages, *page),
+        Intent::SendChat { channel, body } => say(snapshot, *channel, body),
+        Intent::SetActiveChannel { channel } => {
+            if snapshot.chat.active_channel == *channel {
+                return false;
+            }
+            snapshot.chat.active_channel = *channel;
+            true
+        }
         _ => false,
     }
 }
@@ -175,6 +183,31 @@ fn change_page(snapshot: &mut UiSnapshot, pages: &mut HotbarPages, page: usize) 
 
     snapshot.hotbar.slots = slots.clone();
     snapshot.hotbar.page = page;
+    true
+}
+
+/// Add the player's own line to the log.
+///
+/// A real server echoes what it accepted, and the player has to see their own words in
+/// the same place as everyone else's — a composer that clears with nothing appearing
+/// looks exactly like a message that was swallowed.
+fn say(snapshot: &mut UiSnapshot, channel: ao_core::view::ChatChannel, body: &str) -> bool {
+    if body.trim().is_empty() {
+        return false;
+    }
+    let speaker = snapshot.progression.name.clone();
+    snapshot.chat.lines.push(ao_core::view::ChatLine {
+        channel,
+        speaker,
+        body: body.to_string(),
+    });
+    // Bounded, because this stand-in has no other pruning and a session's worth of lines
+    // in a snapshot that is cloned on every intent is a leak with a long fuse.
+    const KEPT: usize = 200;
+    if snapshot.chat.lines.len() > KEPT {
+        let excess = snapshot.chat.lines.len() - KEPT;
+        snapshot.chat.lines.drain(0..excess);
+    }
     true
 }
 

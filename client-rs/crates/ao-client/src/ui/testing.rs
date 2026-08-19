@@ -80,6 +80,7 @@ pub fn shell_app_at(size: Vec2, device_pixel_ratio: f32) -> App {
         super::rail::RailPlugin,
         super::character::CharacterPanelPlugin,
         super::spells::SpellPanelPlugin,
+        super::chat::ChatPanelPlugin,
         // The hotbar is part of the shell, so a harness without it answers
         // questions about a shell that does not exist.
         super::hotbar::HotbarPlugin,
