@@ -84,6 +84,10 @@ impl Plugin for CharacterPanelPlugin {
             .init_resource::<DragState>()
             .init_resource::<SplitAmount>()
             .init_resource::<PendingSlot>()
+            .add_observer(begin_slot_drag)
+            .add_observer(track_slot_drag_over)
+            .add_observer(finish_slot_drag)
+            .add_observer(cancel_slot_drag)
             .add_systems(
                 Update,
                 (
@@ -112,6 +116,85 @@ pub struct PanelContent;
 #[derive(Component, Debug, Clone, Copy)]
 pub struct InventorySlotButton {
     pub index: usize,
+}
+
+/// Begin a drag when a slot is dragged rather than clicked.
+///
+/// Wired to Bevy's own drag events rather than to a hand-rolled press-and-move
+/// state machine, so "what counts as a drag" is the platform's answer and matches
+/// what the player's cursor is already doing. `DragState` was previously written
+/// only by tests: dragging an item did nothing at all.
+fn begin_slot_drag(
+    start: On<bevy::picking::events::Pointer<bevy::picking::events::DragStart>>,
+    slots: Query<&InventorySlotButton>,
+    state: Res<UiState>,
+    mut drag: ResMut<DragState>,
+) {
+    let Ok(button) = slots.get(start.entity) else {
+        return;
+    };
+    // An empty slot has nothing to drag. Starting one anyway would let a player
+    // "move" nothing onto an occupied slot and expect something to happen.
+    if state.get().inventory.slot(button.index).item().is_none() {
+        return;
+    }
+    drag.from = Some(button.index);
+    drag.over = None;
+}
+
+/// Track which slot a drag is currently over.
+fn track_slot_drag_over(
+    over: On<bevy::picking::events::Pointer<bevy::picking::events::DragOver>>,
+    slots: Query<&InventorySlotButton>,
+    mut drag: ResMut<DragState>,
+) {
+    if !drag.is_dragging() {
+        return;
+    }
+    if let Ok(button) = slots.get(over.entity) {
+        drag.over = Some(button.index);
+    }
+}
+
+/// Complete a drag, emitting a move only for a valid distinct destination.
+fn finish_slot_drag(
+    drop: On<bevy::picking::events::Pointer<bevy::picking::events::DragDrop>>,
+    slots: Query<&InventorySlotButton>,
+    state: Res<UiState>,
+    mut drag: ResMut<DragState>,
+    mut intents: MessageWriter<super::state::IntentMessage>,
+) {
+    let Ok(button) = slots.get(drop.entity) else {
+        return;
+    };
+    drag.over = Some(button.index);
+
+    // A destination that will not take the item is a cancellation, not a move: a
+    // locked slot refuses drops, and sending the move anyway is a round trip the
+    // server would only refuse.
+    let accepts = state.get().inventory.slot(button.index).accepts_drop();
+    if !accepts {
+        drag.cancel();
+        return;
+    }
+
+    // `complete` decides whether this is a move at all: the same slot, or nothing,
+    // is a cancellation rather than a zero-length move.
+    if let Some((from, to)) = drag.complete() {
+        intents.write(super::state::IntentMessage(Intent::MoveInventorySlot { from, to }));
+    }
+}
+
+/// End a drag that was released anywhere else.
+///
+/// Released over nothing is a cancellation, and the ghost must go with it — a drag
+/// that ends invisibly still holds the interface in a dragging state, and the next
+/// click behaves as a drop.
+fn cancel_slot_drag(
+    _end: On<bevy::picking::events::Pointer<bevy::picking::events::DragEnd>>,
+    mut drag: ResMut<DragState>,
+) {
+    drag.cancel();
 }
 
 /// An intent that has been sent and not yet answered.
