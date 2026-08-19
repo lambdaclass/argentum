@@ -17,6 +17,47 @@ use super::tokens::{focus, ink, size, space, status, surface, type_scale};
 use ao_core::view::{EquipSlot, Gauge, Intent, ItemAction, ItemView, SlotState, UiSnapshot};
 use bevy::prelude::*;
 
+/// Which panel the rail's tab strip is showing.
+///
+/// The strip was a static label reading "Inventory    Spells" — a picture of a control,
+/// which is the thing this phase's gates single out. It also meant the snapshot's skills
+/// had nowhere to be shown at all, so a fixture that carried them displayed nothing.
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RailTab {
+    #[default]
+    Inventory,
+    Skills,
+    /// Present and inert until W-0007 builds the spellbook. Drawn as a tab that says
+    /// so rather than omitted, because a strip that grows a tab later is a worse
+    /// surprise than one that admits what is coming.
+    Spells,
+}
+
+impl RailTab {
+    /// Left to right, which is also the tab order.
+    const ORDER: [RailTab; 3] = [RailTab::Inventory, RailTab::Skills, RailTab::Spells];
+
+    fn label(self) -> &'static str {
+        match self {
+            RailTab::Inventory => "Inventory",
+            RailTab::Skills => "Skills",
+            RailTab::Spells => "Spells",
+        }
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            RailTab::Inventory => "rail.tab.inventory",
+            RailTab::Skills => "rail.tab.skills",
+            RailTab::Spells => "rail.tab.spells",
+        }
+    }
+}
+
+/// Marks a tab control with the panel it selects.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RailTabButton(pub RailTab);
+
 /// Which inventory slot the player last clicked.
 ///
 /// Selection is client-side: the server has no opinion about which slot is
@@ -85,6 +126,7 @@ impl Plugin for CharacterPanelPlugin {
             .init_resource::<SplitAmount>()
             .init_resource::<PendingSlot>()
             .init_resource::<RefusedSlot>()
+            .init_resource::<RailTab>()
             .add_observer(begin_slot_drag)
             .add_observer(track_slot_drag_over)
             .add_observer(finish_slot_drag)
@@ -101,6 +143,7 @@ impl Plugin for CharacterPanelPlugin {
                     cancel_drag_when_its_destination_becomes_unknowable,
                     clear_selection_when_slot_empties,
                     apply_slot_activations,
+                    apply_tab_activations,
                     clear_pending_on_answer,
                 )
                     .chain()
@@ -330,6 +373,28 @@ fn apply_slot_activations(
     }
 }
 
+/// Switch the rail's panel when a tab is activated.
+///
+/// Reads `Activated` rather than `Interaction`, so a tab responds to the keyboard as
+/// well as the pointer — which is the whole reason the shared control emits a message
+/// instead of each panel polling for presses.
+fn apply_tab_activations(
+    mut activated: MessageReader<super::controls::Activated>,
+    tabs: Query<&RailTabButton>,
+    mut current: ResMut<RailTab>,
+) {
+    for message in activated.read() {
+        if let Ok(button) = tabs.get(message.entity) {
+            // Assigned only on a real change: this resource drives a rebuild of the
+            // whole rail, and reassigning the same value would throw the panel away
+            // for nothing.
+            if *current != button.0 {
+                *current = button.0;
+            }
+        }
+    }
+}
+
 /// Release the guard once the authority has answered.
 ///
 /// Any snapshot change counts: the server's reply is a new snapshot, and an
@@ -436,6 +501,19 @@ pub struct ItemIcon {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// The rail's transient marks, as one parameter.
+///
+/// Three resources that all say "draw the grid differently": which slot is waiting for
+/// an answer, which was refused, and which panel the tab strip is showing. Grouped
+/// because Bevy's system parameter tuples stop at sixteen and the rebuild was at the
+/// edge of it — and because they are read together every time.
+#[derive(bevy::ecs::system::SystemParam)]
+struct RailMarks<'w> {
+    pending: Res<'w, PendingSlot>,
+    refused: Res<'w, RefusedSlot>,
+    tab: Res<'w, RailTab>,
+}
+
 fn rebuild_on_change(
     state: Res<UiState>,
     selected: Res<SelectedSlot>,
@@ -452,8 +530,7 @@ fn rebuild_on_change(
     sheets: Res<crate::graphics::SheetTextures>,
     mut atlases: ResMut<crate::world::SheetAtlases>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
-    pending: Res<PendingSlot>,
-    refused: Res<RefusedSlot>,
+    marks: RailMarks,
     mut last_drawable: Local<usize>,
     mut last_marks: Local<(Option<usize>, Option<usize>)>,
     mut commands: Commands,
@@ -494,9 +571,9 @@ fn rebuild_on_change(
     // change tick: both resources count down every frame, so `is_changed` is true every
     // frame and gating on it would rebuild the whole rail continuously — throwing away
     // focus and artwork sixty times a second to show a mark that has not moved.
-    let marks = (pending.slot, refused.slot);
-    let marks_moved = *last_marks != marks;
-    *last_marks = marks;
+    let marks_now = (marks.pending.slot, marks.refused.slot);
+    let marks_moved = *last_marks != marks_now;
+    *last_marks = marks_now;
 
     if !state.is_changed()
         && !selected.is_changed()
@@ -504,6 +581,7 @@ fn rebuild_on_change(
         && !geometry.is_changed()
         && !artwork_arrived
         && !marks_moved
+        && !marks.tab.is_changed()
     {
         return;
     }
@@ -548,6 +626,24 @@ fn rebuild_on_change(
                     parent.spawn((PanelContent, character_header(snapshot)));
                 });
             }
+            RailRegion::Tabs => {
+                commands.entity(entity).with_children(|parent| {
+                    parent.spawn((PanelContent, tab_strip(*marks.tab)));
+                });
+            }
+            RailRegion::SlotGrid if *marks.tab == RailTab::Skills => {
+                commands.entity(entity).with_children(|parent| {
+                    parent.spawn((PanelContent, skills_panel(snapshot)));
+                });
+            }
+            RailRegion::SlotGrid if *marks.tab == RailTab::Spells => {
+                commands.entity(entity).with_children(|parent| {
+                    parent.spawn((
+                        PanelContent,
+                        super::shell::muted_label("spellbook — not yet wired"),
+                    ));
+                });
+            }
             RailRegion::SlotGrid => {
                 // In the units the slots are declared in. Bevy multiplies every
                 // Val::Px by the UI scale, so a width measured in logical
@@ -561,8 +657,8 @@ fn rebuild_on_change(
                             snapshot,
                             selected.0,
                             drag.over,
-                            pending.slot,
-                            refused.slot,
+                            marks.pending.slot,
+                            marks.refused.slot,
                             inner,
                             &mut icon_for,
                         ),
@@ -587,6 +683,64 @@ fn rebuild_on_change(
             _ => {}
         }
     }
+}
+
+/// The tab strip, as controls rather than a caption of one.
+fn tab_strip(active: RailTab) -> impl Bundle {
+    (
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            column_gap: Val::Px(space::HAIR),
+            ..default()
+        },
+        Children::spawn(SpawnIter(RailTab::ORDER.into_iter().enumerate().map(
+            move |(index, tab)| {
+                (
+                    super::controls::tab(tab.label(), tab == active, 300 + index as u32),
+                    ControlKey::new(tab.key()),
+                    RailTabButton(tab),
+                )
+            },
+        ))),
+    )
+}
+
+/// The character's trainable skills, as the snapshot reports them.
+///
+/// A list rather than the slot grid: skills are read and occasionally spent, not
+/// dragged, and a grid of them would suggest otherwise. Unspent points lead, because
+/// they are the only part a player can act on.
+fn skills_panel(snapshot: &UiSnapshot) -> impl Bundle {
+    let skills = &snapshot.skills;
+    let mut rows: Vec<(Node, Text, TextFont, TextColor)> = Vec::new();
+    if skills.unspent_points > 0 {
+        rows.push((
+            Node::default(),
+            Text::new(format!("{} points to spend", skills.unspent_points)),
+            TextFont { font_size: type_scale::SMALL, ..default() },
+            TextColor(ink::GOLD),
+        ));
+    }
+    for skill in &skills.skills {
+        rows.push((
+            Node::default(),
+            Text::new(format!("{}  {}", super::fallback_label(&skill.name_key), skill.points)),
+            TextFont { font_size: type_scale::SMALL, ..default() },
+            TextColor(ink::MUTED),
+        ));
+    }
+    if rows.is_empty() {
+        // An empty panel is indistinguishable from one that failed to draw.
+        rows.push((
+            Node::default(),
+            Text::new("no skills yet".to_string()),
+            TextFont { font_size: type_scale::SMALL, ..default() },
+            TextColor(ink::DISABLED),
+        ));
+    }
+
+    (column(space::HAIR), Children::spawn(SpawnIter(rows.into_iter())))
 }
 
 fn text(value: impl Into<String>, font_size: f32, color: Color) -> impl Bundle {
@@ -1366,6 +1520,7 @@ mod tests {
             .init_resource::<SelectedSlot>()
             .init_resource::<PendingSlot>()
             .init_resource::<RefusedSlot>()
+            .init_resource::<RailTab>()
             .insert_resource(ButtonInput::<KeyCode>::default())
             .insert_resource(Time::<()>::default())
             .add_message::<super::super::controls::Activated>()
@@ -1439,6 +1594,139 @@ mod tests {
             .find(|(_, button)| button.index == index)
             .map(|(entity, _)| entity)?;
         app.world().get::<BorderColor>(entity).map(|border| border.top)
+    }
+
+    /// Every text in the rail, for asking what a panel is showing.
+    fn rail_text(app: &mut App) -> String {
+        app.world_mut()
+            .query::<&Text>()
+            .iter(app.world())
+            .map(|text| text.0.clone())
+            .collect::<Vec<_>>()
+            .join(" | ")
+    }
+
+    fn tab_entity(app: &mut App, wanted: RailTab) -> Entity {
+        app.world_mut()
+            .query::<(Entity, &RailTabButton)>()
+            .iter(app.world())
+            .find(|(_, button)| button.0 == wanted)
+            .map(|(entity, _)| entity)
+            .unwrap_or_else(|| panic!("the rail has no {wanted:?} tab"))
+    }
+
+    fn slot_count(app: &mut App) -> usize {
+        app.world_mut().query::<&InventorySlotButton>().iter(app.world()).count()
+    }
+
+    #[test]
+    fn the_tab_strip_is_made_of_controls_rather_than_a_caption_of_them() {
+        // It was a single muted label reading "Inventory    Spells": a picture of a
+        // tab strip, which switched nothing and could not be reached by pointer or
+        // keyboard. Checked through the components the interaction pipeline actually
+        // queries, since that is what the caption was missing.
+        use super::super::testing;
+
+        let mut app = testing::shell_app(Vec2::new(1280.0, 832.0));
+        for _ in 0..4 {
+            app.update();
+        }
+
+        for wanted in RailTab::ORDER {
+            let entity = tab_entity(&mut app, wanted);
+            assert!(
+                app.world().get::<Interaction>(entity).is_some(),
+                "the {wanted:?} tab carries no Interaction, so nothing can click it"
+            );
+            assert!(
+                app.world().get::<ControlKey>(entity).is_some(),
+                "the {wanted:?} tab has no key, so no test can aim at it"
+            );
+        }
+        assert_eq!(*app.world().resource::<RailTab>(), RailTab::Inventory);
+    }
+
+    #[test]
+    fn activating_the_skills_tab_shows_the_skills_the_snapshot_carries() {
+        // The fixture has carried skills all along and the rail had nowhere to put
+        // them, so they were simply invisible.
+        use super::super::testing;
+
+        let mut app = testing::shell_app(Vec2::new(1280.0, 832.0));
+        for _ in 0..4 {
+            app.update();
+        }
+        assert!(slot_count(&mut app) > 0, "the inventory grid is missing to begin with");
+
+        let skills = tab_entity(&mut app, RailTab::Skills);
+        app.world_mut().write_message(super::super::controls::Activated {
+            entity: skills,
+            source: super::super::controls::ActivationSource::Pointer,
+        });
+        app.update();
+        app.update();
+
+        let shown = rail_text(&mut app);
+        assert!(
+            shown.contains("Magic") || shown.contains("magic"),
+            "the skills panel does not name a skill: {shown}"
+        );
+        assert!(shown.contains("42"), "the skills panel does not show its points: {shown}");
+        assert!(
+            shown.contains("5 points to spend"),
+            "unspent points are the only part a player can act on: {shown}"
+        );
+        assert_eq!(slot_count(&mut app), 0, "the inventory grid is still there underneath");
+    }
+
+    #[test]
+    fn switching_back_to_the_inventory_restores_its_grid() {
+        use super::super::testing;
+
+        let mut app = testing::shell_app(Vec2::new(1280.0, 832.0));
+        for _ in 0..4 {
+            app.update();
+        }
+        let before = slot_count(&mut app);
+
+        for wanted in [RailTab::Skills, RailTab::Inventory] {
+            let entity = tab_entity(&mut app, wanted);
+            app.world_mut().write_message(super::super::controls::Activated {
+                entity,
+                source: super::super::controls::ActivationSource::Keyboard,
+            });
+            app.update();
+            app.update();
+        }
+
+        assert_eq!(slot_count(&mut app), before, "the grid did not come back");
+    }
+
+    #[test]
+    fn the_spells_tab_admits_it_is_not_wired_yet() {
+        // Rather than an empty panel, which is indistinguishable from one that failed
+        // to draw — and rather than omitting the tab, since a strip that grows one
+        // later is the worse surprise.
+        use super::super::testing;
+
+        let mut app = testing::shell_app(Vec2::new(1280.0, 832.0));
+        for _ in 0..4 {
+            app.update();
+        }
+
+        let spells = tab_entity(&mut app, RailTab::Spells);
+        app.world_mut().write_message(super::super::controls::Activated {
+            entity: spells,
+            source: super::super::controls::ActivationSource::Pointer,
+        });
+        app.update();
+        app.update();
+
+        assert!(
+            rail_text(&mut app).contains("not yet wired"),
+            "the spells tab shows an empty panel: {}",
+            rail_text(&mut app)
+        );
     }
 
     #[test]

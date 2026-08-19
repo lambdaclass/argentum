@@ -116,11 +116,12 @@ fn populate(mut commands: Commands, rails: Query<(Entity, &Region)>) {
         // displaying.
         rail.spawn((region_well(RailRegion::CharacterHeader, Val::Auto), FullRailOnly));
 
-        rail.spawn((
-            region_well(RailRegion::Tabs, Val::Auto),
-            FullRailOnly,
-            children![muted_label("Inventory    Spells")],
-        ));
+        // No children: the strip is built from `RailTab` by
+        // `character::rebuild_on_change`, as three real controls. It used to be a
+        // static label reading "Inventory    Spells" — a caption shaped like a tab
+        // strip, which switched nothing and left the snapshot's skills with nowhere
+        // to appear.
+        rail.spawn((region_well(RailRegion::Tabs, Val::Auto), FullRailOnly));
 
         // Every region below carries a label when it has nothing in it. An
         // unexplained empty panel reads as a rendering failure, and there is no
