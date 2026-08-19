@@ -58,6 +58,14 @@ pub struct LastActivation {
     /// republishes the resource every frame — so every "this should not activate"
     /// check saw the last thing that did.
     pub count: u64,
+    /// The last few activations, as `key/source/entity`.
+    ///
+    /// A count alone says a click activated something twice; it cannot say whether the
+    /// two came from one entity — a deduplication failure between the event and the
+    /// polled path — or from two entities, which is a pointer event bubbling to an
+    /// ancestor that is also a control. Those need opposite fixes, and guessing between
+    /// them cost several rounds.
+    pub recent: Vec<String>,
 }
 
 pub struct DiagnosticsPlugin;
@@ -104,7 +112,19 @@ fn record_activation(
     mut last: ResMut<LastActivation>,
 ) {
     for message in activated.read() {
-        last.key = keys.get(message.entity).ok().map(|key| key.as_str().to_string());
+        let key = keys.get(message.entity).ok().map(|key| key.as_str().to_string());
+        last.recent.push(format!(
+            "{}/{:?}/{}",
+            key.as_deref().unwrap_or("unkeyed"),
+            message.source,
+            message.entity
+        ));
+        // Bounded: this is a rolling window for a reader, not a log.
+        if last.recent.len() > 6 {
+            let excess = last.recent.len() - 6;
+            last.recent.drain(0..excess);
+        }
+        last.key = key;
         last.count += 1;
     }
 }
@@ -158,6 +178,11 @@ fn publish(
     );
 
     set("activations", last.count as f64);
+    let _ = js_sys::Reflect::set(
+        &report,
+        &wasm_bindgen::JsValue::from_str("recentActivations"),
+        &wasm_bindgen::JsValue::from_str(&last.recent.join(" ")),
+    );
     if let Some(key) = last.key.as_deref() {
         let _ = js_sys::Reflect::set(
             &report,

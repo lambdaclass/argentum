@@ -331,12 +331,16 @@ async function runHitTests(hitPage, label, ratio) {
           const settled = await hitPage.evaluate(() => ({
             count: window.aoLoaded?.activations ?? 0,
             key: window.aoLoaded?.lastActivated ?? null,
+            recent: window.aoLoaded?.recentActivations ?? "",
           }));
           return {
             key: settled.count > now.count ? settled.key : now.key,
             ms: Date.now() - started,
             before,
             after: settled.count,
+            // Carried into the failure message: two activations from one entity and two
+            // from two entities are opposite faults.
+            note: settled.count - before === 1 ? undefined : `recent: ${settled.recent}`,
           };
         }
         await hitPage.waitForTimeout(50);
