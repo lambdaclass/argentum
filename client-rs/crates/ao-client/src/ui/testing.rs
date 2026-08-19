@@ -79,6 +79,7 @@ pub fn shell_app_at(size: Vec2, device_pixel_ratio: f32) -> App {
         super::pointer::PointerPlugin,
         super::rail::RailPlugin,
         super::character::CharacterPanelPlugin,
+        super::spells::SpellPanelPlugin,
         // The hotbar is part of the shell, so a harness without it answers
         // questions about a shell that does not exist.
         super::hotbar::HotbarPlugin,
@@ -136,6 +137,27 @@ pub fn point_at(app: &mut App, position: Vec2) {
         position.x as f64 * factor,
         position.y as f64 * factor,
     )));
+    app.update();
+}
+
+/// Press a mouse button through Bevy's own input pipeline.
+///
+/// Through the message rather than by assigning `ButtonInput`: this app runs
+/// `InputPlugin`, whose systems clear `just_pressed` at the start of every frame and
+/// rebuild it from events. A press written directly onto the resource is therefore gone
+/// before any gameplay system reads it — which reads as "the click did nothing".
+pub fn press_mouse(app: &mut App, button: bevy::input::mouse::MouseButton) {
+    let window = app
+        .world_mut()
+        .query_filtered::<Entity, With<bevy::window::PrimaryWindow>>()
+        .iter(app.world())
+        .next()
+        .expect("there is no primary window");
+    app.world_mut().write_message(bevy::input::mouse::MouseButtonInput {
+        button,
+        state: bevy::input::ButtonState::Pressed,
+        window,
+    });
     app.update();
 }
 

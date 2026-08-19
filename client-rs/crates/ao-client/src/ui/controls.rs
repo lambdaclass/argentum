@@ -1204,13 +1204,17 @@ fn present_controls(
         Entity,
         &Control,
         Option<&Selected>,
+        Option<&Danger>,
         &mut Node,
         &mut BackgroundColor,
         &mut BorderColor,
     )>,
 ) {
-    for (entity, control, selection, mut node, mut background, mut border) in &mut controls {
+    for (entity, control, selection, danger, mut node, mut background, mut border) in
+        &mut controls
+    {
         let selected = selection.is_some_and(|s| s.0);
+        let alarmed = danger.is_some_and(|d| d.0);
         let state = ControlState::resolve(
             control.enabled,
             control.hovered,
@@ -1222,8 +1226,14 @@ fn present_controls(
         // Focus outranks selection: they are different questions — what the player
         // has chosen, and where the next keystroke goes — and when they disagree
         // the keyboard's position is the one that must be visible.
+        // Danger outranks both: it is the newest thing that happened here and the only
+        // one the player may not have expected. Focus then outranks selection — they are
+        // different questions, what the player has chosen and where the next keystroke
+        // goes, and when they disagree the keyboard's position must be visible.
         let focused = state.shows_focus_ring();
-        *border = BorderColor::all(if focused {
+        *border = BorderColor::all(if alarmed {
+            status::DANGER
+        } else if focused {
             focus::RING
         } else if selected {
             focus::SELECTED
@@ -1237,7 +1247,8 @@ fn present_controls(
         // Applied per edge, preserving which edges the builder chose: a list row
         // marks selection with a bar down its leading edge only, and replacing that
         // with a full outline would make every row look like a button.
-        let width = if focused || selected { focus::RING_WIDTH } else { size::BORDER };
+        let width =
+            if focused || selected || alarmed { focus::RING_WIDTH } else { size::BORDER };
         let thicken = |edge: Val| match edge {
             Val::Px(px) if px > 0.0 => Val::Px(width),
             other => other,
@@ -1267,6 +1278,15 @@ fn present_controls(
 /// frame — which is exactly what happened to the list row.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Selected(pub bool);
+
+/// Whether something just went wrong here.
+///
+/// The same reason `Selected` exists, learned twice: a slot marked as refused painted a
+/// danger border in the frame it was built and `present_controls` repainted it with the
+/// resting edge colour on the next one. The mark was left carrying only its glyph, which
+/// is half of what "distinct rejected state" asks for.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Danger(pub bool);
 
 /// What makes a node a control rather than a picture of one.
 ///

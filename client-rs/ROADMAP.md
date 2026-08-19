@@ -276,7 +276,7 @@ aim at yet, and this task stays open until they exist:
 
 ### Task W-0007 — Spellbook and hotbar prototype
 
-- **State:** planned
+- **State:** active
 - **Phase:** 0
 - **Depends on:** W-0004, W-0005
 

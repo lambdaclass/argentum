@@ -42,7 +42,15 @@ impl Plugin for SpellPanelPlugin {
             .init_resource::<super::controls::TextInputActive>()
             .add_systems(
                 Update,
-                (trigger_hotbar_keys, disarm_on_escape, disarm_when_unusable)
+                (
+                    trigger_hotbar_keys,
+                    // Before the disarm rules, so a spell armed this frame is not
+                    // examined for usability against the snapshot that armed it.
+                    apply_spell_activations,
+                    cast_armed_spell_on_world_click,
+                    disarm_on_escape,
+                    disarm_when_unusable,
+                )
                     .chain()
                     .in_set(super::controls::GameplayInput),
             );
@@ -186,12 +194,27 @@ pub fn blocker_key(blocker: SpellBlocker) -> &'static str {
     }
 }
 
+/// Marks a spellbook row with the spell it casts.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpellRowButton {
+    pub spell_id: i32,
+    pub index: usize,
+}
+
 /// One spellbook row.
-pub fn spell_row(spell: &SpellView, armed: bool) -> impl Bundle {
+///
+/// A control, not a picture of one: it carries the shared interaction bundle and a
+/// stable key, so the pointer pipeline can see it, Tab reaches it, and a browser test
+/// can aim at it. The builder existed for some time with neither, which meant a
+/// spellbook that could be rendered and not used.
+pub fn spell_row(spell: &SpellView, index: usize, armed: bool) -> impl Bundle {
     let castable = spell.is_castable();
-    let name = spell.name_key.rsplit('.').next().unwrap_or_default().to_string();
+    // Localised at this boundary. The blocker keys are semantic — `spell.blocked.mana`
+    // — and this task forbids showing them raw; the fallback is derived from the key
+    // rather than hard-coded here so the catalogue replaces it in one place.
+    let name = super::fallback_label(&spell.name_key);
     let detail = match spell.primary_blocker() {
-        Some(blocker) => blocker_key(blocker).to_string(),
+        Some(blocker) => super::fallback_label(blocker_key(blocker)),
         None => format!("{} mana", spell.mana_cost.max(0)),
     };
 
@@ -205,6 +228,12 @@ pub fn spell_row(spell: &SpellView, armed: bool) -> impl Bundle {
         },
         BackgroundColor(surface::WELL),
         BorderColor::all(if armed { focus::RING } else { surface::EDGE }),
+        // Armed is a selection: it survives `present_controls`, which owns borders and
+        // would otherwise repaint the ring away on the next frame.
+        super::controls::Selected(armed),
+        super::controls::interactive(400 + index as u32, castable),
+        super::controls::ControlKey::indexed("spell.row", index),
+        SpellRowButton { spell_id: spell.spell_id, index },
         children![
             (
                 Text::new(name),
@@ -218,6 +247,112 @@ pub fn spell_row(spell: &SpellView, armed: bool) -> impl Bundle {
             ),
         ],
     )
+}
+
+/// The spellbook, as the snapshot reports it.
+pub fn spellbook_panel(snapshot: &UiSnapshot, armed: Option<i32>) -> impl Bundle {
+    let spells = snapshot.spellbook.spells.clone();
+    let empty = spells.is_empty();
+    (
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(space::HAIR),
+            ..default()
+        },
+        // Two spawners rather than two `Children` components: the rows and the
+        // empty-book label are different bundles, and a panel that draws nothing when
+        // the book is empty is indistinguishable from one that failed to draw.
+        Children::spawn((
+            SpawnIter(spells.into_iter().enumerate().map(move |(index, spell)| {
+                let armed_here = armed == Some(spell.spell_id);
+                spell_row(&spell, index, armed_here)
+            })),
+            SpawnIter(
+                empty
+                    .then(|| {
+                        (
+                            Text::new("no spells yet".to_string()),
+                            TextFont { font_size: type_scale::SMALL, ..default() },
+                            TextColor(ink::DISABLED),
+                        )
+                    })
+                    .into_iter(),
+            ),
+        )),
+    )
+}
+
+/// Turn a click or keypress on a spell row into a cast or an armed spell.
+///
+/// The counterpart of `character::apply_slot_activations`, and missing for the same
+/// reason it was: `activate_spell` had no production caller at all, so the decision it
+/// exists to make — cast now, or wait for a target — was never actually made.
+fn apply_spell_activations(
+    mut activated: MessageReader<super::controls::Activated>,
+    rows: Query<&SpellRowButton>,
+    state: Res<UiState>,
+    mut armed: ResMut<ArmedSpell>,
+    mut intents: MessageWriter<super::state::IntentMessage>,
+) {
+    for message in activated.read() {
+        let Ok(row) = rows.get(message.entity) else {
+            continue;
+        };
+        let snapshot = state.get();
+        let Some(spell) =
+            snapshot.spellbook.spells.iter().find(|spell| spell.spell_id == row.spell_id)
+        else {
+            continue;
+        };
+
+        match activate_spell(spell, &snapshot.target) {
+            SpellActivation::Cast(spell_id) => {
+                armed.0 = None;
+                intents.write(super::state::IntentMessage(Intent::CastSpell { spell_id }));
+            }
+            SpellActivation::Arm(spell_id) => armed.0 = Some(spell_id),
+            // Silent: the row already shows why, and a second message repeating it
+            // would be noise the player did not ask for.
+            SpellActivation::Blocked(_) => {}
+        }
+    }
+}
+
+/// Spend an armed spell on the next world tile the player clicks.
+///
+/// This is the other half of arming, and without it an armed spell could only be
+/// disarmed: the ring appeared and nothing could ever consume it.
+///
+/// Reads the mouse and the resolved pointer rather than a picking event, because the
+/// world is not a UI node — the shell's world region deliberately ignores picking so
+/// that clicks reach the world at all. Target *selection* proper is W-0008; this is the
+/// narrow case of a spell that is already waiting for somewhere to land.
+fn cast_armed_spell_on_world_click(
+    mouse: Res<ButtonInput<MouseButton>>,
+    pointer: Res<super::pointer::PointerState>,
+    mut armed: ResMut<ArmedSpell>,
+    mut intents: MessageWriter<super::state::IntentMessage>,
+) {
+    let Some(spell_id) = armed.0 else {
+        return;
+    };
+    if !mouse.just_pressed(MouseButton::Left) || !pointer.over_world() {
+        return;
+    }
+    let Some(tile) = pointer.tile else {
+        return;
+    };
+
+    // The target first, then the cast. That is the order the protocol uses and the
+    // order the server can refuse in halves; sending the cast alone would ask the
+    // server to guess what the player pointed at.
+    intents.write(super::state::IntentMessage(Intent::SelectTarget {
+        x: tile.x.clamp(0, u8::MAX as i32) as u8,
+        y: tile.y.clamp(0, u8::MAX as i32) as u8,
+    }));
+    intents.write(super::state::IntentMessage(Intent::CastSpell { spell_id }));
+    armed.0 = None;
 }
 
 /// Whether the hotbar should show its page control.
@@ -250,6 +385,192 @@ mod tests {
             kind: TargetKind::Hostile,
             health: Some(Gauge::new(30, 60)),
         }
+    }
+
+    /// A running shell with the spellbook open.
+    ///
+    /// The production tree, not a hand-built row: the point of these tests is that the
+    /// rows the rail actually spawns are operable, and a locally assembled entity would
+    /// carry whatever components the test remembered to add.
+    fn spellbook_app() -> App {
+        let mut app = super::super::testing::shell_app(Vec2::new(1280.0, 832.0));
+        // Ordered after the systems it records. Registered without ordering, the reader
+        // ran before the writers and every intent was only visible a frame later — which
+        // reads as "the click sent nothing".
+        app.init_resource::<Recorded>().add_systems(
+            Update,
+            record_intents.after(super::super::controls::GameplayInput),
+        );
+        let tab = app
+            .world_mut()
+            .query::<(Entity, &super::super::character::RailTabButton)>()
+            .iter(app.world())
+            .find(|(_, button)| button.0 == super::super::character::RailTab::Spells)
+            .map(|(entity, _)| entity)
+            .expect("the rail has a spells tab");
+        app.world_mut().write_message(super::super::controls::Activated {
+            entity: tab,
+            source: super::super::controls::ActivationSource::Pointer,
+        });
+        for _ in 0..3 {
+            app.update();
+        }
+        app
+    }
+
+    #[derive(Resource, Default)]
+    struct Recorded(Vec<Intent>);
+
+    fn record_intents(
+        mut messages: MessageReader<IntentMessage>,
+        mut recorded: ResMut<Recorded>,
+    ) {
+        for message in messages.read() {
+            recorded.0.push(message.0.clone());
+        }
+    }
+
+    fn intents(app: &App) -> Vec<Intent> {
+        app.world().resource::<Recorded>().0.clone()
+    }
+
+    fn row_for(app: &mut App, spell_id: i32) -> Entity {
+        app.world_mut()
+            .query::<(Entity, &SpellRowButton)>()
+            .iter(app.world())
+            .find(|(_, row)| row.spell_id == spell_id)
+            .map(|(entity, _)| entity)
+            .unwrap_or_else(|| panic!("no row for spell {spell_id}"))
+    }
+
+    fn activate(app: &mut App, entity: Entity) {
+        app.world_mut().write_message(super::super::controls::Activated {
+            entity,
+            source: super::super::controls::ActivationSource::Pointer,
+        });
+        app.update();
+    }
+
+    #[test]
+    fn the_spellbook_spawns_a_row_for_every_spell_the_snapshot_carries() {
+        let mut app = spellbook_app();
+        let rows = app.world_mut().query::<&SpellRowButton>().iter(app.world()).count();
+        assert_eq!(
+            rows,
+            fixtures::snapshot(Scenario::Populated).spellbook.spells.len(),
+            "the spellbook drew a different number of rows than the snapshot has spells"
+        );
+    }
+
+    #[test]
+    fn clicking_a_self_cast_spell_emits_exactly_one_cast() {
+        // Heal in the fixture: nothing to point at, so it goes straight out.
+        let mut app = spellbook_app();
+        let heal = row_for(&mut app, 2);
+
+        activate(&mut app, heal);
+
+        assert_eq!(
+            intents(&app),
+            vec![Intent::CastSpell { spell_id: 2 }],
+            "a self-cast spell did not produce exactly one cast"
+        );
+        assert!(app.world().resource::<ArmedSpell>().0.is_none(), "a self-cast spell armed");
+    }
+
+    #[test]
+    fn clicking_a_ground_spell_arms_it_rather_than_casting() {
+        // Tremor is ground-targeted, and the fixture's selected target is an entity —
+        // which is not somewhere a ground spell can land.
+        let mut app = spellbook_app();
+        let tremor = row_for(&mut app, 3);
+
+        activate(&mut app, tremor);
+
+        assert!(intents(&app).is_empty(), "arming a spell already sent a cast: {:?}", intents(&app));
+        assert_eq!(app.world().resource::<ArmedSpell>().0, Some(3), "the spell did not arm");
+    }
+
+    #[test]
+    fn an_armed_spell_is_spent_on_the_next_world_click_and_disarms() {
+        // Without this the ring appeared and nothing could ever consume it: arming was
+        // reachable and spending it was not.
+        let mut app = spellbook_app();
+        let tremor = row_for(&mut app, 3);
+        activate(&mut app, tremor);
+
+        let world_centre = super::super::testing::settled(&app).world.center();
+        super::super::testing::move_pointer(&mut app, world_centre);
+        assert!(
+            app.world().resource::<super::super::pointer::PointerState>().over_world(),
+            "the pointer is not over the world, so this test is not asking its question"
+        );
+
+        super::super::testing::press_mouse(&mut app, MouseButton::Left);
+
+        let sent = intents(&app);
+        assert!(
+            matches!(sent.first(), Some(Intent::SelectTarget { .. })),
+            "the cast did not say what it was aimed at: {sent:?}"
+        );
+        assert!(
+            sent.contains(&Intent::CastSpell { spell_id: 3 }),
+            "the armed spell was never cast: {sent:?}"
+        );
+        assert!(app.world().resource::<ArmedSpell>().0.is_none(), "the spell stayed armed");
+    }
+
+    #[test]
+    fn a_world_click_with_nothing_armed_casts_nothing() {
+        let mut app = spellbook_app();
+        let world_centre = super::super::testing::settled(&app).world.center();
+        super::super::testing::move_pointer(&mut app, world_centre);
+
+        super::super::testing::press_mouse(&mut app, MouseButton::Left);
+
+        assert!(intents(&app).is_empty(), "an unarmed world click cast something: {:?}", intents(&app));
+    }
+
+    #[test]
+    fn a_blocked_spell_sends_nothing_and_does_not_arm() {
+        let mut app = spellbook_app();
+        let mut blocked = app.world().resource::<UiState>().get().clone();
+        blocked.spellbook.spells[0].blockers = vec![SpellBlocker::InsufficientMana];
+        UiState::set(&mut app.world_mut().resource_mut::<UiState>(), blocked);
+        for _ in 0..2 {
+            app.update();
+        }
+
+        let missile = row_for(&mut app, 1);
+        activate(&mut app, missile);
+
+        assert!(intents(&app).is_empty(), "a blocked spell was cast anyway: {:?}", intents(&app));
+        assert!(app.world().resource::<ArmedSpell>().0.is_none(), "a blocked spell armed");
+    }
+
+    #[test]
+    fn a_spell_row_says_why_in_words_rather_than_in_a_key() {
+        // The contract is explicit: semantic keys are localised at this boundary and
+        // never shown raw. `spell.blocked.mana` on screen is our source code, printed
+        // for a player.
+        let mut app = spellbook_app();
+        let mut blocked = app.world().resource::<UiState>().get().clone();
+        blocked.spellbook.spells[0].blockers = vec![SpellBlocker::InsufficientMana];
+        UiState::set(&mut app.world_mut().resource_mut::<UiState>(), blocked);
+        for _ in 0..2 {
+            app.update();
+        }
+
+        let shown: Vec<String> =
+            app.world_mut().query::<&Text>().iter(app.world()).map(|text| text.0.clone()).collect();
+        assert!(
+            shown.iter().any(|text| !text.is_empty() && !text.contains('.')),
+            "the spellbook rendered nothing readable: {shown:?}"
+        );
+        assert!(
+            !shown.iter().any(|text| text.starts_with("spell.")),
+            "a semantic key reached the screen: {shown:?}"
+        );
     }
 
     #[test]

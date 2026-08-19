@@ -512,6 +512,7 @@ struct RailMarks<'w> {
     pending: Res<'w, PendingSlot>,
     refused: Res<'w, RefusedSlot>,
     tab: Res<'w, RailTab>,
+    armed: Res<'w, super::spells::ArmedSpell>,
 }
 
 fn rebuild_on_change(
@@ -532,7 +533,7 @@ fn rebuild_on_change(
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
     marks: RailMarks,
     mut last_drawable: Local<usize>,
-    mut last_marks: Local<(Option<usize>, Option<usize>)>,
+    mut last_marks: Local<(Option<usize>, Option<usize>, Option<i32>)>,
     mut commands: Commands,
 ) {
     // Artwork arrives asynchronously, long after the snapshot that named it, and
@@ -571,7 +572,7 @@ fn rebuild_on_change(
     // change tick: both resources count down every frame, so `is_changed` is true every
     // frame and gating on it would rebuild the whole rail continuously — throwing away
     // focus and artwork sixty times a second to show a mark that has not moved.
-    let marks_now = (marks.pending.slot, marks.refused.slot);
+    let marks_now = (marks.pending.slot, marks.refused.slot, marks.armed.0);
     let marks_moved = *last_marks != marks_now;
     *last_marks = marks_now;
 
@@ -640,7 +641,7 @@ fn rebuild_on_change(
                 commands.entity(entity).with_children(|parent| {
                     parent.spawn((
                         PanelContent,
-                        super::shell::muted_label("spellbook — not yet wired"),
+                        super::spells::spellbook_panel(snapshot, marks.armed.0),
                     ));
                 });
             }
@@ -698,6 +699,11 @@ fn tab_strip(active: RailTab) -> impl Bundle {
             move |(index, tab)| {
                 (
                     super::controls::tab(tab.label(), tab == active, 300 + index as u32),
+                    // `present_controls` owns every control's border and reads selection
+                    // from this component. Without it the tab's underline was painted
+                    // once at spawn and then overwritten with the resting edge colour on
+                    // the very next frame, so the strip showed no selection at all.
+                    super::controls::Selected(tab == active),
                     ControlKey::new(tab.key()),
                     RailTabButton(tab),
                 )
@@ -1028,11 +1034,10 @@ fn inventory_slot(
     let was_refused = refused == Some(index);
     let locked = matches!(slot, SlotState::Locked);
 
-    // A refusal outranks the rest: it is the newest thing that happened and the only
-    // one the player may not have expected.
-    let border = if was_refused {
-        status::DANGER
-    } else if is_selected {
+    // The refusal's own colour is not set here: `present_controls` owns every control's
+    // border and would repaint it on the next frame, which is exactly what happened. It
+    // reads `Danger` instead, below.
+    let border = if is_selected {
         focus::SELECTED
     } else if is_drop_target {
         focus::RING
@@ -1167,6 +1172,7 @@ fn inventory_slot(
         // `Button`, so it had no `Interaction` and the pointer pipeline could not
         // see it. Clicking an inventory slot did nothing.
         super::controls::interactive(100 + index as u32, !locked),
+        super::controls::Danger(was_refused),
         Children::spawn(SpawnIter(children.into_iter())),
     )
 }
