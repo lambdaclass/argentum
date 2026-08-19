@@ -89,11 +89,30 @@ pub struct Control {
     pub enabled: bool,
     pub hovered: bool,
     pub pressed: bool,
+    /// Whether the press currently in progress has already been activated.
+    ///
+    /// One press is one action, and two code paths can see the same press: the
+    /// picking event and the polled `Interaction`. Cleared when a new press begins,
+    /// which is what makes a *repeat* click on the same control still work.
+    ///
+    /// This was a single frame's memory, and that is only enough when the release
+    /// and the `Interaction` transition that follows it land in the same frame. They
+    /// do at sixty frames a second and do not at three: the event fired on release,
+    /// the polled path saw `Pressed` -> `Hovered` a frame later with the guard already
+    /// cleared, and one click used two potions. Frame timing is not something an
+    /// action should depend on.
+    pub activated_in_press: bool,
 }
 
 impl Default for Control {
     fn default() -> Self {
-        Self { tab_index: 0, enabled: true, hovered: false, pressed: false }
+        Self {
+            tab_index: 0,
+            enabled: true,
+            hovered: false,
+            pressed: false,
+            activated_in_press: false,
+        }
     }
 }
 
@@ -609,6 +628,12 @@ fn track_pointer(
 
         if matches!(interaction, Interaction::Pressed) {
             focus.focus(entity, key);
+            // A new press earns a new action. Cleared on the rising edge only, so the
+            // guard lasts exactly as long as the press it describes however many
+            // frames that takes.
+            if !was_pressed {
+                control.activated_in_press = false;
+            }
         }
 
         // Released while still over the control.
@@ -618,16 +643,22 @@ fn track_pointer(
         // this path alone swallowed fast clicks. It stays because it works without
         // a picking backend, which is the only thing a headless test has.
         //
-        // Skipped when the event already reported this click, or a click slow
+        // Skipped when the event already reported this press, or a click slow
         // enough to be seen by both would activate twice — two potions from one
         // click.
-        if was_pressed && matches!(interaction, Interaction::Hovered) && clicked.0 != Some(entity) {
+        if was_pressed
+            && matches!(interaction, Interaction::Hovered)
+            && !control.activated_in_press
+            && clicked.0 != Some(entity)
+        {
+            control.activated_in_press = true;
             activated.write(Activated { entity, source: ActivationSource::Pointer });
         }
     }
 
     // One frame's worth of memory, cleared here because this system is the last
-    // reader of it.
+    // reader of it. It remains as the same-frame fast path; the per-press flag on
+    // the control is what survives a press that spans frames.
     clicked.0 = None;
 }
 
@@ -644,19 +675,25 @@ fn track_pointer(
 /// control that activates twice on one click uses two potions.
 fn activate_on_click(
     click: On<bevy::picking::events::Pointer<bevy::picking::events::Click>>,
-    controls: Query<(&Control, Option<&ControlKey>)>,
+    mut controls: Query<(&mut Control, Option<&ControlKey>)>,
     mut focus: ResMut<FocusOwner>,
     mut activated: MessageWriter<Activated>,
     mut clicked: ResMut<ClickedThisFrame>,
 ) {
     let entity = click.entity;
-    let Ok((control, key)) = controls.get(entity) else {
+    let Ok((mut control, key)) = controls.get_mut(entity) else {
         return;
     };
     if !control.enabled {
         return;
     }
+    // Already answered for this press: a click event arriving for a press the polled
+    // path has activated is the same click, not a second one.
+    if control.activated_in_press {
+        return;
+    }
 
+    control.activated_in_press = true;
     clicked.0 = Some(entity);
     focus.focus(entity, key);
     activated.write(Activated { entity, source: ActivationSource::Pointer });
@@ -2261,6 +2298,101 @@ mod tests {
         let fired = activations(&mut app);
         assert_eq!(fired.len(), 1);
         assert_eq!(fired[0].source, ActivationSource::Pointer);
+    }
+
+    /// Fire the real picking click event at a control, as the browser's backend does.
+    fn fire_click_event(app: &mut App, entity: Entity) {
+        use bevy::picking::backend::HitData;
+        use bevy::picking::events::{Click, Pointer};
+        use bevy::picking::pointer::{Location, PointerButton, PointerId};
+
+        let surface = app.world_mut().spawn_empty().id();
+        let target = bevy::camera::NormalizedRenderTarget::Window(
+            bevy::window::WindowRef::Entity(surface)
+                .normalize(Some(surface))
+                .expect("a window reference normalises"),
+        );
+        app.world_mut().trigger(Pointer {
+            entity,
+            pointer_id: PointerId::Mouse,
+            pointer_location: Location { target, position: Vec2::ZERO },
+            event: Click {
+                button: PointerButton::Primary,
+                hit: HitData::new(surface, 0.0, None, None),
+                duration: std::time::Duration::from_millis(80),
+            },
+        });
+    }
+
+    #[test]
+    fn a_slow_click_activates_exactly_once() {
+        // The regression, and it only appears at a low frame rate. Two paths see one
+        // click: the picking event on release, and the polled `Interaction` when it
+        // transitions afterwards. At sixty frames a second those land together and a
+        // single frame of memory was enough to deduplicate them. At three frames a
+        // second the transition arrives a frame later, the guard had already been
+        // cleared, and one click on a potion drank two of them.
+        //
+        // Counted across frames with an accumulating reader, because the message
+        // buffer holds only the last two frames and a fresh cursor per frame would
+        // both miss and double-count.
+        #[derive(Resource, Default)]
+        struct Counted(usize);
+        fn count(mut activated: MessageReader<Activated>, mut counted: ResMut<Counted>) {
+            counted.0 += activated.read().count();
+        }
+
+        let (mut app, controls) = control_app(1);
+        app.init_resource::<Counted>().add_systems(Update, count);
+        let entity = controls[0];
+
+        // Held for two frames: a real click spans several when frames are slow.
+        set_interaction(&mut app, entity, Interaction::Pressed);
+        set_interaction(&mut app, entity, Interaction::Pressed);
+
+        // Release. The event arrives first, in its own frame.
+        fire_click_event(&mut app, entity);
+        app.update();
+
+        // `Interaction` catches up only now — a frame after the guard used to expire.
+        set_interaction(&mut app, entity, Interaction::Hovered);
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<Counted>().0,
+            1,
+            "one click produced more than one activation"
+        );
+    }
+
+    #[test]
+    fn a_second_click_on_the_same_control_still_activates() {
+        // The guard has to end with its press. A longer-lived one swallowed every
+        // repeat click, which is worse than the double activation it prevented: a
+        // hotbar slot that works once is indistinguishable from a broken one.
+        #[derive(Resource, Default)]
+        struct Counted(usize);
+        fn count(mut activated: MessageReader<Activated>, mut counted: ResMut<Counted>) {
+            counted.0 += activated.read().count();
+        }
+
+        let (mut app, controls) = control_app(1);
+        app.init_resource::<Counted>().add_systems(Update, count);
+        let entity = controls[0];
+
+        for _ in 0..3 {
+            set_interaction(&mut app, entity, Interaction::Pressed);
+            fire_click_event(&mut app, entity);
+            app.update();
+            set_interaction(&mut app, entity, Interaction::Hovered);
+            app.update();
+        }
+
+        assert_eq!(
+            app.world().resource::<Counted>().0,
+            3,
+            "three clicks did not produce three activations"
+        );
     }
 
     #[test]

@@ -174,27 +174,33 @@ async function runHitTests(hitPage, label, ratio) {
     /// probe reads it — which is how a click one pixel outside a control came to
     /// "activate" it while the same click, measured in isolation, behaved perfectly.
     /// Measured against the published frame counter rather than a sleep, because the
-    /// speed of a software renderer on a loaded machine is not a constant.
-    /// The rate is not a round number picked for comfort: a click is answered within a
-    /// few frames, so the ten-second budget below is only meaningful while a frame is a
-    /// small fraction of it. Twenty frames inside the budget is the requirement, which
-    /// on this software renderer means two a second. Measured, not assumed — a machine
-    /// slower than that invalidates the timing rather than the client.
+    /// speed of a software renderer on a loaded machine is not a constant. The budget a
+    /// click is then given is derived from that measurement rather than fixed: this
+    /// renderer manages three frames a second at ratio 1 and under one at ratio 2, so a
+    /// fixed rate is a requirement about the machine, not about the client. Twenty
+    /// frames is the budget either way — enough for a click to be seen, pressed,
+    /// released, applied and republished several times over.
     const frames = () => hitPage.evaluate(() => window.aoLoaded?.frames ?? 0);
-    const CLICK_BUDGET_MS = 10_000;
-    const WANTED_FPS = Math.ceil(20 / (CLICK_BUDGET_MS / 1_000));
-    let fps = 0;
+    const SAMPLE_MS = 3_000;
+    let frameMs = SAMPLE_MS;
     const readyDeadline = Date.now() + 45_000;
     while (Date.now() < readyDeadline) {
       const first = await frames();
-      await hitPage.waitForTimeout(1_000);
-      fps = (await frames()) - first;
-      if (fps >= WANTED_FPS) break;
+      await hitPage.waitForTimeout(SAMPLE_MS);
+      const advanced = (await frames()) - first;
+      // Zero frames in the sample means slower than the sample, not stopped: charge it
+      // one frame so the budget is finite and the floor below can judge it.
+      frameMs = SAMPLE_MS / Math.max(advanced, 1);
+      if (advanced >= 2) break;
     }
+    // A frame slower than this makes the timing meaningless rather than the client
+    // wrong, and saying so is the point: a failure here is about the machine.
+    const SLOWEST_USABLE_FRAME_MS = 3_000;
+    const CLICK_BUDGET_MS = Math.min(Math.max(20 * frameMs, 10_000), 60_000);
     check(
       `${label}: `+"the client renders fast enough to time a click against",
-      fps >= WANTED_FPS,
-      `${fps} frames per second, ${WANTED_FPS} needed`
+      frameMs <= SLOWEST_USABLE_FRAME_MS,
+      `${frameMs.toFixed(0)}ms per frame, clicks allowed ${(CLICK_BUDGET_MS / 1000).toFixed(0)}s`
     );
 
     /// Click a point in canvas coordinates and report what activated, if anything.
