@@ -1471,6 +1471,70 @@ mod tests {
     }
 
     #[test]
+    fn a_modal_never_moves_the_player_either() {
+        // The other half of focus ownership, and worth its own test because the rule lives
+        // somewhere else: typing is a resource `handle_input` reads, while a modal is a run
+        // condition on the set it belongs to. A player answering a dialog must not walk out
+        // from under the question.
+        let mut app = App::new();
+        app.insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(Time::<()>::default())
+            .insert_resource(Blockmap::demo())
+            .insert_resource(LocalPlayer::default())
+            .insert_resource(Walk::default())
+            .insert_resource(HeldDirections::default())
+            .insert_resource(CharacterDrawn(false))
+            .insert_resource(SceneDirty::default())
+            .insert_resource(Motion::default())
+            .insert_resource(Session::default())
+            .init_resource::<crate::ui::controls::TextInputActive>()
+            // In the set, as production registers it, and gated the way production gates
+            // it. Registering it bare here would test a system that is not the one running.
+            .configure_sets(
+                Update,
+                crate::ui::controls::GameplayInput
+                    .run_if(crate::ui::controls::nothing_modal_is_open),
+            )
+            .add_systems(Update, handle_input.in_set(crate::ui::controls::GameplayInput));
+
+        let start = {
+            let p = app.world().resource::<LocalPlayer>();
+            (p.x, p.y)
+        };
+        app.world_mut().spawn(crate::ui::controls::Modal);
+        for _ in 0..8 {
+            press(&mut app, KeyCode::KeyW);
+            advance(&mut app, 200);
+            app.update();
+        }
+        let held = {
+            let p = app.world().resource::<LocalPlayer>();
+            (p.x, p.y)
+        };
+        assert_eq!(held, start, "a modal let the player walk from {start:?} to {held:?}");
+
+        // And closing it gives movement back, or the suppression would be a way to strand
+        // the player behind a dialog they have already answered.
+        let modal = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::ui::controls::Modal>>()
+            .iter(app.world())
+            .next()
+            .expect("the modal is still there");
+        app.world_mut().entity_mut(modal).despawn();
+        for _ in 0..8 {
+            press(&mut app, KeyCode::KeyW);
+            advance(&mut app, 200);
+            app.update();
+        }
+        let after = {
+            let p = app.world().resource::<LocalPlayer>();
+            (p.x, p.y)
+        };
+        assert_ne!(after, start, "closing the modal did not give movement back");
+    }
+
+    #[test]
     fn typing_never_moves_the_player() {
         // "w" is both a movement key and a letter. Before this, a focused chat
         // field received the character *and* the player walked north.
