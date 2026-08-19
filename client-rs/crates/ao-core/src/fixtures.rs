@@ -439,6 +439,11 @@ fn rejected() -> UiSnapshot {
             params: vec![FeedbackParam::Name("Wolf".to_string())],
             literal: None,
         },
+        // Cooldown and silence, because this task asks for both to be judged and they
+        // lead a player to opposite next actions: one is waiting, the other is a
+        // moderator.
+        Feedback::new(FeedbackKey::ActionTooSoon),
+        Feedback::new(FeedbackKey::Muted),
         // The wire still carries inherited prose in places; it is shown, but
         // marked so nothing branches on it.
         Feedback::untranslated("No puedes hacer eso ahora."),

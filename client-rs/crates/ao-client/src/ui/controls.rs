@@ -557,7 +557,17 @@ impl Plugin for ControlsPlugin {
         app.init_resource::<FocusOwner>()
             .add_message::<Activated>()
             .configure_sets(Update, ControlSet::Interact.before(ControlSet::Present))
-            .configure_sets(Update, GameplayInput.after(ControlSet::Interact))
+            .configure_sets(
+                Update,
+                GameplayInput
+                    .after(ControlSet::Interact)
+                    // A modal owns the keyboard as completely as a text field does. With a
+                    // dialog open, "w" must not walk the character out from under it and a
+                    // number key must not cast: the player is answering a question, and a
+                    // question they can walk away from mid-answer is a question that will
+                    // be answered by accident.
+                    .run_if(nothing_modal_is_open),
+            )
             .add_systems(
                 Update,
                 (
@@ -990,6 +1000,15 @@ pub fn list_row(label_text: &str, selected: bool, tab_index: u32) -> impl Bundle
             TextColor(if selected { ink::PRIMARY } else { ink::MUTED }),
         )],
     )
+}
+
+/// Whether the world may act on the keyboard at all.
+///
+/// A run condition rather than a check inside each gameplay system, for the same reason
+/// `TextInputActive` is one resource: a rule each consumer applies for itself is a rule a
+/// new consumer forgets.
+pub fn nothing_modal_is_open(modals: Query<(), With<Modal>>) -> bool {
+    modals.is_empty()
 }
 
 /// Marks a subtree that owns the keyboard while it is open.

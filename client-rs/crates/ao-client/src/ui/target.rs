@@ -15,6 +15,19 @@ use super::tokens::{ink, size, space, status, surface, type_scale};
 use ao_core::view::{ConnectionPhase, Feedback, FeedbackKey, TargetKind, TargetState, UiSnapshot};
 use bevy::prelude::*;
 
+/// What a player can do about the target from here.
+///
+/// Deliberately the two actions the intent surface actually has. Attacking is a world
+/// gesture and casting is the spellbook's; offering buttons for them here would be
+/// offering controls that cannot work.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetAction {
+    /// Stop pointing at it.
+    Clear,
+    /// Answer them privately, by switching the composer's channel.
+    Whisper,
+}
+
 /// Content of the target strip, rebuilt when the target changes.
 #[derive(Component)]
 struct TargetContent;
@@ -29,7 +42,8 @@ impl Plugin for TargetPanelPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (present_target, present_notices)
+            (apply_target_actions, present_target, present_notices)
+                .chain()
                 .after(super::shell::spawn_shell)
                 // So a target or a notice spawned this frame is painted this frame.
                 .before(super::controls::ControlSet::Present),
@@ -184,9 +198,63 @@ fn present_target(
                         })
                         .into_iter(),
                 ),
+                // The actions, offered only for a target that can hear them: whispering
+                // at a wolf is not a thing the server will do.
+                SpawnIter(
+                    actions_for(kind)
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, (action, label))| {
+                            (
+                                super::controls::button(
+                                    label,
+                                    super::controls::ControlState::Normal,
+                                    800 + index as u32,
+                                ),
+                                super::controls::ControlKey::new(match action {
+                                    TargetAction::Clear => "target.clear",
+                                    TargetAction::Whisper => "target.whisper",
+                                }),
+                                action,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .into_iter(),
+                ),
             )),
         ));
     });
+}
+
+/// Which actions a kind of target offers.
+fn actions_for(kind: TargetKind) -> Vec<(TargetAction, &'static str)> {
+    let mut actions = vec![(TargetAction::Clear, "clear")];
+    if matches!(kind, TargetKind::Player) {
+        actions.push((TargetAction::Whisper, "whisper"));
+    }
+    actions
+}
+
+/// Turn a target action into the intent that asks for it.
+fn apply_target_actions(
+    mut activated: MessageReader<super::controls::Activated>,
+    actions: Query<&TargetAction>,
+    mut intents: MessageWriter<super::state::IntentMessage>,
+) {
+    for message in activated.read() {
+        let Ok(action) = actions.get(message.entity) else {
+            continue;
+        };
+        intents.write(super::state::IntentMessage(match action {
+            TargetAction::Clear => ao_core::view::Intent::ClearTarget,
+            // Switching the channel rather than opening a separate box: the composer is
+            // already there, and a second place to type is a second place for focus to
+            // be lost.
+            TargetAction::Whisper => ao_core::view::Intent::SetActiveChannel {
+                channel: Some(ao_core::view::ChatChannel::Whisper),
+            },
+        }));
+    }
 }
 
 /// What a notice says, as a key the catalogue will translate.
@@ -227,6 +295,29 @@ pub fn notice_level(key: FeedbackKey) -> super::controls::NoticeLevel {
     }
 }
 
+/// The connection's own notice, when there is one to give.
+///
+/// Not a `Feedback`: the server cannot tell a client that it has stopped talking to it.
+/// This is the client's own observation, and it belongs in the same place as the server's
+/// notices because from the player's side both answer "why did nothing happen".
+pub fn connection_notice(snapshot: &UiSnapshot) -> Option<(String, super::controls::NoticeLevel)> {
+    use super::controls::NoticeLevel;
+    match snapshot.service.phase {
+        ConnectionPhase::Playing => None,
+        ConnectionPhase::Connecting | ConnectionPhase::Authenticating => {
+            Some(("notice.connecting".into(), NoticeLevel::Info))
+        }
+        ConnectionPhase::Reconnecting => {
+            Some(("notice.reconnecting".into(), NoticeLevel::Warning))
+        }
+        // Offline and failed are both "nothing you do will work", and saying so loudly is
+        // the point: a player who does not know is a player who keeps clicking.
+        ConnectionPhase::Offline | ConnectionPhase::Failed => {
+            Some(("notice.disconnected".into(), NoticeLevel::Danger))
+        }
+    }
+}
+
 /// The notices to show, newest last.
 ///
 /// Bounded, because a server having a bad minute must not paper over the world. The
@@ -246,19 +337,20 @@ fn present_notices(
     stacks: Query<Entity, With<super::shell::NoticeStack>>,
     existing: Query<Entity, With<NoticeContent>>,
     mut commands: Commands,
-    mut last: Local<Option<Vec<Feedback>>>,
+    mut last: Local<Option<(Vec<Feedback>, ConnectionPhase)>>,
 ) {
     let snapshot = state.get();
-    if last.as_deref() == Some(snapshot.feedback.as_slice()) {
+    let signature = (snapshot.feedback.clone(), snapshot.service.phase);
+    if last.as_ref() == Some(&signature) {
         return;
     }
-    *last = Some(snapshot.feedback.clone());
+    *last = Some(signature);
 
     for entity in &existing {
         commands.entity(entity).despawn();
     }
 
-    let lines: Vec<(String, super::controls::NoticeLevel)> = notices(snapshot)
+    let mut lines: Vec<(String, super::controls::NoticeLevel)> = notices(snapshot)
         .into_iter()
         .map(|feedback| {
             let key = notice_key(feedback);
@@ -271,6 +363,11 @@ fn present_notices(
         })
         .filter(|(text, _)| !text.trim().is_empty())
         .collect();
+    // The connection's notice goes last, which is where the eye lands: a player who
+    // cannot act needs to know it is the connection before they read four refusals.
+    if let Some((key, level)) = connection_notice(snapshot) {
+        lines.push((super::fallback_label(&key), level));
+    }
     if lines.is_empty() {
         return;
     }
@@ -315,6 +412,159 @@ mod tests {
             .map(|text| text.0.clone())
             .collect::<Vec<_>>()
             .join(" | ")
+    }
+
+    #[derive(Resource, Default)]
+    struct Asked(Vec<ao_core::view::Intent>);
+
+    fn record(
+        mut messages: MessageReader<super::super::state::IntentMessage>,
+        mut asked: ResMut<Asked>,
+    ) {
+        for message in messages.read() {
+            asked.0.push(message.0.clone());
+        }
+    }
+
+    fn hud_app() -> App {
+        let mut app = super::super::testing::shell_app(Vec2::new(1280.0, 832.0));
+        app.init_resource::<Asked>()
+            .add_systems(Update, record.after(super::super::controls::ControlSet::Present));
+        for _ in 0..4 {
+            app.update();
+        }
+        app
+    }
+
+    fn activate(app: &mut App, entity: Entity) {
+        app.world_mut().write_message(super::super::controls::Activated {
+            entity,
+            source: super::super::controls::ActivationSource::Pointer,
+        });
+        app.update();
+    }
+
+    #[test]
+    fn clearing_the_target_asks_the_server_to_forget_it() {
+        let mut app = hud_app();
+        let entity = app
+            .world_mut()
+            .query::<(Entity, &TargetAction)>()
+            .iter(app.world())
+            .find(|(_, action)| **action == TargetAction::Clear)
+            .map(|(entity, _)| entity)
+            .expect("the strip offers a way to clear the target");
+
+        activate(&mut app, entity);
+
+        assert!(
+            app.world().resource::<Asked>().0.contains(&ao_core::view::Intent::ClearTarget),
+            "clearing the target asked for nothing: {:?}",
+            app.world().resource::<Asked>().0
+        );
+    }
+
+    #[test]
+    fn a_wolf_is_not_offered_a_whisper() {
+        // The actions are the ones the intent surface has, offered where they can work.
+        // A button that whispers at a hostile is a button that produces a refusal.
+        assert!(actions_for(TargetKind::Player).iter().any(|(action, _)| {
+            *action == TargetAction::Whisper
+        }));
+        for kind in [TargetKind::Hostile, TargetKind::Npc, TargetKind::Item] {
+            assert!(
+                !actions_for(kind).iter().any(|(action, _)| *action == TargetAction::Whisper),
+                "{kind:?} was offered a whisper"
+            );
+        }
+        // Everything can be let go of.
+        for kind in [TargetKind::Player, TargetKind::Hostile, TargetKind::Npc, TargetKind::Item] {
+            assert!(actions_for(kind).iter().any(|(action, _)| *action == TargetAction::Clear));
+        }
+    }
+
+    #[test]
+    fn a_disconnected_client_says_so_where_the_refusals_appear() {
+        // The server cannot tell a client it has stopped talking to it, so this is the
+        // client's own observation — shown in the same place, because from the player's
+        // side both answer "why did nothing happen".
+        use super::super::testing;
+
+        let mut app = hud_app();
+        let mut gone = app.world().resource::<UiState>().get().clone();
+        gone.service.phase = ConnectionPhase::Reconnecting;
+        UiState::set(&mut app.world_mut().resource_mut::<UiState>(), gone);
+        for _ in 0..3 {
+            app.update();
+        }
+
+        let stack = app
+            .world_mut()
+            .query_filtered::<Entity, With<super::super::shell::NoticeStack>>()
+            .iter(app.world())
+            .next()
+            .expect("the shell has a notice stack");
+        let texts: Vec<String> = testing::descendants(&app, stack)
+            .into_iter()
+            .filter_map(|entity| app.world().get::<Text>(entity).map(|text| text.0.clone()))
+            .collect();
+
+        assert!(
+            texts.iter().any(|text| text.to_lowercase().contains("reconnect")),
+            "a reconnecting client says nothing about it: {texts:?}"
+        );
+    }
+
+    #[test]
+    fn every_connection_phase_that_is_not_playing_says_something() {
+        for phase in [
+            ConnectionPhase::Offline,
+            ConnectionPhase::Connecting,
+            ConnectionPhase::Authenticating,
+            ConnectionPhase::Reconnecting,
+            ConnectionPhase::Failed,
+        ] {
+            let mut snapshot = fixtures::snapshot(Scenario::Populated);
+            snapshot.service.phase = phase;
+            let notice = connection_notice(&snapshot);
+            assert!(notice.is_some(), "{phase:?} says nothing to the player");
+            let (key, _) = notice.expect("checked");
+            let readable = super::super::fallback_label(&key);
+            assert!(!readable.contains('.'), "{phase:?} would show a key: {readable}");
+        }
+
+        let mut playing = fixtures::snapshot(Scenario::Populated);
+        playing.service.phase = ConnectionPhase::Playing;
+        assert!(
+            connection_notice(&playing).is_none(),
+            "a healthy connection is announcing itself"
+        );
+    }
+
+    #[test]
+    fn a_modal_takes_the_keyboard_from_the_world() {
+        // The rule this task asks for, and the reason it is a run condition rather than a
+        // check in each system: with a dialog open, "1" must not cast and "w" must not
+        // walk the character out from under the question they are answering.
+        use super::super::testing;
+
+        let mut app = hud_app();
+        testing::tap_key(&mut app, KeyCode::Digit1);
+        app.update();
+        let with_world = app.world().resource::<Asked>().0.len();
+        assert!(with_world > 0, "a hotbar key did nothing even with no modal open");
+
+        app.world_mut().spawn((Node::default(), super::super::controls::Modal));
+        app.update();
+        testing::tap_key(&mut app, KeyCode::Digit1);
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<Asked>().0.len(),
+            with_world,
+            "a hotbar key fired while a modal was open: {:?}",
+            app.world().resource::<Asked>().0
+        );
     }
 
     #[test]

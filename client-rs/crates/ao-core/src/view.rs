@@ -715,7 +715,7 @@ impl WorldMapState {
 }
 
 /// Whether the client is talking to a server, and how well.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ConnectionPhase {
     #[default]
     Offline,
