@@ -721,6 +721,9 @@ pub enum FeedbackKey {
     TooFarAway,
     TargetInvalid,
     ActionTooSoon,
+    /// Silenced by a moderator or by a spell. Distinct from `Blocked` because the
+    /// player's next action is completely different: waiting, not moving or re-equipping.
+    Muted,
     Blocked,
     Died,
     LevelUp,

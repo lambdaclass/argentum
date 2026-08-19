@@ -131,6 +131,20 @@ fn apply(snapshot: &mut UiSnapshot, intent: &Intent, pages: &mut HotbarPages) ->
         Intent::ClearHotbarSlot { index } => bind_hotbar(snapshot, pages, *index, None),
         Intent::ChangeHotbarPage { page } => change_page(snapshot, pages, *page),
         Intent::SendChat { channel, body } => say(snapshot, *channel, body),
+        Intent::SetSafeMode(on) => {
+            if snapshot.safety.safe_mode == *on {
+                return false;
+            }
+            snapshot.safety.safe_mode = *on;
+            true
+        }
+        Intent::SetPartySafe(on) => {
+            if snapshot.safety.party_safe == *on {
+                return false;
+            }
+            snapshot.safety.party_safe = *on;
+            true
+        }
         Intent::SetActiveChannel { channel } => {
             if snapshot.chat.active_channel == *channel {
                 return false;

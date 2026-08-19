@@ -20,6 +20,7 @@ pub mod scale;
 pub mod shell;
 pub mod spells;
 pub mod state;
+pub mod target;
 pub mod telemetry;
 #[cfg(test)]
 pub mod testing;
@@ -68,6 +69,7 @@ impl Plugin for UiPlugin {
             character::CharacterPanelPlugin,
             spells::SpellPanelPlugin,
             chat::ChatPanelPlugin,
+            target::TargetPanelPlugin,
             hotbar::HotbarPlugin,
         ));
     }

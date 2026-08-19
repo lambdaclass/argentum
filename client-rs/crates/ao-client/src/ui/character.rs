@@ -144,6 +144,7 @@ impl Plugin for CharacterPanelPlugin {
                     clear_selection_when_slot_empties,
                     apply_slot_activations,
                     apply_tab_activations,
+                    apply_safety_activations,
                     clear_pending_on_answer,
                 )
                     .chain()
@@ -709,6 +710,11 @@ fn rebuild_on_change(
                     parent.spawn((PanelContent, character_header(snapshot)));
                 });
             }
+            RailRegion::Navigation => {
+                commands.entity(entity).with_children(|parent| {
+                    parent.spawn((PanelContent, safety_row(snapshot)));
+                });
+            }
             RailRegion::Tabs => {
                 commands.entity(entity).with_children(|parent| {
                     parent.spawn((PanelContent, tab_strip(*marks.tab)));
@@ -1263,6 +1269,89 @@ fn inventory_slot(
     )
 }
 
+/// Which safety rule a toggle controls.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SafetyToggle {
+    /// Refuses attacks on other citizens.
+    Safe,
+    /// Refuses attacks on party members.
+    Party,
+}
+
+/// The safety toggles, and the trade rule the server owns outright.
+///
+/// These are the two settings a player checks before a fight and curses after one. Shown
+/// with the word "on" or "off" as well as a selection border, because a toggle whose state
+/// is only a colour is a toggle a player has to test by attacking someone.
+fn safety_row(snapshot: &UiSnapshot) -> impl Bundle {
+    let safety = snapshot.safety;
+    (
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            column_gap: Val::Px(space::TIGHT),
+            align_items: AlignItems::Center,
+            ..default()
+        },
+        Children::spawn((
+            SpawnIter(
+                [
+                    (SafetyToggle::Safe, "safe", safety.safe_mode),
+                    (SafetyToggle::Party, "party", safety.party_safe),
+                ]
+                .into_iter()
+                .enumerate()
+                .map(|(index, (toggle, label, on))| {
+                    (
+                        super::controls::button(
+                            &format!("{label} {}", if on { "on" } else { "off" }),
+                            // The state is resolved by `present_controls` from hover,
+                            // focus and press; what this builder passes is only the
+                            // starting look, and selection carries "on".
+                            super::controls::ControlState::Normal,
+                            700 + index as u32,
+                        ),
+                        super::controls::Selected(on),
+                        ControlKey::new(match toggle {
+                            SafetyToggle::Safe => "safety.safe",
+                            SafetyToggle::Party => "safety.party",
+                        }),
+                        toggle,
+                    )
+                }),
+            ),
+            // Read-only: the view model carries it and no intent asks to change it, so
+            // presenting a control here would be a button that cannot work.
+            Spawn(text(
+                format!("trade {}", if safety.secure_trade { "secure" } else { "open" }),
+                type_scale::MICRO,
+                ink::MUTED,
+            )),
+        )),
+    )
+}
+
+/// Turn a safety toggle's activation into the intent that asks for it.
+fn apply_safety_activations(
+    mut activated: MessageReader<super::controls::Activated>,
+    toggles: Query<&SafetyToggle>,
+    state: Res<UiState>,
+    mut intents: MessageWriter<super::state::IntentMessage>,
+) {
+    for message in activated.read() {
+        let Ok(toggle) = toggles.get(message.entity) else {
+            continue;
+        };
+        let safety = state.get().safety;
+        // Asked for, not applied: the server decides whether a citizen may switch safety
+        // off, and in some places it refuses.
+        intents.write(super::state::IntentMessage(match toggle {
+            SafetyToggle::Safe => Intent::SetSafeMode(!safety.safe_mode),
+            SafetyToggle::Party => Intent::SetPartySafe(!safety.party_safe),
+        }));
+    }
+}
+
 /// The slot's free corner: the quantity and equipped markers own the trailing edge.
 fn corner_leading() -> Node {
     Node {
@@ -1736,6 +1825,103 @@ mod tests {
             );
         }
         assert_eq!(*app.world().resource::<RailTab>(), RailTab::Inventory);
+    }
+
+    #[test]
+    fn the_safety_toggles_say_which_way_they_are_set() {
+        // A toggle whose state is only a colour is a toggle a player has to test by
+        // attacking someone, which is the one experiment they cannot undo.
+        use super::super::testing;
+
+        let mut app = testing::shell_app(Vec2::new(1280.0, 832.0));
+        for _ in 0..4 {
+            app.update();
+        }
+
+        let toggles: Vec<(SafetyToggle, bool, String)> = app
+            .world_mut()
+            .query::<(Entity, &SafetyToggle)>()
+            .iter(app.world())
+            .map(|(entity, toggle)| (entity, *toggle))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|(entity, toggle)| {
+                let selected = app
+                    .world()
+                    .get::<super::super::controls::Selected>(entity)
+                    .map(|s| s.0)
+                    .unwrap_or(false);
+                let words = testing::descendants(&app, entity)
+                    .into_iter()
+                    .filter_map(|child| app.world().get::<Text>(child).map(|text| text.0.clone()))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                (toggle, selected, words)
+            })
+            .collect();
+
+        assert_eq!(toggles.len(), 2, "the rail is missing a safety toggle: {toggles:?}");
+        let safety = app.world().resource::<UiState>().get().safety;
+        for (toggle, selected, words) in toggles {
+            let expected = match toggle {
+                SafetyToggle::Safe => safety.safe_mode,
+                SafetyToggle::Party => safety.party_safe,
+            };
+            assert_eq!(selected, expected, "{toggle:?} is marked the wrong way");
+            assert!(
+                words.contains(if expected { "on" } else { "off" }),
+                "{toggle:?} does not say which way it is set: {words}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_safety_toggle_asks_the_server_rather_than_switching_itself() {
+        // The server decides whether a citizen may switch safety off, and refuses in some
+        // places. A client that flipped its own copy would show a player as unsafe while
+        // the server still refused every attack.
+        use super::super::testing;
+
+        let mut app = testing::shell_app(Vec2::new(1280.0, 832.0));
+        #[derive(Resource, Default)]
+        struct Asked(Vec<Intent>);
+        fn record(
+            mut messages: MessageReader<super::super::state::IntentMessage>,
+            mut asked: ResMut<Asked>,
+        ) {
+            for message in messages.read() {
+                asked.0.push(message.0.clone());
+            }
+        }
+        app.init_resource::<Asked>()
+            // After presentation, which is after the rail's own systems have run: the
+            // safety toggle is applied inside that chain, and a reader ordered only after
+            // `Interact` can run before it and see nothing.
+            .add_systems(Update, record.after(super::super::controls::ControlSet::Present));
+        for _ in 0..4 {
+            app.update();
+        }
+
+        let before = app.world().resource::<UiState>().get().safety;
+        let entity = app
+            .world_mut()
+            .query::<(Entity, &SafetyToggle)>()
+            .iter(app.world())
+            .find(|(_, toggle)| **toggle == SafetyToggle::Safe)
+            .map(|(entity, _)| entity)
+            .expect("the rail has a safe-mode toggle");
+
+        app.world_mut().write_message(super::super::controls::Activated {
+            entity,
+            source: super::super::controls::ActivationSource::Pointer,
+        });
+        app.update();
+
+        let asked = app.world().resource::<Asked>().0.clone();
+        assert!(
+            asked.contains(&Intent::SetSafeMode(!before.safe_mode)),
+            "the toggle did not ask for the other setting: {asked:?}"
+        );
     }
 
     #[test]

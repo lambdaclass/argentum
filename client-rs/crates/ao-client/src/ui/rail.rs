@@ -164,10 +164,12 @@ fn populate(mut commands: Commands, rails: Query<(Entity, &Region)>) {
         // mid-fight belong closest to what is being looked at.
         rail.spawn((region_well(RailRegion::Vitals, Val::Auto), FullRailOnly));
 
+        // No placeholder children: `character::rebuild_on_change` fills this with the
+        // safety toggles from the snapshot. It said "not yet wired" while nothing read
+        // them, which was honest then.
         rail.spawn((
             region_well(RailRegion::Navigation, Val::Px(size::ICON_BUTTON + space::WIDE)),
             FullRailOnly,
-            children![muted_label("navigation — not yet wired")],
         ));
 
         // Compact rail: an icon strip. Vitals survive as unlabelled slivers

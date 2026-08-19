@@ -72,6 +72,20 @@ pub struct Hotbar;
 #[derive(Component)]
 pub struct Minimap;
 
+/// The selected target, centred at the top of the world.
+///
+/// Over the world rather than in the rail: a player deciding whether to attack is looking
+/// at the thing they are attacking, not at a panel beside it.
+#[derive(Component)]
+pub struct TargetStrip;
+
+/// Where the server's notices stack, above the hotbar.
+///
+/// Low and central, because that is where the player's attention already is during a
+/// fight, and a refusal shown in a corner has not been delivered.
+#[derive(Component)]
+pub struct NoticeStack;
+
 /// Content that only exists in the full rail.
 #[derive(Component)]
 pub struct FullRailOnly;
@@ -175,6 +189,42 @@ pub fn spawn_shell(mut commands: Commands) {
                         },
                         Pickable::IGNORE,
                         WorldMessageArea,
+                    ));
+
+                    // The target, centred at the top. Between the messages on the left
+                    // and the minimap on the right, which is the one horizontal strip of
+                    // the world nothing else claims.
+                    world.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Percent(50.0),
+                            top: Val::Px(space::BASE),
+                            // Half its own width back, so the strip is centred on the
+                            // world rather than starting at its centre.
+                            margin: UiRect::left(Val::Percent(-12.0)),
+                            flex_direction: FlexDirection::Column,
+                            align_items: AlignItems::Center,
+                            max_width: Val::Percent(24.0),
+                            ..default()
+                        },
+                        Pickable::IGNORE,
+                        TargetStrip,
+                    ));
+
+                    // Notices, above where the hotbar sits: low and central, where a
+                    // player's attention already is during a fight.
+                    world.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            right: Val::Px(space::BASE),
+                            bottom: Val::Px(size::HOTBAR_SLOT + space::WIDE * 2.0),
+                            flex_direction: FlexDirection::Column,
+                            align_items: AlignItems::FlexEnd,
+                            max_width: Val::Percent(56.0),
+                            ..default()
+                        },
+                        Pickable::IGNORE,
+                        NoticeStack,
                     ));
 
                     // Labelled, not blank. The minimap has no data source
