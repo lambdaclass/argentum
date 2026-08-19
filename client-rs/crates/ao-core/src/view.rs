@@ -494,6 +494,44 @@ pub struct SafetyState {
     pub secure_trade: bool,
 }
 
+/// The world's own state, as the rail reports it.
+///
+/// Time of day matters in this game — spells, spawns and visibility change with it —
+/// so it belongs in the rail rather than in a menu. Safety belongs beside it because
+/// the two together answer "is it safe to be here right now", which is the question
+/// a player actually asks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct WorldStatus {
+    /// Minutes since midnight in the game world.
+    ///
+    /// Stored rather than formatted, so the interface decides how to show it and a
+    /// locale that writes times differently is a presentation change.
+    pub minute_of_day: u16,
+    /// Whether player-versus-player combat is prevented here.
+    pub safe_area: bool,
+}
+
+impl WorldStatus {
+    /// Hour and minute, clamped into a real day.
+    ///
+    /// Clamped because this crosses a boundary from a server that may send anything:
+    /// a minute count past the end of the day would otherwise format as "27:14",
+    /// which looks like a client fault rather than bad data.
+    pub fn clock(&self) -> (u16, u16) {
+        let minutes = self.minute_of_day % (24 * 60);
+        (minutes / 60, minutes % 60)
+    }
+
+    /// The localisation key for the area's safety.
+    pub fn safety_key(&self) -> &'static str {
+        if self.safe_area {
+            "world.area.safe"
+        } else {
+            "world.area.hostile"
+        }
+    }
+}
+
 /// Whether a map view has anything to show, and why not when it does not.
 ///
 /// Four states rather than an `Option`, because "not loaded yet", "this map has
@@ -741,6 +779,7 @@ pub struct UiSnapshot {
     pub service: ServiceState,
     pub minimap: MinimapState,
     pub world_map: WorldMapState,
+    pub world: WorldStatus,
     pub feedback: Vec<Feedback>,
     /// True while the snapshot is a placeholder awaiting real data. Distinct
     /// from empty: "no items" and "not loaded yet" look different and mean
@@ -787,6 +826,7 @@ impl UiSnapshot {
             && self.service == other.service
             && self.minimap == other.minimap
             && self.world_map == other.world_map
+            && self.world == other.world
             && self.feedback == other.feedback
             && self.loading == other.loading
             && hotbars_match(&self.hotbar, &other.hotbar)
@@ -1041,6 +1081,44 @@ mod tests {
         assert!(!snapshot.text_input_has_focus());
         snapshot.chat.composing = true;
         assert!(snapshot.text_input_has_focus());
+    }
+
+    #[test]
+    fn a_world_clock_never_reports_an_impossible_time() {
+        // This crosses a boundary from a server that may send anything. A minute
+        // count past the end of the day formatting as "27:14" looks like a client
+        // fault rather than like bad data.
+        for minute in [0u16, 59, 60, 719, 720, 1439, 1440, 1441, u16::MAX] {
+            let (hour, min) = WorldStatus { minute_of_day: minute, safe_area: false }.clock();
+            assert!(hour < 24, "{minute} minutes became hour {hour}");
+            assert!(min < 60, "{minute} minutes became minute {min}");
+        }
+
+        assert_eq!(WorldStatus { minute_of_day: 19 * 60 + 42, safe_area: false }.clock(), (19, 42));
+        // Midnight the next day is midnight, not hour 24.
+        assert_eq!(WorldStatus { minute_of_day: 1440, safe_area: false }.clock(), (0, 0));
+    }
+
+    #[test]
+    fn area_safety_is_a_key_and_the_two_states_differ() {
+        let safe = WorldStatus { minute_of_day: 0, safe_area: true };
+        let hostile = WorldStatus { minute_of_day: 0, safe_area: false };
+        assert_ne!(safe.safety_key(), hostile.safety_key());
+        assert!(safe.safety_key().starts_with("world.area."));
+        assert!(hostile.safety_key().starts_with("world.area."));
+    }
+
+    #[test]
+    fn the_world_status_takes_part_in_snapshot_equality() {
+        // Dusk falling, or a safe zone becoming hostile, must reach the interface.
+        let a = crate::fixtures::snapshot(crate::fixtures::Scenario::Populated);
+        let mut b = a.clone();
+        b.world.minute_of_day += 1;
+        assert!(!a.same_state_as(&b), "the clock advancing is not a change");
+
+        let mut c = a.clone();
+        c.world.safe_area = !c.world.safe_area;
+        assert!(!a.same_state_as(&c), "an area becoming hostile is not a change");
     }
 
     #[test]

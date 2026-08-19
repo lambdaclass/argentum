@@ -186,8 +186,26 @@ async function runHitTests(hitPage, label, ratio) {
         key
       );
 
+    /// Wait until no activation has arrived for a moment.
+    ///
+    /// Without this, a click whose activation lands after its own probe gave up is
+    /// counted against the *next* probe — so a click one pixel outside a control
+    /// "activated" it, using the previous click's result. The failures that produced
+    /// were real observations of the wrong thing: measured in isolation, every one of
+    /// those clicks behaved correctly.
+    const settle = async () => {
+      let last = -1;
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        const now = await hitPage.evaluate(() => window.aoLoaded?.activations ?? 0);
+        if (now === last) return now;
+        last = now;
+        await hitPage.waitForTimeout(150);
+      }
+      return last;
+    };
+
     const clickAt = async (x, y) => {
-      const before = await hitPage.evaluate(() => window.aoLoaded?.activations ?? 0);
+      const before = await settle();
       await hitPage.mouse.click(canvasBox.x + x, canvasBox.y + y);
 
       // Polled, not slept. Under software rendering this client runs at about six

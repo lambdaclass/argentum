@@ -460,7 +460,36 @@ fn character_header(snapshot: &UiSnapshot) -> impl Bundle {
             text(name, type_scale::TITLE, ink::GOLD),
             text(subtitle, type_scale::SMALL, ink::MUTED),
             experience_bar(progression.experience),
+            world_row(&snapshot.world),
             currency_row(progression.gold),
+        ],
+    )
+}
+
+/// The world's time and whether this place is safe.
+///
+/// Between the experience bar and the currency row, which is where the task puts it.
+/// The two facts share a line because together they answer one question — is it safe
+/// to be here right now — and time alone is trivia in a game where night changes what
+/// spawns.
+fn world_row(world: &ao_core::view::WorldStatus) -> impl Bundle {
+    let (hour, minute) = world.clock();
+    // Safety is a word, not a colour: the palette separates surfaces by very little
+    // and this is the one line a player checks before committing to a fight.
+    let (safety, ink_colour) =
+        if world.safe_area { ("segura", ink::MUTED) } else { ("hostil", status::DANGER) };
+
+    (
+        Node {
+            width: Val::Percent(100.0),
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            padding: UiRect::horizontal(Val::Px(space::SNUG)),
+            ..default()
+        },
+        children![
+            text(format!("{hour:02}:{minute:02}"), type_scale::MICRO, ink::MUTED),
+            text(safety, type_scale::MICRO, ink_colour),
         ],
     )
 }

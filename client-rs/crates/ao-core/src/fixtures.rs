@@ -172,6 +172,8 @@ fn base_progression(name: &str, level: u16) -> ProgressionState {
 
 fn populated() -> UiSnapshot {
     UiSnapshot {
+        // Dusk, and hostile: the pair a player checks before deciding to fight.
+        world: WorldStatus { minute_of_day: 19 * 60 + 42, safe_area: false },
         minimap: MinimapState {
             availability: MapAvailability::Ready,
             map_number: 1,
