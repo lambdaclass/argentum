@@ -147,7 +147,12 @@ impl Plugin for CharacterPanelPlugin {
                     clear_pending_on_answer,
                 )
                     .chain()
-                    .after(super::shell::spawn_shell),
+                    .after(super::shell::spawn_shell)
+                    // Before the controls are presented, so a panel rebuilt this frame is
+                    // painted this frame. Without the ordering a freshly spawned control
+                    // showed its resting colours until the next one — a flicker on every
+                    // rebuild, and a mark that a test could only see by counting frames.
+                    .before(super::controls::ControlSet::Present),
             );
     }
 }
@@ -498,6 +503,57 @@ pub struct ItemIcon {
     image: Handle<Image>,
     layout: Handle<TextureAtlasLayout>,
     index: usize,
+}
+
+impl ItemIcon {
+    /// The icon as a node, or an invisible one when there is nothing to draw.
+    ///
+    /// Invisible rather than absent: `ImageNode::default()` carries the engine's white
+    /// placeholder, which would draw a white square over every empty slot.
+    pub fn node(icon: Option<&ItemIcon>) -> ImageNode {
+        match icon {
+            Some(icon) => ImageNode {
+                image: icon.image.clone(),
+                texture_atlas: Some(TextureAtlas {
+                    layout: icon.layout.clone(),
+                    index: icon.index,
+                }),
+                ..default()
+            },
+            None => ImageNode { color: Color::NONE, ..default() },
+        }
+    }
+}
+
+/// Resolve a graphic id to something drawable, through the same path the world uses.
+///
+/// Shared because the hotbar needs exactly what the inventory grid needed, and a second
+/// copy of this resolution is a second place for the object table, the sheet cache and
+/// the atlas layout to be looked up in the wrong order.
+pub fn icon_for_grh(
+    grh_id: i32,
+    graphics: &crate::graphics::Graphics,
+    sheets: &crate::graphics::SheetTextures,
+    atlases: &mut crate::world::SheetAtlases,
+    layouts: &mut Assets<TextureAtlasLayout>,
+) -> Option<ItemIcon> {
+    let grh = graphics.index().as_ref()?.resolve(grh_id)?;
+    let (image, layout, index) = crate::world::resolve_grh(sheets, atlases, layouts, &grh)?;
+    Some(ItemIcon { image, layout, index })
+}
+
+/// The graphic an item is drawn with.
+///
+/// The game's own object table first, the view model's `icon_grh` as the override for
+/// items the table does not cover — fixtures fill that field with plausible-looking
+/// numbers that are not real graphics, and preferring it made every slot draw its
+/// fallback.
+pub fn item_grh(item_id: i32, icon_grh: i32, graphics: &crate::graphics::Graphics) -> i32 {
+    graphics
+        .objects()
+        .as_ref()
+        .and_then(|table| table.get(&item_id).copied())
+        .unwrap_or(icon_grh)
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -7,6 +7,7 @@
 
 use super::shell::{label, Hotbar};
 use super::tokens::{focus, ink, size, space, surface, type_scale};
+use ao_core::view::{HotbarBinding, UiSnapshot};
 use bevy::prelude::*;
 
 /// Slots on one page.
@@ -50,7 +51,168 @@ pub struct HotbarPlugin;
 
 impl Plugin for HotbarPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, populate.after(super::shell::spawn_shell));
+        app.add_systems(Startup, populate.after(super::shell::spawn_shell)).add_systems(
+            Update,
+            (
+                // The bindings decide what a slot contains; the cooldown only decides
+                // how much of it is veiled, so it is a height rather than a rebuild.
+                present_bindings,
+                present_cooldowns,
+            ),
+        );
+    }
+}
+
+/// A slot's contents, rebuilt when its binding changes.
+///
+/// The slot entity itself is permanent. Rebuilding it would respawn a control the player
+/// may have focused and would give it a new entity every time a cooldown ticked.
+#[derive(Component)]
+struct SlotContent;
+
+/// The veil that shows how much of a cooldown is left.
+#[derive(Component)]
+struct SlotCooldown;
+
+/// Draw what each slot is bound to.
+fn present_bindings(
+    state: Res<super::state::UiState>,
+    graphics: Res<crate::graphics::Graphics>,
+    sheets: Res<crate::graphics::SheetTextures>,
+    mut atlases: ResMut<crate::world::SheetAtlases>,
+    mut layouts: ResMut<Assets<TextureAtlasLayout>>,
+    slots: Query<(Entity, &HotbarSlot)>,
+    content: Query<(Entity, &ChildOf), With<SlotContent>>,
+    mut commands: Commands,
+    mut last: Local<Option<Vec<Option<HotbarBinding>>>>,
+) {
+    let snapshot = state.get();
+    let bindings: Vec<Option<HotbarBinding>> =
+        (0..SLOTS_PER_PAGE).map(|index| snapshot.hotbar.slot(index).binding).collect();
+
+    // Artwork arrives long after the snapshot that named it, and nothing in the
+    // bindings changes when it does — the same trap the inventory grid fell into, where
+    // every slot kept the fallback it was first drawn with for the rest of the session.
+    let drawable = bindings
+        .iter()
+        .flatten()
+        .filter(|binding| {
+            super::character::icon_for_grh(
+                grh_of(binding, &graphics),
+                &graphics,
+                &sheets,
+                &mut atlases,
+                &mut layouts,
+            )
+            .is_some()
+        })
+        .count();
+    let key = (bindings.clone(), drawable);
+    if last.as_ref().map(|previous| (previous.clone(), drawable)) == Some(key.clone()) {
+        return;
+    }
+    *last = Some(bindings.clone());
+
+    for (entity, _) in &content {
+        commands.entity(entity).despawn();
+    }
+
+    for (entity, slot) in &slots {
+        let binding = bindings.get(slot.index).copied().flatten();
+        let icon = binding.and_then(|binding| {
+            super::character::icon_for_grh(
+                grh_of(&binding, &graphics),
+                &graphics,
+                &sheets,
+                &mut atlases,
+                &mut layouts,
+            )
+        });
+        commands.entity(entity).insert(super::character::ItemIcon::node(icon.as_ref()));
+
+        commands.entity(entity).with_children(|slot_node| {
+            // The cooldown veil exists whether or not the slot is cooling: spawning it
+            // on demand would mean a frame of full brightness every time one starts.
+            slot_node.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
+                    height: Val::Percent(0.0),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
+                Pickable::IGNORE,
+                SlotContent,
+                SlotCooldown,
+            ));
+
+            // How many the player has, for a bound consumable. The count lives in the
+            // inventory rather than in the binding, so a hotbar showing a potion with no
+            // number is indistinguishable from one showing the last of them.
+            if let Some(quantity) = bound_quantity(&binding, snapshot) {
+                slot_node.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        right: Val::Px(space::HAIR),
+                        bottom: Val::Px(space::HAIR),
+                        ..default()
+                    },
+                    Text::new(quantity.to_string()),
+                    TextFont { font_size: type_scale::MICRO, ..default() },
+                    TextColor(ink::PRIMARY),
+                    Pickable::IGNORE,
+                    SlotContent,
+                ));
+            }
+        });
+    }
+}
+
+/// The graphic a binding draws with.
+fn grh_of(binding: &HotbarBinding, graphics: &crate::graphics::Graphics) -> i32 {
+    match binding {
+        HotbarBinding::Item { item_id, icon_grh } => {
+            super::character::item_grh(*item_id, *icon_grh, graphics)
+        }
+        // A spell's graphic is its own; there is no object table entry for it.
+        HotbarBinding::Spell { icon_grh, .. } => *icon_grh,
+    }
+}
+
+/// How many of a bound item the player is carrying, when that is worth saying.
+fn bound_quantity(binding: &Option<HotbarBinding>, snapshot: &UiSnapshot) -> Option<i32> {
+    let HotbarBinding::Item { item_id, .. } = binding.as_ref()? else {
+        return None;
+    };
+    let quantity: i32 = snapshot
+        .inventory
+        .slots
+        .iter()
+        .filter_map(|slot| slot.item())
+        .filter(|item| item.item_id == *item_id)
+        .map(|item| item.quantity.max(0))
+        .sum();
+    (quantity > 1).then_some(quantity)
+}
+
+/// Veil each slot by how much of its cooldown is left.
+fn present_cooldowns(
+    state: Res<super::state::UiState>,
+    slots: Query<&HotbarSlot>,
+    mut veils: Query<(&ChildOf, &mut Node), With<SlotCooldown>>,
+) {
+    let snapshot = state.get();
+    for (parent, mut node) in &mut veils {
+        let Ok(slot) = slots.get(parent.parent()) else {
+            continue;
+        };
+        let fraction = snapshot.hotbar.slot(slot.index).cooldown_fraction();
+        let height = Val::Percent(fraction * 100.0);
+        if node.height != height {
+            node.height = height;
+        }
     }
 }
 

@@ -140,6 +140,34 @@ pub fn point_at(app: &mut App, position: Vec2) {
     app.update();
 }
 
+/// Tap a key through Bevy's own input pipeline.
+///
+/// Same reason as `press_mouse`: `InputPlugin` rebuilds `ButtonInput` from events every
+/// frame, so a press written onto the resource is gone before any gameplay system reads
+/// it. A test that does that is asking whether a keystroke *nobody delivered* had an
+/// effect, and the answer is always no.
+pub fn tap_key(app: &mut App, key_code: KeyCode) {
+    let window = app
+        .world_mut()
+        .query_filtered::<Entity, With<bevy::window::PrimaryWindow>>()
+        .iter(app.world())
+        .next()
+        .expect("there is no primary window");
+    for state in [bevy::input::ButtonState::Pressed, bevy::input::ButtonState::Released] {
+        app.world_mut().write_message(bevy::input::keyboard::KeyboardInput {
+            key_code,
+            logical_key: bevy::input::keyboard::Key::Unidentified(
+                bevy::input::keyboard::NativeKey::Unidentified,
+            ),
+            state,
+            text: None,
+            repeat: false,
+            window,
+        });
+        app.update();
+    }
+}
+
 /// Press a mouse button through Bevy's own input pipeline.
 ///
 /// Through the message rather than by assigning `ButtonInput`: this app runs

@@ -44,6 +44,7 @@ impl Plugin for SpellPanelPlugin {
                 Update,
                 (
                     trigger_hotbar_keys,
+                    apply_hotbar_activations,
                     // Before the disarm rules, so a spell armed this frame is not
                     // examined for usability against the snapshot that armed it.
                     apply_spell_activations,
@@ -104,6 +105,36 @@ pub fn hotbar_intent(slot: HotbarSlotState, index: usize) -> Option<Intent> {
     Some(Intent::TriggerHotbarSlot { index })
 }
 
+/// Fire a hotbar slot, whichever input asked for it.
+///
+/// One function so there is one path: the contract asks for it, and the reason is that
+/// two paths drift. A key that refuses a cooling slot while a click sends it anyway is a
+/// bug nobody finds until the server starts refusing casts.
+fn fire_slot(index: usize, snapshot: &UiSnapshot, intents: &mut MessageWriter<IntentMessage>) {
+    if let Some(intent) = hotbar_intent(snapshot.hotbar.slot(index), index) {
+        intents.write(IntentMessage(intent));
+    }
+}
+
+/// Fire a hotbar slot that was clicked or activated from the keyboard.
+///
+/// The pointer path is deliberately *not* suppressed while a text field owns the
+/// keyboard, where the number keys are. A click is unambiguous, and it takes focus away
+/// from the field as it lands — suppressing it would make the hotbar unclickable while
+/// the chat box is focused, which is the opposite of what the rule protects.
+fn apply_hotbar_activations(
+    mut activated: MessageReader<super::controls::Activated>,
+    slots: Query<&super::hotbar::HotbarSlot>,
+    state: Res<UiState>,
+    mut intents: MessageWriter<IntentMessage>,
+) {
+    for message in activated.read() {
+        if let Ok(slot) = slots.get(message.entity) {
+            fire_slot(slot.index, state.get(), &mut intents);
+        }
+    }
+}
+
 /// Fire hotbar slots from the number row.
 ///
 /// Suppressed entirely while a text field owns the keyboard: typing "1" in
@@ -130,9 +161,7 @@ fn trigger_hotbar_keys(
         if !keys.just_pressed(key) {
             continue;
         }
-        if let Some(intent) = hotbar_intent(state.get().hotbar.slot(index), index) {
-            intents.write(IntentMessage(intent));
-        }
+        fire_slot(index, state.get(), &mut intents);
     }
 }
 
@@ -449,6 +478,125 @@ mod tests {
             source: super::super::controls::ActivationSource::Pointer,
         });
         app.update();
+    }
+
+    fn hotbar_slot(app: &mut App, index: usize) -> Entity {
+        app.world_mut()
+            .query::<(Entity, &super::super::hotbar::HotbarSlot)>()
+            .iter(app.world())
+            .find(|(_, slot)| slot.index == index)
+            .map(|(entity, _)| entity)
+            .unwrap_or_else(|| panic!("no hotbar slot {index}"))
+    }
+
+    fn press_key(app: &mut App, key: KeyCode) {
+        super::super::testing::tap_key(app, key);
+    }
+
+    #[test]
+    fn a_number_key_and_a_click_ask_for_the_same_thing() {
+        // One path, which is what the contract asks for and what keeps a key that
+        // refuses a cooling slot from disagreeing with a click that sends it.
+        let mut app = spellbook_app();
+        let slot = hotbar_slot(&mut app, 0);
+        activate(&mut app, slot);
+        let clicked = intents(&app);
+
+        let mut app = spellbook_app();
+        press_key(&mut app, KeyCode::Digit1);
+        app.update();
+        let typed = intents(&app);
+
+        assert_eq!(clicked, vec![Intent::TriggerHotbarSlot { index: 0 }]);
+        assert_eq!(typed, clicked, "the key and the click asked for different things");
+    }
+
+    #[test]
+    fn neither_input_fires_an_empty_slot() {
+        // The fixture binds three slots, so the fourth is empty.
+        let mut app = spellbook_app();
+        let empty = hotbar_slot(&mut app, 4);
+        activate(&mut app, empty);
+        press_key(&mut app, KeyCode::Digit5);
+        app.update();
+
+        assert!(intents(&app).is_empty(), "an empty slot was fired: {:?}", intents(&app));
+    }
+
+    #[test]
+    fn neither_input_fires_a_cooling_slot() {
+        let mut app = spellbook_app();
+        let mut cooling = app.world().resource::<UiState>().get().clone();
+        cooling.hotbar.slots[0].cooldown = 0.6;
+        UiState::set(&mut app.world_mut().resource_mut::<UiState>(), cooling);
+        app.update();
+
+        let cooling_slot = hotbar_slot(&mut app, 0);
+        activate(&mut app, cooling_slot);
+        press_key(&mut app, KeyCode::Digit1);
+        app.update();
+
+        assert!(intents(&app).is_empty(), "a cooling slot was fired: {:?}", intents(&app));
+    }
+
+    #[test]
+    fn a_number_key_typed_into_a_text_field_fires_nothing() {
+        // Through the snapshot rather than by assigning the resource: production
+        // recomputes ownership from focus and the snapshot every frame, so a resource set
+        // by hand is gone before the key is read — and the test would then be asserting
+        // that a suppressed keystroke was suppressed by nothing.
+        let mut app = spellbook_app();
+        let mut composing = app.world().resource::<UiState>().get().clone();
+        composing.chat.composing = true;
+        UiState::set(&mut app.world_mut().resource_mut::<UiState>(), composing);
+        app.update();
+        assert!(
+            app.world().resource::<super::super::controls::TextInputActive>().0,
+            "text does not own the keyboard, so this test is not asking its question"
+        );
+
+        press_key(&mut app, KeyCode::Digit1);
+        app.update();
+
+        assert!(
+            intents(&app).is_empty(),
+            "typing a number in a text field cast a spell: {:?}",
+            intents(&app)
+        );
+    }
+
+    #[test]
+    fn a_cooling_slot_is_veiled_in_proportion_to_what_is_left() {
+        // The cooldown is a height rather than a rebuild: a slot respawned every frame a
+        // cooldown ticks would lose focus continuously.
+        let mut app = spellbook_app();
+        let mut cooling = app.world().resource::<UiState>().get().clone();
+        cooling.hotbar.slots[1].cooldown = 0.5;
+        UiState::set(&mut app.world_mut().resource_mut::<UiState>(), cooling);
+        app.update();
+
+        let veiled: Vec<(Entity, Val)> = app
+            .world_mut()
+            .query::<(&ChildOf, &Node)>()
+            .iter(app.world())
+            .map(|(parent, node)| (parent.parent(), node.height))
+            .collect();
+        let veils: Vec<(usize, Val)> = veiled
+            .into_iter()
+            .filter_map(|(parent, height)| {
+                let slot = app.world().get::<super::super::hotbar::HotbarSlot>(parent)?;
+                Some((slot.index, height))
+            })
+            .collect();
+
+        assert!(
+            veils.iter().any(|(index, height)| *index == 1 && *height == Val::Percent(50.0)),
+            "the cooling slot is not veiled: {veils:?}"
+        );
+        assert!(
+            veils.iter().any(|(index, height)| *index == 0 && *height == Val::Percent(0.0)),
+            "a ready slot is veiled anyway: {veils:?}"
+        );
     }
 
     #[test]
