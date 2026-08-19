@@ -267,16 +267,24 @@ async function runHitTests(hitPage, label, ratio) {
     /// The published pointer position is the client's own answer to "where is the
     /// cursor", so this is the only way to know a subsequent press will be attributed
     /// to the right place rather than to wherever the pointer was last frame.
-    const pointerTo = async (x, y) => {
+    /// `expectKey` is the control the caller is aiming at, when there is one. The
+    /// pointer's *position* is not enough: the client can report the cursor where it was
+    /// put and not yet have that control under it, and the first click of a
+    /// configuration then landed on nothing while every click after it worked. Waiting
+    /// for the client to say the control is hovered is waiting for the thing the click
+    /// actually depends on.
+    const pointerTo = async (x, y, expectKey = null) => {
       await hitPage.mouse.move(canvasBox.x + x, canvasBox.y + y);
-      const deadline = Date.now() + Math.max(4 * frameMs, 3_000);
+      const deadline = Date.now() + Math.max(8 * frameMs, 5_000);
       while (Date.now() < deadline) {
-        const at = await hitPage.evaluate(() => [window.aoLoaded?.pointerX, window.aoLoaded?.pointerY]);
-        if (
-          typeof at[0] === "number" &&
-          Math.abs(at[0] - x) <= 1.5 &&
-          Math.abs(at[1] - y) <= 1.5
-        ) {
+        const at = await hitPage.evaluate(() => ({
+          x: window.aoLoaded?.pointerX,
+          y: window.aoLoaded?.pointerY,
+          hovered: window.aoLoaded?.hovered ?? [],
+        }));
+        const there =
+          typeof at.x === "number" && Math.abs(at.x - x) <= 1.5 && Math.abs(at.y - y) <= 1.5;
+        if (there && (!expectKey || at.hovered.includes(expectKey))) {
           return true;
         }
         await hitPage.waitForTimeout(50);
@@ -292,7 +300,7 @@ async function runHitTests(hitPage, label, ratio) {
     /// client has had time to answer, and giving every negative probe the full budget
     /// made a single configuration at ratio 2 take half an hour — which is its own kind
     /// of wrong answer, since nobody runs a suite that slow often enough to trust it.
-    const clickAt = async (x, y, budget = CLICK_BUDGET_MS) => {
+    const clickAt = async (x, y, budget = CLICK_BUDGET_MS, expectKey = null) => {
       const before = await settle();
 
       // Moved, seen, then pressed — not `mouse.click`, which delivers move, press and
@@ -301,12 +309,20 @@ async function runHitTests(hitPage, label, ratio) {
       // a single frame: the press is then attributed using a hover map computed before
       // the pointer had moved, so the click belongs to nothing and vanishes. A player
       // moves the cursor, sees the control light up, and only then presses.
-      const arrived = await pointerTo(x, y);
+      const arrived = await pointerTo(x, y, expectKey);
       await hitPage.mouse.down();
       await hitPage.waitForTimeout(Math.min(Math.max(frameMs, 60), 1_500));
       await hitPage.mouse.up();
       if (!arrived) {
-        return { key: null, ms: 0, before, after: before, note: "the client never saw the pointer arrive" };
+        return {
+          key: null,
+          ms: 0,
+          before,
+          after: before,
+          note: expectKey
+            ? `the client never reported ${expectKey} under the pointer`
+            : "the client never saw the pointer arrive",
+        };
       }
 
       // Polled, not slept. Under software rendering this client runs at about six
@@ -404,7 +420,7 @@ async function runHitTests(hitPage, label, ratio) {
       const cx = control.x + control.w / 2;
       const cy = control.y + control.h / 2;
 
-      const centred = await clickAt(cx, cy);
+      const centred = await clickAt(cx, cy, CLICK_BUDGET_MS, control.key);
       check(
         `clicking the centre of ${control.key} activates it`,
         centred.key === control.key,
@@ -429,7 +445,7 @@ async function runHitTests(hitPage, label, ratio) {
         const centreY = now.y + now.h / 2;
         const x = dx === 0 ? centreX : dx > 0 ? now.x + inset : now.x + now.w - inset;
         const y = dy === 0 ? centreY : dy > 0 ? now.y + inset : now.y + now.h - inset;
-        const inside = await clickAt(x, y);
+        const inside = await clickAt(x, y, CLICK_BUDGET_MS, control.key);
         check(
           `${inset}px inside the ${edge} edge of ${control.key} still activates it`,
           inside.key === control.key && inside.after - inside.before === 1,
@@ -473,7 +489,7 @@ async function runHitTests(hitPage, label, ratio) {
     const tabRect = await rectOf("rail.tab.spells");
     if (tabRect) {
       const at = [tabRect.x + tabRect.w / 2, tabRect.y + tabRect.h / 2];
-      const opened = await clickAt(at[0], at[1]);
+      const opened = await clickAt(at[0], at[1], CLICK_BUDGET_MS, "rail.tab.spells");
       check(
         `${label}: `+"the spells tab activates",
         opened.key === "rail.tab.spells" && opened.after - opened.before === 1,
@@ -483,7 +499,12 @@ async function runHitTests(hitPage, label, ratio) {
       const row = await rectOf("spell.row.0");
       check(`${label}: `+"the spellbook publishes a row to aim at", row !== null);
       if (row) {
-        const centred = await clickAt(row.x + row.w / 2, row.y + row.h / 2);
+        const centred = await clickAt(
+          row.x + row.w / 2,
+          row.y + row.h / 2,
+          CLICK_BUDGET_MS,
+          "spell.row.0"
+        );
         check(
           "clicking the centre of spell.row.0 activates it exactly once",
           centred.key === "spell.row.0" && centred.after - centred.before === 1,
@@ -499,7 +520,12 @@ async function runHitTests(hitPage, label, ratio) {
 
       const back = await rectOf("rail.tab.inventory");
       if (back) {
-        await clickAt(back.x + back.w / 2, back.y + back.h / 2);
+        await clickAt(
+          back.x + back.w / 2,
+          back.y + back.h / 2,
+          CLICK_BUDGET_MS,
+          "rail.tab.inventory"
+        );
       }
     }
 
@@ -527,7 +553,7 @@ async function runHitTests(hitPage, label, ratio) {
       const startY = from.y + from.h / 2;
       const endX = onto.x + onto.w / 2;
       const endY = onto.y + onto.h / 2;
-      await pointerTo(startX, startY);
+      await pointerTo(startX, startY, `inventory.slot.${source}`);
       await hitPage.mouse.down();
 
       // Paced by frames rather than delivered as twelve events in a few milliseconds.
