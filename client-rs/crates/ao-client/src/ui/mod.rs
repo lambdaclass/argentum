@@ -15,6 +15,7 @@ pub mod hotbar;
 pub mod icons;
 pub mod labels;
 pub mod layout;
+pub mod minimap;
 pub mod pointer;
 pub mod rail;
 pub mod scale;
@@ -57,6 +58,9 @@ pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
+        // Grouped, because Bevy's plugin tuples stop at sixteen and the shell has more
+        // panels than that now. The grouping is also the reading order: what the interface
+        // is made of, then what draws the character, then what draws the world's own HUD.
         app.add_plugins((
             fonts::FontPlugin,
             controls::ControlsPlugin,
@@ -65,14 +69,19 @@ impl Plugin for UiPlugin {
             state::UiStatePlugin,
             authority::SimulatedAuthorityPlugin,
             shell::ShellPlugin,
+        ))
+        .add_plugins((
             topbar::TopBarPlugin,
             rail::RailPlugin,
             character::CharacterPanelPlugin,
             spells::SpellPanelPlugin,
+            hotbar::HotbarPlugin,
+        ))
+        .add_plugins((
             chat::ChatPanelPlugin,
             target::TargetPanelPlugin,
             labels::LabelPlugin,
-            hotbar::HotbarPlugin,
+            minimap::MinimapPlugin,
         ));
     }
 }

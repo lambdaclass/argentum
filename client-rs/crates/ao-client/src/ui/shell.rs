@@ -244,10 +244,11 @@ pub fn spawn_shell(mut commands: Commands) {
                         NoticeStack,
                     ));
 
-                    // Labelled, not blank. The minimap has no data source
-                    // until the world adapter lands, and an unexplained empty
-                    // rectangle over the world is indistinguishable from a
-                    // rendering failure — a player has no way to tell which.
+                    // The well only. `minimap::present_minimap` fills it from the
+                    // snapshot, and says which state it is in when there is no map to
+                    // draw. It used to carry the words "minimap unavailable"
+                    // unconditionally, which was honest while nothing read the map data
+                    // and a lie the moment something did.
                     world.spawn((
                         Node {
                             position_type: PositionType::Absolute,
@@ -256,14 +257,14 @@ pub fn spawn_shell(mut commands: Commands) {
                             width: Val::Px(180.0),
                             height: Val::Px(180.0),
                             border: UiRect::all(Val::Px(size::BORDER)),
-                            align_items: AlignItems::Center,
-                            justify_content: JustifyContent::Center,
+                            // Clipped, so a marker cannot escape the well however wrong
+                            // the map data is.
+                            overflow: Overflow::clip(),
                             ..default()
                         },
                         BackgroundColor(surface::WELL),
                         BorderColor::all(surface::EDGE),
                         Minimap,
-                        children![label("minimap unavailable", type_scale::MICRO, ink::DISABLED)],
                     ));
 
                     // Centred on the world viewport by making this row span the

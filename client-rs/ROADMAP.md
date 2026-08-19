@@ -279,7 +279,7 @@ click just outside it does not, and puts the inventory back.
 
 ### Task W-0088 — Fixture-backed minimap presentation
 
-- **State:** planned
+- **State:** active
 - **Phase:** 0
 - **Depends on:** W-0004, W-0005, W-0008
 

@@ -83,6 +83,7 @@ pub fn shell_app_at(size: Vec2, device_pixel_ratio: f32) -> App {
         super::chat::ChatPanelPlugin,
         super::target::TargetPanelPlugin,
         super::labels::LabelPlugin,
+        super::minimap::MinimapPlugin,
         // The hotbar is part of the shell, so a harness without it answers
         // questions about a shell that does not exist.
         super::hotbar::HotbarPlugin,

@@ -566,7 +566,7 @@ impl WorldStatus {
 /// only one of them is worth retrying. An unexplained black rectangle is
 /// indistinguishable from a rendering fault, which is the state the shell is in
 /// today and what W-0088 and W-0089 replace.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MapAvailability {
     /// No request has been made yet.
     #[default]
