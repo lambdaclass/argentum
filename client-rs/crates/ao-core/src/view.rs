@@ -857,6 +857,12 @@ pub enum Intent {
     CastSpell { spell_id: i32 },
     TriggerHotbarSlot { index: usize },
     BindHotbarSlot { index: usize, binding: HotbarBinding },
+    /// Empty a hotbar slot.
+    ///
+    /// Separate from binding rather than a binding of `None`: unbinding is what a
+    /// player does deliberately, and a server that refuses one has a different reason
+    /// than one that refuses the other.
+    ClearHotbarSlot { index: usize },
     ChangeHotbarPage { page: usize },
     SelectTarget { x: u8, y: u8 },
     ClearTarget,
@@ -882,6 +888,10 @@ impl Intent {
                 | Intent::SelectTarget { .. }
                 | Intent::RequestReconnect
                 | Intent::ChangeHotbarPage { .. }
+                // Rearranging the hotbar is bookkeeping, not an action in the world: a
+                // ghost waiting to be revived may as well tidy it.
+                | Intent::BindHotbarSlot { .. }
+                | Intent::ClearHotbarSlot { .. }
         )
     }
 }

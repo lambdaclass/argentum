@@ -190,7 +190,13 @@ pub fn press_mouse(app: &mut App, button: bevy::input::mouse::MouseButton) {
 }
 
 /// The window's own pointer target, for driving real pointer input.
-fn window_target(app: &mut App) -> bevy::camera::NormalizedRenderTarget {
+///
+/// Public because every hand-built pointer event needs it. A fabricated target entity
+/// looks harmless and is not: `Pointer` events propagate to the parent, and an entity
+/// with no parent propagates to the pointer's window — stopping only if that entity
+/// actually has a `Window`. A stand-in without one traverses to itself forever, and the
+/// test hangs rather than failing.
+pub fn window_target(app: &mut App) -> bevy::camera::NormalizedRenderTarget {
     let window = app
         .world_mut()
         .query_filtered::<Entity, With<bevy::window::PrimaryWindow>>()

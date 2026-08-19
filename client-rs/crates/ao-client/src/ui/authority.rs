@@ -20,10 +20,49 @@ use super::state::{ActiveScenario, IntentMessage, IntentSet, UiState};
 use ao_core::fixtures::Scenario;
 use ao_core::view::{Feedback, FeedbackKey, Intent, SlotState, UiSnapshot};
 
+/// The hotbar pages this stand-in remembers.
+///
+/// The snapshot carries one page at a time, because that is what a server sends. Which
+/// slots the *other* pages hold is server state, so a stand-in that wants page changes
+/// and assignment to persist has to keep it somewhere — here, explicitly, rather than by
+/// inventing bindings when a page is asked for.
+///
+/// Seeded lazily from the first snapshot: page one is whatever the fixture carries, and
+/// the rest start empty, which is truthful. A fixture with two pages of bindings would
+/// be describing a character nobody set up.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct HotbarPages {
+    pages: Vec<Vec<ao_core::view::HotbarSlotState>>,
+}
+
+impl HotbarPages {
+    fn seed(&mut self, hotbar: &ao_core::view::HotbarState) {
+        if !self.pages.is_empty() {
+            return;
+        }
+        let width = hotbar.slots.len().max(1);
+        let count = hotbar.page_count.max(1);
+        self.pages = (0..count)
+            .map(|page| {
+                if page == hotbar.page {
+                    hotbar.slots.clone()
+                } else {
+                    vec![ao_core::view::HotbarSlotState::default(); width]
+                }
+            })
+            .collect();
+    }
+
+    fn page_mut(&mut self, page: usize) -> Option<&mut Vec<ao_core::view::HotbarSlotState>> {
+        self.pages.get_mut(page)
+    }
+}
+
 pub struct SimulatedAuthorityPlugin;
 
 impl Plugin for SimulatedAuthorityPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<HotbarPages>();
         // A consumer, in the same set as any other: intents reach it only after the
         // filter has had its say, so a ghost's forbidden action never gets applied.
         app.add_systems(Update, apply_accepted_intents.in_set(IntentSet::Consume));
@@ -43,7 +82,10 @@ fn apply_accepted_intents(
     mut intents: MessageReader<IntentMessage>,
     scenario: Res<ActiveScenario>,
     mut state: ResMut<UiState>,
+    mut pages: ResMut<HotbarPages>,
 ) {
+    pages.seed(&state.get().hotbar);
+
     for message in intents.read() {
         let mut next = state.get().clone();
 
@@ -56,7 +98,7 @@ fn apply_accepted_intents(
             continue;
         }
 
-        if apply(&mut next, &message.0) {
+        if apply(&mut next, &message.0, &mut pages) {
             UiState::publish(&mut state, next);
         }
     }
@@ -77,14 +119,63 @@ fn rejection_for(intent: &Intent) -> FeedbackKey {
 /// unmodelled intent that quietly reverted the snapshot would be indistinguishable
 /// from a rejection, and this stand-in must not invent refusals the real server
 /// would not send.
-fn apply(snapshot: &mut UiSnapshot, intent: &Intent) -> bool {
+fn apply(snapshot: &mut UiSnapshot, intent: &Intent, pages: &mut HotbarPages) -> bool {
     match intent {
         Intent::UseInventorySlot { slot } => consume(snapshot, *slot, 1),
         Intent::DropInventorySlot { slot, amount } => consume(snapshot, *slot, (*amount).max(1)),
         Intent::EquipInventorySlot { slot } => equip(snapshot, *slot),
         Intent::MoveInventorySlot { from, to } => move_slot(snapshot, *from, *to),
+        Intent::BindHotbarSlot { index, binding } => {
+            bind_hotbar(snapshot, pages, *index, Some(*binding))
+        }
+        Intent::ClearHotbarSlot { index } => bind_hotbar(snapshot, pages, *index, None),
+        Intent::ChangeHotbarPage { page } => change_page(snapshot, pages, *page),
         _ => false,
     }
+}
+
+/// Put something in a hotbar slot, or take it out.
+///
+/// Written to the page the player is looking at, and kept there: a binding that
+/// disappeared when the page changed would look like the server refusing an assignment
+/// it had already accepted.
+fn bind_hotbar(
+    snapshot: &mut UiSnapshot,
+    pages: &mut HotbarPages,
+    index: usize,
+    binding: Option<ao_core::view::HotbarBinding>,
+) -> bool {
+    let page = snapshot.hotbar.page;
+    let Some(slots) = pages.page_mut(page) else {
+        return false;
+    };
+    let Some(slot) = slots.get_mut(index) else {
+        return false;
+    };
+    if slot.binding == binding {
+        return false;
+    }
+
+    slot.binding = binding;
+    // A slot that has just been rebound is not on the cooldown of whatever used to be
+    // in it.
+    slot.cooldown = 0.0;
+    snapshot.hotbar.slots = slots.clone();
+    true
+}
+
+/// Show a different page of the hotbar.
+fn change_page(snapshot: &mut UiSnapshot, pages: &mut HotbarPages, page: usize) -> bool {
+    if page == snapshot.hotbar.page {
+        return false;
+    }
+    let Some(slots) = pages.page_mut(page) else {
+        return false;
+    };
+
+    snapshot.hotbar.slots = slots.clone();
+    snapshot.hotbar.page = page;
+    true
 }
 
 /// Remove `amount` from a stack, emptying the slot when it runs out.
@@ -375,6 +466,91 @@ mod tests {
         send(&mut app, Intent::MoveInventorySlot { from: 0, to: 9_999 });
 
         assert_eq!(app.world().resource::<UiState>().get().inventory.slots, before);
+    }
+
+    #[test]
+    fn binding_a_hotbar_slot_survives_a_trip_to_another_page_and_back() {
+        // The point of keeping the pages here: an assignment that vanished when the
+        // player looked at page two would read as the server refusing something it had
+        // already accepted.
+        let mut app = authority_app(Scenario::Populated);
+        let binding = ao_core::view::HotbarBinding::Spell { spell_id: 42, icon_grh: 2042 };
+
+        send(&mut app, Intent::BindHotbarSlot { index: 5, binding });
+        assert_eq!(
+            app.world().resource::<UiState>().get().hotbar.slot(5).binding,
+            Some(binding),
+            "the binding was not applied"
+        );
+
+        send(&mut app, Intent::ChangeHotbarPage { page: 1 });
+        assert_eq!(
+            app.world().resource::<UiState>().get().hotbar.page,
+            1,
+            "the page did not change"
+        );
+        assert_eq!(
+            app.world().resource::<UiState>().get().hotbar.slot(5).binding,
+            None,
+            "the second page shows the first page's bindings"
+        );
+
+        send(&mut app, Intent::ChangeHotbarPage { page: 0 });
+        assert_eq!(
+            app.world().resource::<UiState>().get().hotbar.slot(5).binding,
+            Some(binding),
+            "the binding did not survive a page change"
+        );
+    }
+
+    #[test]
+    fn a_rebound_slot_does_not_inherit_the_cooldown_of_what_was_there() {
+        let mut app = authority_app(Scenario::Populated);
+        let mut cooling = app.world().resource::<UiState>().get().clone();
+        cooling.hotbar.slots[0].cooldown = 0.8;
+        UiState::set(&mut app.world_mut().resource_mut::<UiState>(), cooling);
+        app.update();
+
+        send(
+            &mut app,
+            Intent::BindHotbarSlot {
+                index: 0,
+                binding: ao_core::view::HotbarBinding::Spell { spell_id: 9, icon_grh: 2009 },
+            },
+        );
+
+        assert_eq!(
+            app.world().resource::<UiState>().get().hotbar.slot(0).cooldown_fraction(),
+            0.0,
+            "the new binding is waiting out the old one's cooldown"
+        );
+    }
+
+    #[test]
+    fn emptying_a_hotbar_slot_leaves_the_others_alone() {
+        let mut app = authority_app(Scenario::Populated);
+        let before = app.world().resource::<UiState>().get().hotbar.slot(1).binding;
+        assert!(before.is_some(), "this test needs a bound neighbour");
+
+        send(&mut app, Intent::ClearHotbarSlot { index: 0 });
+
+        let hotbar = &app.world().resource::<UiState>().get().hotbar;
+        assert_eq!(hotbar.slot(0).binding, None, "the slot was not emptied");
+        assert_eq!(hotbar.slot(1).binding, before, "emptying one slot disturbed another");
+    }
+
+    #[test]
+    fn a_page_that_does_not_exist_changes_nothing() {
+        let mut app = authority_app(Scenario::Populated);
+        let before = app.world().resource::<UiState>().get().hotbar.clone();
+
+        send(&mut app, Intent::ChangeHotbarPage { page: 99 });
+
+        assert_eq!(
+            app.world().resource::<UiState>().get().hotbar,
+            before,
+            "a page beyond the end was accepted"
+        );
     }
 
     #[test]

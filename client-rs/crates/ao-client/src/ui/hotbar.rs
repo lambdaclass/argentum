@@ -51,15 +51,114 @@ pub struct HotbarPlugin;
 
 impl Plugin for HotbarPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, populate.after(super::shell::spawn_shell)).add_systems(
-            Update,
-            (
-                // The bindings decide what a slot contains; the cooldown only decides
-                // how much of it is veiled, so it is a height rather than a rebuild.
-                present_bindings,
-                present_cooldowns,
-            ),
-        );
+        app.add_systems(Startup, populate.after(super::shell::spawn_shell))
+            .add_observer(assign_dropped)
+            .add_systems(
+                Update,
+                (
+                    // The bindings decide what a slot contains; the cooldown only decides
+                    // how much of it is veiled, so it is a height rather than a rebuild.
+                    present_bindings,
+                    present_cooldowns,
+                ),
+            )
+            .add_systems(
+                Update,
+                apply_hotbar_edits.in_set(super::controls::GameplayInput),
+            );
+    }
+}
+
+/// Marks the control that turns the hotbar's page.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct PageControl;
+
+/// Assign whatever was dropped onto a slot.
+///
+/// The dragged entity comes from Bevy's own drop event, so no second drag model is
+/// needed: an inventory slot carries the item it holds and a spellbook row carries its
+/// spell, and either is enough to bind.
+fn assign_dropped(
+    drop: On<bevy::picking::events::Pointer<bevy::picking::events::DragDrop>>,
+    slots: Query<&HotbarSlot>,
+    items: Query<&super::character::InventorySlotButton>,
+    spells: Query<&super::spells::SpellRowButton>,
+    state: Res<super::state::UiState>,
+    graphics: Res<crate::graphics::Graphics>,
+    mut intents: MessageWriter<super::state::IntentMessage>,
+) {
+    let Ok(slot) = slots.get(drop.entity) else {
+        return;
+    };
+    let dropped = drop.event.dropped;
+
+    let binding = if let Ok(button) = items.get(dropped) {
+        let item = state.get().inventory.slot(button.index).item().cloned();
+        item.map(|item| HotbarBinding::Item {
+            item_id: item.item_id,
+            icon_grh: super::character::item_grh(item.item_id, item.icon_grh, &graphics),
+        })
+    } else if let Ok(row) = spells.get(dropped) {
+        state
+            .get()
+            .spellbook
+            .spells
+            .iter()
+            .find(|spell| spell.spell_id == row.spell_id)
+            .map(|spell| HotbarBinding::Spell {
+                spell_id: spell.spell_id,
+                icon_grh: spell.icon_grh,
+            })
+    } else {
+        None
+    };
+
+    // Nothing recognisable was dropped. Silent rather than refused: the player may have
+    // been dragging something this bar has no opinion about.
+    if let Some(binding) = binding {
+        intents.write(super::state::IntentMessage(ao_core::view::Intent::BindHotbarSlot {
+            index: slot.index,
+            binding,
+        }));
+    }
+}
+
+/// Empty a slot on Shift-click, and turn the page on the page control.
+///
+/// Shift for removal because a plain click is how a slot is *used*, and a hotbar where
+/// clicking sometimes unbinds instead of firing would be unusable. It matches the
+/// Shift-click rule the inventory already uses for the destructive action.
+fn apply_hotbar_edits(
+    mut activated: MessageReader<super::controls::Activated>,
+    keys: Res<ButtonInput<KeyCode>>,
+    slots: Query<&HotbarSlot>,
+    pages: Query<(), With<PageControl>>,
+    state: Res<super::state::UiState>,
+    mut intents: MessageWriter<super::state::IntentMessage>,
+) {
+    let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    for message in activated.read() {
+        if pages.get(message.entity).is_ok() {
+            let hotbar = &state.get().hotbar;
+            let count = hotbar.page_count.max(1);
+            // Wraps, so the last page is not a dead end on a bar with one control.
+            let next = (hotbar.page + 1) % count;
+            intents.write(super::state::IntentMessage(
+                ao_core::view::Intent::ChangeHotbarPage { page: next },
+            ));
+            continue;
+        }
+
+        if !shift {
+            continue;
+        }
+        if let Ok(slot) = slots.get(message.entity) {
+            if state.get().hotbar.slot(slot.index).binding.is_some() {
+                intents.write(super::state::IntentMessage(
+                    ao_core::view::Intent::ClearHotbarSlot { index: slot.index },
+                ));
+            }
+        }
     }
 }
 
@@ -260,7 +359,13 @@ fn populate(mut commands: Commands, bars: Query<Entity, With<Hotbar>>) {
                 },
                 BackgroundColor(surface::WELL),
                 BorderColor::all(surface::EDGE),
-                children![label(">", type_scale::BODY, ink::DISABLED)],
+                // A real control now. It was drawn disabled while the second page had no
+                // behaviour, which was honest then and is a lie once turning the page
+                // works.
+                super::controls::interactive(210, true),
+                super::controls::ControlKey::new("hotbar.page.next"),
+                PageControl,
+                children![label(">", type_scale::BODY, ink::PRIMARY)],
             ));
         });
     }
@@ -269,6 +374,157 @@ fn populate(mut commands: Commands, bars: Query<Entity, With<Hotbar>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Resource, Default)]
+    struct Recorded(Vec<ao_core::view::Intent>);
+
+    fn record_intents(
+        mut messages: MessageReader<super::super::state::IntentMessage>,
+        mut recorded: ResMut<Recorded>,
+    ) {
+        for message in messages.read() {
+            recorded.0.push(message.0.clone());
+        }
+    }
+
+    /// A running shell that records what the hotbar asks for.
+    fn hotbar_app() -> App {
+        let mut app = super::super::testing::shell_app(Vec2::new(1280.0, 832.0));
+        app.init_resource::<Recorded>().add_systems(
+            Update,
+            record_intents.after(super::super::controls::GameplayInput),
+        );
+        app.update();
+        app
+    }
+
+    fn intents(app: &App) -> Vec<ao_core::view::Intent> {
+        app.world().resource::<Recorded>().0.clone()
+    }
+
+    fn slot_entity(app: &mut App, index: usize) -> Entity {
+        app.world_mut()
+            .query::<(Entity, &HotbarSlot)>()
+            .iter(app.world())
+            .find(|(_, slot)| slot.index == index)
+            .map(|(entity, _)| entity)
+            .unwrap_or_else(|| panic!("no hotbar slot {index}"))
+    }
+
+    fn activate(app: &mut App, entity: Entity) {
+        app.world_mut().write_message(super::super::controls::Activated {
+            entity,
+            source: super::super::controls::ActivationSource::Pointer,
+        });
+        app.update();
+    }
+
+    /// Drop `dropped` onto `target` through Bevy's own drop event.
+    fn drop_onto(app: &mut App, dropped: Entity, target: Entity) {
+        use bevy::picking::backend::HitData;
+        use bevy::picking::events::{DragDrop, Pointer};
+        use bevy::picking::pointer::{Location, PointerButton, PointerId};
+
+        // The real window, not a stand-in: these events propagate to the window when
+        // they run out of parents, and a target entity without a `Window` component is
+        // traversed to forever.
+        let render_target = super::super::testing::window_target(app);
+        let surface = app.world_mut().spawn_empty().id();
+        app.world_mut().trigger(Pointer {
+            entity: target,
+            pointer_id: PointerId::Mouse,
+            pointer_location: Location { target: render_target, position: Vec2::ZERO },
+            event: DragDrop {
+                button: PointerButton::Primary,
+                dropped,
+                hit: HitData::new(surface, 0.0, None, None),
+            },
+        });
+        app.update();
+    }
+
+    #[test]
+    fn dropping_an_inventory_item_on_a_slot_asks_to_bind_it() {
+        let mut app = hotbar_app();
+        let item = app
+            .world_mut()
+            .query::<(Entity, &super::super::character::InventorySlotButton)>()
+            .iter(app.world())
+            .find(|(_, button)| button.index == 0)
+            .map(|(entity, _)| entity)
+            .expect("the rail has an inventory");
+        let target = slot_entity(&mut app, 6);
+
+        drop_onto(&mut app, item, target);
+
+        let asked = intents(&app);
+        assert!(
+            asked.iter().any(|intent| matches!(
+                intent,
+                ao_core::view::Intent::BindHotbarSlot { index: 6, .. }
+            )),
+            "dropping an item on a slot asked for nothing: {asked:?}"
+        );
+    }
+
+    #[test]
+    fn dropping_something_the_bar_does_not_recognise_asks_for_nothing() {
+        let mut app = hotbar_app();
+        let stranger = app.world_mut().spawn_empty().id();
+        let target = slot_entity(&mut app, 6);
+
+        drop_onto(&mut app, stranger, target);
+
+        assert!(intents(&app).is_empty(), "an unrecognised drop bound something: {:?}", intents(&app));
+    }
+
+    #[test]
+    fn shift_clicking_a_bound_slot_asks_to_empty_it() {
+        let mut app = hotbar_app();
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ShiftLeft);
+        let bound = slot_entity(&mut app, 0);
+
+        activate(&mut app, bound);
+
+        assert!(
+            intents(&app).contains(&ao_core::view::Intent::ClearHotbarSlot { index: 0 }),
+            "shift-clicking a bound slot did not ask to empty it: {:?}",
+            intents(&app)
+        );
+    }
+
+    #[test]
+    fn shift_clicking_an_empty_slot_asks_for_nothing() {
+        // The fixture binds three slots, so the eighth is empty. A request to empty an
+        // empty slot is a round trip the server can only refuse.
+        let mut app = hotbar_app();
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ShiftLeft);
+        let empty = slot_entity(&mut app, 7);
+
+        activate(&mut app, empty);
+
+        assert!(intents(&app).is_empty(), "an empty slot asked to be emptied: {:?}", intents(&app));
+    }
+
+    #[test]
+    fn the_page_control_asks_for_the_next_page_and_wraps() {
+        let mut app = hotbar_app();
+        let control = app
+            .world_mut()
+            .query_filtered::<Entity, With<PageControl>>()
+            .iter(app.world())
+            .next()
+            .expect("the hotbar has a page control");
+
+        activate(&mut app, control);
+
+        // The fixture has two pages and starts on the first.
+        assert!(
+            intents(&app).contains(&ao_core::view::Intent::ChangeHotbarPage { page: 1 }),
+            "the page control asked for nothing: {:?}",
+            intents(&app)
+        );
+    }
 
     #[test]
     fn slots_are_keyed_one_through_nine_then_zero() {
