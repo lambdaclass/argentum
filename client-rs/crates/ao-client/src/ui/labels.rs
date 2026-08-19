@@ -184,7 +184,9 @@ fn name_ink(kind: TargetKind) -> Color {
         TargetKind::Player => ink::PRIMARY,
         TargetKind::Npc => status::THIRST,
         TargetKind::Hostile => status::DANGER,
-        TargetKind::Item => ink::MUTED,
+        // Neither an object on the ground nor a bare tile is a character, and neither is
+        // labelled prominently: they are what the world is made of, not who is in it.
+        TargetKind::Item | TargetKind::Ground => ink::MUTED,
     }
 }
 

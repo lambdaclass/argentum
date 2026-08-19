@@ -424,6 +424,9 @@ pub enum TargetKind {
     Npc,
     Hostile,
     Item,
+    /// A tile, with nothing on it. What a ground-targeted spell aims at, and the one kind
+    /// that has no name of its own to disclose.
+    Ground,
 }
 
 /// Someone or something standing on the map, as the interface needs to label it.

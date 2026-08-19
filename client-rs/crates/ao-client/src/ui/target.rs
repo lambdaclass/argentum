@@ -68,7 +68,27 @@ pub fn shows_target(snapshot: &UiSnapshot) -> bool {
     if !matches!(snapshot.service.phase, ConnectionPhase::Playing) {
         return false;
     }
-    matches!(snapshot.target, TargetState::Selected { .. })
+    let TargetState::Selected { name, kind, .. } = &snapshot.target else {
+        return false;
+    };
+
+    // A target that is somebody has to still be somebody the client can see. Range and
+    // visibility are the server's to decide and it says so by dropping them from the
+    // presences it sends; a client that kept the strip up would be pointing at a
+    // character who has walked behind a wall or logged out.
+    //
+    // Only for the kinds that *are* presences: a tile and an object on the ground are not
+    // in that list, and requiring them to be would clear every ground target instantly.
+    if matches!(kind, TargetKind::Player | TargetKind::Npc | TargetKind::Hostile) {
+        let visible = snapshot
+            .presences
+            .iter()
+            .any(|presence| presence.name == *name && presence.kind == *kind);
+        if !visible {
+            return false;
+        }
+    }
+    true
 }
 
 /// What kind of thing the target is, in words.
@@ -81,6 +101,7 @@ pub fn kind_label(kind: TargetKind) -> &'static str {
         TargetKind::Npc => "npc",
         TargetKind::Hostile => "hostile",
         TargetKind::Item => "object",
+        TargetKind::Ground => "ground",
     }
 }
 
@@ -89,7 +110,7 @@ fn kind_ink(kind: TargetKind) -> Color {
         TargetKind::Player => ink::PRIMARY,
         TargetKind::Npc => status::THIRST,
         TargetKind::Hostile => status::DANGER,
-        TargetKind::Item => ink::MUTED,
+        TargetKind::Item | TargetKind::Ground => ink::MUTED,
     }
 }
 
@@ -577,7 +598,7 @@ mod tests {
         }
 
         let shown = on_screen(&mut app);
-        assert!(shown.contains("Wolf"), "the target strip does not name the target: {shown}");
+        assert!(shown.contains("Lobo"), "the target strip does not name the target: {shown}");
         assert!(
             shown.contains("hostile"),
             "the strip does not say what kind of thing the target is: {shown}"
@@ -603,7 +624,7 @@ mod tests {
         let with_health = testing::descendants(&app, strip).len();
 
         let mut withheld = app.world().resource::<UiState>().get().clone();
-        withheld.target = selected("Wolf", TargetKind::Hostile, None);
+        withheld.target = selected("Lobo", TargetKind::Hostile, None);
         UiState::set(&mut app.world_mut().resource_mut::<UiState>(), withheld);
         for _ in 0..3 {
             app.update();
@@ -614,7 +635,7 @@ mod tests {
             without < with_health,
             "an undisclosed health still drew a bar: {without} nodes against {with_health}"
         );
-        assert!(on_screen(&mut app).contains("Wolf"), "the target itself disappeared");
+        assert!(on_screen(&mut app).contains("Lobo"), "the target itself disappeared");
     }
 
     #[test]
@@ -692,7 +713,7 @@ mod tests {
     #[test]
     fn a_target_is_shown_while_the_player_is_alive_and_connected() {
         let mut snapshot = fixtures::snapshot(Scenario::Populated);
-        snapshot.target = selected("Wolf", TargetKind::Hostile, Some(Gauge::new(30, 60)));
+        snapshot.target = selected("Lobo", TargetKind::Hostile, Some(Gauge::new(30, 60)));
         assert!(shows_target(&snapshot), "a live connected player cannot see their target");
     }
 
@@ -703,7 +724,7 @@ mod tests {
         // something that is not there.
         let base = {
             let mut snapshot = fixtures::snapshot(Scenario::Populated);
-            snapshot.target = selected("Wolf", TargetKind::Hostile, Some(Gauge::new(30, 60)));
+            snapshot.target = selected("Lobo", TargetKind::Hostile, Some(Gauge::new(30, 60)));
             snapshot
         };
 
@@ -718,6 +739,30 @@ mod tests {
         let mut loading = base.clone();
         loading.loading = true;
         assert!(!shows_target(&loading), "a target survived a map change");
+    }
+
+    #[test]
+    fn a_target_the_client_can_no_longer_see_is_not_shown() {
+        // Range and visibility are the server's to decide, and it says so by dropping a
+        // character from the presences it sends. A strip that stayed up would be pointing
+        // at someone who has walked behind a wall or logged out.
+        let mut snapshot = fixtures::snapshot(Scenario::Populated);
+        assert!(shows_target(&snapshot), "the fixture's own target is not visible");
+
+        snapshot.presences.retain(|presence| presence.kind != TargetKind::Hostile);
+        assert!(
+            !shows_target(&snapshot),
+            "a target that walked out of sight is still on the strip"
+        );
+    }
+
+    #[test]
+    fn a_ground_target_does_not_have_to_be_a_presence() {
+        // A tile is not in the list of who can be seen, and requiring it to be would clear
+        // every ground target the instant it was chosen.
+        let mut snapshot = fixtures::snapshot(Scenario::Populated);
+        snapshot.target = selected("", TargetKind::Ground, None);
+        assert!(shows_target(&snapshot), "a ground target was treated as somebody missing");
     }
 
     #[test]

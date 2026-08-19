@@ -238,6 +238,24 @@ async function runHitTests(hitPage, label, ratio) {
         key
       );
 
+    /// The same, waiting for a control that is on its way.
+    ///
+    /// A panel that has just been switched to is rebuilt a frame or two after the click
+    /// that asked for it, and at half a frame a second that is seconds away. Read once,
+    /// the spellbook looked empty — which is this harness's impatience reported as a
+    /// missing control.
+    const rectSoon = async (key) => {
+      const deadline = Date.now() + Math.max(10 * frameMs, 5_000);
+      while (Date.now() < deadline) {
+        const rect = await rectOf(key);
+        if (rect && rect.w > 4 && rect.h > 4) {
+          return rect;
+        }
+        await hitPage.waitForTimeout(100);
+      }
+      return null;
+    };
+
     /// Wait until no activation has arrived for a moment.
     ///
     /// Without this, a click whose activation lands after its own probe gave up is
@@ -496,7 +514,7 @@ async function runHitTests(hitPage, label, ratio) {
         shown(at, opened)
       );
 
-      const row = await rectOf("spell.row.0");
+      const row = await rectSoon("spell.row.0");
       check(`${label}: `+"the spellbook publishes a row to aim at", row !== null);
       if (row) {
         const centred = await clickAt(
@@ -518,7 +536,7 @@ async function runHitTests(hitPage, label, ratio) {
         );
       }
 
-      const back = await rectOf("rail.tab.inventory");
+      const back = await rectSoon("rail.tab.inventory");
       if (back) {
         await clickAt(
           back.x + back.w / 2,

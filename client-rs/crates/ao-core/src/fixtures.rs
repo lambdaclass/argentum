@@ -314,7 +314,7 @@ fn populated() -> UiSnapshot {
         },
         hotbar: hotbar(3, None),
         target: TargetState::Selected {
-            name: "Wolf".to_string(),
+            name: "Lobo".to_string(),
             kind: TargetKind::Hostile,
             health: Some(Gauge::new(30, 60)),
         },
@@ -436,7 +436,7 @@ fn rejected() -> UiSnapshot {
         Feedback::new(FeedbackKey::NotEnoughStamina),
         Feedback {
             key: FeedbackKey::TooFarAway,
-            params: vec![FeedbackParam::Name("Wolf".to_string())],
+            params: vec![FeedbackParam::Name("Lobo".to_string())],
             literal: None,
         },
         // Cooldown and silence, because this task asks for both to be judged and they
