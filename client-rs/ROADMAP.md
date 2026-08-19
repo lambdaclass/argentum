@@ -190,9 +190,24 @@ table.
 
 Execute the following task bodies from top to bottom. Phase 0 is intentionally
 UI-first and fixture-backed; Phase 1 makes the platform boundary real before
-protocol breadth. `W-0013` unlocks technical Phase 1 work. `W-0014` is required
-before Phase 0 is product-approved, but waiting for participant sessions does
-not stop dependency-ready platform work.
+protocol breadth.
+
+Phase 0 keeps only the work that later phases depend on: `W-0085`, `W-0089`,
+`W-0009` — which `W-0025` needs for live account and character flows — and
+`W-0090`, which `W-0030` needs before it can own a world. Closing those unlocks
+Phase 1.
+
+Hardening and validation moved to Phase 0b, after Phase 3, and the Phase 0 exit
+gate list is its checklist. Nothing in that group gates protocol or world work,
+and each of them measures more against a live adapter than against fixtures: a
+component gallery, a worst-case fixture set, a lifecycle stress run and recorded
+usability sessions all answer "does this hold up" and the honest answer needs real
+data behind it. `W-0014` remains required before Phase 0 is product-approved.
+
+`W-0062` sits in Phase 2 rather than Phase 8 because it is a decision, not an
+implementation: map handoff constrains world and entity lifecycle, and the tasks
+it constrains are cheaper to build to it than to rebuild for it. The handoff
+implementation stays in Phase 8.
 
 ## Phase 0 — Responsive Bevy game shell and UI/UX prototype
 
@@ -388,146 +403,19 @@ one failed asset, stale-generation completion, resize/maximize/fullscreen and
 memory cleanup. Record time-to-complete-first-frame separately from time to
 download the full optional asset set.
 
-### Task W-0010 — Secondary windows and interaction ownership
-
-- **State:** planned
-- **Phase:** 0
-- **Depends on:** W-0005
-
-Implement open/close/focus, z-order, modal behavior, movement,
-snapping/docking, optional resize, remembered positions, Escape semantics and
-restoration after viewport changes. Specify click/double-click/right-click,
-drag/drop, quantity and tooltip timing once rather than per panel.
-
-### Task W-0011 — Settings, guidance and accessibility fixtures
-
-- **State:** planned
-- **Phase:** 0
-- **Depends on:** W-0006, W-0007, W-0008, W-0009, W-0010
-
-Prototype remappable input, UI/chat scale, audio, reduced motion and
-color-sensitive settings; keyboard focus/semantics; and contextual guidance for
-movement, interaction, combat, inventory, spells, death and recovery. Exercise
-long ES/EN/PT strings, Unicode composition, missing localization and unavailable
-capabilities.
-
-Offer persistent named UI-scale choices covering at least 90%, 100%, 110% and
-125% (or measured equivalents), independent of logical world framing and DPR.
-Text keeps a documented readable minimum, pixel-art icons use the intended
-nearest-neighbor sampling, tooltips remain on-screen and changing UI scale
-preserves focus, selection, composing text and camera center. Every
-color-sensitive state has a non-color cue.
-
-### Task W-0087 — Worst-case UI data and fallback fixtures
-
-- **State:** planned
-- **Phase:** 0
-- **Depends on:** W-0004, W-0006, W-0007, W-0008, W-0009, W-0011
-
-Add one deterministic stress fixture using the server/protocol maximum for every
-bounded collection: all inventory and equipment slots occupied, the maximum
-spellbook and hotbar pages, the retained chat-message limit, the longest valid
-character/item/spell labels and the largest supported numeric values. If a
-maximum is not currently defined, define and document a named client display or
-retention cap before constructing the fixture; do not choose a silent arbitrary
-number.
-
-Add a separate realistic busy-HUD fixture: several nearby players and NPCs with
-names, chat and system messages, a selected target, damaged vitals, equipment,
-a full first inventory page, assigned item/spell hotbar slots, active cooldowns,
-quantities and one rejected/pending action. It must exercise the actual world,
-rail, minimap and hotbar together; an empty scene with placeholder labels is
-not sufficient visual evidence.
-
-Add independent failure variants for an unknown/missing GRH icon, unavailable
-primary font, missing localization key, oversized translated label and malformed
-numeric value. Each produces a stable visible fallback, preserves layout and
-remains actionable where safe. Player-facing screens must not expose a raw
-semantic key, collapse a slot to zero size or replace a whole panel with an
-empty black rectangle.
-
-Record spawned UI entity count, rebuild count and p95 frame time while the
-fixture is visible for ten seconds. Reapplying an identical fixture performs no
-rebuild; switching away and back returns to the same bounded entity count. W-0020
-sets production budgets later, but this task records the Phase 0 baseline and
-fails monotonic entity or memory growth.
-
-### Task W-0012 — Component gallery and deterministic visual harness
-
-- **State:** planned
-- **Phase:** 0
-- **Depends on:** W-0002, W-0003, W-0004, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0011, W-0085, W-0087, W-0088, W-0089, W-0090
-
-Create a Bevy component gallery and scripted capture harness sharing the same
-fixtures as production UI. Pin fonts, seed, animation time, map/camera, locale,
-logical resolution, DPR and GPU tolerance. Store approved goldens for 720p,
-1080p, 1440p, ultrawide, small laptop, compact rail, maximized and fullscreen;
-include peaceful, realistic busy-HUD, combat, loading, empty and rejected
-states plus whole-world and zoomed/filtered Tab-map states. Reference-layout
-comparisons use the same browser viewport and record shell bounds, world/rail
-ratio and UI scale so conclusions are not drawn from differently sized
-captures.
-
-### Task W-0086 — Resize and UI lifecycle stress
-
-- **State:** planned
-- **Phase:** 0
-- **Depends on:** W-0002, W-0003, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0012, W-0085, W-0087, W-0088, W-0089, W-0090
-
-Run the production Bevy tree through repeated lifecycle changes rather than
-testing each layout once. A scripted test performs 250 alternating resizes
-across minimum, 720p, 1080p and ultrawide bounds; 1,000 panel open/close cycles;
-1,000 inventory/spell tab switches; 1,000 Tab-map open/close cycles with bounded
-pan/zoom/filter changes; repeated first-scene load/cancel/retry cycles; repeated
-maximize/fullscreen restoration; and a zero-sized/minimized canvas followed by
-restoration.
-
-After every settled transition there is exactly one shell root, top bar, world
-camera, rail and hotbar. Hidden or removed controls cannot retain focus; no drag,
-tooltip, modal, armed spell or captured pointer survives the transition that
-invalidates it. A zero-sized surface produces no panic, NaN, enormous viewport
-or world command, and restoration produces a correctly laid-out frame within
-two rendered frames.
-
-Record entity count, active browser listeners/observers and WASM/native memory
-before and after the run. Counts return to the documented baseline except for
-explicit bounded caches; they cannot grow once per cycle. Run the stress path in
-native and a real browser, not only against pure layout functions.
-
-### Task W-0013 — Phase 0 technical evidence
-
-- **State:** planned
-- **Phase:** 0
-- **Depends on:** W-0001, W-0002, W-0003, W-0004, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0011, W-0012, W-0085, W-0086, W-0087, W-0088, W-0089, W-0090
-
-Run the Phase 0 technical checklist, archive capture artifacts and correct every
-failed contract. This closes the engineering gate and unlocks Phase 1; it does
-not fabricate the human usability evidence owned by W-0014.
-
-Run formatting, clippy, WASM/native checks and tests from the pinned Nix
-toolchain. Phase 0 UI code has no unused imports; production interaction types
-must not be dead code. Record client/core test counts, optimized raw+gzip size,
-browser engine/version, GPU/backend and the full capture matrix. Before moving
-any body to the changelog, verify its closure evidence exercises the claimed
-layer and add the dated commit plus evidence to `CHANGELOG.md`; a green
-structural roadmap count is not task-completion evidence.
-
-### Task W-0014 — Veteran and newcomer usability validation
-
-- **State:** planned
-- **Phase:** 0
-- **Depends on:** W-0013 and recruited participants
-
-Run task-based sessions measuring whether veterans and newcomers can find
-health/mana, use/equip an item, cast a spell, trade, bank, change chat channel
-and recover from rejection. Record protocol, findings, resulting revisions and
-remaining tradeoffs. This is the Phase 0 product-approval gate but does not hold
-idle dependency-ready Phase 1 engineering.
-
 ### Phase 0 exit gate
 
-`W-0013` owns the technical checks below and unlocks Phase 1. Participant checks
-close through `W-0014`; scheduling people does not idle ready technical work.
+Phase 1 unlocks when `W-0085`, `W-0089`, `W-0009` and `W-0090` close. The checks
+below are the full prototype gate, owned by `W-0013` in Phase 0b: the ones about
+scaling, pointer integrity, product screens, the first-scene reveal and the two
+maps belong to tasks in this phase, and the rest — UI-scale persistence,
+worst-case fixtures, the busy-HUD capture, the lifecycle stress run, the component
+gallery, the evidence sweep and the usability protocol — belong to the Phase 0b
+group and are checked there. Participant checks close through `W-0014`.
+
+Nothing here is dropped by the split. What changes is when it is answered, and the
+reason is that most of these questions have a better answer once the client is
+talking to a server than they do against fixtures.
 
 - [ ] At 720p, 1080p, 1440p, ultrawide and small-laptop sizes, the world expands,
       the rail remains usable, compact mode is deliberate and the hotbar stays
@@ -724,6 +612,24 @@ Classify version/framing extensions in `session_route_manifest.ex`, reserve IDs,
 define legacy compatibility and add byte fixtures before implementation. Record
 why the divergence is necessary and how it is disabled or rolled back.
 
+### Task W-0062 — Handoff parity and compatibility contract
+
+- **State:** planned
+- **Phase:** 2
+- **Depends on:** W-0021
+
+Classify `map_handoff_begin/end/failed` as intentional divergences, assign
+fixtures and capability negotiation, and state the behavior of retained
+VB6/unframed sessions explicitly. Do not build or preserve a TypeScript-specific
+handoff path.
+
+Decided here rather than in Phase 8 because handoff is a constraint on design, not
+a feature bolted on at the end. It dictates world and entity lifecycle: two live
+worlds, epochs, ordered batches, identity across a boundary and a cache that
+spans two maps. Settled after the protocol decision and before the tasks it
+constrains — `W-0031`, `W-0033`, `W-0051`, `W-0055` and `W-0059` — so those are
+built to it rather than rebuilt for it. The implementation stays in Phase 8.
+
 ### Task W-0022 — Negotiated length-framed WebSocket transport
 
 - **State:** planned
@@ -779,17 +685,6 @@ chat/structured console events, stats, inventory, spells, objects, weather, map
 change, intervals, build/version and errors. Unknown framed packets are counted
 and skipped; unknown legacy packets fail without desync.
 
-### Task W-0027 — Connection lifecycle and recovery
-
-- **State:** planned
-- **Phase:** 2
-- **Depends on:** W-0018, W-0024
-
-Implement meaningful close reasons, bounded heartbeat/RTT, exponential backoff,
-token expiry and explicit `Playing` only after bootstrap. Classify credentials,
-ban/mute, full, maintenance, stale world/assets and preload failures into Bevy
-states with independent retry/reconnect/forget-session actions.
-
 ### Task W-0028 — Redacted trace and deterministic replay
 
 - **State:** planned
@@ -800,6 +695,17 @@ Record bounded inbound/outbound frames, timestamps, state transitions and
 build/world versions without passwords, tokens, cookies or private account
 data. Replay without a socket and inject fragmentation, latency, reordering
 where legal and disconnect boundaries.
+
+### Task W-0027 — Connection lifecycle and recovery
+
+- **State:** planned
+- **Phase:** 2
+- **Depends on:** W-0018, W-0024
+
+Implement meaningful close reasons, bounded heartbeat/RTT, exponential backoff,
+token expiry and explicit `Playing` only after bootstrap. Classify credentials,
+ban/mute, full, maintenance, stale world/assets and preload failures into Bevy
+states with independent retry/reconnect/forget-session actions.
 
 ### Task W-0029 — Bounded network queues
 
@@ -844,11 +750,13 @@ entity currently exists or that the first scene is ready.
 
 - **State:** planned
 - **Phase:** 3
-- **Depends on:** W-0030
+- **Depends on:** W-0030, W-0062
 
 Represent players, NPCs and objects as live ECS entities keyed by authoritative
 identity. Apply create/move/change/remove idempotently and test duplicates,
 unknown removes, late packets and churn without leaks.
+
+Identity has to satisfy `W-0062`: an entity that crosses a map boundary is the same entity, and a scheme that cannot say so is a scheme handoff has to replace.
 
 ### Task W-0032 — Prediction, interpolation and reconciliation
 
@@ -864,11 +772,13 @@ interval distribution so camera or cadence pauses are diagnosed from data.
 
 - **State:** planned
 - **Phase:** 3
-- **Depends on:** W-0027, W-0031
+- **Depends on:** W-0027, W-0031, W-0062
 
 Define server/client resynchronization: a fresh epoch/snapshot replaces stale
 entities and inputs, and movement accumulated while disconnected or asleep is
 not blindly replayed.
+
+Resnapshot and handoff are the same operation seen from two sides, so this has to satisfy `W-0062` rather than be widened for it later.
 
 ### Task W-0034 — Client architecture split
 
@@ -902,6 +812,150 @@ tools.
 - [ ] Reconnect obtains a fresh snapshot and never replays asleep/offline input.
 - [ ] Fixture, replay and live adapters produce equivalent typed snapshots; no
       widget reads packets and release builds omit private diagnostics.
+
+## Phase 0b — Prototype hardening and validation
+
+Deferred out of Phase 0 deliberately. None of these gates protocol or world work,
+and every one of them is worth more once real data exists: a component gallery, a
+worst-case fixture set, a lifecycle stress run and recorded usability sessions all
+test more against a live adapter than against fixtures. They run after Phase 3, and
+the Phase 0 exit gate list is their checklist.
+
+### Task W-0010 — Secondary windows and interaction ownership
+
+- **State:** planned
+- **Phase:** 0b
+- **Depends on:** W-0005
+
+Implement open/close/focus, z-order, modal behavior, movement,
+snapping/docking, optional resize, remembered positions, Escape semantics and
+restoration after viewport changes. Specify click/double-click/right-click,
+drag/drop, quantity and tooltip timing once rather than per panel.
+
+### Task W-0011 — Settings, guidance and accessibility fixtures
+
+- **State:** planned
+- **Phase:** 0b
+- **Depends on:** W-0006, W-0007, W-0008, W-0009, W-0010
+
+Prototype remappable input, UI/chat scale, audio, reduced motion and
+color-sensitive settings; keyboard focus/semantics; and contextual guidance for
+movement, interaction, combat, inventory, spells, death and recovery. Exercise
+long ES/EN/PT strings, Unicode composition, missing localization and unavailable
+capabilities.
+
+Offer persistent named UI-scale choices covering at least 90%, 100%, 110% and
+125% (or measured equivalents), independent of logical world framing and DPR.
+Text keeps a documented readable minimum, pixel-art icons use the intended
+nearest-neighbor sampling, tooltips remain on-screen and changing UI scale
+preserves focus, selection, composing text and camera center. Every
+color-sensitive state has a non-color cue.
+
+### Task W-0087 — Worst-case UI data and fallback fixtures
+
+- **State:** planned
+- **Phase:** 0b
+- **Depends on:** W-0004, W-0006, W-0007, W-0008, W-0009, W-0011
+
+Add one deterministic stress fixture using the server/protocol maximum for every
+bounded collection: all inventory and equipment slots occupied, the maximum
+spellbook and hotbar pages, the retained chat-message limit, the longest valid
+character/item/spell labels and the largest supported numeric values. If a
+maximum is not currently defined, define and document a named client display or
+retention cap before constructing the fixture; do not choose a silent arbitrary
+number.
+
+Add a separate realistic busy-HUD fixture: several nearby players and NPCs with
+names, chat and system messages, a selected target, damaged vitals, equipment,
+a full first inventory page, assigned item/spell hotbar slots, active cooldowns,
+quantities and one rejected/pending action. It must exercise the actual world,
+rail, minimap and hotbar together; an empty scene with placeholder labels is
+not sufficient visual evidence.
+
+Add independent failure variants for an unknown/missing GRH icon, unavailable
+primary font, missing localization key, oversized translated label and malformed
+numeric value. Each produces a stable visible fallback, preserves layout and
+remains actionable where safe. Player-facing screens must not expose a raw
+semantic key, collapse a slot to zero size or replace a whole panel with an
+empty black rectangle.
+
+Record spawned UI entity count, rebuild count and p95 frame time while the
+fixture is visible for ten seconds. Reapplying an identical fixture performs no
+rebuild; switching away and back returns to the same bounded entity count. W-0020
+sets production budgets later, but this task records the Phase 0 baseline and
+fails monotonic entity or memory growth.
+
+### Task W-0012 — Component gallery and deterministic visual harness
+
+- **State:** planned
+- **Phase:** 0b
+- **Depends on:** W-0002, W-0003, W-0004, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0011, W-0085, W-0087, W-0088, W-0089, W-0090
+
+Create a Bevy component gallery and scripted capture harness sharing the same
+fixtures as production UI. Pin fonts, seed, animation time, map/camera, locale,
+logical resolution, DPR and GPU tolerance. Store approved goldens for 720p,
+1080p, 1440p, ultrawide, small laptop, compact rail, maximized and fullscreen;
+include peaceful, realistic busy-HUD, combat, loading, empty and rejected
+states plus whole-world and zoomed/filtered Tab-map states. Reference-layout
+comparisons use the same browser viewport and record shell bounds, world/rail
+ratio and UI scale so conclusions are not drawn from differently sized
+captures.
+
+### Task W-0086 — Resize and UI lifecycle stress
+
+- **State:** planned
+- **Phase:** 0b
+- **Depends on:** W-0002, W-0003, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0012, W-0085, W-0087, W-0088, W-0089, W-0090
+
+Run the production Bevy tree through repeated lifecycle changes rather than
+testing each layout once. A scripted test performs 250 alternating resizes
+across minimum, 720p, 1080p and ultrawide bounds; 1,000 panel open/close cycles;
+1,000 inventory/spell tab switches; 1,000 Tab-map open/close cycles with bounded
+pan/zoom/filter changes; repeated first-scene load/cancel/retry cycles; repeated
+maximize/fullscreen restoration; and a zero-sized/minimized canvas followed by
+restoration.
+
+After every settled transition there is exactly one shell root, top bar, world
+camera, rail and hotbar. Hidden or removed controls cannot retain focus; no drag,
+tooltip, modal, armed spell or captured pointer survives the transition that
+invalidates it. A zero-sized surface produces no panic, NaN, enormous viewport
+or world command, and restoration produces a correctly laid-out frame within
+two rendered frames.
+
+Record entity count, active browser listeners/observers and WASM/native memory
+before and after the run. Counts return to the documented baseline except for
+explicit bounded caches; they cannot grow once per cycle. Run the stress path in
+native and a real browser, not only against pure layout functions.
+
+### Task W-0013 — Phase 0 technical evidence
+
+- **State:** planned
+- **Phase:** 0b
+- **Depends on:** W-0001, W-0002, W-0003, W-0004, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0011, W-0012, W-0085, W-0086, W-0087, W-0088, W-0089, W-0090
+
+Run the Phase 0 technical checklist, archive capture artifacts and correct every
+failed contract. This closes the engineering gate and unlocks Phase 1; it does
+not fabricate the human usability evidence owned by W-0014.
+
+Run formatting, clippy, WASM/native checks and tests from the pinned Nix
+toolchain. Phase 0 UI code has no unused imports; production interaction types
+must not be dead code. Record client/core test counts, optimized raw+gzip size,
+browser engine/version, GPU/backend and the full capture matrix. Before moving
+any body to the changelog, verify its closure evidence exercises the claimed
+layer and add the dated commit plus evidence to `CHANGELOG.md`; a green
+structural roadmap count is not task-completion evidence.
+
+### Task W-0014 — Veteran and newcomer usability validation
+
+- **State:** planned
+- **Phase:** 0b
+- **Depends on:** W-0013 and recruited participants
+
+Run task-based sessions measuring whether veterans and newcomers can find
+health/mana, use/equip an item, cast a spell, trade, bank, change chat channel
+and recover from rejection. Record protocol, findings, resulting revisions and
+remaining tradeoffs. This is the Phase 0 product-approval gate but does not hold
+idle dependency-ready Phase 1 engineering.
 
 ## Phase 4 — Core playable HUD vertical slice
 
@@ -1090,13 +1144,15 @@ evidence, not closure; the TypeScript renderer is not a compatibility target.
 
 - **State:** planned
 - **Phase:** 6
-- **Depends on:** W-0020, W-0030
+- **Depends on:** W-0020, W-0030, W-0062
 
 Request missing sheets ahead of movement, retain tall art and despawn material
 outside byte-budgeted windows without visible holes or unbounded GPU growth.
 Every dependency in the initial visible window belongs to W-0090's reveal set;
 post-reveal streaming may not use ordinary movement into an unloaded visible
 tile as an excuse for pop-in.
+
+Streaming has to satisfy `W-0062`: two maps can be resident at once during a handoff, and a budget that assumes one is a budget that breaks at the boundary.
 
 ### Task W-0052 — Labels, fades, weather and visual FX
 
@@ -1149,11 +1205,13 @@ downloads or materializes the full 58.8 MB pack.
 
 - **State:** planned
 - **Phase:** 7
-- **Depends on:** W-0020, W-0024
+- **Depends on:** W-0020, W-0024, W-0062
 
 Replace the monolithic sequential pack with per-map resources or a range-indexed
 format and small index. Define compressed transfer, decoded map and maximum
 hostile-size bounds before implementation.
+
+The format has to satisfy `W-0062`, which is what makes a per-map request cheap enough to prefetch the map a player is walking towards.
 
 ### Task W-0056 — Content-hashed resource manifest
 
@@ -1187,12 +1245,14 @@ the format requires it; prove warm visits do not refetch unchanged resources.
 
 - **State:** planned
 - **Phase:** 7
-- **Depends on:** W-0057
+- **Depends on:** W-0057, W-0062
 
 Track compressed, decoded-map, WASM-heap and estimated RGBA/GPU bytes
 separately. Evict by bytes, not entry count. Build a map-to-assets dependency
 index and give speculative exits a separate allowance below authoritative-world
 headroom.
+
+The budget has to satisfy `W-0062`: during a handoff the cache holds the map being left and the map being entered, and eviction that cannot express that will drop the one still on screen.
 
 ### Task W-0060 — Bounded decode and GPU upload
 
@@ -1231,17 +1291,6 @@ manifest, including rollback.
 
 Treat this as approximately 40% server/60% client. The server API and ordering
 changes are core work, not two free packets.
-
-### Task W-0062 — Handoff parity and compatibility contract
-
-- **State:** planned
-- **Phase:** 8
-- **Depends on:** W-0021, W-0033, W-0059
-
-Classify `map_handoff_begin/end/failed` as intentional divergences, assign
-fixtures and capability negotiation, and state the behavior of retained
-VB6/unframed sessions explicitly. Do not build or preserve a TypeScript-specific
-handoff path.
 
 ### Task W-0063 — Structured MapServer snapshot adapter
 

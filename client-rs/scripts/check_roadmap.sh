@@ -84,6 +84,39 @@ if [ -n "$parallel_queues" ]; then
   fail=$((fail + 1))
 fi
 
+# Nothing may depend on work that comes later in the sequence. The file order *is*
+# the order, so a forward dependency is a task that cannot be executed where it
+# sits — which is exactly the mistake reordering phases invites.
+forward="$(awk -v closed="$closed_ids" '
+  /^### Task W-[0-9][0-9][0-9][0-9] — / { id=$3; order[++n]=id; pos[id]=n; current=id; next }
+  /^- \*\*Depends on:\*\* / {
+    line=$0
+    sub(/^- \*\*Depends on:\*\* /, "", line)
+    deps[current]=line
+    next
+  }
+  END {
+    while ((getline entry < closed) > 0) { closedset[entry]=1 }
+    for (i = 1; i <= n; i++) {
+      id=order[i]
+      rest=deps[id]
+      while (match(rest, /W-[0-9][0-9][0-9][0-9]/)) {
+        ref=substr(rest, RSTART, RLENGTH)
+        rest=substr(rest, RSTART + RLENGTH)
+        if (ref in closedset) { continue }
+        if (!(ref in pos)) { printf "%s depends on unknown %s\n", id, ref; continue }
+        if (pos[ref] > pos[id]) {
+          printf "%s depends on %s, which comes later in the sequence\n", id, ref
+        }
+      }
+    }
+  }' "$roadmap")"
+if [ -n "$forward" ]; then
+  echo "FAIL a task depends on work that comes after it:"
+  printf '%s\n' "$forward"
+  fail=$((fail + 1))
+fi
+
 exit_gate_count="$(grep -cE '^### Phase ([0-9]|10|11) exit gate$' "$roadmap" || true)"
 if [ "$exit_gate_count" -ne 12 ]; then
   echo "FAIL expected one exit gate for each of phases 0–11, found $exit_gate_count"
