@@ -504,6 +504,24 @@ mod tests {
     }
 
     #[test]
+    fn binding_over_an_occupied_slot_replaces_what_was_there() {
+        // Replacement, which the contract names alongside assignment: a bar where the
+        // second binding silently does nothing is worse than one that cannot be edited.
+        let mut app = authority_app(Scenario::Populated);
+        let before = app.world().resource::<UiState>().get().hotbar.slot(0).binding;
+        assert!(before.is_some(), "this test needs an occupied slot");
+        let replacement = ao_core::view::HotbarBinding::Item { item_id: 461, icon_grh: 505 };
+
+        send(&mut app, Intent::BindHotbarSlot { index: 0, binding: replacement });
+
+        assert_eq!(
+            app.world().resource::<UiState>().get().hotbar.slot(0).binding,
+            Some(replacement),
+            "binding over an occupied slot changed nothing"
+        );
+    }
+
+    #[test]
     fn a_rebound_slot_does_not_inherit_the_cooldown_of_what_was_there() {
         let mut app = authority_app(Scenario::Populated);
         let mut cooling = app.world().resource::<UiState>().get().clone();

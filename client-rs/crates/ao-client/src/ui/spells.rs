@@ -191,14 +191,19 @@ fn disarm_when_unusable(state: Res<UiState>, mut armed: ResMut<ArmedSpell>) {
         return;
     };
 
-    let still_usable = state
-        .get()
+    let snapshot = state.get();
+    let still_usable = snapshot
         .spellbook
         .spells
         .iter()
         .any(|spell| spell.spell_id == spell_id && spell.is_castable());
 
-    if !still_usable {
+    // A refusal disarms as well. The authority saying no is an answer about what the
+    // player was trying to do, and a ring left pointing at nothing invites them to click
+    // again into the same refusal.
+    let refused = !snapshot.feedback.is_empty();
+
+    if !still_usable || refused {
         armed.clear();
     }
 }
@@ -731,6 +736,64 @@ mod tests {
 
         assert!(intents(&app).is_empty(), "a blocked spell was cast anyway: {:?}", intents(&app));
         assert!(app.world().resource::<ArmedSpell>().0.is_none(), "a blocked spell armed");
+    }
+
+    #[test]
+    fn an_authoritative_refusal_disarms() {
+        // The last of the five ways a ring should end. A refusal is an answer about what
+        // the player was trying to do, and leaving the ring up invites them to click
+        // straight back into the same refusal.
+        let mut app = spellbook_app();
+        let tremor = row_for(&mut app, 3);
+        activate(&mut app, tremor);
+        assert_eq!(app.world().resource::<ArmedSpell>().0, Some(3), "the spell did not arm");
+
+        let mut refused = app.world().resource::<UiState>().get().clone();
+        refused.feedback =
+            vec![ao_core::view::Feedback::new(ao_core::view::FeedbackKey::NotEnoughMana)];
+        UiState::set(&mut app.world_mut().resource_mut::<UiState>(), refused);
+        app.update();
+
+        assert!(
+            app.world().resource::<ArmedSpell>().0.is_none(),
+            "a refusal left the spell armed"
+        );
+    }
+
+    #[test]
+    fn a_blocked_spell_row_shows_the_reason_and_reads_as_unavailable() {
+        // Rendered blockers, which this task asks to be observed rather than assumed: the
+        // row has to say why *and* stop looking like something that can be cast.
+        let mut app = spellbook_app();
+        let mut blocked = app.world().resource::<UiState>().get().clone();
+        blocked.spellbook.spells[1].blockers = vec![SpellBlocker::InsufficientMana];
+        UiState::set(&mut app.world_mut().resource_mut::<UiState>(), blocked);
+        for _ in 0..2 {
+            app.update();
+        }
+
+        let row = row_for(&mut app, 2);
+        let texts: Vec<(String, Color)> = super::super::testing::descendants(&app, row)
+            .into_iter()
+            .filter_map(|entity| {
+                let text = app.world().get::<Text>(entity)?.0.clone();
+                let colour = app.world().get::<TextColor>(entity)?.0;
+                Some((text, colour))
+            })
+            .collect();
+
+        assert!(
+            texts.iter().any(|(text, _)| text.to_lowercase().contains("mana")),
+            "the row does not say why it cannot be cast: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|(_, colour)| *colour == super::super::tokens::ink::DISABLED),
+            "the blocked row still reads as castable: {texts:?}"
+        );
+        assert!(
+            !app.world().get::<super::super::controls::Control>(row).expect("a control").enabled,
+            "a blocked row is still offered as an action"
+        );
     }
 
     #[test]
