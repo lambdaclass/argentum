@@ -273,11 +273,15 @@ fn adopt_device_limits(
 /// of the canvas back into the measurement and the element grew without bound —
 /// 7628 pixels wide before I stopped it.
 #[cfg(target_arch = "wasm32")]
-fn track_host_canvas(mut windows: Query<&mut Window>) {
+fn track_host_canvas(
+    mut windows: Query<(Entity, &mut Window)>,
+    mut resized: MessageWriter<bevy::window::WindowResized>,
+    mut rescaled: MessageWriter<bevy::window::WindowScaleFactorChanged>,
+) {
     let Some((css, ratio)) = host_shell_box() else {
         return;
     };
-    let Ok(mut window) = windows.single_mut() else {
+    let Ok((entity, mut window)) = windows.single_mut() else {
         return;
     };
 
@@ -294,8 +298,44 @@ fn track_host_canvas(mut windows: Query<&mut Window>) {
         return;
     }
 
+    let rescale = (window.resolution.base_scale_factor() - ratio).abs() >= f32::EPSILON;
     window.resolution.set_scale_factor(ratio);
     window.resolution.set(css.x, css.y);
+
+    // Announced, because we changed the window rather than the browser telling winit
+    // that it did. `camera_system` refreshes a camera's cached target information only
+    // for windows named in these messages, and the UI takes its scale factor from that
+    // cache — so a device pixel ratio change applied silently left every node laid out
+    // at the old scale. Measured after a ratio change from 1 to 2: the canvas backing
+    // store correctly doubled to 2196x1476 while an inventory slot stayed 42 physical
+    // pixels instead of 84, which is a whole interface at half size.
+    announce_window_change(entity, css, ratio, rescale, &mut resized, &mut rescaled);
+}
+
+/// Tell the rest of the engine about a window we changed ourselves.
+///
+/// Not wasm-gated, so it can be tested: the browser is where the ratio changes, but
+/// what the engine does with the announcement is the same everywhere.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+fn announce_window_change(
+    window: Entity,
+    logical: Vec2,
+    scale_factor: f32,
+    rescaled_too: bool,
+    resized: &mut MessageWriter<bevy::window::WindowResized>,
+    rescaled: &mut MessageWriter<bevy::window::WindowScaleFactorChanged>,
+) {
+    if rescaled_too {
+        rescaled.write(bevy::window::WindowScaleFactorChanged {
+            window,
+            scale_factor: scale_factor as f64,
+        });
+    }
+    resized.write(bevy::window::WindowResized {
+        window,
+        width: logical.x,
+        height: logical.y,
+    });
 }
 
 /// The host element's CSS box and the display's device pixel ratio.
@@ -487,6 +527,50 @@ mod tests {
     /// shell", used by every test that needs one.
     fn camera_app(window_size: Vec2) -> App {
         super::super::testing::shell_app(window_size)
+    }
+
+    #[test]
+    fn a_size_change_announces_a_resize_and_only_a_ratio_change_announces_a_rescale() {
+        // Both messages matter and for different reasons. Without the rescale, Bevy
+        // never refreshes the camera's cached scale factor and the whole interface stays
+        // laid out at the old one — measured in a browser as a canvas backing store that
+        // correctly doubled while an inventory slot stayed 42 physical pixels instead of
+        // 84. Sending it on every resize would be the opposite mistake: a rescale
+        // invalidates every node's layout, and a window being dragged emits a resize a
+        // frame.
+        let mut app = App::new();
+        app.add_message::<bevy::window::WindowResized>()
+            .add_message::<bevy::window::WindowScaleFactorChanged>();
+        let window = app.world_mut().spawn_empty().id();
+
+        let announce = move |rescaled_too: bool| {
+            move |mut resized: MessageWriter<bevy::window::WindowResized>,
+                  mut rescaled: MessageWriter<bevy::window::WindowScaleFactorChanged>| {
+                announce_window_change(
+                    window,
+                    Vec2::new(1280.0, 832.0),
+                    2.0,
+                    rescaled_too,
+                    &mut resized,
+                    &mut rescaled,
+                );
+            }
+        };
+
+        use bevy::ecs::system::RunSystemOnce;
+        app.world_mut().run_system_once(announce(false)).expect("runs");
+        let resizes = app.world().resource::<Messages<bevy::window::WindowResized>>().len();
+        let rescales =
+            app.world().resource::<Messages<bevy::window::WindowScaleFactorChanged>>().len();
+        assert_eq!(resizes, 1, "a size change did not announce a resize");
+        assert_eq!(rescales, 0, "a size change announced a scale factor change as well");
+
+        app.world_mut().run_system_once(announce(true)).expect("runs");
+        assert_eq!(
+            app.world().resource::<Messages<bevy::window::WindowScaleFactorChanged>>().len(),
+            1,
+            "a ratio change did not announce itself, so the interface would stay at the old scale"
+        );
     }
 
     #[test]

@@ -382,6 +382,10 @@ async function runHitTests(hitPage, label, ratio) {
     const WANTED_CONTROLS = [
       "inventory.slot.0",
       "hotbar.slot.0",
+      // The tab this task's contract asks for. Deliberately the *active* tab:
+      // activating it is a no-op for the panel, where clicking Skills would replace
+      // the inventory grid that the drag probe below needs.
+      "rail.tab.inventory",
       "action.settings",
       ...(compactRail ? ["rail.compact.nav.0"] : []),
     ];
@@ -959,6 +963,16 @@ async function main() {
     await changedPage.waitForTimeout(2_000);
     await runHitTests(changedPage, "after a resize", 1);
 
+    // A control's size in CSS pixels does not depend on the device pixel ratio: at a
+    // higher ratio the same control is drawn with more device pixels, not made smaller.
+    // Worth stating because the failure it catches passes every other check in this
+    // battery — a whole interface laid out at half scale is self-consistent, so clicks
+    // still land on the controls they hit, and only the drag between two slots that are
+    // now half as far apart gave it away.
+    const sizeBefore = await changedPage.evaluate(
+      () => (window.aoLoaded?.controls ?? []).find((c) => c.key === "inventory.slot.0")
+    );
+
     const cdp = await changedContext.newCDPSession(changedPage);
     await cdp.send("Emulation.setDeviceMetricsOverride", {
       width: 1100,
@@ -973,6 +987,18 @@ async function main() {
       changedRatio === 2,
       `devicePixelRatio is ${changedRatio}`
     );
+    const sizeAfter = await changedPage.evaluate(
+      () => (window.aoLoaded?.controls ?? []).find((c) => c.key === "inventory.slot.0")
+    );
+    check(
+      "a control keeps its size in css pixels across a DPR change",
+      sizeBefore &&
+        sizeAfter &&
+        Math.abs(sizeBefore.w - sizeAfter.w) <= 1 &&
+        Math.abs(sizeBefore.h - sizeAfter.h) <= 1,
+      `${sizeBefore?.w}x${sizeBefore?.h} became ${sizeAfter?.w}x${sizeAfter?.h}`
+    );
+
     await runHitTests(changedPage, "after a DPR change to 2x", 2);
     await cdp.detach();
     await changedContext.close();
