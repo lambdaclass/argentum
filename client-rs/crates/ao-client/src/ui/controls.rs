@@ -546,6 +546,16 @@ pub struct GameplayInput;
 pub enum ControlSet {
     /// Reads pointers and keys, updates `Control`, emits `Activated`.
     Interact,
+    /// Acts on what was activated, while the entity that was activated still exists.
+    ///
+    /// This sits between interaction and rebuilding for a reason that cost real clicks: a
+    /// panel rebuild despawns every control in it, and an `Activated` message names an
+    /// entity. Consume the message after the rebuild and the lookup fails, so the click is
+    /// dropped in silence — which is why switching the rail's tab sometimes took two or
+    /// three attempts.
+    Consume,
+    /// Rebuilds panels from the state the consumers just changed.
+    Rebuild,
     /// Redraws controls from their resolved state.
     Present,
 }
@@ -556,7 +566,16 @@ impl Plugin for ControlsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FocusOwner>()
             .add_message::<Activated>()
-            .configure_sets(Update, ControlSet::Interact.before(ControlSet::Present))
+            .configure_sets(
+                Update,
+                (
+                    ControlSet::Interact,
+                    ControlSet::Consume,
+                    ControlSet::Rebuild,
+                    ControlSet::Present,
+                )
+                    .chain(),
+            )
             .configure_sets(
                 Update,
                 GameplayInput

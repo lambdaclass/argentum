@@ -191,7 +191,17 @@ fn populated() -> UiSnapshot {
             open: false,
             focus_map: 1,
             size: (100, 100),
-            markers: vec![MapMarker { x: 50, y: 50, kind: MarkerKind::Player }],
+            region_key: "region.nix".to_string(),
+            // One of every category a player can switch off, so the filters have something
+            // to filter and the icons have something to distinguish.
+            markers: vec![
+                MapMarker { x: 50, y: 50, kind: MarkerKind::Player },
+                MapMarker { x: 47, y: 47, kind: MarkerKind::Merchant },
+                MapMarker { x: 62, y: 38, kind: MarkerKind::Quest },
+                MapMarker { x: 18, y: 74, kind: MarkerKind::Dungeon },
+                MapMarker { x: 82, y: 20, kind: MarkerKind::Landmark },
+                MapMarker { x: 53, y: 48, kind: MarkerKind::Party },
+            ],
         },
         progression: base_progression("Aldar", 14),
         // Enough company to judge the HUD under real density rather than on an empty
@@ -364,6 +374,7 @@ fn empty() -> UiSnapshot {
             open: false,
             focus_map: 1,
             size: (100, 100),
+            region_key: "region.nix".to_string(),
             markers: Vec::new(),
         },
         progression: base_progression("Novato", 1),
@@ -506,6 +517,9 @@ fn malformed() -> UiSnapshot {
             open: true,
             focus_map: 1,
             size: (0, 0),
+            // Empty, so a region has to be drawn without a name rather than with one the
+            // client invented.
+            region_key: String::new(),
             markers: vec![MapMarker { x: -1, y: -1, kind: MarkerKind::Player }],
         },
         progression: ProgressionState {

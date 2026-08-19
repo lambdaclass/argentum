@@ -27,6 +27,7 @@ pub mod telemetry;
 #[cfg(test)]
 pub mod testing;
 pub mod tokens;
+pub mod worldmap;
 pub mod topbar;
 
 use bevy::prelude::*;
@@ -82,6 +83,7 @@ impl Plugin for UiPlugin {
             target::TargetPanelPlugin,
             labels::LabelPlugin,
             minimap::MinimapPlugin,
+            worldmap::WorldMapPlugin,
         ));
     }
 }

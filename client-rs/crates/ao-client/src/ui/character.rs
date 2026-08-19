@@ -131,6 +131,24 @@ impl Plugin for CharacterPanelPlugin {
             .add_observer(track_slot_drag_over)
             .add_observer(finish_slot_drag)
             .add_observer(cancel_slot_drag)
+            // Consumers first, while the controls they name still exist. A rebuild
+            // despawns every control in the panel, so an activation read afterwards names
+            // an entity that is gone and the click is dropped in silence — which is why
+            // switching tabs sometimes took two or three attempts.
+            .add_systems(
+                Update,
+                (
+                    apply_slot_activations,
+                    apply_tab_activations,
+                    apply_safety_activations,
+                    clear_pending_on_answer,
+                    cancel_drag_on_escape,
+                    cancel_drag_when_its_destination_becomes_unknowable,
+                    clear_selection_when_slot_empties,
+                )
+                    .chain()
+                    .in_set(super::controls::ControlSet::Consume),
+            )
             .add_systems(
                 Update,
                 (
@@ -139,21 +157,14 @@ impl Plugin for CharacterPanelPlugin {
                     request_item_graphics,
                     rebuild_on_change,
                     update_compact_vitals,
-                    cancel_drag_on_escape,
-                    cancel_drag_when_its_destination_becomes_unknowable,
-                    clear_selection_when_slot_empties,
-                    apply_slot_activations,
-                    apply_tab_activations,
-                    apply_safety_activations,
-                    clear_pending_on_answer,
                 )
                     .chain()
                     .after(super::shell::spawn_shell)
-                    // Before the controls are presented, so a panel rebuilt this frame is
-                    // painted this frame. Without the ordering a freshly spawned control
-                    // showed its resting colours until the next one — a flicker on every
-                    // rebuild, and a mark that a test could only see by counting frames.
-                    .before(super::controls::ControlSet::Present),
+                    // In the rebuild stage, which is after the consumers and before the
+                    // controls are presented: a panel rebuilt this frame is painted this
+                    // frame, or a freshly spawned control shows its resting colours until
+                    // the next one — a flicker on every rebuild.
+                    .in_set(super::controls::ControlSet::Rebuild),
             );
     }
 }
@@ -1957,6 +1968,40 @@ mod tests {
                 "the {tab:?} tab's selection is not what the rail is showing"
             );
         }
+    }
+
+    #[test]
+    fn a_tab_click_is_not_lost_to_a_rebuild_in_the_same_frame() {
+        // Reported from the running client: switching between Inventory and Spells
+        // sometimes took two or three clicks. The rail is rebuilt whenever the snapshot
+        // changes, a rebuild despawns every control in it, and an `Activated` message names
+        // an entity — so a rebuild that ran before the message was read left the consumer
+        // looking up an entity that no longer existed, and the click vanished without a
+        // trace.
+        use super::super::testing;
+
+        let mut app = testing::shell_app(Vec2::new(1280.0, 832.0));
+        for _ in 0..4 {
+            app.update();
+        }
+        let skills = tab_entity(&mut app, RailTab::Skills);
+
+        // A snapshot arriving in the same frame as the click, which is what a heartbeat
+        // does several times a second.
+        let mut heartbeat = app.world().resource::<UiState>().get().clone();
+        heartbeat.vitals.health.current -= 1;
+        UiState::set(&mut app.world_mut().resource_mut::<UiState>(), heartbeat);
+        app.world_mut().write_message(super::super::controls::Activated {
+            entity: skills,
+            source: super::super::controls::ActivationSource::Pointer,
+        });
+        app.update();
+
+        assert_eq!(
+            *app.world().resource::<RailTab>(),
+            RailTab::Skills,
+            "the click was dropped by the rebuild it shared a frame with"
+        );
     }
 
     #[test]

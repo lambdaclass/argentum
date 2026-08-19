@@ -29,7 +29,7 @@ impl Plugin for MinimapPlugin {
             Update,
             present_minimap
                 .after(super::shell::spawn_shell)
-                .before(super::controls::ControlSet::Present),
+                .in_set(super::controls::ControlSet::Rebuild),
         );
     }
 }
@@ -80,12 +80,17 @@ pub fn state_key(availability: MapAvailability) -> Option<&'static str> {
 /// How big a marker is drawn, in logical pixels.
 const MARKER: f32 = 6.0;
 
-fn marker_ink(kind: MarkerKind) -> Color {
+pub fn marker_ink(kind: MarkerKind) -> Color {
     match kind {
         MarkerKind::Player => ink::PRIMARY,
         MarkerKind::Party => status::THIRST,
         MarkerKind::Hostile => status::DANGER,
         MarkerKind::Landmark => ink::GOLD,
+        // The three world-map categories. They can appear on the minimap too — a shop two
+        // streets away is worth seeing — and each keeps its own colour there.
+        MarkerKind::Merchant => status::EXPERIENCE,
+        MarkerKind::Quest => status::STAMINA,
+        MarkerKind::Dungeon => status::HUNGER,
     }
 }
 
@@ -94,7 +99,7 @@ fn marker_ink(kind: MarkerKind) -> Color {
 /// Four shapes rather than four colours: a round dot for the player, a square for a party
 /// member, a hollow ring for a hostile and a small hollow square for a landmark. Shape is
 /// the signal that survives a colour-blind player and a bad monitor.
-fn marker_node(kind: MarkerKind) -> impl Bundle {
+pub fn marker_node(kind: MarkerKind) -> impl Bundle {
     let colour = marker_ink(kind);
     let shape = marker_shape(kind);
     (
@@ -148,6 +153,21 @@ pub fn marker_shape(kind: MarkerKind) -> MarkerShape {
         MarkerKind::Landmark => {
             MarkerShape { size: MARKER, radius: 0.0, filled: false, border: 1.0 }
         }
+        // Every category is a different size as well as a different fill, so a screenshot
+        // in grey still distinguishes them: a large hollow square, a small filled square
+        // with a wide border, and a large filled round one.
+        MarkerKind::Merchant => {
+            MarkerShape { size: MARKER + 3.0, radius: 0.0, filled: false, border: 1.0 }
+        }
+        MarkerKind::Quest => {
+            MarkerShape { size: MARKER - 2.0, radius: 0.0, filled: true, border: 2.0 }
+        }
+        MarkerKind::Dungeon => MarkerShape {
+            size: MARKER + 3.0,
+            radius: (MARKER + 3.0) / 2.0,
+            filled: true,
+            border: 0.0,
+        },
     }
 }
 
@@ -388,7 +408,15 @@ mod tests {
     fn every_marker_kind_is_a_different_shape_as_well_as_a_different_colour() {
         // Shape is the signal that survives a colour-blind player and a bad monitor, and
         // this phase forbids status carried by colour alone.
-        let kinds = [MarkerKind::Player, MarkerKind::Party, MarkerKind::Hostile, MarkerKind::Landmark];
+        let kinds = [
+            MarkerKind::Player,
+            MarkerKind::Party,
+            MarkerKind::Hostile,
+            MarkerKind::Landmark,
+            MarkerKind::Merchant,
+            MarkerKind::Quest,
+            MarkerKind::Dungeon,
+        ];
         let mut shapes: Vec<MarkerShape> = Vec::new();
         let mut colours: Vec<[u8; 4]> = Vec::new();
         for kind in kinds {

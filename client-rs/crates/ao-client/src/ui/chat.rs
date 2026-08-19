@@ -106,15 +106,18 @@ impl Plugin for ChatPanelPlugin {
         app.init_resource::<ChatView>()
             .add_systems(
                 Update,
-                (
-                    apply_chat_activations,
-                    // After the activations, so a filter switched off this frame is drawn
-                    // switched off this frame rather than a frame later.
-                    present_chat,
-                )
-                    .chain()
+                // In the consume stage, while the filter control that was clicked still
+                // exists: this overlay is rebuilt whenever the view changes, and a
+                // rebuild before the message is read loses the click.
+                apply_chat_activations.in_set(super::controls::ControlSet::Consume),
+            )
+            .add_systems(
+                Update,
+                // After the activations, so a filter switched off this frame is drawn
+                // switched off this frame rather than a frame later.
+                present_chat
                     .after(super::shell::spawn_shell)
-                    .before(super::controls::ControlSet::Present),
+                    .in_set(super::controls::ControlSet::Rebuild),
             )
             .add_systems(
                 Update,

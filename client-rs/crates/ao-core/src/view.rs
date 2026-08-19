@@ -647,8 +647,37 @@ pub enum MarkerKind {
     Party,
     /// A hostile the server has disclosed.
     Hostile,
-    /// A named point of interest: a city, a dungeon mouth.
+    /// A named point of interest: a city, a crossroads, a shrine.
     Landmark,
+    /// Somewhere to buy or sell.
+    Merchant,
+    /// Somewhere a quest is waiting or continues.
+    Quest,
+    /// The mouth of a dungeon.
+    Dungeon,
+}
+
+impl MarkerKind {
+    /// Whether a player can switch this category off.
+    ///
+    /// Their own position is not a category: a map that can hide where you are is a map
+    /// you can get lost on while looking at it.
+    pub fn is_filterable(self) -> bool {
+        !matches!(self, MarkerKind::Player)
+    }
+
+    /// The localisation key for the category's own name.
+    pub fn name_key(self) -> &'static str {
+        match self {
+            MarkerKind::Player => "map.category.player",
+            MarkerKind::Party => "map.category.party",
+            MarkerKind::Hostile => "map.category.hostile",
+            MarkerKind::Landmark => "map.category.landmark",
+            MarkerKind::Merchant => "map.category.merchant",
+            MarkerKind::Quest => "map.category.quest",
+            MarkerKind::Dungeon => "map.category.dungeon",
+        }
+    }
 }
 
 /// The minimap: the immediate surroundings, drawn in the rail.
@@ -701,6 +730,11 @@ pub struct WorldMapState {
     pub focus_map: u16,
     /// Size of the whole map in tiles, for placing markers proportionally.
     pub size: (i32, i32),
+    /// The region the focused map belongs to, as a localisation key.
+    ///
+    /// A map number is not a place. "34" tells a player nothing and cannot be said out
+    /// loud to a party, which is most of what a world map is used for.
+    pub region_key: String,
     pub markers: Vec<MapMarker>,
 }
 

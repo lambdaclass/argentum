@@ -215,7 +215,7 @@ impl Plugin for LabelPlugin {
             Update,
             present_labels
                 .after(super::shell::spawn_shell)
-                .before(super::controls::ControlSet::Present),
+                .in_set(super::controls::ControlSet::Rebuild),
         );
     }
 }

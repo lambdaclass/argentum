@@ -42,11 +42,16 @@ impl Plugin for TargetPanelPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (apply_target_actions, present_target, present_notices)
-                .chain()
+            // The strip is rebuilt whenever the target changes, so the action that was
+            // clicked has to be read before that happens.
+            apply_target_actions.in_set(super::controls::ControlSet::Consume),
+        )
+        .add_systems(
+            Update,
+            (present_target, present_notices)
                 .after(super::shell::spawn_shell)
                 // So a target or a notice spawned this frame is painted this frame.
-                .before(super::controls::ControlSet::Present),
+                .in_set(super::controls::ControlSet::Rebuild),
         );
     }
 }
