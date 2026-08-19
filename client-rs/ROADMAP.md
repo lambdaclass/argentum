@@ -269,43 +269,13 @@ window silently.
 Three probes this contract names remain unwritten because they have nothing to
 aim at yet, and this task stays open until they exist:
 
-- a spell control, which arrives with the spellbook in W-0007;
 - a dialog control, which arrives with the product screens in W-0009;
 - fullscreen, which needs a user gesture the automation cannot supply. The
   refusal path is covered; the hit tests are not.
 
-### Task W-0007 — Spellbook and hotbar prototype
-
-- **State:** active
-- **Phase:** 0
-- **Depends on:** W-0004, W-0005
-
-Implement spells, requirements, target modes, cooldowns and persistent numbered
-hotbar assignment/use with fixtures. Cover insufficient mana/stamina/skill,
-equipment masks, land/water, target-level, area and dead-target restrictions as
-typed presentation states whose final authority remains server-side.
-
-Complete the rendered flow:
-
-- inventory/spell tabs are equal-width controls with distinct hover, focus,
-  pressed and selected states, preserve the selected tab across harmless
-  snapshots and switch visible content with keyboard and pointer input without
-  moving the surrounding rail;
-- clicking a ready self/area spell emits one cast intent; an entity/ground spell
-  arms visibly, consumes the next valid world target and disarms on cast,
-  Escape, death, disconnect or authoritative rejection;
-- spell rows and hotbar slots display GRH icon, cost, disabled reason, cooldown
-  and quantity overlays, key labels, disabled reason, cooldown overlay and
-  focus/selection/activation state; semantic keys are localized by the UI
-  boundary rather than shown raw to players;
-- number keys and pointer clicks share one hotbar activation path, are suppressed
-  while text owns focus and never fire a cooling or empty slot; and
-- assignment, replacement, removal and page controls are usable and persist in
-  the fixture adapter without pretending the server accepted them.
-
-Close with Bevy app tests that interact with spawned spell/hotbar entities and
-observe intents, armed state and rendered blockers. Pure spell-activation and
-hotbar-intent tests do not prove that the interface is operable.
+The spell control this contract also named is covered as of W-0007: the battery
+switches to the Spells tab, checks that a row activates exactly once and that a
+click just outside it does not, and puts the inventory back.
 
 ### Task W-0008 — Chat, target, safety and feedback prototype
 

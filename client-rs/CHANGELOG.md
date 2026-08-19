@@ -19,6 +19,50 @@ Never reuse a completed ID in the active roadmap.
 
 ## Closed tasks
 
+### Completed Task W-0007 — Spellbook and hotbar prototype
+
+Closed: 2026-08-19 (`1ca1735`, `5b2c763`, `83be5bd`, `d646fa5`, `200c769`,
+`079a221`, `62930c3`, `0f5dcc4`)
+
+The spellbook and the numbered hotbar, both operable. `spell_row` and
+`activate_spell` had existed for some time with no production caller, so the
+book could be rendered and not used and the decision the module exists to make
+— cast now, or arm and wait for a target — was never made.
+
+Rows are controls with stable keys, drawn with the graphic their spell names,
+the mana cost, and the reason a blocked spell cannot be cast in words rather
+than as `spell.blocked.mana`. Clicking a ready self-cast or area spell sends
+exactly one cast; a ground or entity spell with nothing selected arms, and a
+world click spends it — target first, then cast, which is the order a server can
+refuse in halves. An armed spell disarms on the cast, on Escape, on death, on a
+disconnect and on an authoritative refusal.
+
+Hotbar slots draw their binding's graphic, how many of a bound consumable the
+player is carrying, and a veil in proportion to the cooldown left. Pointer and
+keyboard share one activation function, so a key that refuses a cooling slot
+cannot disagree with a click that sends it; the number keys stay suppressed
+while text owns the keyboard. Dropping an inventory item or a spellbook row onto
+a slot binds it, Shift-click empties it, and the page control turns the page.
+The stand-in authority keeps the pages, because an assignment that vanished on
+the way to page two and back would read as the server refusing something it had
+already accepted.
+
+The rail's tab strip became real in the process: three equal-width controls that
+switch the panel by pointer or keyboard, keep their selection across the
+snapshots that rebuild the rail, and do not move the regions below the grid.
+`Intent::ClearHotbarSlot` is new and deliberately separate from binding.
+
+Evidence: 442 tests in `ao-client`, including tests that activate and drop onto
+the production spell and hotbar entities and observe the intents, the armed
+state and the rendered blockers; and 586 browser checks against build `0f5dcc4`,
+which now include the spell control W-0085 was waiting for.
+
+Three defects the evidence found: tabs that were not equal width because
+`flex_grow` shares only spare space; a panel rebuilt after the controls were
+presented, which flickered resting colours for a frame; and a refused inventory
+slot whose danger border was repainted away, fixed by giving
+`present_controls` a `Danger` component to read.
+
 ### Completed Task W-0006 — Character, vitals, inventory and equipment prototype
 
 Closed: 2026-08-19 (`c850253`, `6308dcb`, `55229e2`, `973c4a0`, `c9f03ca`,
