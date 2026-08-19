@@ -277,30 +277,6 @@ The spell control this contract also named is covered as of W-0007: the battery
 switches to the Spells tab, checks that a row activates exactly once and that a
 click just outside it does not, and puts the inventory back.
 
-### Task W-0008 — Chat, target, safety and feedback prototype
-
-- **State:** planned
-- **Phase:** 0
-- **Depends on:** W-0004, W-0005
-
-Implement world messages, chat channels, bubbles, current target, personal and
-party safety, navigation/dead restrictions, notifications and contextual
-actions. Define focus ownership so chat, IME, password fields and modals suppress
-movement/combat/hotkeys. Cover cooldown, mute, rejection and disconnect feedback.
-
-World chat is a bounded upper-left overlay with wrapping, fading, expansion and
-channel filters; long announcements cannot run beneath or obscure the minimap.
-Fixtures include the local name, several player/NPC names, bubbles, combat text,
-a selected target and success/failure feedback so the HUD is judged under real
-Argentum visual density rather than an empty map. Labels apply deterministic
-priority, overlap and distance/fade rules instead of becoming an unreadable
-stack.
-
-The selected-target presentation distinguishes player, NPC, object and ground
-targets, exposes only server-authorized information, and clears immediately on
-despawn, death, map change, range/visibility loss or disconnect. Feedback is
-visible without relying only on chat color.
-
 ### Task W-0088 — Fixture-backed minimap presentation
 
 - **State:** planned

@@ -19,6 +19,58 @@ Never reuse a completed ID in the active roadmap.
 
 ## Closed tasks
 
+### Completed Task W-0008 — Chat, target, safety and feedback prototype
+
+Closed: 2026-08-19 (`bf74d6e`, `afab30c`, `b5ae76b`, `ada0f73`, `c0fb8ff`,
+`778d4cd`, `7a379b0`)
+
+The HUD over the world, judged against a map with people on it. The populated
+fixture now carries five presences — two citizens, a merchant and two hostiles,
+one speaking and two taking hits — and six channels' worth of chat, because a
+HUD tested on an empty map is tested against the wrong thing: the parts that
+fail first fail because of each other.
+
+The message overlay is bounded and wrapped so a long announcement cannot reach
+under the minimap, five lines collapsed and fourteen expanded, oldest faintest,
+with a filter per channel that marks itself off in two ways at once. A line with
+no body is dropped rather than drawn as an invisible row that still takes a place
+in the bound. The composer is where focus ownership becomes visible: Enter gives
+it the keyboard, Enter again sends on the active channel, Escape hands the
+keyboard back and keeps the sentence.
+
+Names, bubbles and combat text are placed over the world by three stated rules —
+priority by distance, overlap resolved by dropping rather than nudging, fade by
+distance — with ties broken on identity so a crowd resolves the same way every
+frame. `screen_of_world` and `tile_centre` joined the coordinate pipeline rather
+than being computed in the panel that wanted them.
+
+The target strip names the target, says what kind it is in words, and draws
+health only when the server disclosed it. It stops showing a target once the
+answer cannot still be true: death, a map change, a disconnect, or the character
+no longer being among the presences the server sends — which is how range and
+visibility loss reach the client.
+
+Notices stack above the hotbar with a marker glyph as well as a colour, bounded
+to the newest four, and the connection's own state joins them last, because from
+the player's side both answer "why did nothing happen". `FeedbackKey::Muted` and
+`FeedbackKey::is_refusal` are new: being silenced leads somewhere different from
+being blocked, and a client that treats every notice as a refusal disarms an
+armed spell the moment a level-up arrives.
+
+The safety toggles replaced the words "not yet wired" in the rail's navigation
+region. They say "on" or "off" as well as carrying a border, and they ask the
+server rather than flipping the client's own copy.
+
+Focus ownership is now complete: a text field, an IME composition and a modal all
+take the keyboard from the world. The modal rule is a run condition on the whole
+gameplay set rather than a check inside each system, and movement is tested
+through it — a player answering a dialog must not walk out from under it.
+
+Evidence: 488 tests in `ao-client` and 82 in `ao-core`, and 584 browser checks
+against build `7a379b0`, all green. Two defects the evidence found: a target that
+contradicted the fixture's own crowd, and "any feedback" standing in for "a
+refusal".
+
 ### Completed Task W-0007 — Spellbook and hotbar prototype
 
 Closed: 2026-08-19 (`1ca1735`, `5b2c763`, `83be5bd`, `d646fa5`, `200c769`,
