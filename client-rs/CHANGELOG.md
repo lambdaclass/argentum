@@ -19,6 +19,50 @@ Never reuse a completed ID in the active roadmap.
 
 ## Closed tasks
 
+### Completed Task W-0085 — Pointer and hit-test coordinate integrity
+
+Closed: 2026-08-20 (`d0e5af2`, verified again at `c377ec9`)
+
+One coordinate pipeline from the pointer to the world, applied exactly once each:
+CSS presentation size, backing-store size, device pixel ratio, UI scale, camera
+viewport offset and world projection. The control visibly under the pointer is the
+control that receives the event, and a click on the interface does not also reach
+the ground behind it.
+
+Proved where the question lives — in a browser, with a real pointer. 548 checks at
+ratios 1.0, 1.25, 1.5, 1.75 and 2.0, windowed and maximized, and again after a
+mid-session resize and a mid-session ratio change: centre and per-edge probes one
+pixel inside and one pixel outside an inventory slot, a hotbar slot, a rail tab
+and a top-bar icon; exactly-once activation; the world's centre and four edges
+against the tile actually drawn; the world/rail seam; a control floating over the
+world intercepting its own click; a pointer-driven inventory drag; and a control
+keeping its CSS size across a ratio change. Screenshots and coordinate arithmetic
+alone would not have found any of the three defects below.
+
+Three defects were found by that evidence and fixed rather than accommodated:
+
+- A click on the hotbar also selected the tile beneath it. The hotbar floats
+  inside the world viewport, so a player meaning to drink a potion walked two
+  tiles instead. Fixed with an explicit interception rule rather than by moving
+  the hotbar out of the way.
+- One click activated a control twice whenever the picking event and the first
+  observed press landed in the same frame. The first guard cleared its flag on the
+  rising edge, wiping what the observer had just set; the guard now ends with the
+  press.
+- A mid-session device pixel ratio change laid the whole interface out at half
+  scale. `camera_system` refreshes a camera's cached scale factor only for windows
+  named in a window message, and the client had changed its own window silently.
+  It announces the change now.
+
+Two probes named in the contract are owned by the tasks that create the surface
+they need, and were reassigned rather than left to hold this foundation open:
+W-0009 runs the same dialog-boundary probes when it creates a production dialog,
+and W-0073 owns physical fullscreen hit testing, which needs a real user gesture
+automation cannot supply — the automated refusal path is covered here. The spell
+control the contract also named arrived with W-0007 and is covered: the battery
+switches to the Spells tab, checks a row activates exactly once and that a click
+just outside it does not, and puts the inventory back.
+
 ### Completed Task W-0088 — Fixture-backed minimap presentation
 
 Closed: 2026-08-19 (`e94832e`)

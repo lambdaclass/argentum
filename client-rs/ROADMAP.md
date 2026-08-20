@@ -325,59 +325,6 @@ same browser viewport: the target is comparable information clarity and
 interaction quality, not pixel-for-pixel reproduction. Every shipped icon and
 decorative asset is project-owned or licensed for this client.
 
-### Task W-0085 — Pointer and hit-test coordinate integrity
-
-- **State:** active
-- **Phase:** 0
-- **Depends on:** W-0003, W-0005
-
-Define one coordinate pipeline from browser/native pointer position through the
-canvas, Bevy UI and world camera. Apply CSS presentation size, backing-store
-size, DPR, UI scale, camera viewport offset and world projection exactly once.
-The control that is visibly under the pointer must be the control that receives
-the event, and UI interception must prevent the same click from reaching the
-world.
-
-Exercise DPR 1.0, 1.25, 1.5, 1.75 and 2.0 at windowed, maximized and fullscreen
-sizes. For representative inventory, spell, hotbar, tab and dialog controls,
-click the center, every edge one pixel inside and one pixel outside; assert the
-expected entity activates exactly once. Click the center and four edges of the
-world viewport and prove the selected tile matches the rendered tile without an
-off-by-one error. Repeat after resize, browser zoom and DPR change.
-
-Pointer capture must survive an in-progress drag while the pointer remains in
-the window and cancel cleanly on focus loss, pointer exit, panel removal or an
-invalidating resize. Close with browser-driven input tests plus Bevy app tests;
-screenshots and pure coordinate arithmetic alone are insufficient.
-
-Delivered and verified by 548 browser checks against build `d0e5af2`, at ratios
-1.0, 1.25, 1.5, 1.75 and 2.0, windowed and maximized, and again after a
-mid-session resize and a mid-session device pixel ratio change: centre and
-per-edge probes for an inventory slot, a hotbar slot, a rail tab and a top-bar
-icon; exactly-once activation; world centre and four edges; the world/rail seam;
-interception by a control floating over the world; a pointer-driven inventory
-drag; and a control keeping its size in CSS pixels across a ratio change.
-
-Three defects were found by that evidence and fixed rather than accommodated: a
-click on the hotbar also selecting the tile beneath it; one click activating a
-control twice whenever the picking event and the first observed press shared a
-frame; and a mid-session ratio change leaving the whole interface laid out at
-half scale, because `camera_system` refreshes a camera's cached scale factor
-only for windows named in a window message and the client changed its own
-window silently.
-
-Two probes remain assigned to the tasks that introduce the required surface;
-they do not keep this coordinate foundation open:
-
-- W-0009 must run the same dialog-boundary probes when it creates a production
-  dialog; and
-- W-0073 owns physical fullscreen hit testing that requires a real user gesture.
-  The automated refusal path remains covered here.
-
-The spell control this contract also named is covered as of W-0007: the battery
-switches to the Spells tab, checks that a row activates exactly once and that a
-click just outside it does not, and puts the inventory back.
-
 ### Task W-0089 — Tab world-map overlay
 
 - **State:** active
