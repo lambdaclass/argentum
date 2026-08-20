@@ -135,7 +135,12 @@ fn publish(
     scene: Res<LoadedScene>,
     player: Res<crate::world::LocalPlayer>,
     last: Res<LastActivation>,
-    controls: Query<(&ControlKey, &Control, &ComputedNode, &UiGlobalTransform)>,
+    controls: Query<(
+        &ControlKey,
+        &crate::ui::controls::Control,
+        &ComputedNode,
+        &UiGlobalTransform,
+    )>,
     pointer: Res<crate::ui::pointer::PointerState>,
     geometry: Res<crate::ui::shell::AppliedGeometry>,
     windows: Query<&Window>,

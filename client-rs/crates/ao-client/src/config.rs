@@ -211,7 +211,7 @@ fn percent_decode(value: &str) -> String {
 
 /// Keys read from `<meta name="..." content="...">` in the host page.
 #[cfg(target_arch = "wasm32")]
-const META_KEYS: [(&str, fn(&mut Overrides, String)); 5] = [
+const META_KEYS: [(&str, fn(&mut Overrides, String)); 6] = [
     ("ao:asset-origin", |o, v| o.asset_origin = Some(v)),
     ("ao:gateway-url", |o, v| o.gateway_url = Some(v)),
     ("ao:character-name", |o, v| o.character_name = Some(v)),
