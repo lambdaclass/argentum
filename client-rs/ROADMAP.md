@@ -526,6 +526,24 @@ storage, audio, clipboard, IME/text composition, fullscreen/window, browser
 history and external links. Define capability results and failures without
 spreading `cfg(wasm32)` into gameplay or UI systems.
 
+Partially delivered, and deliberately not closed. `platform` defines `HostClock`,
+`HostWindow` and `HostHttp` behind one `Platform` resource, with `Support` for
+capability answers — the top bar uses it to withhold a fullscreen button from a
+host that has no fullscreen while keeping it on one that merely needs a gesture —
+and `FetchError` for the failures a fetch can produce. Four production callers
+moved behind the boundary: the ping schedule, the online poll, the frame-rate
+readout and the shell's canvas tracker. `hud.rs` went from six `cfg(target_arch)`
+sites to none.
+
+The rest of the list — WebSocket, persistent cache, token storage, audio,
+clipboard, IME, history and external links — is unbuilt on purpose: every one of
+them was written, reported unused by the compiler, and removed. Their adapters and
+their first callers both belong to `W-0016` and to the tasks that introduce the
+screens using them, and a service whose only caller is its own test is not a
+service. Close this task together with `W-0016`, in dependency order, or move the
+unbuilt services explicitly to the tasks that will call them. It does not close on
+its own.
+
 ### Task W-0016 — Browser adapters and host boundary
 
 - **State:** planned
