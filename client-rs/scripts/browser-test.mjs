@@ -86,6 +86,21 @@ async function waitForClient(page) {
   await page.waitForTimeout(2_000);
 }
 
+/// How long one frame takes, right now, in this context.
+///
+/// The hit battery measures this for its click budgets; the layout section needs it too,
+/// because "wait 600 ms" is under two frames on a client decoding a 61 MB world pack
+/// under a software renderer, and a check that reads before the client can answer is
+/// measuring the harness rather than the client.
+async function frameTimeMs(page) {
+  const frames = () => page.evaluate(() => window.aoLoaded?.frames ?? 0);
+  const sample = 2_000;
+  const first = await frames();
+  await page.waitForTimeout(sample);
+  const advanced = (await frames()) - first;
+  return sample / Math.max(advanced, 1);
+}
+
 /// The client's bounded playing size, from web/index.html.
 ///
 /// The canvas fills the content area only while the content area is smaller
@@ -738,7 +753,21 @@ async function runHitTests(hitPage, label, ratio) {
     // in flight is not a slow client, it is the harness reading a half-drawn frame and
     // then blaming the client for it.
     const settleMap = async () => {
+      // Two waits, and both are necessary.
+      //
+      // First the client has to have had a chance to *act*: at three frames a second
+      // under a software renderer, a keypress is not visible for a frame or two.
+      // Quiescence alone read "still closed, still closed" a hundred milliseconds after
+      // a Tab press and called that settled, which turned every map check into a
+      // failure — the harness asking whether something had happened before it could
+      // have.
+      //
+      // Then it has to have *stopped* acting, which is what a fixed wait could not
+      // establish: a rebuild in flight after a device-pixel-ratio change published five
+      // markers of six exactly once in nine passes.
       const step = Math.min(Math.max(frameMs, 100), 2_000);
+      await hitPage.waitForTimeout(Math.min(Math.max(3 * frameMs, 300), 6_000));
+
       const deadline = Date.now() + Math.min(Math.max(60 * frameMs, 5_000), 30_000);
       let last = await mapState();
 
@@ -1111,8 +1140,12 @@ async function main() {
       // The world map across the same three modes. It is sized from the world region, so
       // a mode change resizes it while it is open — the case where a stale camera would
       // put the world half outside its own panel, or lose it entirely.
+      const modeFrameMs = await frameTimeMs(modePage);
       const mapAfter = async () => {
-        await modePage.waitForTimeout(600);
+        // Scaled to the measured frame time rather than fixed: 600 ms is under two
+        // frames on a client that is decoding a world pack under a software renderer,
+        // and a check that reads before the client can answer is measuring the harness.
+        await modePage.waitForTimeout(Math.min(Math.max(6 * modeFrameMs, 1_200), 15_000));
         return modePage.evaluate(() => ({
           open: window.aoLoaded?.worldMapOpen === true,
           markers: window.aoLoaded?.worldMapMarkers ?? 0,
