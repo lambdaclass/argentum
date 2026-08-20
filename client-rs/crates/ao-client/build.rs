@@ -16,7 +16,25 @@ fn main() {
         return;
     }
 
-    let Some(sha) = run(&["rev-parse", "--short=7", "HEAD"]) else {
+    // The last commit that touched what the binary is built from, not HEAD: HEAD moves
+    // for a roadmap note or a server change, and a stamp that follows it makes a
+    // perfectly good artifact fail its own verification. Kept in step with
+    // scripts/build-stamp.sh, which is what `./build.sh` checks against.
+    let sha = run(&[
+        "log",
+        "-1",
+        "--format=%h",
+        "--abbrev=7",
+        "--",
+        "crates",
+        "assets",
+        "Cargo.toml",
+        "Cargo.lock",
+    ])
+    .filter(|out| !out.is_empty())
+    .or_else(|| run(&["rev-parse", "--short=7", "HEAD"]));
+
+    let Some(sha) = sha else {
         return;
     };
 

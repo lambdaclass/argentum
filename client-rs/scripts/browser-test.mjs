@@ -883,13 +883,16 @@ async function runHitTests(hitPage, label, ratio) {
         // Settled before reading, not merely read. The overlay is rebuilt by the wheel
         // above, and a count taken mid-rebuild caught five of six markers — which then
         // read as filtering *adding* one.
+        const clickFilter = () =>
+          clickAt(
+            filter.x + filter.w / 2,
+            filter.y + filter.h / 2,
+            CLICK_BUDGET_MS,
+            "worldmap.filter.merchant"
+          );
+
         const drawn = (await settleMap()).markers;
-        const toggled = await clickAt(
-          filter.x + filter.w / 2,
-          filter.y + filter.h / 2,
-          CLICK_BUDGET_MS,
-          "worldmap.filter.merchant"
-        );
+        const toggled = await clickFilter();
         // Assert the click reached the filter before comparing counts. A click that
         // missed and a filter that does not filter produce the same marker count, and
         // blaming the second for the first is how a harness bug becomes a bug report.
@@ -898,11 +901,29 @@ async function runHitTests(hitPage, label, ratio) {
           toggled.key === "worldmap.filter.merchant",
           shown([filter.x + filter.w / 2, filter.y + filter.h / 2], toggled)
         );
-        const filtered = await settleMap();
+        const flipped = (await settleMap()).markers;
+
+        // One marker either way, not one marker *fewer*.
+        //
+        // The resize and device-pixel-ratio passes reuse the page the pass before them
+        // used, and the filter is client state that survives them: a pass that switched
+        // merchants off left them off, so the next pass's click switched them back on
+        // and the count went 5 to 6. That read as filtering *adding* a marker, and the
+        // bug was the assumption about which way the toggle was pointing.
         check(
-          "switching a map category off removes exactly its markers",
-          filtered.markers === drawn - 1,
-          `${drawn} -> ${filtered.markers}`
+          `${label}: `+"a legend filter changes exactly its own markers",
+          Math.abs(flipped - drawn) === 1,
+          `${drawn} -> ${flipped}`
+        );
+
+        // And it is reversible: clicking again restores exactly what was there, which is
+        // the half a one-way check cannot see.
+        await clickFilter();
+        const restored = (await settleMap()).markers;
+        check(
+          `${label}: `+"switching a map category back on restores its markers",
+          restored === drawn,
+          `${drawn} -> ${flipped} -> ${restored}`
         );
       }
 
