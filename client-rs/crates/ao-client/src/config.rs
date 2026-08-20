@@ -40,6 +40,12 @@ pub struct Overrides {
     pub character_name: Option<String>,
     pub character_password: Option<String>,
     pub client_hash: Option<String>,
+    /// Which fixture state to start in, by its stable key.
+    ///
+    /// Configuration rather than a hook that writes into the running client: a capture
+    /// harness needs to photograph an unavailable map and a dead ghost, and the honest way
+    /// to ask for one is at boot, through the same layered config as everything else.
+    pub scenario: Option<String>,
 }
 
 /// Credentials for the placeholder auto-login.
@@ -59,6 +65,8 @@ pub struct ClientConfig {
     /// Origin for world data and status endpoints, without a trailing slash.
     pub asset_origin: String,
     pub gateway_url: String,
+    /// The fixture state to start in, when one was asked for by name.
+    pub scenario: Option<String>,
     /// None means "do not auto-connect": no credentials were configured.
     pub credentials: Option<Credentials>,
     /// Build identifier the server records. Not a secret and not a host, so it
@@ -106,7 +114,9 @@ pub fn resolve(origin: Option<&Origin>, layers: &[Overrides]) -> Option<ClientCo
     let client_hash =
         first(layers, |o| o.client_hash.as_ref()).unwrap_or(DEFAULT_CLIENT_HASH).to_owned();
 
-    Some(ClientConfig { asset_origin, gateway_url, credentials, client_hash })
+    let scenario = first(layers, |o| o.scenario.as_ref()).map(str::to_owned);
+
+    Some(ClientConfig { asset_origin, gateway_url, scenario, credentials, client_hash })
 }
 
 fn trim_trailing_slash(value: &str) -> &str {
@@ -147,6 +157,7 @@ pub fn parse_query(query: &str) -> Overrides {
             "name" => overrides.character_name = Some(value),
             "password" => overrides.character_password = Some(value),
             "hash" => overrides.client_hash = Some(value),
+            "scenario" => overrides.scenario = Some(value),
             _ => {}
         }
     }
@@ -206,6 +217,7 @@ const META_KEYS: [(&str, fn(&mut Overrides, String)); 5] = [
     ("ao:character-name", |o, v| o.character_name = Some(v)),
     ("ao:character-password", |o, v| o.character_password = Some(v)),
     ("ao:client-hash", |o, v| o.client_hash = Some(v)),
+    ("ao:scenario", |o, v| o.scenario = Some(v)),
 ];
 
 /// Resolve configuration from the browser: query string, then page meta tags,
@@ -264,6 +276,7 @@ pub fn load() -> Option<ClientConfig> {
         character_name: std::env::var("AO_CHARACTER_NAME").ok(),
         character_password: std::env::var("AO_CHARACTER_PASSWORD").ok(),
         client_hash: std::env::var("AO_CLIENT_HASH").ok(),
+        scenario: std::env::var("AO_SCENARIO").ok(),
     };
 
     resolve(None, &[from_env])
@@ -397,6 +410,27 @@ mod tests {
             config.credentials,
             Some(Credentials { name: "RustClient".into(), password: "pass".into() })
         );
+    }
+
+    #[test]
+    fn a_fixture_state_can_be_asked_for_by_name_and_a_bad_name_is_ignored() {
+        // Configuration rather than a hook a page can call: a capture harness has to
+        // photograph an unavailable map and a dead ghost, and asking at boot keeps the
+        // running client's state its own. A query string is not a contract, so an unknown
+        // name lands on the default rather than failing to start.
+        let query = parse_query("?scenario=disconnected");
+        assert_eq!(query.scenario.as_deref(), Some("disconnected"));
+        assert_eq!(
+            ao_core::fixtures::Scenario::from_key("disconnected"),
+            Some(ao_core::fixtures::Scenario::Disconnected)
+        );
+        assert_eq!(ao_core::fixtures::Scenario::from_key("nonsense"), None);
+
+        let config = resolve(Some(&origin(false, "host")), &[query]).expect("resolves");
+        assert_eq!(config.scenario.as_deref(), Some("disconnected"));
+
+        let bare = resolve(Some(&origin(false, "host")), &[]).expect("resolves");
+        assert_eq!(bare.scenario, None, "a client with nothing configured picks no scenario");
     }
 
     #[test]

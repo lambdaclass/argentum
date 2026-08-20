@@ -109,7 +109,7 @@ impl Plugin for UiStatePlugin {
             .init_resource::<ActiveScenario>()
             .add_message::<IntentMessage>()
             .configure_sets(Update, IntentSet::Filter.before(IntentSet::Consume))
-            .add_systems(Startup, apply_scenario)
+            .add_systems(Startup, (adopt_configured_scenario, apply_scenario).chain())
             .add_systems(
                 Update,
                 (
@@ -122,6 +122,24 @@ impl Plugin for UiStatePlugin {
 
 fn scenario_changed(scenario: Res<ActiveScenario>) -> bool {
     scenario.is_changed()
+}
+
+/// Start in the fixture state the configuration asked for, if it named one.
+///
+/// Configuration rather than a hook a page can call: a capture harness has to photograph
+/// an unavailable map and a dead ghost, and asking at boot keeps the running client's
+/// state its own. An unknown name is ignored rather than fatal — a query string is not a
+/// contract, and the populated fixture is a safe place to land.
+fn adopt_configured_scenario(
+    config: Option<Res<crate::config::ClientConfig>>,
+    mut scenario: ResMut<ActiveScenario>,
+) {
+    let Some(named) = config.as_ref().and_then(|config| config.scenario.as_deref()) else {
+        return;
+    };
+    if let Some(wanted) = Scenario::from_key(named) {
+        *scenario = ActiveScenario(wanted);
+    }
 }
 
 fn apply_scenario(scenario: Res<ActiveScenario>, mut state: ResMut<UiState>) {

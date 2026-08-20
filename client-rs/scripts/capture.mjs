@@ -223,6 +223,62 @@ async function waitForClient(page) {
   await page.waitForTimeout(1_500);
 }
 
+/// The world-map views this task asks to be captured, each with the input that reaches it.
+///
+/// Steps rather than a list of names: a file called `panned` that nothing panned is
+/// mislabelled evidence, and the only way to be sure is to perform the gesture.
+function worldMapViews() {
+  const centre = async (page) => {
+    const box = await page.evaluate(() => {
+      const rect = document.getElementById("ao-canvas").getBoundingClientRect();
+      return {
+        x: rect.x + (window.aoLoaded?.worldX ?? 0) + (window.aoLoaded?.worldW ?? 0) / 2,
+        y: rect.y + (window.aoLoaded?.worldY ?? 0) + (window.aoLoaded?.worldH ?? 0) / 2,
+      };
+    });
+    await page.mouse.move(box.x, box.y);
+    return box;
+  };
+
+  return [
+    ["whole-world", async (page) => {
+      await page.keyboard.press("Tab");
+      await page.waitForTimeout(600);
+    }],
+    ["zoomed", async (page) => {
+      await centre(page);
+      for (let i = 0; i < 8; i += 1) {
+        await page.mouse.wheel(0, -120);
+      }
+    }],
+    ["panned", async (page) => {
+      const box = await centre(page);
+      await page.mouse.down();
+      for (let step = 1; step <= 6; step += 1) {
+        await page.mouse.move(box.x - step * 18, box.y - step * 10);
+        await page.waitForTimeout(60);
+      }
+      await page.mouse.up();
+    }],
+    ["filtered", async (page) => {
+      const rect = await page.evaluate(
+        () => (window.aoLoaded?.controls ?? []).find((c) => c.key === "worldmap.filter.merchant")
+      );
+      if (!rect) return;
+      const origin = await page.evaluate(() => {
+        const box = document.getElementById("ao-canvas").getBoundingClientRect();
+        return { x: box.x, y: box.y };
+      });
+      await page.mouse.click(origin.x + rect.x + rect.w / 2, origin.y + rect.y + rect.h / 2);
+      await page.waitForTimeout(600);
+    }],
+    ["closed", async (page) => {
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(600);
+    }],
+  ];
+}
+
 async function shoot(page, name) {
   const file = join(outDir, `${name}.png`);
   await page.screenshot({ path: file });
@@ -402,7 +458,34 @@ async function main() {
       dprMatrix.push({ requested: ratio, ...observed });
 
       shots.push(await shoot(page, name));
+
+      // The whole-world map at this ratio: the views the task names, in the order a
+      // player reaches them. Captured inside the DPR loop rather than once, because the
+      // overlay is laid out from the world viewport and that is exactly what a ratio
+      // change moves.
+      for (const [view, act] of worldMapViews()) {
+        await act(page);
+        await page.waitForTimeout(600);
+        shots.push(await shoot(page, `${name}-map-${view}`));
+      }
       await context.close();
+
+      // An unavailable map is a different boot rather than a different frame: the fixture
+      // state is configuration, asked for in the URL, so nothing writes into a running
+      // client to stage a photograph.
+      {
+        const offlineContext = await browser.newContext({
+          viewport: { width: 1280, height: 800 },
+          deviceScaleFactor: ratio,
+        });
+        const offline = await offlineContext.newPage();
+        await offline.goto(`${url}?scenario=disconnected`, { waitUntil: "load" });
+        await waitForClient(offline);
+        await offline.keyboard.press("Tab");
+        await offline.waitForTimeout(900);
+        shots.push(await shoot(offline, `${name}-map-unavailable`));
+        await offlineContext.close();
+      }
     }
 
     // A resize while running, which is the case a fixed-size layout survives

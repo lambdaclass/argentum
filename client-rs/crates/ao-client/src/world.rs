@@ -2119,6 +2119,7 @@ mod tests {
                 gateway_url: "ws://test/ao".into(),
                 credentials: None,
                 client_hash: "test".into(),
+                scenario: None,
             })
             .add_systems(Update, apply_loaded_map.run_if(in_state(AppState::LoadingWorld)));
         app.insert_state(AppState::LoadingWorld);
@@ -2147,6 +2148,7 @@ mod tests {
                 gateway_url: "ws://test/ao".into(),
                 credentials: None,
                 client_hash: "test".into(),
+                scenario: None,
             })
             .add_systems(Update, apply_loaded_map.run_if(in_state(AppState::LoadingWorld)));
         app.insert_state(AppState::LoadingWorld);
@@ -2175,6 +2177,7 @@ mod tests {
                 gateway_url: "ws://test/ao".into(),
                 credentials: None,
                 client_hash: "test".into(),
+                scenario: None,
             })
             .add_systems(Update, apply_loaded_map.run_if(in_state(AppState::LoadingWorld)));
         app.insert_state(AppState::LoadingWorld);

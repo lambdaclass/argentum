@@ -49,6 +49,14 @@ impl Scenario {
         Scenario::Malformed,
     ];
 
+    /// The scenario a stable identifier names, if any.
+    ///
+    /// The inverse of `key`, so a capture harness can ask for a fixture state by name
+    /// through configuration instead of a hook that writes into the running client.
+    pub fn from_key(key: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|scenario| scenario.key() == key)
+    }
+
     /// Stable identifier, used to name golden screenshots.
     pub fn key(self) -> &'static str {
         match self {
