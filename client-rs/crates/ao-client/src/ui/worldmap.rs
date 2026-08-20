@@ -52,6 +52,20 @@ use bevy::prelude::*;
 /// will fill, and the budget it has to fit.
 pub const OVERVIEW_MAX_DIMENSION: u32 = 2048;
 
+/// The manifest entry for the overview, embedded so a test can check the numbers above
+/// against the ones the entry states.
+///
+/// Two copies of a budget that can drift are one budget and one comment.
+pub const OVERVIEW_MANIFEST: &str = include_str!("../../../../assets/world-map/MANIFEST.md");
+
+/// One `key: value` line from the manifest, or `None` if it does not state that key.
+pub fn manifest_field(key: &str) -> Option<&'static str> {
+    OVERVIEW_MANIFEST.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        (name.trim() == key).then(|| value.trim())
+    })
+}
+
 /// The reduced dimension for a device that cannot manage the full one.
 pub const OVERVIEW_REDUCED_DIMENSION: u32 = 1024;
 
@@ -1612,6 +1626,88 @@ mod tests {
         assert!(
             !texts.iter().any(|text| text.starts_with("map.")),
             "a semantic key reached the screen: {texts:?}"
+        );
+    }
+
+    #[test]
+    fn the_map_draws_only_the_markers_the_server_sent() {
+        // The rule this task states is that the overlay cannot reveal a hidden NPC, player,
+        // objective or resource. What that means in code is that no marker may be
+        // *synthesised* from anything else the client happens to know. The snapshot carries
+        // five presences — two of them hostile creatures — and clearing the marker list has
+        // to empty the map completely, presences and all. A map that drew a dot per
+        // presence would look richer and would be telling the player where the monsters
+        // are.
+        use super::super::testing;
+
+        let mut app = map_app();
+        let before = app.world().resource::<UiState>().get().clone();
+        assert!(
+            before.presences.len() >= 2,
+            "this test is vacuous without presences to leak: {}",
+            before.presences.len()
+        );
+
+        let mut bare = before.clone();
+        bare.world_map.markers.clear();
+        UiState::set(&mut app.world_mut().resource_mut::<UiState>(), bare);
+        app.update();
+        testing::tap_key(&mut app, KeyCode::Tab);
+        app.update();
+        app.update();
+
+        let drawn = markers_drawn(&mut app);
+        assert!(
+            drawn.is_empty(),
+            "the map drew {drawn:?} with an empty marker list and {} presences",
+            before.presences.len()
+        );
+
+        let selves =
+            app.world_mut().query_filtered::<Entity, With<SelfMark>>().iter(app.world()).count();
+        assert_eq!(selves, 1, "the player's own position is theirs to see: {selves}");
+    }
+
+    #[test]
+    fn the_manifest_states_the_budget_the_client_compiles_in() {
+        // The manifest is the entry the production asset has to fit. If it and the client
+        // can disagree, the budget is a comment.
+        let number = |key: &str| -> u64 {
+            manifest_field(key)
+                .unwrap_or_else(|| panic!("the manifest does not state {key}"))
+                .parse()
+                .unwrap_or_else(|_| panic!("{key} is not a number"))
+        };
+        assert_eq!(number("max-dimension"), OVERVIEW_MAX_DIMENSION as u64);
+        assert_eq!(number("reduced-dimension"), OVERVIEW_REDUCED_DIMENSION as u64);
+        assert_eq!(number("bytes-per-pixel"), OVERVIEW_BYTES_PER_PIXEL);
+        assert_eq!(number("max-compressed-bytes"), OVERVIEW_MAX_COMPRESSED_BYTES);
+        assert_eq!(
+            number("decoded-bytes"),
+            OverviewProfile::Full { dimension: OVERVIEW_MAX_DIMENSION }.decoded_bytes()
+        );
+        assert_eq!(
+            number("reduced-decoded-bytes"),
+            OverviewProfile::Reduced { dimension: OVERVIEW_REDUCED_DIMENSION }.decoded_bytes()
+        );
+
+        // A licence and a source, because an asset with neither cannot be shipped.
+        for key in ["id", "path", "source", "licence", "below-reduced"] {
+            let value = manifest_field(key).unwrap_or("");
+            assert!(!value.is_empty(), "the manifest does not state {key}");
+        }
+
+        // Its own entry, not the gameplay world pack. Drawing the overview from the pack
+        // is the thing this budget exists to prevent.
+        let path = manifest_field("path").unwrap_or_default();
+        assert!(
+            path.starts_with("world-map/"),
+            "the overview points at {path}, which is not its own asset"
+        );
+        assert_eq!(
+            manifest_field("below-reduced"),
+            Some("outline"),
+            "a device below the reduced profile must fall back to the outline"
         );
     }
 

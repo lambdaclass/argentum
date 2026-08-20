@@ -762,6 +762,33 @@ async function runHitTests(hitPage, label, ratio) {
         `${before} -> ${after}`
       );
 
+      // Nothing the world would act on, part two: the map's own pan keys. Arrow keys move
+      // the *view*, and the player has to stay exactly where they were. A browser is the
+      // only place that can answer whether a real arrow keypress reaches the map's camera
+      // instead of the movement code — the Bevy test drives messages, not a keyboard.
+      const standing = await hitPage.evaluate(() => [
+        window.aoLoaded?.playerX ?? -1,
+        window.aoLoaded?.playerY ?? -1,
+      ]);
+      const before_pan = await mapState();
+      await hitPage.keyboard.press("ArrowRight");
+      await hitPage.keyboard.press("ArrowDown");
+      const panned = await settleMap();
+      check(
+        `${label}: `+"an arrow key pans the map",
+        panned.centre[0] !== before_pan.centre[0] || panned.centre[1] !== before_pan.centre[1],
+        `${before_pan.centre} -> ${panned.centre}`
+      );
+      const stillStanding = await hitPage.evaluate(() => [
+        window.aoLoaded?.playerX ?? -1,
+        window.aoLoaded?.playerY ?? -1,
+      ]);
+      check(
+        `${label}: `+"panning the map did not move the player",
+        stillStanding[0] === standing[0] && stillStanding[1] === standing[1],
+        `${standing} -> ${stillStanding}`
+      );
+
       // Zoom is clamped in both directions, driven by the wheel rather than by arithmetic.
       const fitted = map.scale;
       await hitPage.mouse.move(
@@ -834,6 +861,24 @@ async function runHitTests(hitPage, label, ratio) {
       await hitPage.keyboard.press("Escape");
       const closed = await settleMap();
       check(`${label}: `+"Escape closes the world map", !closed.open, JSON.stringify(closed));
+
+      // One toggle per keypress, from a real keyboard. A press that both opened and closed
+      // the map would leave it shut and look like a key that does nothing; a press held
+      // across two frames would flip it twice. Three presses have to read open, shut, open.
+      const flips = [];
+      for (let i = 0; i < 3; i += 1) {
+        await hitPage.keyboard.press("Tab");
+        flips.push((await settleMap()).open);
+      }
+      check(
+        `${label}: `+"each Tab press toggles the map exactly once",
+        flips[0] === true && flips[1] === false && flips[2] === true,
+        JSON.stringify(flips)
+      );
+      if (flips[2]) {
+        await hitPage.keyboard.press("Escape");
+        await settleMap();
+      }
     }
 
 
