@@ -762,31 +762,24 @@ async function runHitTests(hitPage, label, ratio) {
         `${before} -> ${after}`
       );
 
-      // Nothing the world would act on, part two: the map's own pan keys. Arrow keys move
-      // the *view*, and the player has to stay exactly where they were. A browser is the
-      // only place that can answer whether a real arrow keypress reaches the map's camera
-      // instead of the movement code — the Bevy test drives messages, not a keyboard.
+      // Where the player is standing, read before anything touches the map: no arrow key,
+      // wheel or drag over the map may move them.
       const standing = await hitPage.evaluate(() => [
         window.aoLoaded?.playerX ?? -1,
         window.aoLoaded?.playerY ?? -1,
       ]);
-      const before_pan = await mapState();
+
+      // A fitted map has nowhere to pan to, and the arrow keys have to be refused rather
+      // than drift the world out of its own frame. This is the state the map opens in, so
+      // it is the state a player meets first.
+      const fittedCentre = (await mapState()).centre;
       await hitPage.keyboard.press("ArrowRight");
       await hitPage.keyboard.press("ArrowDown");
-      const panned = await settleMap();
+      const stillFitted = await settleMap();
       check(
-        `${label}: `+"an arrow key pans the map",
-        panned.centre[0] !== before_pan.centre[0] || panned.centre[1] !== before_pan.centre[1],
-        `${before_pan.centre} -> ${panned.centre}`
-      );
-      const stillStanding = await hitPage.evaluate(() => [
-        window.aoLoaded?.playerX ?? -1,
-        window.aoLoaded?.playerY ?? -1,
-      ]);
-      check(
-        `${label}: `+"panning the map did not move the player",
-        stillStanding[0] === standing[0] && stillStanding[1] === standing[1],
-        `${standing} -> ${stillStanding}`
+        `${label}: `+"a whole-world view has nowhere to pan to",
+        stillFitted.centre[0] === fittedCentre[0] && stillFitted.centre[1] === fittedCentre[1],
+        `${fittedCentre} -> ${stillFitted.centre}`
       );
 
       // Zoom is clamped in both directions, driven by the wheel rather than by arithmetic.
@@ -803,6 +796,28 @@ async function runHitTests(hitPage, label, ratio) {
         `${label}: `+"the wheel zooms in and stops at the maximum",
         zoomedIn.scale > fitted && Number.isFinite(zoomedIn.scale) && zoomedIn.scale <= 12.001,
         `${fitted} -> ${zoomedIn.scale}`
+      );
+
+      // Zoomed in, there *is* somewhere to pan, and a real arrow keypress has to reach the
+      // map's camera rather than the movement code. Only a browser can answer that: the
+      // Bevy test drives messages, not a keyboard.
+      const beforePan = await mapState();
+      await hitPage.keyboard.press("ArrowRight");
+      await hitPage.keyboard.press("ArrowDown");
+      const panned = await settleMap();
+      check(
+        `${label}: `+"an arrow key pans a zoomed map",
+        panned.centre[0] !== beforePan.centre[0] || panned.centre[1] !== beforePan.centre[1],
+        `${beforePan.centre} -> ${panned.centre}`
+      );
+      const stillStanding = await hitPage.evaluate(() => [
+        window.aoLoaded?.playerX ?? -1,
+        window.aoLoaded?.playerY ?? -1,
+      ]);
+      check(
+        `${label}: `+"panning the map did not move the player",
+        stillStanding[0] === standing[0] && stillStanding[1] === standing[1],
+        `${standing} -> ${stillStanding}`
       );
 
       for (let i = 0; i < 30; i += 1) {
