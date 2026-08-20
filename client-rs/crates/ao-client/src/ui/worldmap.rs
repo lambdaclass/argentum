@@ -56,9 +56,15 @@ pub const OVERVIEW_MAX_DIMENSION: u32 = 2048;
 /// against the ones the entry states.
 ///
 /// Two copies of a budget that can drift are one budget and one comment.
+///
+/// Test-only: checking that the entry and the constants agree is a test's job, and
+/// shipping the prose inside the wasm bundle would cost every player a few kilobytes to
+/// carry a document nothing reads at runtime.
+#[cfg(test)]
 pub const OVERVIEW_MANIFEST: &str = include_str!("../../../../assets/world-map/MANIFEST.md");
 
 /// One `key: value` line from the manifest, or `None` if it does not state that key.
+#[cfg(test)]
 pub fn manifest_field(key: &str) -> Option<&'static str> {
     OVERVIEW_MANIFEST.lines().find_map(|line| {
         let (name, value) = line.split_once(':')?;

@@ -859,6 +859,7 @@ async function runHitTests(hitPage, label, ratio) {
         limit: window.aoLoaded?.overviewMaxDimension ?? 0,
         dimension: window.aoLoaded?.overviewDimension ?? -1,
         bytes: window.aoLoaded?.overviewBytes ?? -1,
+        ceiling: window.aoLoaded?.overviewCompressedCeiling ?? -1,
       }));
       const expected =
         overview.limit >= 2048 ? 2048 : overview.limit >= 1024 ? 1024 : 0;
@@ -866,6 +867,11 @@ async function runHitTests(hitPage, label, ratio) {
         `${label}: `+"the device is offered the largest overview it can hold",
         overview.dimension === expected,
         `limit ${overview.limit} offered ${overview.dimension}, expected ${expected}`
+      );
+      check(
+        `${label}: `+"the overview's wire ceiling is the one the manifest states",
+        overview.ceiling === 2 * 1024 * 1024,
+        `${overview.ceiling} bytes`
       );
       check(
         `${label}: `+"the overview stays inside its memory budget",

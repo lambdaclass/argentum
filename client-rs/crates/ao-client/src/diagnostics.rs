@@ -242,6 +242,7 @@ fn publish(
         },
     );
     set("overviewBytes", profile.decoded_bytes() as f64);
+    set("overviewCompressedCeiling", crate::ui::worldmap::OVERVIEW_MAX_COMPRESSED_BYTES as f64);
 
     // Whether a drag is in progress, and over what. Published because a drag that
     // produced no move has two very different causes — the client never saw the gesture
