@@ -730,9 +730,26 @@ async function runHitTests(hitPage, label, ratio) {
         centre: [window.aoLoaded?.worldMapCentreX ?? 0, window.aoLoaded?.worldMapCentreY ?? 0],
         markers: window.aoLoaded?.worldMapMarkers ?? 0,
       }));
+    // Wait for the overlay to stop changing, rather than for a fixed number of frames.
+    //
+    // A fixed wait read a marker count of five out of a six-marker map exactly once in
+    // nine passes — the pass right after a device-pixel-ratio change, which relayouts
+    // the whole interface and rebuilds the overlay. A count taken while the rebuild is
+    // in flight is not a slow client, it is the harness reading a half-drawn frame and
+    // then blaming the client for it.
     const settleMap = async () => {
-      await hitPage.waitForTimeout(Math.min(Math.max(3 * frameMs, 300), 6_000));
-      return mapState();
+      const step = Math.min(Math.max(frameMs, 100), 2_000);
+      const deadline = Date.now() + Math.min(Math.max(60 * frameMs, 5_000), 30_000);
+      let last = await mapState();
+
+      while (Date.now() < deadline) {
+        await hitPage.waitForTimeout(step);
+        const next = await mapState();
+        if (JSON.stringify(next) === JSON.stringify(last)) return next;
+        last = next;
+      }
+
+      return last;
     };
 
     await hitPage.keyboard.press("Tab");
@@ -838,11 +855,19 @@ async function runHitTests(hitPage, label, ratio) {
         // above, and a count taken mid-rebuild caught five of six markers — which then
         // read as filtering *adding* one.
         const drawn = (await settleMap()).markers;
-        await clickAt(
+        const toggled = await clickAt(
           filter.x + filter.w / 2,
           filter.y + filter.h / 2,
           CLICK_BUDGET_MS,
           "worldmap.filter.merchant"
+        );
+        // Assert the click reached the filter before comparing counts. A click that
+        // missed and a filter that does not filter produce the same marker count, and
+        // blaming the second for the first is how a harness bug becomes a bug report.
+        check(
+          `${label}: `+"the legend filter takes the click",
+          toggled.key === "worldmap.filter.merchant",
+          shown([filter.x + filter.w / 2, filter.y + filter.h / 2], toggled)
         );
         const filtered = await settleMap();
         check(
