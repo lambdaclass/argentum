@@ -420,14 +420,15 @@ defmodule Arena.Map.MapServer do
             npc_char_indices: npc_char_indices
           }
 
-          if runtime_timers_enabled?(map_id) and map_size(npcs_live) > 0 do
-            Process.send_after(self(), :npc_ai_tick, @npc_ai_tick_ms)
-          end
-
-          unless test_map?(map_id) do
-            Process.send_after(self(), :buff_tick, 1000)
-            Process.send_after(self(), :regen_tick, regen_tick_ms())
-          end
+          # No player has entered yet, so the fast timers are not armed at all. There is
+          # nothing for them to do — `NpcAi.tick/1` short-circuits without players, buffs
+          # and regeneration are per-player — and 842 maps waking three times a second
+          # each to discover that is 21% of a core on an idle server, which is what this
+          # replaces. `do_enter` arms them on the first entry.
+          #
+          # Autosave was armed above and keeps its own schedule on every map: it is what
+          # persists a populated map and what keeps an empty map's heap compact, so it
+          # must not depend on anyone being here.
 
           # Parsing a map leaves a heap full of intermediates that a minor collection
           # promotes into the old generation, where nothing sweeps them again for the
@@ -545,10 +546,10 @@ defmodule Arena.Map.MapServer do
         send(pid, {:send_raw, raw})
       end)
 
-      # Start NPC AI tick if this is the first NPC
-      if map_size(npcs_live) == 1 do
-        Process.send_after(self(), :npc_ai_tick, @npc_ai_tick_ms)
-      end
+      # A spawned NPC needs the AI chain running, and it may already be — an invasion
+      # lands on a map with players on it. `arm_fast_timers` is idempotent for exactly
+      # this reason.
+      state = arm_fast_timers(state)
 
       {:reply, {:ok, instance_id}, state}
     else
@@ -1081,14 +1082,35 @@ defmodule Arena.Map.MapServer do
   # map in the world — allocation nobody can observe the results of. Respawn deadlines
   # are absolute timestamps, so nothing is lost by not scanning: `do_enter` reconciles
   # them before the entering player is shown any NPC.
+  # Nobody on the map: stop rearming. `NpcAi.tick/1` already short-circuits to a respawn
+  # scan in this case, and respawn deadlines are absolute, so `do_enter` catches them up
+  # before the entering player is shown any NPC. What this removes is the wakeup itself,
+  # which measured 21% of a core across 842 idle maps.
   @impl true
-  def handle_info(:npc_ai_tick, state) when map_size(state.players) == 0 do
-    Process.send_after(self(), :npc_ai_tick, @npc_ai_tick_ms)
+  def handle_info({:npc_ai_tick, _gen}, state) when map_size(state.players) == 0 do
+    {:noreply, %{state | fast_timers_armed: false}}
+  end
+
+  # A tick from a generation that is no longer current. Dropped without rearming: it was
+  # sent while the map still had a player, and entry has since armed a fresh chain.
+  # Rearming it too is how a map ends up running two chains of the same timer.
+  @impl true
+  def handle_info({:npc_ai_tick, gen}, state) when gen != state.fast_timer_gen do
     {:noreply, state}
   end
 
   @impl true
+  def handle_info({:npc_ai_tick, gen}, state) do
+    {:noreply, npc_ai_tick(state, gen)}
+  end
+
+  # The bare atom, for a caller that wants one pass: the tick body without a schedule.
+  @impl true
   def handle_info(:npc_ai_tick, state) do
+    {:noreply, npc_ai_tick(state, nil)}
+  end
+
+  defp npc_ai_tick(state, gen) do
     start = System.monotonic_time()
     {state, effects} = Arena.NpcAi.tick(state)
     Arena.Map.Effects.run(state, effects)
@@ -1102,8 +1124,11 @@ defmodule Arena.Map.MapServer do
       %{map_id: state.map_id, tick_type: :npc_ai}
     )
 
-    Process.send_after(self(), :npc_ai_tick, @npc_ai_tick_ms)
-    {:noreply, state}
+    if gen do
+      Process.send_after(self(), {:npc_ai_tick, gen}, @npc_ai_tick_ms)
+    end
+
+    state
   end
 
   @impl true
@@ -1113,13 +1138,27 @@ defmodule Arena.Map.MapServer do
   # and would produce nothing, having allocated an accumulator, an effect list and a
   # telemetry event to do it.
   @impl true
-  def handle_info(:buff_tick, state) when map_size(state.players) == 0 do
-    Process.send_after(self(), :buff_tick, 1000)
+  def handle_info({:buff_tick, _gen}, state) when map_size(state.players) == 0 do
+    {:noreply, %{state | fast_timers_armed: false}}
+  end
+
+  @impl true
+  def handle_info({:buff_tick, gen}, state) when gen != state.fast_timer_gen do
     {:noreply, state}
   end
 
   @impl true
+  def handle_info({:buff_tick, gen}, state) do
+    {:noreply, buff_tick(state, gen)}
+  end
+
+  # The bare atom, for a caller that wants one pass: the tick body without a schedule.
+  @impl true
   def handle_info(:buff_tick, state) do
+    {:noreply, buff_tick(state, nil)}
+  end
+
+  defp buff_tick(state, gen) do
     start = System.monotonic_time()
     now = System.monotonic_time(:millisecond)
 
@@ -1146,8 +1185,11 @@ defmodule Arena.Map.MapServer do
       %{map_id: state.map_id, tick_type: :buff}
     )
 
-    Process.send_after(self(), :buff_tick, 1000)
-    {:noreply, state}
+    if gen do
+      Process.send_after(self(), {:buff_tick, gen}, 1000)
+    end
+
+    state
   end
 
   @impl true
@@ -1158,13 +1200,27 @@ defmodule Arena.Map.MapServer do
   # where they are while the map is empty changes nothing a player can observe, and
   # advancing them built four new state maps a tick on 842 empty maps.
   @impl true
-  def handle_info(:regen_tick, state) when map_size(state.players) == 0 do
-    Process.send_after(self(), :regen_tick, regen_tick_ms())
+  def handle_info({:regen_tick, _gen}, state) when map_size(state.players) == 0 do
+    {:noreply, %{state | fast_timers_armed: false}}
+  end
+
+  @impl true
+  def handle_info({:regen_tick, gen}, state) when gen != state.fast_timer_gen do
     {:noreply, state}
   end
 
   @impl true
+  def handle_info({:regen_tick, gen}, state) do
+    {:noreply, regen_tick(state, gen)}
+  end
+
+  # The bare atom, for a caller that wants one pass: the tick body without a schedule.
+  @impl true
   def handle_info(:regen_tick, state) do
+    {:noreply, regen_tick(state, nil)}
+  end
+
+  defp regen_tick(state, gen) do
     start = System.monotonic_time()
     {state, effects} = StatusTicks.process_regen_tick(state)
     Arena.Map.Effects.run(state, effects)
@@ -1176,8 +1232,11 @@ defmodule Arena.Map.MapServer do
       %{map_id: state.map_id, tick_type: :regen}
     )
 
-    Process.send_after(self(), :regen_tick, regen_tick_ms())
-    {:noreply, state}
+    if gen do
+      Process.send_after(self(), {:regen_tick, gen}, regen_tick_ms())
+    end
+
+    state
   end
 
   # Session process crashed — clean up the player (O(1) via reverse ref map)
@@ -1231,6 +1290,10 @@ defmodule Arena.Map.MapServer do
     # No longer idle. Set before the compaction hooks can see the new player, so a
     # leave immediately after this entry still compacts.
     state = %{state | idle_compacted: false}
+
+    # And the map starts simulating again. An empty map stops rearming its fast timers
+    # entirely, so this is what brings creatures, buffs and regeneration back.
+    state = arm_fast_timers(state)
 
     {x, y} =
       case Keyword.get(opts, :position) do
@@ -1367,6 +1430,38 @@ defmodule Arena.Map.MapServer do
           state
       end
     end)
+  end
+
+  # ---- Fast timers ----
+
+  # Arm the NPC, buff and regen chains, once.
+  #
+  # Called when a player enters a map that has none, and when an NPC is spawned into a map
+  # whose chain may already be running. Idempotent by the `fast_timers_armed` flag, and the
+  # generation is bumped so that a tick still in flight from the previous chain is dropped
+  # rather than rearming itself — two chains of the same timer is a map that is quietly
+  # twice as busy as its neighbours, with nothing on screen to say so.
+  #
+  # Each chain starts one of its own intervals from now, not immediately.
+  #
+  # Firing them at once looked kinder — creatures behaving the instant somebody walks in —
+  # and it changed the game: an entering player got a regeneration and a buff pass on
+  # arrival, so hopping between maps regenerated faster than standing still. A transfer
+  # test caught it, carrying 25 HP into a map and reading it back higher. Respawns are
+  # already reconciled synchronously on entry, so the half second before the first AI tick
+  # costs nothing a player can see.
+  defp arm_fast_timers(%{fast_timers_armed: true} = state), do: state
+
+  defp arm_fast_timers(state) do
+    if test_map?(state.map_id) do
+      state
+    else
+      gen = state.fast_timer_gen + 1
+      Process.send_after(self(), {:npc_ai_tick, gen}, @npc_ai_tick_ms)
+      Process.send_after(self(), {:buff_tick, gen}, 1000)
+      Process.send_after(self(), {:regen_tick, gen}, regen_tick_ms())
+      %{state | fast_timer_gen: gen, fast_timers_armed: true}
+    end
   end
 
   # ---- Idle heap compaction ----

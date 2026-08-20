@@ -42,6 +42,19 @@ defmodule Arena.Map.State do
     gm_blocked_tiles: MapSet.new(),
     triggers: %{},
 
+    # Which generation of fast timers is current, and whether one is running.
+    #
+    # An empty map stops rearming its NPC, buff and regen timers entirely, and entry
+    # arms them again. Between those two things a tick can already be in flight: it was
+    # sent while the map still had a player, and it arrives after entry has armed a fresh
+    # chain. Without a generation to compare against, that stale tick rearms itself and
+    # the map runs two chains of the same timer forever — twice the wakeups, and a bug
+    # that only shows up as a map that is inexplicably busier than its neighbours.
+    #
+    # Entry increments the generation, so a tick from an older one is dropped.
+    fast_timer_gen: 0,
+    fast_timers_armed: false,
+
     # Whether this map's process heap has been compacted since the map last became
     # empty. Set when we compact, cleared the moment a player enters. Without it an
     # empty map would either be compacted once per autosave forever, or not at all

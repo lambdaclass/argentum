@@ -246,10 +246,13 @@ defmodule Arena.RuntimeSettingsIntegrationTest do
     test "regen_tick_ms changes the reschedule interval for regen" do
       Arena.Settings.set(:regen_tick_ms, 5)
 
-      state = make_state(%{})
+      # A populated map on a live chain: an empty map deliberately stops rearming, and a
+      # tick carries the generation that armed it so a leftover from a previous chain can
+      # be told apart from the current one.
+      state = %{make_state(%{1 => make_player()}) | fast_timer_gen: 1, fast_timers_armed: true}
 
-      assert {:noreply, _state} = MapServer.handle_info(:regen_tick, state)
-      assert_receive :regen_tick, 50
+      assert {:noreply, _state} = MapServer.handle_info({:regen_tick, 1}, state)
+      assert_receive {:regen_tick, 1}, 50
     end
   end
 end

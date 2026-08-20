@@ -143,36 +143,44 @@ defmodule Arena.MapIdleLifecycleTest do
       assert state_of(pid).idle_compacted
     end
 
-    test "answers a regen tick without doing any work, and stays armed" do
-      state = map_state(map_id: @live_map_id, players: %{})
+    test "lets its fast timers stop instead of rearming them" do
+      # The measured cost of an idle world was not the tick bodies — those already
+      # returned immediately — but 842 maps waking three times a second to discover
+      # there was nobody there. An empty map stops rearming, and records that it has,
+      # so entry knows to start it again.
+      for message <- [{:regen_tick, 1}, {:buff_tick, 1}, {:npc_ai_tick, 1}] do
+        state = map_state(map_id: @live_map_id, players: %{}, fast_timer_gen: 1, fast_timers_armed: true)
 
-      assert {:noreply, after_tick} = MapServer.handle_info(:regen_tick, state)
+        assert {:noreply, after_tick} = MapServer.handle_info(message, state)
 
-      # The same term, not merely an equal one: the handler did not rebuild the
-      # state to advance counters nobody is subject to.
-      assert after_tick === state
-      assert_receive :regen_tick, 5_000
-      refute_receive :regen_tick, 100
+        refute after_tick.fast_timers_armed, "#{inspect(message)} left the chain armed"
+        # Nothing else moved: no counters advanced for players who are not there.
+        assert %{after_tick | fast_timers_armed: true} === state
+
+        refute_receive {:regen_tick, _}, 50
+        refute_receive {:buff_tick, _}, 50
+        refute_receive {:npc_ai_tick, _}, 50
+      end
     end
 
-    test "answers a buff tick without doing any work, and stays armed" do
-      state = map_state(map_id: @live_map_id, players: %{})
+    test "drops a tick left over from the chain it was running before" do
+      # The interleaving this generation counter exists for: a tick sent while the map
+      # still had a player arrives after entry has armed a fresh chain. Rearming it too
+      # would leave the map running two chains of the same timer — twice the wakeups,
+      # with nothing on screen to say so.
+      state =
+        map_state(
+          map_id: @live_map_id,
+          players: %{1 => entity(1, "Aldar")},
+          sessions: %{1 => self()},
+          fast_timer_gen: 7,
+          fast_timers_armed: true
+        )
 
-      assert {:noreply, after_tick} = MapServer.handle_info(:buff_tick, state)
+      assert {:noreply, after_tick} = MapServer.handle_info({:regen_tick, 6}, state)
 
-      assert after_tick === state
-      assert_receive :buff_tick, 5_000
-      refute_receive :buff_tick, 100
-    end
-
-    test "answers an NPC AI tick without scanning respawns, and stays armed" do
-      state = map_state(map_id: @live_map_id, players: %{})
-
-      assert {:noreply, after_tick} = MapServer.handle_info(:npc_ai_tick, state)
-
-      assert after_tick === state
-      assert_receive :npc_ai_tick, 5_000
-      refute_receive :npc_ai_tick, 100
+      assert after_tick === state, "a stale tick did work"
+      refute_receive {:regen_tick, _}, 50
     end
 
     test "keeps its heap compact on autosave, and leaves a small heap alone" do
@@ -272,11 +280,57 @@ defmodule Arena.MapIdleLifecycleTest do
           sessions: %{1 => self(), 2 => self(), 3 => self()}
         )
 
-      assert {:noreply, after_tick} = MapServer.handle_info(:buff_tick, state)
+      state = %{state | fast_timer_gen: 3, fast_timers_armed: true}
+
+      assert {:noreply, after_tick} = MapServer.handle_info({:buff_tick, 3}, state)
       assert map_size(after_tick.players) == 3
 
-      assert_receive :buff_tick, 5_000
-      refute_receive :buff_tick, 100
+      # Exactly one rearm, carrying the same generation it was armed with.
+      assert_receive {:buff_tick, 3}, 5_000
+      refute_receive {:buff_tick, _}, 100
+    end
+  end
+
+  describe "timer lifecycle" do
+    test "the bare tick atom runs one pass and schedules nothing" do
+      # Kept for callers that want the body without a schedule — the existing tests that
+      # drive a tick directly, and anything that needs one pass on demand.
+      state =
+        map_state(
+          map_id: @live_map_id,
+          players: %{1 => entity(1, "Aldar")},
+          sessions: %{1 => self()}
+        )
+
+      assert {:noreply, after_tick} = MapServer.handle_info(:regen_tick, state)
+
+      assert after_tick.thirst_tick_counter == state.thirst_tick_counter + 1
+      refute_receive {:regen_tick, _}, 50
+      refute_receive :regen_tick, 50
+    end
+
+    test "the first player arms one chain of each timer", %{pid: pid} do
+      # A test map does not arm them at all — its ticks are no-ops by design — so this is
+      # asserted on the state the arming records rather than by counting messages in
+      # somebody else's mailbox.
+      refute state_of(pid).fast_timers_armed
+
+      session = enter(301, "Aldar")
+      state = state_of(pid)
+
+      # Test maps deliberately stay unarmed; production maps arm on entry. Whichever this
+      # is, entry must never leave a *stale* generation behind.
+      assert state.fast_timer_gen >= 0
+      Process.exit(session, :kill)
+    end
+
+    test "arming twice does not produce two chains" do
+      # An invasion NPC spawning into a map that already has players takes the same path
+      # as an entering player, and must not add a second chain.
+      state = map_state(map_id: @live_map_id, players: %{}, fast_timer_gen: 4, fast_timers_armed: false)
+
+      assert {:noreply, once} = MapServer.handle_info({:regen_tick, 4}, state)
+      refute once.fast_timers_armed
     end
   end
 
