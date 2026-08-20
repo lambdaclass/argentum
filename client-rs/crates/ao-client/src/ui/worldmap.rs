@@ -16,7 +16,7 @@
 //! is a NaN transform and a black rectangle they cannot recover from without restarting.
 
 use super::state::UiState;
-use super::tokens::{ink, size, space, surface, type_scale};
+use super::tokens::{focus, ink, size, space, surface, type_scale};
 use ao_core::view::{MapMarker, MarkerKind, WorldMapState};
 use bevy::prelude::*;
 
@@ -118,6 +118,12 @@ pub fn overview_note(profile: OverviewProfile) -> &'static str {
 /// dots in it, and the first capture of this overlay was exactly that — the unexplained
 /// black rectangle this task forbids, drawn by the code that was supposed to prevent one.
 const GRID_TILES: f32 = 10.0;
+
+/// How wide the ring marking the player's own position is.
+///
+/// Larger than any category marker on purpose. It is the position a player looks for
+/// first, and one more dot the same size as the other dots is not an answer.
+const SELF_MARK: f32 = size::ICON_BUTTON * 0.5;
 
 /// The world's own rectangle on screen, and the grid lines inside it.
 ///
@@ -684,6 +690,16 @@ fn present_overlay(
             .collect()
     };
 
+    // Where the player is, on the map rather than only in the heading. "Centre on me"
+    // centred the view on nothing you could see: the button worked and there was no way
+    // to tell, because the one position a player looks for first was the one position the
+    // map did not draw.
+    let self_at = (unavailable.is_none())
+        .then(|| project(Vec2::new(player.x as f32, player.y as f32), view, viewport))
+        .filter(|at| {
+            at.is_finite() && at.x >= 0.0 && at.y >= 0.0 && at.x <= viewport.x && at.y <= viewport.y
+        });
+
     // The region and where the player is, in words: a map you cannot read a position off
     // is a map you cannot use to tell a party where to meet.
     // The outline first, so the markers sit on something. Empty when there is no map to
@@ -783,6 +799,10 @@ fn present_overlay(
                         overflow: Overflow::clip(),
                         ..default()
                     },
+                    // Void behind the world, so the world's own fill is what tells you
+                    // where the land stops. Filling both the same colour left the edge
+                    // legible only through the grid lines crossing it.
+                    BackgroundColor(surface::VOID),
                     Children::spawn((
                         // The world's own rectangle and its ten-tile grid, under
                         // everything else: without them this panel is a black field with
@@ -803,7 +823,7 @@ fn present_overlay(
                                     ..default()
                                 },
                                 BackgroundColor(if is_outline {
-                                    surface::WELL
+                                    surface::RAISED
                                 } else {
                                     surface::EDGE.with_alpha(0.35)
                                 }),
@@ -860,6 +880,31 @@ fn present_overlay(
                                 children![super::minimap::marker_node(kind)],
                             )
                         })),
+                        SpawnIter(self_at.into_iter().map(|at| {
+                            (
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    left: Val::Px(at.x),
+                                    top: Val::Px(at.y),
+                                    width: Val::Px(SELF_MARK),
+                                    height: Val::Px(SELF_MARK),
+                                    margin: UiRect::axes(
+                                        Val::Px(-SELF_MARK / 2.0),
+                                        Val::Px(-SELF_MARK / 2.0),
+                                    ),
+                                    border: UiRect::all(Val::Px(focus::RING_WIDTH)),
+                                    border_radius: BorderRadius::all(Val::Px(SELF_MARK / 2.0)),
+                                    ..default()
+                                },
+                                // A gold ring, larger than any marker and the only unfilled
+                                // circle on the map: "where am I" has to be answerable
+                                // without reading a legend.
+                                BackgroundColor(Color::NONE),
+                                BorderColor::all(ink::GOLD),
+                                Pickable::IGNORE,
+                                SelfMark,
+                            )
+                        })),
                     )),
                 )),
                 // The legend, which is also the filter strip: a category with no way to
@@ -878,16 +923,8 @@ fn present_overlay(
                     Children::spawn(SpawnIter(CATEGORIES.into_iter().enumerate().map(
                         move |(index, kind)| {
                             (
-                                super::controls::button(
-                                    &super::fallback_label(kind.name_key()),
-                                    super::controls::ControlState::Normal,
-                                    910 + index as u32,
-                                ),
+                                legend_toggle(kind, 910 + index as u32),
                                 super::controls::Selected(shows[index]),
-                                super::controls::ControlKey::new(format!(
-                                    "worldmap.filter.{}",
-                                    kind.name_key().rsplit('.').next().unwrap_or_default()
-                                )),
                                 CategoryToggle(kind),
                             )
                         },
@@ -898,9 +935,62 @@ fn present_overlay(
     });
 }
 
+/// One category in the legend, which is also the filter for it.
+///
+/// Built here rather than from `controls::button` because it carries the category's own
+/// marker beside its name. Five buttons reading "Party", "Merchant", "Quest", "Dungeon"
+/// and "Landmark" tell you the categories exist and not which dot on the map is which,
+/// which is the one thing a legend is for. `present_controls` owns the fill and the
+/// border of anything carrying `Control`, so hover, focus and selection still look
+/// exactly like every other control.
+fn legend_toggle(kind: MarkerKind, tab_index: u32) -> impl Bundle {
+    (
+        Node {
+            padding: UiRect::axes(Val::Px(space::BASE), Val::Px(space::SNUG)),
+            column_gap: Val::Px(space::TIGHT),
+            align_items: AlignItems::Center,
+            border: UiRect::all(Val::Px(size::BORDER)),
+            ..default()
+        },
+        super::controls::interactive(tab_index, true),
+        super::controls::ControlKey::new(format!(
+            "worldmap.filter.{}",
+            kind.name_key().rsplit('.').next().unwrap_or_default()
+        )),
+        children![
+            (
+                Node {
+                    width: Val::Px(size::ICON_BUTTON * 0.4),
+                    height: Val::Px(size::ICON_BUTTON * 0.4),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                Pickable::IGNORE,
+                LegendSwatch(kind),
+                children![super::minimap::marker_node(kind)],
+            ),
+            (
+                Text::new(super::fallback_label(kind.name_key())),
+                TextFont { font_size: type_scale::SMALL, ..default() },
+                TextColor(ink::PRIMARY),
+                Pickable::IGNORE,
+            ),
+        ],
+    )
+}
+
 /// Marks the world's rectangle or one of its grid lines.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct WorldMapOutline;
+
+/// Marks where the player is on the map.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct SelfMark;
+
+/// Marks a legend entry's colour sample, so a test can say the legend and the map agree.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LegendSwatch(pub MarkerKind);
 
 /// Marks a marker drawn on the world map.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
@@ -1259,6 +1349,69 @@ mod tests {
             fit_scale(viewport, world),
             "reset did not return the whole world"
         );
+    }
+
+    #[test]
+    fn the_map_draws_where_the_player_is_and_the_recentre_button_agrees_with_it() {
+        use super::super::testing;
+
+        let mut app = map_app();
+        testing::tap_key(&mut app, KeyCode::Tab);
+        app.update();
+        app.update();
+
+        let mark = app
+            .world_mut()
+            .query_filtered::<&Node, With<SelfMark>>()
+            .iter(app.world())
+            .map(|node| (node.left, node.top))
+            .collect::<Vec<_>>();
+        assert_eq!(mark.len(), 1, "the map drew {} marks for one player", mark.len());
+
+        // And it is where the camera says the player is, not a fixed spot on the panel:
+        // "centre on me" centred on nothing visible before this existed.
+        let player = app.world().resource::<crate::world::LocalPlayer>();
+        let at = Vec2::new(player.x as f32, player.y as f32);
+        let view = app.world().resource::<WorldMapCamera>().view;
+        let viewport =
+            overlay_viewport(app.world().resource::<super::super::shell::AppliedGeometry>())
+                .expect("a viewport");
+        let expected = project(at, view, viewport);
+        assert_eq!(mark[0], (Val::Px(expected.x), Val::Px(expected.y)));
+    }
+
+    #[test]
+    fn the_legend_shows_each_category_in_the_colour_the_map_draws_it() {
+        // Five buttons reading "Party", "Merchant", "Quest", "Dungeon" and "Landmark"
+        // say the categories exist, not which dot on the map is which.
+        use super::super::testing;
+
+        let mut app = map_app();
+        testing::tap_key(&mut app, KeyCode::Tab);
+        app.update();
+        app.update();
+
+        let mut swatches = app
+            .world_mut()
+            .query::<&LegendSwatch>()
+            .iter(app.world())
+            .map(|swatch| swatch.0)
+            .collect::<Vec<_>>();
+        swatches.sort_by_key(|kind| format!("{kind:?}"));
+        let mut expected = CATEGORIES.to_vec();
+        expected.sort_by_key(|kind| format!("{kind:?}"));
+        assert_eq!(swatches, expected, "the legend does not sample every category");
+
+        // Every swatch carries the same marker the map draws, so the two cannot drift.
+        let drawn = app
+            .world_mut()
+            .query::<&super::super::minimap::MinimapMarker>()
+            .iter(app.world())
+            .map(|marker| marker.0)
+            .collect::<Vec<_>>();
+        for kind in CATEGORIES {
+            assert!(drawn.contains(&kind), "no {kind:?} glyph anywhere on the overlay");
+        }
     }
 
     #[test]
