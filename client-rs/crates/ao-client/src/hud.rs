@@ -116,7 +116,12 @@ fn reset_schedule_on_reconnect(
     *previous = Some(current);
 }
 
-fn send_ping(time: Res<Time>, mut schedule: ResMut<PingSchedule>, session: Res<Session>) {
+fn send_ping(
+    time: Res<Time>,
+    mut schedule: ResMut<PingSchedule>,
+    session: Res<Session>,
+    platform: Res<crate::platform::Platform>,
+) {
     // Scheduled on its own clock, not from the readout's refresh: tying the
     // probe to a display update makes its rate a function of the frame rate,
     // so a struggling client probes less exactly when latency matters most.
@@ -136,11 +141,11 @@ fn send_ping(time: Res<Time>, mut schedule: ResMut<PingSchedule>, session: Res<S
     // sample taken there measures the browser's scheduler, not the network.
     // The schedule has already been reset by the tick above, so resuming does
     // not immediately fire a held-over probe either.
-    if document_hidden() {
+    if !platform.clock.is_visible() {
         return;
     }
 
-    if let Some(ping) = session.next_ping(now_ms()) {
+    if let Some(ping) = session.next_ping(platform.clock.now_ms()) {
         session.send(&ping);
     }
 }
@@ -150,34 +155,15 @@ fn poll_online(
     mut timer: ResMut<OnlineTimer>,
     stats: Res<HudStats>,
     config: Res<ClientConfig>,
+    platform: Res<crate::platform::Platform>,
 ) {
     if !timer.0.tick(time.delta()).just_finished() {
         return;
     }
-    if document_hidden() {
+    if !platform.clock.is_visible() {
         return;
     }
     poll(stats.clone(), config.asset_origin.clone());
-}
-
-#[cfg(target_arch = "wasm32")]
-fn now_ms() -> f64 {
-    js_sys::Date::now()
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn now_ms() -> f64 {
-    0.0
-}
-
-#[cfg(target_arch = "wasm32")]
-fn document_hidden() -> bool {
-    web_sys::window().and_then(|w| w.document()).map(|d| d.hidden()).unwrap_or(false)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn document_hidden() -> bool {
-    false
 }
 
 /// Read the player count.
@@ -239,6 +225,9 @@ mod tests {
     fn probe_app() -> App {
         let mut app = App::new();
         app.insert_resource(Time::<()>::default())
+            // Visible, because these tests are about the probe schedule rather than
+            // about a backgrounded tab; the hidden case is its own test below.
+            .insert_resource(crate::platform::Platform::with_clock(0.0, true))
             .init_resource::<PingSchedule>()
             .init_resource::<Session>()
             .add_systems(Update, (reset_schedule_on_reconnect, send_ping).chain());

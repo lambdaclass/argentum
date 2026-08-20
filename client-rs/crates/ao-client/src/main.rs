@@ -12,6 +12,7 @@ mod diagnostics;
 mod graphics;
 mod hud;
 mod net;
+mod platform;
 mod session;
 mod ui;
 mod world;
@@ -109,7 +110,7 @@ fn main() {
         // it, interpolation and animation only advance when a key is pressed,
         // so movement appears to lag and then jump a whole tile at a time.
         .insert_resource(winit_settings())
-        .add_plugins((world::WorldPlugin, ui::UiPlugin, hud::HudPlugin))
+        .add_plugins((platform::PlatformPlugin, world::WorldPlugin, ui::UiPlugin, hud::HudPlugin))
         .add_plugins(diagnostics::DiagnosticsPlugin)
         .run();
 }

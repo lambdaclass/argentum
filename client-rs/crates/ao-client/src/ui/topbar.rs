@@ -41,15 +41,6 @@ struct StatusReadout;
 
 /// Whether the browser tab is hidden. Always false natively, where the window
 /// being unfocused is the equivalent signal and Bevy reports it directly.
-#[cfg(target_arch = "wasm32")]
-fn document_hidden() -> bool {
-    web_sys::window().and_then(|w| w.document()).map(|d| d.hidden()).unwrap_or(false)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn document_hidden() -> bool {
-    false
-}
 
 /// A platform action in the bar's right group.
 ///
@@ -90,6 +81,16 @@ pub enum HostMode {
     Maximized,
     /// The whole display.
     Fullscreen,
+}
+
+impl From<crate::platform::WindowMode> for HostMode {
+    fn from(mode: crate::platform::WindowMode) -> Self {
+        match mode {
+            crate::platform::WindowMode::Windowed => HostMode::Windowed,
+            crate::platform::WindowMode::Maximized => HostMode::Maximized,
+            crate::platform::WindowMode::Fullscreen => HostMode::Fullscreen,
+        }
+    }
 }
 
 impl HostMode {
@@ -219,7 +220,11 @@ fn readout_field(name: &'static str, value: &str) -> impl Bundle {
 #[derive(Component)]
 struct ReadoutValue;
 
-fn populate(mut commands: Commands, bars: Query<(Entity, &Region)>) {
+fn populate(
+    mut commands: Commands,
+    platform: Res<crate::platform::Platform>,
+    bars: Query<(Entity, &Region)>,
+) {
     let Some((bar, _)) = bars.iter().find(|(_, region)| **region == Region::TopBar) else {
         return;
     };
@@ -290,6 +295,14 @@ fn populate(mut commands: Commands, bars: Query<(Entity, &Region)>) {
             ],
         ))
         .with_children(|group| {
+            // Fullscreen is offered where the host has it at all, which is not the same
+            // question as whether it can be entered right now. On the web it needs a
+            // gesture the client cannot fabricate — still offered, because the player's
+            // click *is* the gesture — while a host with no such concept gets no button,
+            // rather than one that quietly does nothing when pressed.
+            let fullscreen = platform.window.supports(crate::platform::WindowMode::Fullscreen);
+            let offers_fullscreen = fullscreen.is_available() || fullscreen.is_worth_retrying();
+
             for (action, kind) in [
                 (BarAction::Language, Icon::Language),
                 (BarAction::Screenshot, Icon::Screenshot),
@@ -299,6 +312,9 @@ fn populate(mut commands: Commands, bars: Query<(Entity, &Region)>) {
                 (BarAction::ToggleMaximise, Icon::Maximise),
                 (BarAction::ToggleFullscreen, Icon::Fullscreen),
             ] {
+                if action == BarAction::ToggleFullscreen && !offers_fullscreen {
+                    continue;
+                }
                 group.spawn(icon_button(action, kind));
             }
         });
@@ -309,6 +325,7 @@ fn update_readout(
     time: Res<Time>,
     stats: Res<HudStats>,
     session: Res<Session>,
+    platform: Res<crate::platform::Platform>,
     windows: Query<&Window>,
     mut rows: Query<(&mut FpsAverage, &Children), With<StatusReadout>>,
     fields: Query<&Children>,
@@ -324,7 +341,7 @@ fn update_readout(
     // reported is a *throttled* rate: a hidden tab runs at a few frames a
     // second, and showing that as performance says the machine is failing when
     // it is idle.
-    let foreground = windows.iter().any(|window| window.visible) && !document_hidden();
+    let foreground = windows.iter().any(|window| window.visible) && platform.clock.is_visible();
 
     for (mut average, row) in &mut rows {
         average.set_foreground(foreground);
@@ -381,44 +398,22 @@ fn handle_bar_clicks(
 /// A player can leave fullscreen with Escape, and the page does not tell the
 /// client. Without this the mirror is wrong from then on and the button offers
 /// to do what has already happened.
-fn refresh_maximised(time: Res<Time>, mut since: Local<f32>, mut maximised: ResMut<Maximised>) {
+fn refresh_maximised(
+    time: Res<Time>,
+    platform: Res<crate::platform::Platform>,
+    mut since: Local<f32>,
+    mut maximised: ResMut<Maximised>,
+) {
     *since += time.delta_secs();
     if *since < FULLSCREEN_POLL_SECS {
         return;
     }
     *since = 0.0;
 
-    let actual = page_host_mode();
+    let actual = HostMode::from(platform.window.mode());
     if actual != maximised.0 {
         maximised.0 = actual;
     }
-}
-
-#[cfg(target_arch = "wasm32")]
-fn page_host_mode() -> HostMode {
-    use wasm_bindgen::JsValue;
-
-    let Some(window) = web_sys::window() else {
-        return HostMode::Windowed;
-    };
-    let Ok(adapter) = js_sys::Reflect::get(&window, &JsValue::from_str("aoWindow")) else {
-        return HostMode::Windowed;
-    };
-    let Ok(getter) = js_sys::Reflect::get(&adapter, &JsValue::from_str("getMode")) else {
-        return HostMode::Windowed;
-    };
-    getter
-        .dyn_ref::<js_sys::Function>()
-        .and_then(|f| f.call0(&adapter).ok())
-        .and_then(|v| v.as_string())
-        .map(|name| HostMode::from_str(&name))
-        .unwrap_or(HostMode::Windowed)
-}
-
-/// Native windows are managed by the desktop, not by the client.
-#[cfg(not(target_arch = "wasm32"))]
-fn page_host_mode() -> HostMode {
-    HostMode::Windowed
 }
 
 /// Ask the page for a host mode.
@@ -447,6 +442,46 @@ fn request_host_mode(_mode: HostMode) {}
 mod tests {
     use super::*;
 
+    /// Build the bar the way the plugin does, with a host that answers `support` when
+    /// asked about fullscreen.
+    fn bar_with_fullscreen(support: crate::platform::Support) -> App {
+        let mut app = App::new();
+        app.insert_resource(crate::platform::Platform::with_fullscreen(support))
+            .init_resource::<Maximised>()
+            .add_systems(Startup, populate);
+        app.world_mut().spawn(Region::TopBar);
+        app.update();
+        app
+    }
+
+    fn actions(app: &mut App) -> Vec<BarAction> {
+        app.world_mut().query::<&BarAction>().iter(app.world()).copied().collect::<Vec<_>>()
+    }
+
+    #[test]
+    fn a_host_that_cannot_go_fullscreen_is_not_offered_a_fullscreen_button() {
+        // A button that does nothing when pressed is worse than an absent one: the
+        // player concludes the client is broken rather than that the host has no such
+        // mode. Native is exactly that host today.
+        let mut app = bar_with_fullscreen(crate::platform::Support::Unsupported);
+        let drawn = actions(&mut app);
+
+        assert!(!drawn.contains(&BarAction::ToggleFullscreen), "{drawn:?}");
+        assert!(drawn.contains(&BarAction::ToggleMaximise), "maximise went with it: {drawn:?}");
+    }
+
+    #[test]
+    fn a_host_that_needs_a_gesture_is_still_offered_the_button() {
+        // The web's answer. The client cannot fabricate a user gesture, and the button
+        // *is* the gesture — so "not right now" must not remove it, or fullscreen becomes
+        // unreachable on the one host that has it.
+        let mut app = bar_with_fullscreen(crate::platform::Support::Unavailable {
+            reason_key: "platform.needs-a-gesture",
+        });
+
+        assert!(actions(&mut app).contains(&BarAction::ToggleFullscreen));
+    }
+
     #[test]
     fn the_readout_actually_replaces_its_values() {
         // Regression: splitting one string into three labelled fields left the
@@ -455,6 +490,7 @@ mod tests {
         // updating, and only a test that runs the system can tell them apart.
         let mut app = App::new();
         app.insert_resource(Time::<()>::default())
+            .insert_resource(crate::platform::Platform::with_clock(0.0, true))
             .init_resource::<HudStats>()
             .init_resource::<Session>()
             .add_systems(Update, update_readout);
@@ -510,6 +546,9 @@ mod tests {
     fn readout_app(visible: bool) -> (App, Entity) {
         let mut app = App::new();
         app.insert_resource(Time::<()>::default())
+            // The host's own answer, alongside the window's: a visible window in a
+            // hidden document is throttled, and the readout must believe the document.
+            .insert_resource(crate::platform::Platform::with_clock(0.0, visible))
             .init_resource::<HudStats>()
             .init_resource::<Session>()
             .add_systems(Update, update_readout);

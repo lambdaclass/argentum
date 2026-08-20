@@ -342,11 +342,12 @@ fn adopt_device_limits(
 /// 7628 pixels wide before I stopped it.
 #[cfg(target_arch = "wasm32")]
 fn track_host_canvas(
+    platform: Res<crate::platform::Platform>,
     mut windows: Query<(Entity, &mut Window)>,
     mut resized: MessageWriter<bevy::window::WindowResized>,
     mut rescaled: MessageWriter<bevy::window::WindowScaleFactorChanged>,
 ) {
-    let Some((css, ratio)) = host_shell_box() else {
+    let Some((css, ratio)) = platform.window.presentation_box() else {
         return;
     };
     let Ok((entity, mut window)) = windows.single_mut() else {
@@ -400,22 +401,6 @@ fn announce_window_change(
         });
     }
     resized.write(bevy::window::WindowResized { window, width: logical.x, height: logical.y });
-}
-
-/// The host element's CSS box and the display's device pixel ratio.
-///
-/// The shell, not the canvas: the canvas's size is what Bevy is being told to set,
-/// and measuring it produces a feedback loop.
-#[cfg(target_arch = "wasm32")]
-fn host_shell_box() -> Option<(Vec2, f32)> {
-    let window = web_sys::window()?;
-    let ratio = window.device_pixel_ratio() as f32;
-    let element = window.document()?.query_selector("#shell").ok()??;
-    let css = Vec2::new(element.client_width() as f32, element.client_height() as f32);
-    if css.x <= 0.0 || css.y <= 0.0 || !ratio.is_finite() || ratio <= 0.0 {
-        return None;
-    }
-    Some((css, ratio))
 }
 
 /// Resize the regions and the world camera when the window changes.
