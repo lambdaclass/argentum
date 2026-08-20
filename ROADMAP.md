@@ -384,7 +384,40 @@ Work:
    - Keep guild writes synchronous until a separate UX/semantics design is
      approved
 
-8. Make login bootstrap and map handoff use one structured snapshot boundary.
+8. Disarm high-frequency timers on empty maps and rearm them exactly once on
+   first entry.
+   - Every MapServer stays loaded and its state stays in memory: no reload, no
+     hibernation, and no measurable entry delay
+   - Measured after the empty-map fast paths landed: an idle 842-map world still
+     burns 21% of a core, and 94.6% of idle reductions are the map processes —
+     no longer the tick bodies, which now return immediately, but the wakeups
+     themselves at 1 to 3.3 Hz per map
+   - Buff, regen and NPC-AI timers stop being rearmed while `players` is empty;
+     `do_enter` rearms each of them exactly once, and a second entry while
+     somebody is already there must not arm a duplicate
+   - Autosave keeps running on every map, because it is what keeps an empty
+     map's heap compact and it is the only sweeper left once the fast timers
+     are silent
+   - Respawn reconciliation on entry already covers the deadlines an unarmed
+     NPC timer does not scan
+   - Close with tests for timer uniqueness across rapid leave/re-entry, a
+     crashed session, and simultaneous entries; and with before/after idle CPU
+     and entry-latency measurements
+
+9. Reduce allocation in NPC AI hot loops on crowded maps.
+   - `npc_ai.ex` accumulates effects with `effects ++ [effect]` inside
+     reductions over every live NPC, which is quadratic in the number of
+     effects a tick produces
+   - Prepend and reverse once, or thread an accumulator, and reuse static map
+     data instead of rebuilding collections
+   - Not to be done on the strength of the shape alone: implement only with
+     before/after allocation and tick-latency numbers on a crowded map that
+     show a meaningful improvement. Measured today at 50 players, a regen tick
+     is p95 59us / p99 85us and a buff tick p95 59us / p99 63us, against a
+     500 ms NPC tick budget — there is no latency problem yet, only a shape
+     that will not scale
+
+10. Make login bootstrap and map handoff use one structured snapshot boundary.
    *(Rust/Bevy: W-0030, W-0062-W-0067.)*
    - Refactor map entry so it returns structured snapshot data instead of
      sending nearby NPCs or other members out of band
@@ -402,6 +435,8 @@ Work:
 
 Exit criteria:
 
+- An idle world does not burn a core on maps nobody is standing in, and no map
+  needs reloading to achieve it.
 - NPC and pet targeting avoid full-map scans on hot paths.
 - Guild code has clear module boundaries.
 - Persistence writes have explicit ownership and failure semantics.
