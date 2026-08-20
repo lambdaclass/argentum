@@ -12,7 +12,7 @@
 
 use super::layout::{self, RailMode, ShellGeometry, WorldView};
 use super::scale::{self, ScaleDomains};
-use super::tokens::{focus, ink, size, space, surface, type_scale};
+use super::tokens::{ink, size, space, surface, type_scale};
 use bevy::camera::visibility::RenderLayers;
 use bevy::camera::{ClearColorConfig, Viewport};
 use bevy::prelude::*;
@@ -399,11 +399,7 @@ fn announce_window_change(
             scale_factor: scale_factor as f64,
         });
     }
-    resized.write(bevy::window::WindowResized {
-        window,
-        width: logical.x,
-        height: logical.y,
-    });
+    resized.write(bevy::window::WindowResized { window, width: logical.x, height: logical.y });
 }
 
 /// The host element's CSS box and the display's device pixel ratio.
@@ -662,8 +658,11 @@ mod tests {
             *counts.entry(key.as_str().to_string()).or_default() += 1;
         }
 
-        let duplicated: Vec<_> =
-            counts.iter().filter(|(_, count)| **count > 1).map(|(key, count)| format!("{key} x{count}")).collect();
+        let duplicated: Vec<_> = counts
+            .iter()
+            .filter(|(_, count)| **count > 1)
+            .map(|(key, count)| format!("{key} x{count}"))
+            .collect();
         assert!(!counts.is_empty(), "the shell published no keyed controls at all");
         assert!(duplicated.is_empty(), "these keys name more than one entity: {duplicated:?}");
     }

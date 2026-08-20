@@ -472,10 +472,8 @@ mod tests {
         // Ordered after the systems it records. Registered without ordering, the reader
         // ran before the writers and every intent was only visible a frame later — which
         // reads as "the click sent nothing".
-        app.init_resource::<Recorded>().add_systems(
-            Update,
-            record_intents.after(super::super::controls::GameplayInput),
-        );
+        app.init_resource::<Recorded>()
+            .add_systems(Update, record_intents.after(super::super::controls::GameplayInput));
         let tab = app
             .world_mut()
             .query::<(Entity, &super::super::character::RailTabButton)>()
@@ -496,10 +494,7 @@ mod tests {
     #[derive(Resource, Default)]
     struct Recorded(Vec<Intent>);
 
-    fn record_intents(
-        mut messages: MessageReader<IntentMessage>,
-        mut recorded: ResMut<Recorded>,
-    ) {
+    fn record_intents(mut messages: MessageReader<IntentMessage>, mut recorded: ResMut<Recorded>) {
         for message in messages.read() {
             recorded.0.push(message.0.clone());
         }
@@ -681,7 +676,11 @@ mod tests {
 
         activate(&mut app, tremor);
 
-        assert!(intents(&app).is_empty(), "arming a spell already sent a cast: {:?}", intents(&app));
+        assert!(
+            intents(&app).is_empty(),
+            "arming a spell already sent a cast: {:?}",
+            intents(&app)
+        );
         assert_eq!(app.world().resource::<ArmedSpell>().0, Some(3), "the spell did not arm");
     }
 
@@ -722,7 +721,11 @@ mod tests {
 
         super::super::testing::press_mouse(&mut app, MouseButton::Left);
 
-        assert!(intents(&app).is_empty(), "an unarmed world click cast something: {:?}", intents(&app));
+        assert!(
+            intents(&app).is_empty(),
+            "an unarmed world click cast something: {:?}",
+            intents(&app)
+        );
     }
 
     #[test]
@@ -758,10 +761,7 @@ mod tests {
         UiState::set(&mut app.world_mut().resource_mut::<UiState>(), refused);
         app.update();
 
-        assert!(
-            app.world().resource::<ArmedSpell>().0.is_none(),
-            "a refusal left the spell armed"
-        );
+        assert!(app.world().resource::<ArmedSpell>().0.is_none(), "a refusal left the spell armed");
     }
 
     #[test]

@@ -326,10 +326,7 @@ fn present_labels(
                                     Pickable::IGNORE,
                                     children![(
                                         Text::new(text),
-                                        TextFont {
-                                            font_size: type_scale::MICRO,
-                                            ..default()
-                                        },
+                                        TextFont { font_size: type_scale::MICRO, ..default() },
                                         TextColor(speech),
                                         Pickable::IGNORE,
                                     )],

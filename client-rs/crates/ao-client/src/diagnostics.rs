@@ -26,7 +26,7 @@
 use bevy::prelude::*;
 
 use crate::graphics::SheetTextures;
-use crate::ui::controls::{Activated, Control, ControlKey};
+use crate::ui::controls::{Activated, ControlKey};
 
 /// How far the world has actually got.
 #[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -205,11 +205,8 @@ fn publish(
         let id = slot.item().map(|item| item.item_id).unwrap_or(0);
         slots.push(&wasm_bindgen::JsValue::from_f64(id as f64));
     }
-    let _ = js_sys::Reflect::set(
-        &report,
-        &wasm_bindgen::JsValue::from_str("inventorySlots"),
-        &slots,
-    );
+    let _ =
+        js_sys::Reflect::set(&report, &wasm_bindgen::JsValue::from_str("inventorySlots"), &slots);
 
     // The whole-world map: whether it is open, where it is looking and how many markers
     // it drew. Published because the questions this task has to answer in a browser are

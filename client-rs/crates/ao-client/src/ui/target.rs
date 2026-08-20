@@ -333,9 +333,7 @@ pub fn connection_notice(snapshot: &UiSnapshot) -> Option<(String, super::contro
         ConnectionPhase::Connecting | ConnectionPhase::Authenticating => {
             Some(("notice.connecting".into(), NoticeLevel::Info))
         }
-        ConnectionPhase::Reconnecting => {
-            Some(("notice.reconnecting".into(), NoticeLevel::Warning))
-        }
+        ConnectionPhase::Reconnecting => Some(("notice.reconnecting".into(), NoticeLevel::Warning)),
         // Offline and failed are both "nothing you do will work", and saying so loudly is
         // the point: a player who does not know is a player who keeps clicking.
         ConnectionPhase::Offline | ConnectionPhase::Failed => {
@@ -411,11 +409,9 @@ fn present_notices(
                 ..default()
             },
             Pickable::IGNORE,
-            Children::spawn(SpawnIter(
-                lines
-                    .into_iter()
-                    .map(|(text, level)| (super::controls::notification(&text, level), Pickable::IGNORE)),
-            )),
+            Children::spawn(SpawnIter(lines.into_iter().map(|(text, level)| {
+                (super::controls::notification(&text, level), Pickable::IGNORE)
+            }))),
         ));
     });
 }
@@ -494,9 +490,9 @@ mod tests {
     fn a_wolf_is_not_offered_a_whisper() {
         // The actions are the ones the intent surface has, offered where they can work.
         // A button that whispers at a hostile is a button that produces a refusal.
-        assert!(actions_for(TargetKind::Player).iter().any(|(action, _)| {
-            *action == TargetAction::Whisper
-        }));
+        assert!(actions_for(TargetKind::Player)
+            .iter()
+            .any(|(action, _)| { *action == TargetAction::Whisper }));
         for kind in [TargetKind::Hostile, TargetKind::Npc, TargetKind::Item] {
             assert!(
                 !actions_for(kind).iter().any(|(action, _)| *action == TargetAction::Whisper),
@@ -561,10 +557,7 @@ mod tests {
 
         let mut playing = fixtures::snapshot(Scenario::Populated);
         playing.service.phase = ConnectionPhase::Playing;
-        assert!(
-            connection_notice(&playing).is_none(),
-            "a healthy connection is announcing itself"
-        );
+        assert!(connection_notice(&playing).is_none(), "a healthy connection is announcing itself");
     }
 
     #[test]
@@ -779,8 +772,7 @@ mod tests {
 
     #[test]
     fn every_kind_is_named_and_no_two_share_a_word() {
-        let kinds =
-            [TargetKind::Player, TargetKind::Npc, TargetKind::Hostile, TargetKind::Item];
+        let kinds = [TargetKind::Player, TargetKind::Npc, TargetKind::Hostile, TargetKind::Item];
         let mut seen: Vec<&str> = Vec::new();
         for kind in kinds {
             let label = kind_label(kind);

@@ -435,7 +435,6 @@ mod tests {
         ("fullscreen", Vec2::new(2560.0, 1440.0)),
     ];
 
-
     /// The world's share of a window, as the shell lays it out.
     fn world_region_of(window: Vec2) -> Vec2 {
         layout::shell_geometry(window).world.size()

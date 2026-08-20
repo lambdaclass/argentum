@@ -10,7 +10,7 @@
 //! normal path: intents go out, snapshots come back, and the gap between them
 //! is where a pending indicator lives.
 
-use super::controls::{bar_label, rarity_ink, Control, ControlKey};
+use super::controls::{rarity_ink, ControlKey};
 use super::rail::{CompactVital, CompactVitalFill, RailRegion};
 use super::state::UiState;
 use super::tokens::{focus, ink, size, space, status, surface, type_scale};
@@ -561,11 +561,7 @@ pub fn icon_for_grh(
 /// numbers that are not real graphics, and preferring it made every slot draw its
 /// fallback.
 pub fn item_grh(item_id: i32, icon_grh: i32, graphics: &crate::graphics::Graphics) -> i32 {
-    graphics
-        .objects()
-        .as_ref()
-        .and_then(|table| table.get(&item_id).copied())
-        .unwrap_or(icon_grh)
+    graphics.objects().as_ref().and_then(|table| table.get(&item_id).copied()).unwrap_or(icon_grh)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -740,11 +736,7 @@ fn rebuild_on_change(
                 commands.entity(entity).with_children(|parent| {
                     parent.spawn((
                         PanelContent,
-                        super::spells::spellbook_panel(
-                            snapshot,
-                            marks.armed.0,
-                            &spell_icons,
-                        ),
+                        super::spells::spellbook_panel(snapshot, marks.armed.0, &spell_icons),
                     ));
                 });
             }
@@ -2252,8 +2244,7 @@ mod tests {
         // Refused: the answer changes nothing but the feedback.
         app.world_mut().resource_mut::<PendingSlot>().mark(2);
         let mut refused = app.world().resource::<UiState>().get().clone();
-        refused.feedback =
-            vec![ao_core::view::Feedback::new(ao_core::view::FeedbackKey::Blocked)];
+        refused.feedback = vec![ao_core::view::Feedback::new(ao_core::view::FeedbackKey::Blocked)];
         UiState::set(&mut app.world_mut().resource_mut::<UiState>(), refused);
         app.update();
         assert_eq!(

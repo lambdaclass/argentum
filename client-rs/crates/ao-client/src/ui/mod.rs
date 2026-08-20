@@ -27,8 +27,8 @@ pub mod telemetry;
 #[cfg(test)]
 pub mod testing;
 pub mod tokens;
-pub mod worldmap;
 pub mod topbar;
+pub mod worldmap;
 
 use bevy::prelude::*;
 

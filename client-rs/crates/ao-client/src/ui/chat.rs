@@ -268,12 +268,14 @@ fn present_chat(
                             ..default()
                         },
                         Children::spawn((
-                            SpawnIter(CHANNELS.into_iter().enumerate().map(move |(index, channel)| {
-                                (
-                                    filter_button(channel, shows[index], index),
-                                    ChatFilterButton(channel),
-                                )
-                            })),
+                            SpawnIter(CHANNELS.into_iter().enumerate().map(
+                                move |(index, channel)| {
+                                    (
+                                        filter_button(channel, shows[index], index),
+                                        ChatFilterButton(channel),
+                                    )
+                                },
+                            )),
                             Spawn((
                                 overlay_button(if expanded { "less" } else { "more" }, 620),
                                 ControlKey::new("chat.expand"),
@@ -477,10 +479,7 @@ mod tests {
     #[derive(Resource, Default)]
     struct Recorded(Vec<Intent>);
 
-    fn record_intents(
-        mut messages: MessageReader<IntentMessage>,
-        mut recorded: ResMut<Recorded>,
-    ) {
+    fn record_intents(mut messages: MessageReader<IntentMessage>, mut recorded: ResMut<Recorded>) {
         for message in messages.read() {
             recorded.0.push(message.0.clone());
         }
@@ -489,10 +488,8 @@ mod tests {
     /// A running shell with the overlay on it, recording what it asks for.
     fn chat_app() -> App {
         let mut app = super::super::testing::shell_app(Vec2::new(1280.0, 832.0));
-        app.init_resource::<Recorded>().add_systems(
-            Update,
-            record_intents.after(super::super::controls::GameplayInput),
-        );
+        app.init_resource::<Recorded>()
+            .add_systems(Update, record_intents.after(super::super::controls::GameplayInput));
         app.update();
         app
     }
@@ -510,11 +507,7 @@ mod tests {
     }
 
     fn overlay_text(app: &mut App) -> Vec<String> {
-        app.world_mut()
-            .query::<&Text>()
-            .iter(app.world())
-            .map(|text| text.0.clone())
-            .collect()
+        app.world_mut().query::<&Text>().iter(app.world()).map(|text| text.0.clone()).collect()
     }
 
     #[test]

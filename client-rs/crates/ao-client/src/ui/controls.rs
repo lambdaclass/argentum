@@ -1248,8 +1248,7 @@ fn present_controls(
         &mut BorderColor,
     )>,
 ) {
-    for (entity, control, selection, danger, mut node, mut background, mut border) in
-        &mut controls
+    for (entity, control, selection, danger, mut node, mut background, mut border) in &mut controls
     {
         let selected = selection.is_some_and(|s| s.0);
         let alarmed = danger.is_some_and(|d| d.0);
@@ -1285,8 +1284,7 @@ fn present_controls(
         // Applied per edge, preserving which edges the builder chose: a list row
         // marks selection with a bar down its leading edge only, and replacing that
         // with a full outline would make every row look like a button.
-        let width =
-            if focused || selected || alarmed { focus::RING_WIDTH } else { size::BORDER };
+        let width = if focused || selected || alarmed { focus::RING_WIDTH } else { size::BORDER };
         let thicken = |edge: Val| match edge {
             Val::Px(px) if px > 0.0 => Val::Px(width),
             other => other,

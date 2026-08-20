@@ -210,11 +210,7 @@ fn say(snapshot: &mut UiSnapshot, channel: ao_core::view::ChatChannel, body: &st
         return false;
     }
     let speaker = snapshot.progression.name.clone();
-    snapshot.chat.lines.push(ao_core::view::ChatLine {
-        channel,
-        speaker,
-        body: body.to_string(),
-    });
+    snapshot.chat.lines.push(ao_core::view::ChatLine { channel, speaker, body: body.to_string() });
     // Bounded, because this stand-in has no other pruning and a session's worth of lines
     // in a snapshot that is cloned on every intent is a leak with a long fuse.
     const KEPT: usize = 200;
@@ -474,10 +470,8 @@ mod tests {
         let mut app = authority_app(Scenario::Populated);
         let before = app.world().resource::<UiState>().get().inventory.slots.clone();
         let from = before.iter().position(|slot| slot.item().is_some()).expect("an item");
-        let to = before
-            .iter()
-            .position(|slot| matches!(slot, SlotState::Empty))
-            .expect("an empty slot");
+        let to =
+            before.iter().position(|slot| matches!(slot, SlotState::Empty)).expect("an empty slot");
 
         send(&mut app, Intent::MoveInventorySlot { from, to });
 

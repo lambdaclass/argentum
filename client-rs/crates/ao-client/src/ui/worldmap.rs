@@ -17,7 +17,7 @@
 
 use super::state::UiState;
 use super::tokens::{ink, size, space, surface, type_scale};
-use ao_core::view::{MapAvailability, MapMarker, MarkerKind, WorldMapState};
+use ao_core::view::{MapMarker, MarkerKind, WorldMapState};
 use bevy::prelude::*;
 
 /// The overview art the map is allowed to draw, and what it may cost.
@@ -191,10 +191,8 @@ pub fn clamp(view: MapView, viewport: Vec2, world: Vec2) -> MapView {
     // Half the viewport, in tiles: how far from the centre the visible window reaches.
     let half = usable / (2.0 * scale);
     let centre = if view.centre.is_finite() { view.centre } else { extent / 2.0 };
-    let clamped = Vec2::new(
-        clamp_axis(centre.x, half.x, extent.x),
-        clamp_axis(centre.y, half.y, extent.y),
-    );
+    let clamped =
+        Vec2::new(clamp_axis(centre.x, half.x, extent.x), clamp_axis(centre.y, half.y, extent.y));
     MapView { centre: clamped, scale }
 }
 
@@ -398,10 +396,7 @@ impl Plugin for WorldMapPlugin {
                     .after(toggle_overlay)
                     .in_set(super::controls::ControlSet::Consume),
             )
-            .add_systems(
-                Update,
-                present_overlay.in_set(super::controls::ControlSet::Rebuild),
-            );
+            .add_systems(Update, present_overlay.in_set(super::controls::ControlSet::Rebuild));
     }
 }
 
@@ -616,9 +611,8 @@ fn present_overlay(
         return;
     };
 
-    let Some(world_region) = regions
-        .iter()
-        .find(|entity| region_kinds.get(*entity) == Ok(&super::shell::Region::World))
+    let Some(world_region) =
+        regions.iter().find(|entity| region_kinds.get(*entity) == Ok(&super::shell::Region::World))
     else {
         return;
     };
@@ -633,10 +627,7 @@ fn present_overlay(
         drawn_markers(&map, &filters)
             .into_iter()
             .map(|marker| {
-                (
-                    project(Vec2::new(marker.x as f32, marker.y as f32), view, viewport),
-                    marker.kind,
-                )
+                (project(Vec2::new(marker.x as f32, marker.y as f32), view, viewport), marker.kind)
             })
             .filter(|(at, _)| {
                 at.is_finite()
@@ -750,10 +741,7 @@ fn present_overlay(
                                             ..default()
                                         },
                                         Text::new(text),
-                                        TextFont {
-                                            font_size: type_scale::SMALL,
-                                            ..default()
-                                        },
+                                        TextFont { font_size: type_scale::SMALL, ..default() },
                                         TextColor(ink::MUTED),
                                     )
                                 })
@@ -803,8 +791,8 @@ fn present_overlay(
                         ..default()
                     },
                     BackgroundColor(surface::PANEL),
-                    Children::spawn(SpawnIter(
-                        CATEGORIES.into_iter().enumerate().map(move |(index, kind)| {
+                    Children::spawn(SpawnIter(CATEGORIES.into_iter().enumerate().map(
+                        move |(index, kind)| {
                             (
                                 super::controls::button(
                                     &super::fallback_label(kind.name_key()),
@@ -818,8 +806,8 @@ fn present_overlay(
                                 )),
                                 CategoryToggle(kind),
                             )
-                        }),
-                    )),
+                        },
+                    ))),
                 )),
             )),
         ));
@@ -834,6 +822,7 @@ pub struct WorldMapMarker(pub MarkerKind);
 mod tests {
     use super::*;
     use ao_core::fixtures::{self, Scenario};
+    use ao_core::view::MapAvailability;
 
     const VIEWPORT: Vec2 = Vec2::new(900.0, 600.0);
     const WORLD: Vec2 = Vec2::new(100.0, 100.0);
@@ -869,11 +858,8 @@ mod tests {
     }
 
     fn overlay_text(app: &mut App) -> Vec<String> {
-        let Some(root) = app
-            .world_mut()
-            .query_filtered::<Entity, With<OverlayRoot>>()
-            .iter(app.world())
-            .next()
+        let Some(root) =
+            app.world_mut().query_filtered::<Entity, With<OverlayRoot>>().iter(app.world()).next()
         else {
             return Vec::new();
         };
@@ -1096,8 +1082,9 @@ mod tests {
             .expect("the map offers a way back to the whole world");
 
         // Zoom in first, so reset has something to undo.
-        let viewport = overlay_viewport(app.world().resource::<super::super::shell::AppliedGeometry>())
-            .expect("the overlay has a viewport");
+        let viewport =
+            overlay_viewport(app.world().resource::<super::super::shell::AppliedGeometry>())
+                .expect("the overlay has a viewport");
         let world = Vec2::new(100.0, 100.0);
         {
             let mut camera = app.world_mut().resource_mut::<WorldMapCamera>();
@@ -1128,8 +1115,7 @@ mod tests {
         use super::super::testing;
 
         let mut app = map_app();
-        app.world_mut()
-            .insert_resource(super::super::scale::TargetLimits::for_device(8192));
+        app.world_mut().insert_resource(super::super::scale::TargetLimits::for_device(8192));
         testing::tap_key(&mut app, KeyCode::Tab);
         app.update();
         app.update();
@@ -1270,10 +1256,7 @@ mod tests {
         // Keyed off the device's own texture limit, which is the same number the world
         // render target is bounded by. Guessing from the user agent is how a client ends up
         // asking a phone for sixteen megabytes.
-        assert_eq!(
-            profile_for(8192),
-            OverviewProfile::Full { dimension: OVERVIEW_MAX_DIMENSION }
-        );
+        assert_eq!(profile_for(8192), OverviewProfile::Full { dimension: OVERVIEW_MAX_DIMENSION });
         assert_eq!(
             profile_for(OVERVIEW_MAX_DIMENSION),
             OverviewProfile::Full { dimension: OVERVIEW_MAX_DIMENSION },
@@ -1483,7 +1466,12 @@ mod tests {
 
         filters.toggle(MarkerKind::Merchant);
         let hidden = drawn_markers(&map, &filters).len();
-        assert_eq!(hidden, before - 1, "switching one category off hid {} markers", before - hidden);
+        assert_eq!(
+            hidden,
+            before - 1,
+            "switching one category off hid {} markers",
+            before - hidden
+        );
 
         filters.toggle(MarkerKind::Merchant);
         assert_eq!(

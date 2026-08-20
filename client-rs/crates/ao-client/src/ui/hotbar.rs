@@ -6,7 +6,7 @@
 //! looks subtly off rather than obviously broken.
 
 use super::shell::{label, Hotbar};
-use super::tokens::{focus, ink, size, space, surface, type_scale};
+use super::tokens::{ink, size, space, surface, type_scale};
 use ao_core::view::{HotbarBinding, UiSnapshot};
 use bevy::prelude::*;
 
@@ -62,10 +62,7 @@ impl Plugin for HotbarPlugin {
                     present_cooldowns,
                 ),
             )
-            .add_systems(
-                Update,
-                apply_hotbar_edits.in_set(super::controls::GameplayInput),
-            );
+            .add_systems(Update, apply_hotbar_edits.in_set(super::controls::GameplayInput));
     }
 }
 
@@ -99,16 +96,9 @@ fn assign_dropped(
             icon_grh: super::character::item_grh(item.item_id, item.icon_grh, &graphics),
         })
     } else if let Ok(row) = spells.get(dropped) {
-        state
-            .get()
-            .spellbook
-            .spells
-            .iter()
-            .find(|spell| spell.spell_id == row.spell_id)
-            .map(|spell| HotbarBinding::Spell {
-                spell_id: spell.spell_id,
-                icon_grh: spell.icon_grh,
-            })
+        state.get().spellbook.spells.iter().find(|spell| spell.spell_id == row.spell_id).map(
+            |spell| HotbarBinding::Spell { spell_id: spell.spell_id, icon_grh: spell.icon_grh },
+        )
     } else {
         None
     };
@@ -143,9 +133,9 @@ fn apply_hotbar_edits(
             let count = hotbar.page_count.max(1);
             // Wraps, so the last page is not a dead end on a bar with one control.
             let next = (hotbar.page + 1) % count;
-            intents.write(super::state::IntentMessage(
-                ao_core::view::Intent::ChangeHotbarPage { page: next },
-            ));
+            intents.write(super::state::IntentMessage(ao_core::view::Intent::ChangeHotbarPage {
+                page: next,
+            }));
             continue;
         }
 
@@ -390,10 +380,8 @@ mod tests {
     /// A running shell that records what the hotbar asks for.
     fn hotbar_app() -> App {
         let mut app = super::super::testing::shell_app(Vec2::new(1280.0, 832.0));
-        app.init_resource::<Recorded>().add_systems(
-            Update,
-            record_intents.after(super::super::controls::GameplayInput),
-        );
+        app.init_resource::<Recorded>()
+            .add_systems(Update, record_intents.after(super::super::controls::GameplayInput));
         app.update();
         app
     }
@@ -475,7 +463,11 @@ mod tests {
 
         drop_onto(&mut app, stranger, target);
 
-        assert!(intents(&app).is_empty(), "an unrecognised drop bound something: {:?}", intents(&app));
+        assert!(
+            intents(&app).is_empty(),
+            "an unrecognised drop bound something: {:?}",
+            intents(&app)
+        );
     }
 
     #[test]

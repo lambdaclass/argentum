@@ -948,27 +948,58 @@ fn hotbars_match(a: &HotbarState, b: &HotbarState) -> bool {
 /// cannot invent a protocol interaction the session layer has not sanctioned.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Intent {
-    UseInventorySlot { slot: usize },
-    EquipInventorySlot { slot: usize },
-    DropInventorySlot { slot: usize, amount: i32 },
-    MoveInventorySlot { from: usize, to: usize },
-    CastSpell { spell_id: i32 },
-    TriggerHotbarSlot { index: usize },
-    BindHotbarSlot { index: usize, binding: HotbarBinding },
+    UseInventorySlot {
+        slot: usize,
+    },
+    EquipInventorySlot {
+        slot: usize,
+    },
+    DropInventorySlot {
+        slot: usize,
+        amount: i32,
+    },
+    MoveInventorySlot {
+        from: usize,
+        to: usize,
+    },
+    CastSpell {
+        spell_id: i32,
+    },
+    TriggerHotbarSlot {
+        index: usize,
+    },
+    BindHotbarSlot {
+        index: usize,
+        binding: HotbarBinding,
+    },
     /// Empty a hotbar slot.
     ///
     /// Separate from binding rather than a binding of `None`: unbinding is what a
     /// player does deliberately, and a server that refuses one has a different reason
     /// than one that refuses the other.
-    ClearHotbarSlot { index: usize },
-    ChangeHotbarPage { page: usize },
-    SelectTarget { x: u8, y: u8 },
+    ClearHotbarSlot {
+        index: usize,
+    },
+    ChangeHotbarPage {
+        page: usize,
+    },
+    SelectTarget {
+        x: u8,
+        y: u8,
+    },
     ClearTarget,
-    SendChat { channel: ChatChannel, body: String },
-    SetActiveChannel { channel: Option<ChatChannel> },
+    SendChat {
+        channel: ChatChannel,
+        body: String,
+    },
+    SetActiveChannel {
+        channel: Option<ChatChannel>,
+    },
     SetSafeMode(bool),
     SetPartySafe(bool),
-    TrainSkill { skill_id: i32 },
+    TrainSkill {
+        skill_id: i32,
+    },
     RequestReconnect,
 }
 

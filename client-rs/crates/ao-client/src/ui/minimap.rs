@@ -13,7 +13,7 @@
 //! two of the colours still has to be able to tell a party member from a wolf.
 
 use super::state::UiState;
-use super::tokens::{ink, size, space, status, surface, type_scale};
+use super::tokens::{ink, space, status, type_scale};
 use ao_core::view::{MapAvailability, MapMarker, MarkerKind, MinimapState};
 use bevy::prelude::*;
 
@@ -141,9 +141,7 @@ pub fn marker_shape(kind: MarkerKind) -> MarkerShape {
         MarkerKind::Player => {
             MarkerShape { size: MARKER, radius: MARKER / 2.0, filled: true, border: 0.0 }
         }
-        MarkerKind::Party => {
-            MarkerShape { size: MARKER, radius: 0.0, filled: true, border: 0.0 }
-        }
+        MarkerKind::Party => MarkerShape { size: MARKER, radius: 0.0, filled: true, border: 0.0 },
         MarkerKind::Hostile => MarkerShape {
             size: MARKER + 2.0,
             radius: (MARKER + 2.0) / 2.0,
@@ -202,9 +200,7 @@ fn present_minimap(
     } else {
         minimap
             .visible_markers()
-            .filter_map(|marker| {
-                marker_fraction(marker, &minimap).map(|at| (at, marker.kind))
-            })
+            .filter_map(|marker| marker_fraction(marker, &minimap).map(|at| (at, marker.kind)))
             .collect()
     };
     let coordinates = format!("{}:{},{}", minimap.map_number, minimap.centre.0, minimap.centre.1);
