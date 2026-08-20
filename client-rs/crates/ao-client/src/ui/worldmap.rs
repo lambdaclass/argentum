@@ -1630,6 +1630,43 @@ mod tests {
     }
 
     #[test]
+    fn the_session_keeps_running_behind_the_open_map() {
+        // The map suppresses what the *player* can send, not what the server can say.
+        // A client that stopped applying snapshots while a map was open would look like
+        // it had frozen, and would show a stale world the moment the map closed.
+        use super::super::testing;
+
+        let mut app = map_app();
+        testing::tap_key(&mut app, KeyCode::Tab);
+        app.update();
+        app.update();
+        let before = markers_drawn(&mut app).len();
+        assert!(before > 0, "this test needs markers to start with");
+
+        let mut moved = app.world().resource::<UiState>().get().clone();
+        moved.service.phase = ao_core::view::ConnectionPhase::Playing;
+        moved.world_map.markers.push(MapMarker {
+            x: 7,
+            y: 9,
+            kind: MarkerKind::Merchant,
+        });
+        UiState::set(&mut app.world_mut().resource_mut::<UiState>(), moved);
+        app.update();
+        app.update();
+
+        assert_eq!(
+            markers_drawn(&mut app).len(),
+            before + 1,
+            "a snapshot that arrived while the map was open did not reach it"
+        );
+        assert_eq!(
+            app.world().resource::<UiState>().get().service.phase,
+            ao_core::view::ConnectionPhase::Playing,
+            "the overlay changed the connection state, which is not its to change"
+        );
+    }
+
+    #[test]
     fn the_map_draws_only_the_markers_the_server_sent() {
         // The rule this task states is that the overlay cannot reveal a hidden NPC, player,
         // objective or resource. What that means in code is that no marker may be
