@@ -7,7 +7,10 @@
 use std::process::Command;
 
 fn main() {
-    // Only when the caller has not supplied one; CI sets its own.
+    // Only when the caller has not supplied one. `./build.sh` and CI both supply it,
+    // which is the reliable path: cargo tracks a declared environment variable exactly,
+    // whereas the git-file watching below is a best effort that has been observed to
+    // miss a commit — leaving the previous stamp baked into a fresh artifact.
     println!("cargo:rerun-if-env-changed=AO_BUILD");
     if std::env::var("AO_BUILD").is_ok() {
         return;

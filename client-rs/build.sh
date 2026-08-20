@@ -93,7 +93,19 @@ assert_no_embedded_config() {
 case "$TARGET" in
   web)
     echo "==> cargo build (wasm32-unknown-unknown, release)"
-    cargo build -p ao-client --release --target wasm32-unknown-unknown
+    # Pass the stamp in rather than leaving `build.rs` to discover it.
+    #
+    # `build.rs` watches `.git/HEAD` and `.git/refs/heads` so it can recompute the
+    # value when the commit moves. That does not work: a run whose only change was a
+    # commit elsewhere in the tree left the previous stamp baked in, and the artifact
+    # shipped claiming a commit that was three behind. The check below caught it, which
+    # is what it is for, but the remedy was a manual `cargo clean -p`.
+    #
+    # An explicit environment variable is exact instead of nearly right: `build.rs`
+    # declares `rerun-if-env-changed=AO_BUILD`, so cargo rebuilds precisely when the
+    # identity changes and not otherwise.
+    AO_BUILD="$(build_stamp_expected)" \
+      cargo build -p ao-client --release --target wasm32-unknown-unknown
 
     raw=target/wasm32-unknown-unknown/release/ao-client.wasm
     echo "    raw:        $(size_mb "$raw")"
@@ -130,7 +142,7 @@ case "$TARGET" in
     echo "==> cargo build (native, release)"
     # Needs system graphics/input libraries. On NixOS use the dev shell, which
     # is where those are provided.
-    cargo build -p ao-client --release
+    AO_BUILD="$(build_stamp_expected)" cargo build -p ao-client --release
     echo "    binary: target/release/ao-client"
     echo
     # Native has no page origin to derive from, so it will not start without
