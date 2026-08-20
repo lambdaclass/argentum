@@ -112,6 +112,31 @@ invalid actions for responsiveness, but it grants no authority over movement,
 combat, inventory, spells, economy, visibility or identity. Shared `ao-core`
 code prevents accidental rule drift; it is not an anti-cheat boundary.
 
+### A map boundary is not a loading screen
+
+The world may continue to use one loaded `MapServer` per logical AO map. That
+server topology must not be visible as a pause, reconnect, blank frame,
+progressively appearing destination or camera reset in ordinary play. The game
+socket and session remain continuous across a transfer; idle-timer policy may
+change how an empty map spends CPU but may not unload it or add entry latency.
+
+There are two presentation classes:
+
+- a compatible walkable border preloads authorized destination geometry and
+  dependencies, keeps both logical maps resident, renders them in one camera
+  space and crosses without a visible wait; and
+- a door, portal, teleport or geometrically unrelated exit uses one atomic
+  scene replacement while retaining the complete source scene until the
+  destination snapshot and reveal set are ready.
+
+The normal path must finish preloading before contact with an exit. A cold,
+failed or mispredicted path cannot promise zero network time, but it must never
+show a black frame, fallback grid, half-built world or mixed-map entities: keep
+the source visible, stop unsafe input, explain a sustained delay and either
+commit one complete destination frame or recover the source. Static destination
+art may be prefetched only from server-authorized topology/resources; live
+entities remain authoritative snapshot data.
+
 ### Protocol changes are governed
 
 New server/client packets first receive a parity decision in
@@ -165,6 +190,24 @@ bytes are the player-facing budget; raw bytes remain a diagnostic. The next
 budget task must remeasure rather than silently treating this snapshot as
 current forever.
 
+Map continuity is not implemented yet, and it is scheduled directly after the
+client can complete a real login and hold live world state — Phases 7 and 8 run
+before the HUD vertical slice, the gameplay parity tail and world fidelity.
+Seamless movement is what makes 842 map processes feel like one world rather
+than 842 rooms, and every phase built on top of a loading screen would have to
+be revisited once the screen is removed. Nothing in Phase 7 or Phase 8 depends
+on Phase 4, 5, 6 or later, so the order costs nothing.
+
+The server can keep every logical map process and its static state loaded, and
+does, but that alone cannot prevent a client hitch: the Rust client still needs
+governed handoff framing, per-map resources, predictive decode/upload, two
+resident scene roots and an atomic or camera-continuous commit. W-0062, W-0094
+and W-0063–W-0067/W-0095 are the single dependency chain that closes that gap,
+and W-0067 is where it is proved: a destination delayed by two seconds must
+leave the old world fully rendered and then appear atomically, and a preloaded
+compatible border must be crossed with no blank or partial frame and no
+perceptible pause.
+
 ## Capability unlock map
 
 This is an architecture map, not another work list. It explains why the single
@@ -180,8 +223,8 @@ table.
 | 4 | Core combat/HUD vertical slice | Phases 0 and 3 |
 | 5 | Remaining AO workflow parity | Phase 4 |
 | 6 | World/audio fidelity within budgets | Phases 3–5 |
-| 7 | Versioned assets and bounded persistent cache | Phase 1; informs Phase 8 |
-| 8 | Seamless authoritative map handoff | Phases 3 and 7 |
+| 7 | Versioned assets, bounded cache and predictive destination readiness | Phases 1 and 3; enables Phase 8 |
+| 8 | Zero-loading-screen map handoff and compatible-border continuity | Phases 3 and 7 |
 | 9 | Complete localization/accessibility/UI hardening | Phases 4–6 |
 | 10 | Staged, observable production releases | All production phases |
 | 11 | Measured experiments and future product ideas | Explicit research gates |
@@ -206,8 +249,11 @@ data behind it. `W-0014` remains required before Phase 0 is product-approved.
 
 `W-0062` sits in Phase 2 rather than Phase 8 because it is a decision, not an
 implementation: map handoff constrains world and entity lifecycle, and the tasks
-it constrains are cheaper to build to it than to rebuild for it. The handoff
-implementation stays in Phase 8.
+it constrains are cheaper to build to it than to rebuild for it. Phase 7 makes
+likely destinations ready before the boundary; Phase 8 implements atomic
+authority transfer and camera-continuous compatible borders. This is a
+production world invariant, not optional polish: no release can call map travel
+complete while a normal transition exposes a loading screen.
 
 ## Phase 0 — Responsive Bevy game shell and UI/UX prototype
 
@@ -652,12 +698,22 @@ fixtures and capability negotiation, and state the behavior of retained
 VB6/unframed sessions explicitly. Do not build or preserve a TypeScript-specific
 handoff path.
 
+Define the transition topology carried by governed data: source map/exit,
+destination map/entry, transition class (`compatible_border`, `door`, `portal`
+or `teleport`) and, only for a compatible border, the coordinate/orientation
+transform that places both tile grids in one camera space. Define an authorized
+preload hint separately from the authoritative handoff: it may disclose static
+map/resource dependencies the player is permitted to cache, never destination
+players, NPCs, drops or hidden objectives. Pin malformed, stale-version,
+unauthorized and geometrically inconsistent topology fixtures.
+
 Decided here rather than in Phase 8 because handoff is a constraint on design, not
 a feature bolted on at the end. It dictates world and entity lifecycle: two live
 worlds, epochs, ordered batches, identity across a boundary and a cache that
 spans two maps. Settled after the protocol decision and before the tasks it
 constrains — `W-0031`, `W-0033`, `W-0051`, `W-0055` and `W-0059` — so those are
-built to it rather than rebuilt for it. The implementation stays in Phase 8.
+built to it rather than rebuilt for it. Asset readiness is implemented in Phase
+7 and authority/scene continuity in Phase 8.
 
 ### Task W-0022 — Negotiated length-framed WebSocket transport
 
@@ -751,6 +807,9 @@ authoritative state or freeze one render frame.
 
 - [ ] Protocol v2/new packets are classified and byte-pinned before use; legacy
       streams remain compatible and framed streams skip unknown IDs safely.
+- [ ] Handoff topology classifies compatible borders separately from
+      doors/portals/teleports, pins valid and malformed transforms and exposes
+      only authorized static preload dependencies.
 - [ ] Framing/codec fuzz tests survive truncation, concatenation, fragmentation,
       hostile lengths and arbitrary unknown IDs without panic or desync.
 - [ ] A real existing character uses packet 73, validates packet 203, accepts
@@ -841,6 +900,260 @@ tools.
 - [ ] Reconnect obtains a fresh snapshot and never replays asleep/offline input.
 - [ ] Fixture, replay and live adapters produce equivalent typed snapshots; no
       widget reads packets and release builds omit private diagnostics.
+
+## Phase 7 — Versioned assets, persistent cache and destination readiness
+
+This precedes seamless handoff. A transition cannot be hitch-free if it first
+downloads or materializes the full 58.8 MB pack.
+
+### Task W-0055 — Indexed or per-map world format
+
+- **State:** planned
+- **Phase:** 7
+- **Depends on:** W-0020, W-0024, W-0062
+
+Replace the monolithic sequential pack with per-map resources or a range-indexed
+format and small index. Define compressed transfer, decoded map and maximum
+hostile-size bounds before implementation.
+
+The format has to satisfy `W-0062`, which is what makes a per-map request cheap enough to prefetch the map a player is walking towards.
+
+### Task W-0056 — Content-hashed resource manifest
+
+- **State:** planned
+- **Phase:** 7
+- **Depends on:** W-0055
+
+Version maps, indices, sprite sheets and audio; validate packet 203 and prevent
+mixed world builds through atomic activation/invalidation.
+
+### Task W-0057 — Persistent cache service
+
+- **State:** planned
+- **Phase:** 7
+- **Depends on:** W-0015, W-0056
+
+Implement Cache Storage/IndexedDB on web and application cache directories on
+native. Denial, quota exhaustion, eviction, corruption and partial versions
+fall back safely.
+
+### Task W-0058 — Immutable/range resource serving
+
+- **State:** planned
+- **Phase:** 7
+- **Depends on:** W-0055, W-0056
+
+Serve content-addressed assets with immutable headers and range support where
+the format requires it; prove warm visits do not refetch unchanged resources.
+
+### Task W-0059 — Byte-budgeted cache and preloading
+
+- **State:** planned
+- **Phase:** 7
+- **Depends on:** W-0057, W-0062
+
+Track compressed, decoded-map, WASM-heap and estimated RGBA/GPU bytes
+separately. Evict by bytes, not entry count. Build a map-to-assets dependency
+index and give speculative exits a separate allowance below authoritative-world
+headroom.
+
+The budget has to satisfy `W-0062`: during a handoff the cache holds the map being left and the map being entered, and eviction that cannot express that will drop the one still on screen.
+
+### Task W-0060 — Bounded decode and GPU upload
+
+- **State:** planned
+- **Phase:** 7
+- **Depends on:** W-0059
+
+Decode off the gameplay loop where possible, spread uploads across frames,
+cancel obsolete speculation and cap work/bytes per frame. Fuzz map/index/image
+metadata and reject hostile dimensions/counts even when hashes match.
+
+### Task W-0094 — Predictive destination readiness
+
+- **State:** planned
+- **Phase:** 7
+- **Depends on:** W-0060, W-0062
+
+Turn the current map's server-authorized exit topology into a bounded preload
+plan before the player reaches a transition. Rank candidates from position,
+heading, movement history and explicit portal/door interaction without treating
+prediction as authority. Fetch and validate the destination map record and
+content version, decode its visible dependency set, upload required sheets and
+publish a typed `DestinationReadiness` only when the destination can produce a
+complete first frame under the same reveal contract as W-0090.
+
+Keep the current map pinned and give candidate destinations a separate
+compressed/decoded/GPU byte allowance. Bound simultaneous candidates, request
+concurrency, decode/upload work per frame and distance/time lookahead; cancel
+obsolete speculation without evicting the active world or a handoff already in
+progress. A malicious map cannot make exits recursively preload the world, and
+preloading static art cannot create destination entities or reveal
+server-withheld markers.
+
+Record prediction hit/miss/cancel, bytes fetched, cache reuse, time from hint to
+ready and whether contact beat readiness. Close with deterministic route walks,
+rapid direction changes, two competing exits, slow and failed requests, stale
+content versions, quota pressure and warm-cache replay. For the supported
+movement-speed/network profile, a normal traversable exit must be ready before
+contact; a miss enters the explicit retained-source fallback owned by W-0066,
+never progressive destination rendering.
+
+### Task W-0061 — Coherent app-shell updates
+
+- **State:** planned
+- **Phase:** 7
+- **Depends on:** W-0056, W-0057
+
+Cache the shell/service worker while remaining honest that play needs a server.
+Install/activate atomically so no tab combines old WASM with a partially updated
+manifest, including rollback.
+
+### Phase 7 exit gate
+
+- [ ] Loading one map neither downloads nor retains the complete 58.8 MB pack;
+      a small manifest activates atomically and prevents mixed builds.
+- [ ] Warm visits do not refetch unchanged maps, sheets or audio.
+- [ ] Storage denial/quota/eviction, corruption, partial downloads and rollback
+      recover automatically.
+- [ ] CI separates cold/warm transfer, cache hit, compressed/decoded/heap/GPU
+      bytes; eviction and speculation are megabyte-bounded.
+- [ ] Cached decode/upload stays under per-frame work/byte ceilings.
+- [ ] Authorized exits produce a bounded destination-readiness plan; normal
+      traversable-route tests reach the boundary with the complete destination
+      resident, decoded and GPU-ready, while misses retain the source scene.
+- [ ] Prediction cannot recursively fetch the world, disclose live destination
+      state, evict the active map or exceed its compressed/decoded/GPU allowance.
+- [ ] Resource fuzzing enforces size/dimension/count limits and service-worker
+      activation/rollback keeps one coherent shell/WASM/manifest set.
+
+## Phase 8 — Zero-loading-screen authoritative map handoff
+
+Treat this as approximately 40% server/60% client. The server API and ordering
+changes are core work, not two free packets. One loaded GenServer per logical
+map remains a valid server design: this phase removes that boundary from the
+player experience rather than merging all simulation into one process. The
+socket/session never reconnects for travel, and a preloaded normal transition
+does not display a loading state.
+
+### Task W-0063 — Structured MapServer snapshot adapter
+
+- **State:** planned
+- **Phase:** 8
+- **Depends on:** W-0062
+
+Refactor `MapServer.enter/3` to return a structured snapshot rather than send
+NPC bytes out of band. If the governed unframed protocol still requires the
+traditional packet sequence, isolate it behind a protocol adapter; exact
+TypeScript behavior is not an acceptance criterion.
+
+### Task W-0064 — Epoch, failure and ordered batch
+
+- **State:** planned
+- **Phase:** 8
+- **Depends on:** W-0063
+
+Own a session `world_epoch`, increment per transfer and key map-local IDs by
+epoch. Keep the source world on failure, correct position and resume input.
+Guarantee `begin < every snapshot member < end` through one ordered batch or
+critical FIFO; normal coalescing may not escape the boundary.
+
+### Task W-0065 — Active/pending Bevy worlds
+
+- **State:** planned
+- **Phase:** 8
+- **Depends on:** W-0064, W-0094
+
+Maintain `ActiveWorld` and `PendingWorld` under separate `MapSceneRoot`s. Commit
+once, only when assets and complete snapshot are ready; reject queued envelopes
+from stale map/epoch. Reuse the W-0090 reveal-set/readiness contract so initial
+login and later handoff cannot develop different definitions of a complete
+first destination frame.
+
+### Task W-0066 — Input and lifecycle handoff behavior
+
+- **State:** planned
+- **Phase:** 8
+- **Depends on:** W-0018, W-0065
+
+Enter real `Handoff` and reset `WalkGate` without replaying source-epoch steps.
+When `DestinationReadiness` is already complete, commit on the matching ordered
+snapshot boundary without a player-visible pause. A compatible walkable border
+may carry the currently held direction into one fresh destination-epoch intent
+after acceptance; a door/portal/teleport clears it. If readiness misses, pause
+unsafe gameplay, retain the old rendered world, expose an explanation only
+after a bounded grace period and resume only after atomic commit or explicit
+source recovery. Do not infer completion from packet timing: transfer
+intentionally suppresses `pos_update` today.
+
+### Task W-0095 — Compatible-border continuous composition
+
+- **State:** planned
+- **Phase:** 8
+- **Depends on:** W-0065, W-0066
+
+For topology classified by W-0062 as `compatible_border`, place the active and
+ready destination map roots in one world coordinate space using the governed
+edge transform. Draw both maps through the same world camera before contact,
+pin both reveal sets and keep camera position/zoom continuous while the local
+character predicts across the seam. The prediction is presentation only: it
+cannot spawn destination entities, spend resources or confirm movement, and a
+server rejection rolls back to the last authoritative source position.
+
+Commit destination authority at the ordered handoff boundary, replace the
+predicted local identity with the destination epoch and release the source root
+only after it is outside the retention margin and no rollback can reference it.
+Do not show destination players, NPCs, drops, resources or objectives until the
+authoritative destination snapshot discloses them. Seam geometry must preserve
+tile scale, orientation, collision alignment and depth ordering; a transform
+that cannot prove those properties is downgraded to atomic door/teleport
+presentation rather than approximately stitched.
+
+Cover every cardinal edge, corners, repeated backtracking, held movement,
+server correction/rejection, two nearby exits and mismatched geometry. A
+preloaded compatible crossing must keep camera displacement continuous, emit no
+blank/partial/loading frame and complete without a new socket or session. Door,
+portal and teleport tests must instead commit one complete destination frame
+without pretending unrelated spaces are adjacent.
+
+### Task W-0067 — Adversarial transition harness
+
+- **State:** planned
+- **Phase:** 8
+- **Depends on:** W-0095
+
+Add delay injection and forced egress backpressure. Prove a two-second delayed
+destination leaves the old world visible and commits atomically; cover failure,
+mid-transfer disconnect, stale movement, packet ordering and 1,000-transition
+entity/texture cleanup. Capture preloaded compatible borders frame by frame and
+fail on a loading overlay, camera jump, incomplete destination layer, mixed
+epoch or second socket/session. Record preload hit rate, boundary-to-commit
+latency and cold-fallback duration separately so a correct fallback cannot hide
+a consistently late preload path.
+
+### Phase 8 exit gate
+
+- [ ] Handoff packets have parity entries, exact fixtures and explicit
+      capability behavior for any retained unframed protocol.
+- [ ] `MapServer.enter/3` returns a structured snapshot and no NPC packet
+      remains out of band; no TypeScript-specific adapter is required.
+- [ ] Backpressure capture proves `begin < every member < end` with no escaped,
+      coalesced or dropped member.
+- [ ] Epoch filtering prevents stale source entities/input from mutating the
+      destination.
+- [ ] The same socket/session survives every transfer; each destination
+      MapServer was already loaded and no map-process startup lies on the
+      transition path.
+- [ ] A preloaded compatible border renders both authorized static worlds in
+      one camera space, crosses with continuous camera motion and produces zero
+      blank, partial or loading frames; live destination entities appear only
+      from its authoritative snapshot.
+- [ ] Preloaded doors, portals and teleports atomically replace one complete
+      scene with another without fabricating spatial adjacency.
+- [ ] A two-second delayed destination leaves the source visible, pauses input
+      and commits in one frame without black/loading/duplicate artifacts.
+- [ ] Failure and mid-transfer disconnect recover explicitly; 1,000 transitions
+      leak no scene root, entity, decoded map or texture.
 
 ## Phase 0b — Prototype hardening and validation
 
@@ -1262,172 +1575,6 @@ texture cleanup observable.
 - [ ] Audio obeys gesture, controls and background/resume behavior without
       overlap; goldens cover indoor/outdoor/crowded/weather/equipment scenes.
 
-## Phase 7 — Versioned assets and persistent cache
-
-This precedes seamless handoff. A transition cannot be hitch-free if it first
-downloads or materializes the full 58.8 MB pack.
-
-### Task W-0055 — Indexed or per-map world format
-
-- **State:** planned
-- **Phase:** 7
-- **Depends on:** W-0020, W-0024, W-0062
-
-Replace the monolithic sequential pack with per-map resources or a range-indexed
-format and small index. Define compressed transfer, decoded map and maximum
-hostile-size bounds before implementation.
-
-The format has to satisfy `W-0062`, which is what makes a per-map request cheap enough to prefetch the map a player is walking towards.
-
-### Task W-0056 — Content-hashed resource manifest
-
-- **State:** planned
-- **Phase:** 7
-- **Depends on:** W-0055
-
-Version maps, indices, sprite sheets and audio; validate packet 203 and prevent
-mixed world builds through atomic activation/invalidation.
-
-### Task W-0057 — Persistent cache service
-
-- **State:** planned
-- **Phase:** 7
-- **Depends on:** W-0015, W-0056
-
-Implement Cache Storage/IndexedDB on web and application cache directories on
-native. Denial, quota exhaustion, eviction, corruption and partial versions
-fall back safely.
-
-### Task W-0058 — Immutable/range resource serving
-
-- **State:** planned
-- **Phase:** 7
-- **Depends on:** W-0055, W-0056
-
-Serve content-addressed assets with immutable headers and range support where
-the format requires it; prove warm visits do not refetch unchanged resources.
-
-### Task W-0059 — Byte-budgeted cache and preloading
-
-- **State:** planned
-- **Phase:** 7
-- **Depends on:** W-0057, W-0062
-
-Track compressed, decoded-map, WASM-heap and estimated RGBA/GPU bytes
-separately. Evict by bytes, not entry count. Build a map-to-assets dependency
-index and give speculative exits a separate allowance below authoritative-world
-headroom.
-
-The budget has to satisfy `W-0062`: during a handoff the cache holds the map being left and the map being entered, and eviction that cannot express that will drop the one still on screen.
-
-### Task W-0060 — Bounded decode and GPU upload
-
-- **State:** planned
-- **Phase:** 7
-- **Depends on:** W-0059
-
-Decode off the gameplay loop where possible, spread uploads across frames,
-cancel obsolete speculation and cap work/bytes per frame. Fuzz map/index/image
-metadata and reject hostile dimensions/counts even when hashes match.
-
-### Task W-0061 — Coherent app-shell updates
-
-- **State:** planned
-- **Phase:** 7
-- **Depends on:** W-0056, W-0057
-
-Cache the shell/service worker while remaining honest that play needs a server.
-Install/activate atomically so no tab combines old WASM with a partially updated
-manifest, including rollback.
-
-### Phase 7 exit gate
-
-- [ ] Loading one map neither downloads nor retains the complete 58.8 MB pack;
-      a small manifest activates atomically and prevents mixed builds.
-- [ ] Warm visits do not refetch unchanged maps, sheets or audio.
-- [ ] Storage denial/quota/eviction, corruption, partial downloads and rollback
-      recover automatically.
-- [ ] CI separates cold/warm transfer, cache hit, compressed/decoded/heap/GPU
-      bytes; eviction and speculation are megabyte-bounded.
-- [ ] Cached decode/upload stays under per-frame work/byte ceilings.
-- [ ] Resource fuzzing enforces size/dimension/count limits and service-worker
-      activation/rollback keeps one coherent shell/WASM/manifest set.
-
-## Phase 8 — Seamless authoritative map handoff
-
-Treat this as approximately 40% server/60% client. The server API and ordering
-changes are core work, not two free packets.
-
-### Task W-0063 — Structured MapServer snapshot adapter
-
-- **State:** planned
-- **Phase:** 8
-- **Depends on:** W-0062
-
-Refactor `MapServer.enter/3` to return a structured snapshot rather than send
-NPC bytes out of band. If the governed unframed protocol still requires the
-traditional packet sequence, isolate it behind a protocol adapter; exact
-TypeScript behavior is not an acceptance criterion.
-
-### Task W-0064 — Epoch, failure and ordered batch
-
-- **State:** planned
-- **Phase:** 8
-- **Depends on:** W-0063
-
-Own a session `world_epoch`, increment per transfer and key map-local IDs by
-epoch. Keep the source world on failure, correct position and resume input.
-Guarantee `begin < every snapshot member < end` through one ordered batch or
-critical FIFO; normal coalescing may not escape the boundary.
-
-### Task W-0065 — Active/pending Bevy worlds
-
-- **State:** planned
-- **Phase:** 8
-- **Depends on:** W-0064, W-0060
-
-Maintain `ActiveWorld` and `PendingWorld` under separate `MapSceneRoot`s. Commit
-once, only when assets and complete snapshot are ready; reject queued envelopes
-from stale map/epoch. Reuse the W-0090 reveal-set/readiness contract so initial
-login and later handoff cannot develop different definitions of a complete
-first destination frame.
-
-### Task W-0066 — Input and lifecycle handoff behavior
-
-- **State:** planned
-- **Phase:** 8
-- **Depends on:** W-0018, W-0065
-
-Enter real `Handoff`, pause gameplay, clear held inputs/`WalkGate`, retain the
-old rendered world and resume only after atomic commit. Do not infer completion
-from packet timing: transfer intentionally suppresses `pos_update` today.
-
-### Task W-0067 — Adversarial transition harness
-
-- **State:** planned
-- **Phase:** 8
-- **Depends on:** W-0065, W-0066
-
-Add delay injection and forced egress backpressure. Prove a two-second delayed
-destination leaves the old world visible and commits atomically; cover failure,
-mid-transfer disconnect, stale movement, packet ordering and 1,000-transition
-entity/texture cleanup.
-
-### Phase 8 exit gate
-
-- [ ] Handoff packets have parity entries, exact fixtures and explicit
-      capability behavior for any retained unframed protocol.
-- [ ] `MapServer.enter/3` returns a structured snapshot and no NPC packet
-      remains out of band; no TypeScript-specific adapter is required.
-- [ ] Backpressure capture proves `begin < every member < end` with no escaped,
-      coalesced or dropped member.
-- [ ] Epoch filtering prevents stale source entities/input from mutating the
-      destination.
-- [ ] A two-second delayed destination leaves the source visible, pauses input
-      and commits in one frame without black/loading/duplicate artifacts.
-- [ ] Failure and mid-transfer disconnect recover explicitly; 1,000 transitions
-      leak no scene root, entity, decoded map or texture.
-
 ## Phase 9 — Complete localization, accessibility and UI hardening
 
 ### Task W-0068 — Authoritative workflow polish
@@ -1761,6 +1908,7 @@ the root roadmap when it enters active execution.
 | W-0050 | Emit map triggers consumed by the Rust world renderer |
 | W-0055–W-0058 | Indexed assets, hashes, range/immutable serving |
 | W-0062–W-0064 | Handoff parity, structured snapshot, epoch and FIFO batch |
+| W-0094–W-0095 | Authorized transition topology, preload dependencies and exact compatible-border transforms |
 | W-0075, W-0080–W-0081 | Security, rollout compatibility, session ownership and operations |
 
 ## Global definition of done
