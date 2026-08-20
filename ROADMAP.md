@@ -31,9 +31,11 @@ byte-level fixtures, and RNG guardrails are all shipped; the source-data
 parity tail has explicit fixtures.
 
 Within Phase 2, finish the protocol contract (#13) before the modern launch,
-transport, bootstrap, receipt, and reconnect path (#16-#20). Do not broaden the
-Rust/Bevy packet surface until one existing character can authenticate and
-receive a complete authoritative bootstrap without relying on fixture state.
+transport, bootstrap, receipt, reconnect, and seamless-handoff path (#16-#21).
+Do not broaden the Rust/Bevy packet surface until one existing character can
+authenticate and receive a complete authoritative bootstrap without relying on
+fixture state. Once that live world exists, close #21 before broader gameplay
+and presentation work makes loading screens an assumed lifecycle boundary.
 
 ## Phase 1: Deterministic Parity Harness
 
@@ -221,6 +223,38 @@ Work:
     - Prove reconnect leaves one session, one visible entity, and no duplicated
       inventory, trade, guild, party, or combat effects
 
+21. Make login bootstrap and zero-loading-screen map handoff use one structured
+    snapshot boundary.
+   *(Rust/Bevy: W-0030, W-0062-W-0067, W-0094-W-0095.)*
+   - Refactor map entry so it returns structured snapshot data instead of
+     sending nearby NPCs or other members out of band
+   - Make the session process the single ordered writer for begin, snapshot
+     members, end, and failure
+   - Keep the same socket, session process and character authority across the
+     transfer; every destination MapServer remains loaded, so process startup
+     and map parsing never lie on the transition path
+   - Publish versioned, server-authorized transition topology: source exit,
+     destination entry, transition class, static resource dependencies and a
+     coordinate/orientation transform only for borders that can be stitched
+     exactly; never disclose destination entities or hidden objectives as a
+     preload hint
+   - Key map-local character/entity identifiers by world epoch and reject
+     queued envelopes from a previous map or epoch
+   - Keep snapshot and handoff messages non-sheddable and forbid egress
+     coalescing from reordering or crossing the atomic boundary
+   - Let the Rust client preload, decode and upload likely destinations before
+     contact while the source map stays pinned; compatible borders render both
+     static maps in one camera space, while doors/portals/teleports replace the
+     scene atomically
+   - On timeout, crash, overload, or rejected entry, either retain/recover the
+     source world or terminate cleanly; never expose a half-entered destination
+   - Add a deterministic delay-injection test: with destination loading delayed
+     by two seconds, the old world remains visible, input is paused, and the
+     destination appears atomically after the matching end marker
+   - Add a frame-by-frame preloaded-border test: held movement crosses without
+     a loading overlay, blank/partial frame, camera jump, mixed epoch, second
+     connection or destination entity appearing before its snapshot
+
 Exit criteria:
 
 - Fast and slow parity gates are documented and runnable.
@@ -240,6 +274,13 @@ Exit criteria:
   of view.
 - Mutating client commands receive correlated authoritative results, and
   reconnect creates a fresh epoch without duplicate or stale state.
+- Login bootstrap and map transfer share a structured, ordered snapshot path;
+  no out-of-band map producer can race the completion marker.
+- A normal preloaded border has no visible transition or new connection;
+  unrelated exits commit one complete destination frame, and cold/failure paths
+  keep the complete source world until commit or recovery.
+- Delayed and failed transfers preserve one authoritative world and never leave
+  duplicate entities or mixed epochs.
 - Performance regressions have stored baselines, explicit budgets, and a
   failing gate.
 - Failed proof-gate runs preserve enough evidence to reproduce the failure
@@ -417,22 +458,6 @@ Work:
      500 ms NPC tick budget — there is no latency problem yet, only a shape
      that will not scale
 
-10. Make login bootstrap and map handoff use one structured snapshot boundary.
-   *(Rust/Bevy: W-0030, W-0062-W-0067.)*
-   - Refactor map entry so it returns structured snapshot data instead of
-     sending nearby NPCs or other members out of band
-   - Make the session process the single ordered writer for begin, snapshot
-     members, end, and failure
-   - Key map-local character/entity identifiers by world epoch and reject
-     queued envelopes from a previous map or epoch
-   - Keep snapshot and handoff messages non-sheddable and forbid egress
-     coalescing from reordering or crossing the atomic boundary
-   - On timeout, crash, overload, or rejected entry, either retain/recover the
-     source world or terminate cleanly; never expose a half-entered destination
-   - Add a deterministic delay-injection test: with destination loading delayed
-     by two seconds, the old world remains visible, input is paused, and the
-     destination appears atomically after the matching end marker
-
 Exit criteria:
 
 - An idle world does not burn a core on maps nobody is standing in, and no map
@@ -440,10 +465,6 @@ Exit criteria:
 - NPC and pet targeting avoid full-map scans on hot paths.
 - Guild code has clear module boundaries.
 - Persistence writes have explicit ownership and failure semantics.
-- Login bootstrap and map transfer share a structured, ordered snapshot path;
-  no out-of-band map producer can race the completion marker.
-- Delayed and failed transfers preserve one authoritative world and never leave
-  duplicate entities or mixed epochs.
 
 ## Phase 6: Release And Deployment
 
