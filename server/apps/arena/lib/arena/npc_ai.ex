@@ -58,6 +58,17 @@ defmodule Arena.NpcAi do
     {state, effects}
   end
 
+  @doc """
+  Respawn every creature whose deadline has passed, and nothing else.
+
+  Exposed for the map server's entry path: a map with no players does not scan
+  respawns, so an entering player would otherwise be shown a corpse that should
+  already have been replaced — or watch it respawn half a second after they arrived.
+  Deadlines are absolute timestamps, so a single pass catches up whatever was missed
+  however long the map stood empty.
+  """
+  def reconcile_respawns(state), do: process_respawns(state, Clock.now_ms(), [])
+
   # --- Respawns ---
 
   defp process_respawns(state, now, effects) do

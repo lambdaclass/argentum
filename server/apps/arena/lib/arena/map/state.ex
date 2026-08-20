@@ -40,7 +40,14 @@ defmodule Arena.Map.State do
     hunger_thirst_tick_counter: 0,
     penalty_tick_counter: 0,
     gm_blocked_tiles: MapSet.new(),
-    triggers: %{}
+    triggers: %{},
+
+    # Whether this map's process heap has been compacted since the map last became
+    # empty. Set when we compact, cleared the moment a player enters. Without it an
+    # empty map would either be compacted once per autosave forever, or not at all
+    # on the paths that empty it without going through `leave` — a session crash
+    # reaches `do_remove_player` through a monitor, not through the player.
+    idle_compacted: false
   ]
 
   # -- Player helpers --

@@ -63,6 +63,11 @@ defmodule Arena.Map.MapServer do
   @autosave_interval_ms 60_000
   @npc_ai_tick_ms 500
 
+  # Above this, an empty map's heap is worth a fullsweep; below it there is nothing to
+  # reclaim. 64K words is 512 KB on a 64-bit VM, against roughly 100 KB of live state
+  # for a real map.
+  @idle_heap_words 64 * 1024
+
   # ---- Public API ----
 
   def child_spec(map_id) do
@@ -423,6 +428,18 @@ defmodule Arena.Map.MapServer do
             Process.send_after(self(), :buff_tick, 1000)
             Process.send_after(self(), :regen_tick, regen_tick_ms())
           end
+
+          # Parsing a map leaves a heap full of intermediates that a minor collection
+          # promotes into the old generation, where nothing sweeps them again for the
+          # life of the process. A map is empty the instant it finishes loading, so
+          # this is the cheapest compaction there is: nobody is playing on it yet.
+          #
+          # Sent as a message rather than done here. Measured: compacting inside this
+          # frame reclaimed nothing, because the parsed map data, the occupancy array
+          # and every intermediate are still reachable from this function's own stack —
+          # a fullsweep dutifully copied all of it and 842 maps stayed at 2.39 MB each.
+          # One message later the frame is gone and the same sweep drops them to 956 KB.
+          send(self(), :compact_idle_heap)
 
           {:noreply, state}
         end
@@ -1029,7 +1046,22 @@ defmodule Arena.Map.MapServer do
   # ---- Timers ----
 
   @impl true
+  def handle_info(:compact_idle_heap, state) do
+    {:noreply, compact_idle_heap(state)}
+  end
+
+  @impl true
   def handle_info(:autosave, state) when test_map?(state.map_id), do: {:noreply, state}
+
+  # An empty map has nothing to save, and it is where the idle heap is reclaimed for
+  # the paths that do not run through `leave` — a crashed session arrives as a monitor
+  # message, and a map can also empty during shutdown of a party. The flag makes this
+  # once per emptying rather than once a minute forever.
+  @impl true
+  def handle_info(:autosave, state) when map_size(state.players) == 0 do
+    Process.send_after(self(), :autosave, @autosave_interval_ms)
+    {:noreply, keep_idle_heap_compact(state)}
+  end
 
   @impl true
   def handle_info(:autosave, state) do
@@ -1043,6 +1075,17 @@ defmodule Arena.Map.MapServer do
 
   @impl true
   def handle_info(:npc_ai_tick, state) when test_map?(state.map_id), do: {:noreply, state}
+
+  # Nobody on the map. `NpcAi.tick/1` already short-circuits to a respawn scan in this
+  # case, and the scan is over `npcs_live` every 500 ms on every populated-with-NPCs
+  # map in the world — allocation nobody can observe the results of. Respawn deadlines
+  # are absolute timestamps, so nothing is lost by not scanning: `do_enter` reconciles
+  # them before the entering player is shown any NPC.
+  @impl true
+  def handle_info(:npc_ai_tick, state) when map_size(state.players) == 0 do
+    Process.send_after(self(), :npc_ai_tick, @npc_ai_tick_ms)
+    {:noreply, state}
+  end
 
   @impl true
   def handle_info(:npc_ai_tick, state) do
@@ -1065,6 +1108,15 @@ defmodule Arena.Map.MapServer do
 
   @impl true
   def handle_info(:buff_tick, state) when test_map?(state.map_id), do: {:noreply, state}
+
+  # Buffs belong to players, and there are none. The body reduces over `state.players`
+  # and would produce nothing, having allocated an accumulator, an effect list and a
+  # telemetry event to do it.
+  @impl true
+  def handle_info(:buff_tick, state) when map_size(state.players) == 0 do
+    Process.send_after(self(), :buff_tick, 1000)
+    {:noreply, state}
+  end
 
   @impl true
   def handle_info(:buff_tick, state) do
@@ -1100,6 +1152,16 @@ defmodule Arena.Map.MapServer do
 
   @impl true
   def handle_info(:regen_tick, state) when test_map?(state.map_id), do: {:noreply, state}
+
+  # Regeneration, hunger, thirst and the jail timer are all per-player. The counters
+  # this skips only phase *when* a drain lands on somebody standing there; leaving them
+  # where they are while the map is empty changes nothing a player can observe, and
+  # advancing them built four new state maps a tick on 842 empty maps.
+  @impl true
+  def handle_info(:regen_tick, state) when map_size(state.players) == 0 do
+    Process.send_after(self(), :regen_tick, regen_tick_ms())
+    {:noreply, state}
+  end
 
   @impl true
   def handle_info(:regen_tick, state) do
@@ -1160,6 +1222,16 @@ defmodule Arena.Map.MapServer do
   # ---- Enter helper ----
 
   defp do_enter(state, entity, opts, caller_pid) do
+    # An empty map does not scan respawn deadlines, so a creature whose timer expired
+    # while nobody was here is still lying dead in `npcs_live`. Reconcile before the
+    # entering player is shown anything: doing it on the next AI tick instead would
+    # have them walk in and watch NPCs pop into existence half a second later.
+    state = reconcile_respawns(state)
+
+    # No longer idle. Set before the compaction hooks can see the new player, so a
+    # leave immediately after this entry still compacts.
+    state = %{state | idle_compacted: false}
+
     {x, y} =
       case Keyword.get(opts, :position) do
         {px, py} when is_integer(px) and is_integer(py) -> {px, py}
@@ -1261,6 +1333,21 @@ defmodule Arena.Map.MapServer do
         grid: grid,
         visible_sets: visible_sets
     }
+    |> then(fn state ->
+      # The last player left. This is the transition worth compacting on: whatever the
+      # session allocated is now unreachable, and nobody is waiting on this process.
+      if map_size(state.players) == 0, do: compact_idle_heap(state), else: state
+    end)
+  end
+
+  # Respawn creatures whose deadline passed while the map was empty.
+  #
+  # Deadlines are absolute, so this is a catch-up rather than a simulation of the
+  # missed time: one pass restores everything due.
+  defp reconcile_respawns(state) do
+    {state, effects} = Arena.NpcAi.reconcile_respawns(state)
+    Effects.run(state, effects)
+    state
   end
 
   defp despawn_player_pets(state, char_id) do
@@ -1280,6 +1367,51 @@ defmodule Arena.Map.MapServer do
           state
       end
     end)
+  end
+
+  # ---- Idle heap compaction ----
+
+  # Reclaim this map's old-generation garbage, once, while nobody is playing on it.
+  #
+  # BEAM's per-process collector is generational: a minor collection promotes whatever
+  # is reachable when the young heap fills, and only a fullsweep reclaims the old
+  # generation. `fullsweep_after` defaults to 65535 minor collections and these
+  # processes manage a handful an hour, so in practice the old generation is never
+  # swept: measured on a dev world, 842 map processes held 1849 MB of which 1054 MB
+  # was unreachable garbage, and an idle server reached 86 GB RSS in two days.
+  #
+  # Deliberately *not* `fullsweep_after: 0` on the process: that would full-sweep a
+  # crowded map's much larger live state on every collection, in the middle of
+  # combat. This runs only at a transition where no player can be waiting on the
+  # scheduler — after loading, when the last player leaves, and from autosave for a
+  # map that emptied some other way.
+  defp compact_idle_heap(state) do
+    :erlang.garbage_collect(self())
+    %{state | idle_compacted: true}
+  end
+
+  # The same thing from autosave, which is where an empty map is kept compact rather
+  # than merely made compact once.
+  #
+  # A first version compacted once per emptying and then never again. Measured, that
+  # was not enough: 842 empty maps drifted back to 2.39 MB each within ten minutes of
+  # booting, 1.18 GB of it reclaimable. The residue is the gen_server loop and the
+  # timer messages themselves — tiny per tick, promoted into the old generation, and
+  # swept by nothing. It has to be reclaimed on a schedule, not at a transition.
+  #
+  # The threshold is what stops this from being a fullsweep a minute per map for no
+  # reason: a map whose heap is already small has nothing to give back, and skipping
+  # it costs one word comparison. A map above it is holding garbage worth the
+  # microseconds a fullsweep of ~100 KB of live state takes.
+  defp keep_idle_heap_compact(state) do
+    {:total_heap_size, words} = Process.info(self(), :total_heap_size)
+
+    if words > @idle_heap_words do
+      :erlang.garbage_collect(self())
+      %{state | idle_compacted: true}
+    else
+      state
+    end
   end
 
   # ---- Private helpers (map-server-specific) ----
