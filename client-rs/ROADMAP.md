@@ -112,6 +112,37 @@ invalid actions for responsiveness, but it grants no authority over movement,
 combat, inventory, spells, economy, visibility or identity. Shared `ao-core`
 code prevents accidental rule drift; it is not an anti-cheat boundary.
 
+### Canonical world identity, local simulation partitions
+
+The modern domain model uses a canonical
+`WorldPosition { space_id, x, y }` with signed 32-bit tile coordinates. Stable
+regions partition that space for simulation; one already-running `MapServer`
+may continue to own one legacy AO map and use bounded local coordinates for its
+collision grid, occupancy, spawns and hot-path indexes. Local position is a
+topology-derived cache/adapter, not an independent source of truth for new
+client, protocol, persistence, marker, quest, party, logging or support work.
+
+`WorldSpaceId`, stable `RegionId`, content version/hash and runtime owner
+PID/node are different identities. Moving or restarting a region cannot move
+the world or change its durable identity. Runtime dungeon/event copies receive
+distinct world-space identities rather than arbitrary coordinates in the
+overworld. The legacy protocol may project a region and global position back to
+`map_id + u8 x/y`; that compatibility view does not constrain the size of the
+composed global world.
+
+The current AO corpus stores 100x100 maps, but its standard geographic seams
+describe a provisional 74x80 simulation core (`x=14..87`, `y=11..90`) with
+transition bands at `x=13/88` and `y=10/91`. The topology compiler must prove
+that interpretation per region before activation. Transition-band coordinates
+may exist transiently inside one movement/handoff operation but are never a
+durable player location: before commit the source owns the player in its core;
+after commit the destination owns the player in its core.
+
+Maps are composed virtually, never flattened into one giant map file or one
+global gameplay process. The client places authorized region roots in one
+global render space; MapServers retain local parallel authority behind a single
+versioned conversion boundary.
+
 ### A map boundary is not a loading screen
 
 The world may continue to use one loaded `MapServer` per logical AO map. That
@@ -190,23 +221,21 @@ bytes are the player-facing budget; raw bytes remain a diagnostic. The next
 budget task must remeasure rather than silently treating this snapshot as
 current forever.
 
-Map continuity is not implemented yet. The first proof now lands inside Phase 3,
-immediately after the client can complete a real login and hold live world
-state. It uses the current validated pack to prove the final structured
-snapshot, epoch, active/pending roots, input pause and one-frame commit before
-asset repackaging can become a blocker. Phases 7 and 8 then replace the pack
-source with bounded predictive resources and remove the camera seam at
-compatible borders, before the HUD vertical slice, gameplay parity tail or
-world-fidelity breadth.
+Map continuity is not implemented yet. Phase 1 first compiles the existing map
+graph into a reviewable global topology and establishes the shared coordinate
+contract. Phase 3 then proves both the final structured snapshot/epoch handoff
+and a real camera-continuous four-region slice with the current validated pack,
+before asset repackaging can become a blocker. Phases 7 and 8 replace that pack
+source with bounded predictive resources, curate the production topology and
+extend the proven slice across the world and its cross-region systems, before
+the HUD vertical slice, gameplay parity tail or world-fidelity breadth.
 
 The server can keep every logical map process and its static state loaded, and
-does, but that alone cannot prevent a client hitch: the Rust client still needs
-governed handoff framing, two resident scene roots, an atomic commit, per-map
-resources and predictive decode/upload. W-0062–W-0066 and W-0096 close the
-first gap in Phase 3: a destination delayed by two seconds must leave the old
-world fully rendered and then appear atomically on the same session. W-0055–
-W-0060/W-0094 and W-0095/W-0067 then prove a preloaded compatible border can be
-crossed with no blank, partial frame, camera jump or perceptible pause.
+does, but that alone cannot prevent a client hitch. W-0097/W-0098 establish the
+topology and identity foundation; W-0062–W-0066 and W-0096 prove ordered atomic
+authority transfer; W-0099 immediately proves a small composed world with no
+camera seam using the monolithic pack. W-0055–W-0060/W-0094 and
+W-0101/W-0095/W-0067 then make that behavior bounded and production-wide.
 
 ## Capability unlock map
 
@@ -217,14 +246,14 @@ table.
 | Phase | Capability unlocked | Depends on |
 | ---: | --- | --- |
 | 0 | Responsive, fixture-backed Bevy product shell | Current renderer |
-| 1 | WASM platform foundation with measured budgets | Phase 0 contracts |
-| 2 | Truthful authentication and governed protocol | Phase 1 |
-| 3 | Authoritative live world, reconciliation and atomic map handoff | Phase 2 |
+| 1 | Compiled global topology, canonical world identity and WASM platform foundation | Phase 0 contracts |
+| 2 | Truthful authentication and governed global bootstrap/handoff protocol | Phase 1 |
+| 3 | Authoritative live world and a four-region seamless MVP | Phase 2 |
 | 4 | Core combat/HUD vertical slice | Phases 0 and 3 |
 | 5 | Remaining AO workflow parity | Phase 4 |
 | 6 | World/audio fidelity within budgets | Phases 3–5 |
-| 7 | Per-map runtime assets and predictive destination readiness | Phases 1 and 3; enables Phase 8 |
-| 8 | Camera-continuous compatible borders | Phases 3 and 7 |
+| 7 | Per-region runtime assets and predictive destination readiness | Phases 1 and 3; enables Phase 8 |
+| 8 | Production continuous-world rollout and cross-region systems | Phases 3 and 7 |
 | 9 | Complete localization/accessibility/UI hardening | Phases 4–6 |
 | 10 | Staged, observable production releases | All production phases |
 | 11 | Measured experiments and future product ideas | Explicit research gates |
@@ -235,17 +264,19 @@ Execute the following task bodies from top to bottom. Phase 0 is intentionally
 UI-first and fixture-backed; Phase 1 makes the platform boundary real before
 protocol breadth.
 
-Phase 0 keeps only the work that later phases depend on: `W-0085`, `W-0089`,
-`W-0009` and `W-0090`, which `W-0030` needs before it can own a world. Closing
-those unlocks Phase 1.
+Phase 0 keeps only the work the seamless-world MVP needs: finish the active
+pointer and Tab-map work, then close `W-0090`'s reusable reveal barrier. Fixture
+product/account screens move to Phase 0b before their live adapter; they do not
+gate world topology or travel.
 
 The shortest path to testing travel is explicit: close the two active Phase 0
-tasks, the product shell and the atomic first-scene reveal; build the platform
-boundary; then implement the governed snapshot path, a live authoritative world
-and the Phase 3 atomic-handoff slice. That first slice uses the already validated
-monolithic world pack so asset repackaging cannot delay the proof. Phase 7 then
-makes destinations predictively ready from bounded per-map resources, and Phase
-8 removes the remaining camera seam at compatible borders.
+tasks and atomic first-scene reveal; compile and review a global topology; lock
+the Elixir/Rust coordinate contract; build the minimum platform/protocol/live
+world path; then run Phase 3's atomic handoff and four-region seamless slice.
+Both proofs use the already validated monolithic world pack so asset
+repackaging cannot delay them. Phase 7 then makes destinations predictively
+ready from bounded per-region resources, and Phase 8 curates and expands the
+proven model across production geography and cross-region systems.
 
 Hardening, staging, account-flow polish, persistent-cache reuse and developer
 diagnostics are deliberately sequenced after the first seamless-travel proof.
@@ -255,11 +286,13 @@ cache and coherent application updates.
 
 `W-0062` through `W-0064` sit in Phase 2 because handoff packets, structured map
 entry and ordering are protocol foundations, not late presentation features.
-`W-0065`, `W-0066` and `W-0096` produce an early, falsifiable atomic handoff in
-Phase 3. Phase 7 makes likely destinations ready before the boundary; Phase 8
-implements camera-continuous compatible borders. This is a production world
+`W-0065`, `W-0066` and `W-0096` produce an early, falsifiable atomic handoff;
+`W-0099` then proves camera-continuous play across a compiler-confirmed 2x2
+region group in the same phase. Phase 7 makes likely destinations ready before
+the boundary; Phase 8 rolls the model out safely. This is a production world
 invariant, not optional polish: no release can call map travel complete while a
-normal transition exposes a loading screen.
+normal geographic transition exposes a loading screen, camera reset or entity
+identity break.
 
 ## Phase 0 — Responsive Bevy game shell and UI/UX prototype
 
@@ -333,12 +366,13 @@ half scale, because `camera_system` refreshes a camera's cached scale factor
 only for windows named in a window message and the client changed its own
 window silently.
 
-Three probes this contract names remain unwritten because they have nothing to
-aim at yet, and this task stays open until they exist:
+Two probes remain assigned to the tasks that introduce the required surface;
+they do not keep this coordinate foundation open:
 
-- a dialog control, which arrives with the product screens in W-0009;
-- fullscreen, which needs a user gesture the automation cannot supply. The
-  refusal path is covered; the hit tests are not.
+- W-0009 must run the same dialog-boundary probes when it creates a production
+  dialog; and
+- W-0073 owns physical fullscreen hit testing that requires a real user gesture.
+  The automated refusal path remains covered here.
 
 The spell control this contract also named is covered as of W-0007: the battery
 switches to the Spells tab, checks that a row activates exactly once and that a
@@ -388,34 +422,13 @@ interaction, pan/zoom clamping and marker filtering. Capture whole-world,
 zoomed, panned, filtered and unavailable views at the Phase 0 size/DPR matrix,
 including close/restore after resize, maximize and fullscreen.
 
-### Task W-0009 — Core Bevy session screens
-
-- **State:** planned
-- **Phase:** 0
-- **Depends on:** W-0004, W-0005
-
-Build the fixture-driven boot/loading, login, character selection, maintenance,
-reconnect, invalid-session and recovery screens required to enter, retain and
-recover a playable world. These are real Bevy navigation states, not DOM
-placeholders, and include empty/error/slow outcomes before Phase 2 connects
-services. Registration, character creation/preview and rankings remain in the
-same Bevy navigation model but are completed with the live account flows in
-W-0025; they do not gate the first map-transition proof.
-
-The rail's bottom navigation is a real, compact icon-button row using the
-shared control path, localized tooltips and accessible names. It provides the
-supported routes for character/statistics, journal/quests, achievements,
-party/social, clan/faction, map and settings plus an explicit session/logout
-action. Unimplemented destinations are visibly disabled with a reason; the
-production UI never ships a `navigation — not yet wired` text panel.
-
 ### Task W-0090 — Atomic first-scene reveal
 
 - **State:** planned
 - **Phase:** 0
-- **Depends on:** W-0001, W-0003, W-0004, W-0009
+- **Depends on:** W-0001, W-0003, W-0004, W-0089
 
-Keep the Bevy loading/recovery screen fully visible until the first playable
+Keep a Bevy-owned loading/recovery barrier fully visible until the first playable
 scene can be presented as one complete frame. Do not expose the world camera,
 partially populated rail, checkerboard, missing sprites or progressively
 appearing map layers while required first-scene work is still downloading,
@@ -459,9 +472,10 @@ download the full optional asset set.
 
 ### Phase 0 exit gate
 
-Phase 1 unlocks when `W-0085`, `W-0089`, `W-0009` and `W-0090` close, and these
-are the checks that gate it: the shell's geometry and scaling, pointer integrity,
-the product screens, the first-scene reveal, and the two maps.
+Phase 1 unlocks when `W-0085`, `W-0089` and `W-0090` close. These checks gate
+the shell geometry, pointer integrity, two map views and the reusable
+first-scene reveal barrier. Product screens remain required before release in
+Phase 0b, but do not hold the seamless-world MVP behind fixture UI breadth.
 
 The hardening and validation checks are not listed here. They belong to the tasks
 that own them and are checked in the Phase 0b hardening checklist — nothing was
@@ -486,9 +500,6 @@ dropped, and each item is written out there rather than referred to.
       background/paused and cannot overwrite the foreground sample as “10 FPS”.
 - [ ] Ping runs once per five seconds with one probe in flight, no per-frame
       sends and no catch-up burst after suspension, focus or reconnect.
-- [ ] Product screens and HUD workflows are Bevy-owned and cover populated,
-      empty, loading, disabled, rejected, disconnected, dead/ghost and malformed
-      fixture states.
 - [ ] Initial load keeps the complete loading screen visible until the named
       first-scene reveal set, authoritative snapshot and required GPU uploads
       are ready; one frame-boundary commit reveals a complete map, character
@@ -513,10 +524,6 @@ dropped, and each item is written out there rather than referred to.
       currency/equipment summaries and equal-width Inventory/Spells tabs; no
       raw fixture label or permanent textual equipment/navigation placeholder
       substitutes for the intended control.
-- [ ] Top-bar and bottom-navigation actions use project-owned icons with
-      localized tooltips and accessible names, while FPS, ping and population
-      remain readable textual status. Disabled destinations explain why they
-      are unavailable.
 - [ ] Pointer and keyboard input traverse, focus and activate real spawned Bevy
       controls. Inventory/spell/hotbar interactions emit typed intents through
       the shared control path; no production control model exists only in tests.
@@ -530,11 +537,80 @@ dropped, and each item is written out there rather than referred to.
 - [ ] Focus, modal/chat ownership, drag cancellation, tooltips and IME never
       leak unintended world commands.
 
-## Phase 1 — WASM platform foundation
+## Phase 1 — Compiled world topology and WASM platform foundation
 
-Make the prototype honest while the platform-specific surface is still small.
-Minimal platform interfaces are scheduled immediately after the Phase 0
-technical gate; Phase 0 may use deterministic adapters until then.
+Establish the seamless-world coordinate contract before protocol or gameplay
+code can invent incompatible local/global conversions. Then make the prototype
+honest while the platform-specific surface is still small. Phase 0 may use
+deterministic adapters until this phase.
+
+### Task W-0097 — Versioned world-topology compiler
+
+- **State:** planned
+- **Phase:** 1
+- **Depends on:** W-0089
+
+Build a deterministic standalone compiler over the 842 parsed CSM maps, map
+exits, `mapsworlddata.dat`, map metadata and a small reviewed override file. It
+emits a content-hashed `WorldTopology` manifest shared by Elixir and Rust:
+stable spaces/regions, integer origins, storage bounds, simulation core,
+valid/simulated-tile masks for irregular or void space, transition bands,
+render gutters, per-layer seam ownership, resource dependencies and every
+transition classified as `geographic_seam`, `door`, `portal`, `teleport` or
+`instance_entrance`. A bounding rectangle never makes a void tile walkable. The
+existing adjacency data is evidence, not unquestioned authority; the compiler
+validates it against the actual tiles and exits.
+
+Pin the audited corpus baseline in a reviewable report: 100x100 storage; the
+provisional 74x80 core (`x=14..87`, `y=11..90`); standard transition bands at
+`x=13/88` and `y=10/91`; 158,549 exits, of which 157,304 are valid cross-map,
+156,084 follow the standard seam offsets and 1,220 are other valid exceptions;
+49 same-map exits; 1,196 missing/sentinel destinations; 1,091 reciprocal seam
+pairs; 58 inferred placement conflicts; and 237 connected components. Recompute
+and fail on unexplained drift rather than treating these counts as eternal.
+
+Do not silently choose geography. Existing conflicts become an explicit
+versioned baseline with one reviewed disposition each: corrected data,
+non-geographic transition, or unsupported geography. A candidate seam may be
+promoted only with zero unresolved placement contradiction and exact integer
+local/global round trips. Ground overlap is a review signal, not sole truth:
+at least 95% may be an automatic candidate, 85–95% requires review and below
+85% requires correction or explicit classification. New contradictions fail
+the build. Flag storage/local-coordinate shapes that a retained `u8` adapter
+cannot represent.
+
+Prove determinism, bidirectional adjacency where required, collision/edge
+compatibility, all four cardinal transforms and the rule that one walk across a
+standard seam advances exactly one global tile. Produce a human-readable map,
+conflict list and per-seam evidence beside the machine manifest.
+
+### Task W-0098 — Canonical world-position and stable-identity contract
+
+- **State:** planned
+- **Phase:** 1
+- **Depends on:** W-0097
+
+Define shared Elixir/Rust fixtures and checked conversion APIs for
+`WorldSpaceId`, stable `RegionId`, `WorldPosition<i32>`, bounded
+`LocalPosition`, `RegionPlacement`, `TopologyVersion`, `TransitionKind`, stable
+`EntityId`, `AuthorityEpoch` and `TransferId`. New modern-domain code stores,
+compares, logs and transmits global positions; a MapServer derives local
+coordinates at its boundary for collision, occupancy and legacy content.
+
+Keep content identity, topology version, runtime process ownership and dynamic
+instance identity separate. Region IDs remain stable across process restarts
+and topology releases; they are never sequential PIDs or array positions.
+Transition-band positions are operation-local and cannot be persisted. A
+retained legacy adapter projects an eligible global position to
+`map_id + u8 x/y` and rejects an unrepresentable region explicitly.
+
+Specify the extension points now without implementing their breadth: one
+authoritative owner per entity; read-only cross-region observations; commands
+routed to that owner; instance templates separate from runtime space IDs; and a
+versioned topology lookup rather than a central per-movement coordinate
+service. Property tests cover local/global round trips, negative/global-large
+coordinates, boundaries/corners, disconnected spaces, stale versions and
+stable IDs across reshard/restart.
 
 ### Task W-0015 — Platform-service traits and capabilities
 
@@ -586,6 +662,15 @@ profile or actionable unsupported-device screen.
 ### Phase 1 exit gate
 
 - [ ] `./build.sh check` passes for WASM, both Rust crates and the roadmap gate.
+- [ ] The topology compiler deterministically reproduces the audited corpus,
+      emits a version/hash and review report, and permits no active geographic
+      seam with an unresolved placement contradiction.
+- [ ] Shared Elixir/Rust fixtures prove canonical position, stable identity,
+      topology-version and local/global conversion semantics; transition bands
+      cannot become durable locations.
+- [ ] Standard cardinal seams advance one global tile, while doors, portals,
+      teleports, disconnected components and instances never acquire invented
+      spatial adjacency.
 - [ ] Browser platform services use narrow contracts and no platform
       conditionals leak into gameplay/UI; the same contracts retain native
       adapter seams for W-0017.
@@ -616,21 +701,28 @@ why the divergence is necessary and how it is disabled or rolled back.
 
 - **State:** planned
 - **Phase:** 2
-- **Depends on:** W-0021
+- **Depends on:** W-0021, W-0098
 
 Classify `map_handoff_begin/end/failed` as intentional divergences, assign
 fixtures and capability negotiation, and state the behavior of retained
 VB6/unframed sessions explicitly. Do not build or preserve a TypeScript-specific
 handoff path.
 
-Define the transition topology carried by governed data: source map/exit,
-destination map/entry, transition class (`compatible_border`, `door`, `portal`
-or `teleport`) and, only for a compatible border, the coordinate/orientation
-transform that places both tile grids in one camera space. Define an authorized
-preload hint separately from the authoritative handoff: it may disclose static
-map/resource dependencies the player is permitted to cache, never destination
-players, NPCs, drops or hidden objectives. Pin malformed, stale-version,
-unauthorized and geometrically inconsistent topology fixtures.
+Consume W-0097's signed topology rather than carrying an ad-hoc client
+transform. Bootstrap/handoff names the topology version/hash, world space,
+stable source/destination regions, canonical position, transfer ID and authority
+epoch. Define `prepare`, `commit`, `abort` and idempotent retry semantics. Only
+a compiler-authorized `geographic_seam` can place both region roots in one
+camera space; doors, portals, teleports and instance entrances change spaces or
+replace a scene without fabricated adjacency. The server never trusts a
+client-supplied placement or destination.
+
+Define an authorized preload hint separately from the authoritative handoff: it
+may disclose static region/resource dependencies the player is permitted to
+cache, never destination players, NPCs, drops or hidden objectives. Pin
+malformed, stale-version, unauthorized and geometrically inconsistent topology
+fixtures. Length framing leaves room for future neighbor-subscription fields;
+do not reserve a speculative AOI packet before W-0102 proves its contract.
 
 Decided here rather than in Phase 8 because handoff is a constraint on design,
 not a feature bolted on at the end. It dictates world and entity lifecycle: two
@@ -680,10 +772,13 @@ authoritative state or freeze one render frame.
 - **Depends on:** W-0062
 
 Refactor `MapServer.enter/3` to return a structured snapshot rather than send
-NPC bytes out of band. Make login, reconnect and map entry consume the same
+NPC bytes out of band. The snapshot carries canonical position, stable entity
+identity, owning region, topology version and authority epoch in addition to
+the local simulation view. Make login, reconnect and map entry consume the same
 internal snapshot shape. If a retained unframed protocol still requires the
-traditional packet sequence, isolate that encoding behind a protocol adapter;
-exact TypeScript behavior is not an acceptance criterion.
+traditional packet sequence, isolate that encoding and global-to-local
+projection behind a protocol adapter; exact TypeScript behavior is not an
+acceptance criterion.
 
 Close with server tests proving no map producer calls a client/session process
 to emit a snapshot member and no NPC or object packet can arrive after an end
@@ -695,8 +790,14 @@ marker through an out-of-band path.
 - **Phase:** 2
 - **Depends on:** W-0022, W-0023, W-0029, W-0063
 
-Own a session `world_epoch`, increment per transfer and key map-local IDs by
-epoch. Keep the source world on failure, correct position and resume input.
+Own a session `world_epoch`, increment per transfer and key any remaining
+map-local IDs by epoch while preserving stable entity identity. The source owns
+the player through prepare; the destination validates capacity, topology
+version, entry collision and snapshot readiness without publishing authority.
+Commit once, or abort idempotently and retain/correct the complete source world.
+A timeout, destination crash/overload, source crash, duplicated message or
+topology release race may never create zero or two owners.
+
 Guarantee `begin < every snapshot member < end` through one ordered,
 non-sheddable batch or critical FIFO; normal coalescing may not reorder, merge
 across or escape the boundary.
@@ -712,8 +813,9 @@ late source-epoch envelope is rejected rather than applied to the destination.
 - **Depends on:** W-0022, W-0023, W-0064
 
 Decode session token 200, world-pack signature 203, explicit login success and
-all bootstrap/error responses. Validate content version/hash before entering
-the world and prove a real existing character reaches the authoritative
+all bootstrap/error responses. Validate content and topology version/hash, then
+accept the snapshot's world space, stable region and canonical position before
+entering the world. Prove a real existing character reaches the authoritative
 bootstrap with packet 73. This first vertical slice may use explicitly supplied
 development credentials from runtime configuration; polished account and
 character navigation is W-0025 and does not block handoff testing.
@@ -725,10 +827,12 @@ character navigation is W-0025 and does not block handoff testing.
 - **Depends on:** W-0023, W-0024
 
 Add paired fixtures and Rust handlers for the minimum authoritative world
-surface needed by W-0030 and W-0096: snapshot begin/end, entity
-create/move/change/remove, map/position/heading change, character composition,
-visible objects, build/content version and transition errors. Unknown framed
-packets are counted and skipped; unknown legacy packets fail without desync.
+surface needed by W-0030, W-0096 and W-0099: snapshot begin/end, entity
+create/move/change/remove, region/global-position/heading change, character
+composition, visible objects, build/content/topology version and transition
+errors. Local map position exists only inside the legacy adapter and MapServer
+boundary. Unknown framed packets are counted and skipped; unknown legacy
+packets fail without desync.
 
 Incremental chat, detailed inventory/spell/stat updates, weather and other
 gameplay breadth belong to their Phase 4–6 owning tasks and do not gate the
@@ -761,9 +865,12 @@ states with independent retry/reconnect/forget-session actions.
 
 - [ ] Protocol v2/new packets are classified and byte-pinned before use; legacy
       streams remain compatible and framed streams skip unknown IDs safely.
-- [ ] Handoff topology classifies compatible borders separately from
-      doors/portals/teleports, pins valid and malformed transforms and exposes
-      only authorized static preload dependencies.
+- [ ] Handoff topology classifies geographic seams separately from
+      doors/portals/teleports/instances, pins valid and malformed compiler
+      placements and exposes only authorized static preload dependencies.
+- [ ] Bootstrap and handoff agree on topology signature, world space, stable
+      region/entity identity, canonical position, epoch and transfer ID; a
+      client-provided transform or destination is never authoritative.
 - [ ] Framing/codec fuzz tests survive truncation, concatenation, fragmentation,
       hostile lengths and arbitrary unknown IDs without panic or desync.
 - [ ] A real existing character uses packet 73, validates packet 203, accepts
@@ -771,19 +878,21 @@ states with independent retry/reconnect/forget-session actions.
 - [ ] `MapServer.enter/3` returns structured data; login, reconnect and handoff
       share one ordered writer and no snapshot member is emitted out of band.
 - [ ] Forced backpressure proves `begin < every member < end`, and a stale world
-      epoch cannot mutate the current world.
+      epoch cannot mutate the current world; prepare/commit/abort remains
+      single-owner under timeout, duplicate, crash, overload and topology race.
 - [ ] Redacted traces replay deterministically and contain no password, token,
       cookie or account secret.
 - [ ] Network bursts stay bounded and every auth/bootstrap failure offers the
       correct recovery without an invisible live session.
 
-## Phase 3 — Authoritative live world and atomic map handoff
+## Phase 3 — Authoritative live world and seamless-world MVP
 
 This phase is the first playable travel milestone. It proves the final authority,
-epoch, scene-root and input contracts with the current validated world pack,
-before per-map packaging or prediction exists. It must be testable on the first
-pair of connected maps; it is not allowed to wait for every asset optimization
-or every compatible border in the world.
+epoch, canonical-position, scene-root and input contracts with the current
+validated world pack, before per-region packaging or broad production topology
+exists. First prove atomic replacement on one transition; then prove a
+compiler-confirmed 2x2 geographic slice in which the player and camera cross all
+four borders without noticing the internal MapServer handoff.
 
 ### Task W-0030 — Bootstrap-owned world
 
@@ -791,10 +900,11 @@ or every compatible border in the world.
 - **Phase:** 3
 - **Depends on:** W-0024, W-0026, W-0090
 
-Take map, position and identity from the login snapshot; remove demo coordinates
-and `INITIAL_MAP`. Feed the authoritative snapshot and map dependency set into
-the W-0090 reveal barrier; a pack record may preload art but never prove that an
-entity currently exists or that the first scene is ready.
+Take world space, stable region, canonical position and identity from the login
+snapshot; remove demo coordinates and `INITIAL_MAP`. Derive the local MapServer
+view only through W-0098. Feed the authoritative snapshot and region dependency
+set into the W-0090 reveal barrier; a pack record may preload art but never prove
+that an entity currently exists or that the first scene is ready.
 
 ### Task W-0031 — Authoritative ECS identity
 
@@ -802,9 +912,11 @@ entity currently exists or that the first scene is ready.
 - **Phase:** 3
 - **Depends on:** W-0030, W-0062
 
-Represent players, NPCs and objects as live ECS entities keyed by authoritative
-identity. Apply create/move/change/remove idempotently and test duplicates,
-unknown removes, late packets and churn without leaks.
+Represent players, NPCs and objects as live ECS entities keyed by stable
+authoritative identity and positioned canonically in their world space. Region
+owner and epoch are routing/lifetime data, not identity. Apply
+create/move/change/remove idempotently and test duplicates, unknown removes,
+late packets, owner changes and churn without leaks.
 
 Identity has to satisfy `W-0062`: an entity that crosses a map boundary is the same entity, and a scheme that cannot say so is a scheme handoff has to replace.
 
@@ -814,9 +926,11 @@ Identity has to satisfy `W-0062`: an entity that crosses a map boundary is the s
 - **Phase:** 3
 - **Depends on:** W-0031
 
-Separate fixed-step intent, local prediction, authoritative correction and
-remote interpolation. Reset `WalkGate` on login/reconnect/handoff. Measure step
-interval distribution so camera or cadence pauses are diagnosed from data.
+Separate fixed-step intent, global-space prediction, authoritative correction
+and remote interpolation. Derive a local collision command at the MapServer
+boundary; do not reset camera space at a region seam. Reset `WalkGate` on
+login/reconnect/handoff. Measure step interval distribution so camera or cadence
+pauses are diagnosed from data.
 
 ### Task W-0033 — Reconnect/resnapshot contract
 
@@ -826,7 +940,9 @@ interval distribution so camera or cadence pauses are diagnosed from data.
 
 Define server/client resynchronization: a fresh epoch/snapshot replaces stale
 entities and inputs, and movement accumulated while disconnected or asleep is
-not blindly replayed.
+not blindly replayed. A reconnect pins a supported topology version or performs
+the explicit W-0100 migration; it never guesses a placement for obsolete saved
+state.
 
 Resnapshot and handoff are the same operation seen from two sides, so this has to satisfy `W-0062` rather than be widened for it later.
 
@@ -846,16 +962,18 @@ widget resources.
 - **Phase:** 3
 - **Depends on:** W-0034, W-0064, W-0090
 
-Maintain `ActiveWorld` and `PendingWorld` under separate `MapSceneRoot`s. Keep
-the source root fully rendered while destination map data, assets and the
-complete snapshot become ready. Commit once on a frame boundary; reject queued
-envelopes from a stale map or epoch and destroy a cancelled pending root without
-touching the active one.
+Maintain a keyed `ResidentRegions` collection with one `ActiveAuthority`, at
+most one `PreparedTransfer`, and explicit visible-neighbor/rollback pins. Every
+`RegionSceneRoot` sits at its compiler-authorized global origin. Keep the source
+and all visible static roots fully rendered while destination region data,
+assets and the complete snapshot become ready. Commit authority once on a frame
+boundary; reject queued envelopes from a stale region or epoch and destroy a
+cancelled prepared root without touching active or still-visible roots.
 
 Reuse W-0090's reveal-set/readiness contract so initial login and later handoff
 cannot develop different definitions of a complete first destination frame.
 For this early slice, the validated monolithic world pack is an allowed asset
-source: the scene/authority API must already accept a map-scoped dependency set
+source: the scene/authority API must already accept a region-scoped dependency set
 so Phase 7 can replace the source without rewriting handoff.
 
 ### Task W-0066 — Input and lifecycle handoff behavior
@@ -868,7 +986,7 @@ Enter real `Handoff`, pause unsafe gameplay intents and reset `WalkGate` without
 replaying source-epoch steps. Keep the network/session processing. Commit only
 the matching ordered snapshot when the destination scene is complete, then
 resume input against the new epoch. Door, portal and teleport clear held
-movement; compatible-border held-input continuity remains a Phase 8 concern.
+movement; geographic-seam held-input and camera continuity are proved by W-0099.
 
 On timeout, rejection, disconnect, corrupt/missing assets or memory-budget
 failure, retain or restore the complete source scene with an actionable reason.
@@ -899,14 +1017,77 @@ first handoff acceptance test:
    mid-transfer disconnect and source recovery.
 
 Capture the frames and network/session identity as test artifacts. Run 1,000
-back-and-forth transitions while asserting one active root, at most one pending
-root, one authoritative local character, bounded entities/textures/listeners and
-no monotonic WASM-heap growth. This closes atomic no-blank travel, not yet the
-predictive, camera-continuous compatible border owned by W-0095.
+back-and-forth transitions while asserting one active authority, at most one
+prepared transfer, one authoritative local character, bounded resident roots/
+entities/textures/listeners and no monotonic WASM-heap growth. This closes
+atomic no-blank replacement before W-0099 proves camera-continuous geography.
+
+### Task W-0099 — Four-region seamless-world MVP
+
+- **State:** planned
+- **Phase:** 3
+- **Depends on:** W-0096, W-0098
+
+Select one compiler-confirmed 2x2 geographic group with clean cardinal seams;
+maps 1/2/11/14 are candidates only if W-0097's generated evidence confirms
+them. Use the current monolithic pack so packaging work cannot delay the proof.
+Load four `RegionSceneRoot`s at their canonical origins and compose their static
+ground, decoration and roof layers in one Bevy world camera. The server keeps
+one already-running local-coordinate MapServer per region.
+
+Start from a real login and walk north, south, east and west through every seam
+under held input. Player, camera, visible static world, minimap/world-map marker,
+debug/support coordinates and stable character identity remain in one global
+space. Crossing advances one tile, changes internal region owner and epoch
+atomically on the same socket/session, and never exposes a map number, loading
+screen, fade, blank/partial frame, camera recenter, duplicated character or
+transition-band location. Local `u8` coordinates are observable only in
+server/adapter diagnostics.
+
+On the normal path, prepare the destination snapshot before contact and prove
+the crossing has zero paused movement frames. Separately delay preparation by
+two seconds after static art is ready: hold the character at the last
+source-owned tile while the composed world remains fully rendered, then cross
+when ready without a loading/fade/camera reset. Do not predict confirmed
+gameplay into authority the destination has not accepted. Rejection, overload,
+destination crash, stale topology, stale epoch, disconnect and corrupt resource
+data retain the last source-owned global position or terminate
+explicitly—never limbo or double ownership. Repeat all four directions,
+corners, rapid backtracking and 1,000 crossings while checking continuous
+camera displacement on successful crossings, one character, one owner, bounded
+roots/entities/textures/listeners/queues and flat memory.
+
+This MVP intentionally does not claim live cross-border NPC/player visibility,
+targeting, combat or long-range AI; W-0102/W-0103 own those features. Static
+neighbor visibility and invisible player authority handoff are required now.
+Keep a deterministic replay plus frame-by-frame capture as the release artifact.
+
+### Task W-0100 — Versioned global-position persistence migration
+
+- **State:** planned
+- **Phase:** 3
+- **Depends on:** W-0099
+
+Add authoritative `world_space_id`, signed global x/y and `topology_version` to
+character position persistence, with stable region only as a lookup hint. On
+first login from a legacy record, derive global state from the versioned legacy
+map/local position, record an auditable migration and dual-write the old
+compatibility view during a controlled release.
+
+During movement, advance the canonical position first and compare the
+topology-derived local result with the actual owning MapServer/local position;
+do not "verify" canonical state by merely deriving it again from local. Expose
+mismatch counters and sampled redacted diagnostics. Backfill/offline migration,
+rollback and login against an unsupported/ambiguous topology version have
+explicit operator outcomes. Flip authoritative reads only after the four-region
+slice and a representative soak report zero unexplained mismatches; every
+rewrite remains versioned and auditable.
 
 ### Phase 3 exit gate
 
 - [ ] Bootstrap is the only source of initial map, position and identity.
+- [ ] Bootstrap's durable position is canonical world space; local map
+      coordinates are topology-derived simulation/legacy views.
 - [ ] Entity create/change/move/remove is idempotent; duplicate, unknown, stale
       and churn cases leak nothing.
 - [ ] Prediction stays responsive under injected latency and converges without
@@ -921,25 +1102,38 @@ predictive, camera-continuous compatible border owned by W-0095.
 - [ ] Failure, stale epoch, missing/corrupt resources and disconnect recover to
       one explicit authoritative state; 1,000 transitions leak no world root,
       entity, texture, listener or memory.
+- [ ] A compiler-confirmed 2x2 slice crosses all four cardinal seams under held
+      input with continuous player/camera/global coordinates, one socket,
+      stable identity, zero prepared-path movement stalls and no player-visible
+      map transition.
+- [ ] Delayed/rejected/crashed handoffs preserve exactly one authority owner and
+      either roll back to the source-owned global position or terminate
+      explicitly; no transition-band coordinate is persisted.
+- [ ] Versioned persistence migration and dual-write shadow checks report zero
+      unexplained canonical/local mismatches before global position becomes the
+      authoritative read path.
 
-## Phase 7 — Per-map runtime assets and destination readiness
+## Phase 7 — Per-region runtime assets and destination readiness
 
 The Phase 3 atomic transition is already correct with the current world pack.
 This phase makes the normal path ready before contact: a transition cannot be
 hitch-free if it first downloads or materializes the full 58.8 MB pack. Browser
 persistence is useful but does not gate this in-session readiness proof.
 
-### Task W-0055 — Indexed or per-map world format
+### Task W-0055 — Indexed or per-region world format
 
 - **State:** planned
 - **Phase:** 7
-- **Depends on:** W-0020, W-0024, W-0062
+- **Depends on:** W-0020, W-0024, W-0062, W-0098
 
-Replace the monolithic sequential pack with per-map resources or a range-indexed
-format and small index. Define compressed transfer, decoded map and maximum
-hostile-size bounds before implementation.
+Replace the monolithic sequential pack with per-region resources or a
+range-indexed format and small index keyed by W-0097's stable topology IDs.
+Legacy map records remain valid content units; they are not durable world
+identity. Define compressed transfer, decoded region and maximum hostile-size
+bounds before implementation.
 
-The format has to satisfy `W-0062`, which is what makes a per-map request cheap enough to prefetch the map a player is walking towards.
+The format has to satisfy `W-0062`, which is what makes a region request cheap
+enough to prefetch the world a player is walking towards.
 
 ### Task W-0056 — Content-hashed resource manifest
 
@@ -947,8 +1141,9 @@ The format has to satisfy `W-0062`, which is what makes a per-map request cheap 
 - **Phase:** 7
 - **Depends on:** W-0055
 
-Version maps, indices, sprite sheets and audio; validate packet 203 and prevent
-mixed world builds through atomic activation/invalidation.
+Version topology, regions, indices, sprite sheets and audio; validate packet
+203 and prevent mixed topology/content builds through atomic
+activation/invalidation.
 
 ### Task W-0058 — Immutable/range resource serving
 
@@ -957,8 +1152,9 @@ mixed world builds through atomic activation/invalidation.
 - **Depends on:** W-0055, W-0056
 
 Serve content-addressed assets with immutable headers and range support where
-the format requires it. Prove one map request cannot force transfer of unrelated
-maps and a cancelled range/request cannot activate a partial resource.
+the format requires it. Prove one region request cannot force transfer of
+unrelated regions and a cancelled range/request cannot activate a partial
+resource.
 
 ### Task W-0059 — Byte-budgeted residency and preloading
 
@@ -966,15 +1162,16 @@ maps and a cancelled range/request cannot activate a partial resource.
 - **Phase:** 7
 - **Depends on:** W-0056, W-0062
 
-Track compressed, decoded-map, WASM-heap and estimated RGBA/GPU bytes
-separately. Evict by bytes, not entry count. Build a map-to-assets dependency
+Track compressed, decoded-region, WASM-heap and estimated RGBA/GPU bytes
+separately. Evict by bytes, not entry count. Build a region-to-assets dependency
 index and give speculative exits a separate allowance below authoritative-world
 headroom.
 
-The budget has to satisfy `W-0062`: during a handoff the in-memory residency set
-holds the map being left and the map being entered, and eviction that cannot
-express that will drop the one still on screen. Persistent reuse across browser
-sessions is a separate Phase 7b concern.
+The budget has to satisfy `W-0062` and W-0099's composition model: residency
+pins the active region, every visible adjacent static region, the prepared
+destination and any source needed for rollback. Eviction that assumes exactly
+two maps can drop visible geography or the only safe recovery world. Persistent
+reuse across browser sessions is a separate Phase 7b concern.
 
 ### Task W-0060 — Bounded decode and GPU upload
 
@@ -992,19 +1189,19 @@ metadata and reject hostile dimensions/counts even when hashes match.
 - **Phase:** 7
 - **Depends on:** W-0058, W-0060, W-0062
 
-Turn the current map's server-authorized exit topology into a bounded preload
+Turn the current region's compiler-generated, server-authorized topology into a bounded preload
 plan before the player reaches a transition. Rank candidates from position,
 heading, movement history and explicit portal/door interaction without treating
-prediction as authority. Fetch and validate the destination map record and
+prediction as authority. Fetch and validate the destination region record and
 content version, decode its visible dependency set, upload required sheets and
 publish a typed `DestinationReadiness` only when the destination can produce a
 complete first frame under the same reveal contract as W-0090.
 
-Keep the current map pinned and give candidate destinations a separate
+Keep the current region pinned and give candidate destinations a separate
 compressed/decoded/GPU byte allowance. Bound simultaneous candidates, request
 concurrency, decode/upload work per frame and distance/time lookahead; cancel
 obsolete speculation without evicting the active world or a handoff already in
-progress. A malicious map cannot make exits recursively preload the world, and
+progress. A malicious region cannot make exits recursively preload the world, and
 preloading static art cannot create destination entities or reveal
 server-withheld markers.
 
@@ -1018,11 +1215,11 @@ never progressive destination rendering.
 
 ### Phase 7 exit gate
 
-- [ ] Loading one map neither downloads nor retains the complete 58.8 MB pack;
+- [ ] Loading one region neither downloads nor retains the complete 58.8 MB pack;
       a small manifest activates atomically and prevents mixed builds.
-- [ ] A map/range request transfers only its bounded resource set; cancellation,
+- [ ] A region/range request transfers only its bounded resource set; cancellation,
       corruption or partial data never activates an incomplete destination.
-- [ ] CI reports compressed transfer, decoded map, WASM heap and GPU bytes;
+- [ ] CI reports compressed transfer, decoded region, WASM heap and GPU bytes;
       residency, eviction and speculation are megabyte-bounded.
 - [ ] Decode/upload stays under per-frame work/byte ceilings.
 - [ ] Authorized exits produce a bounded destination-readiness plan; normal
@@ -1032,42 +1229,57 @@ never progressive destination rendering.
       state, evict the active map or exceed its compressed/decoded/GPU allowance.
 - [ ] Resource fuzzing enforces size, dimension and count limits.
 
-## Phase 8 — Camera-continuous compatible borders
+## Phase 8 — Production continuous-world rollout and cross-region systems
 
-Phase 3 already proved the same-socket, atomic, no-blank authority transfer and
-Phase 7 made likely destinations ready before contact. This phase removes the
-last visible seam for topology that is truly spatially compatible. One loaded
-GenServer per logical map remains valid: the client composes authorized static
-maps continuously while the server keeps simulation authority separated.
+Phase 3 already proves the experience and authority model on a four-region
+slice; Phase 7 makes likely regions ready within byte/time budgets. This phase
+curates the full production topology, expands the proven composition path and
+adds gameplay that genuinely spans invisible simulation partitions. It does not
+replace one loaded MapServer per legacy map with a global bottleneck.
 
-### Task W-0095 — Compatible-border continuous composition
+### Task W-0101 — Production topology curation and activation
 
 - **State:** planned
 - **Phase:** 8
-- **Depends on:** W-0065, W-0066, W-0094
+- **Depends on:** W-0097, W-0099
 
-For topology classified by W-0062 as `compatible_border`, place the active and
-ready destination map roots in one world coordinate space using the governed
-edge transform. Draw both maps through the same world camera before contact,
-pin both reveal sets and keep camera position/zoom continuous while the local
-character predicts across the seam. The prediction is presentation only: it
-cannot spawn destination entities, spend resources or confirm movement, and a
-server rejection rolls back to the last authoritative source position.
+Resolve every one of W-0097's baseline placement conflicts and classify every
+non-standard exit and low-quality seam as corrected geographic data, a
+door/portal/teleport/instance transition, or unsupported geography. An active
+geographic component may contain no unresolved contradiction. Not all 842 maps
+must become one continent: disconnected components and explicit portals are
+valid, but approximate transforms and silent compiler winners are not.
 
-Commit destination authority at the ordered handoff boundary, replace the
-predicted local identity with the destination epoch and release the source root
-only after it is outside the retention margin and no rollback can reference it.
-Do not show destination players, NPCs, drops, resources or objectives until the
-authoritative destination snapshot discloses them. Seam geometry must preserve
-tile scale, orientation, collision alignment and depth ordering; a transform
-that cannot prove those properties is downgraded to atomic door/teleport
-presentation rather than approximately stitched.
+Define per-layer seam ownership. Ground/collision comes from the region that
+owns a global tile; gutter decorations/roofs may cross a core boundary only by
+an explicit priority/artist rule that cannot duplicate or erase interactive
+collision. Review corner junctions, occlusion/depth ordering, weather/audio
+zones and world-map alignment. Activate topology/content versions atomically;
+existing sessions pin a compatible version or receive an explicit resnapshot,
+never a half-updated geography.
+
+### Task W-0095 — Production geographic composition
+
+- **State:** planned
+- **Phase:** 8
+- **Depends on:** W-0065, W-0066, W-0094, W-0099, W-0101
+
+Expand W-0099's four-region implementation to every topology-authorized
+geographic component. Place active and ready region roots at their canonical
+origins, draw required static neighbors through one world camera, and retain
+roots by the W-0059 visibility/rollback budget. Camera, player, markers and
+coordinates remain global; owner-region/epoch changes stay invisible.
+
+Commit destination authority at the ordered handoff boundary and release a
+source root only after it leaves the retention margin and no rollback or visible
+gutter can reference it. Do not show destination players, NPCs, drops,
+resources or objectives until authoritative interest data discloses them. A
+seam that fails compiler geometry, collision, layer or depth rules is downgraded
+to atomic non-geographic presentation rather than approximately stitched.
 
 Cover every cardinal edge, corners, repeated backtracking, held movement,
-server correction/rejection, two nearby exits and mismatched geometry. A
-preloaded compatible crossing must keep camera displacement continuous, emit no
-blank/partial/loading frame and complete without a new socket or session. Door,
-portal and teleport tests must instead commit one complete destination frame
+server correction/rejection, competing exits and topology-version activation.
+Doors, portals, teleports and instance entrances commit one complete scene
 without pretending unrelated spaces are adjacent.
 
 ### Task W-0067 — Adversarial transition harness
@@ -1076,12 +1288,59 @@ without pretending unrelated spaces are adjacent.
 - **Phase:** 8
 - **Depends on:** W-0095, W-0096
 
-Extend W-0096's delay/backpressure harness with preloaded compatible-border
+Extend W-0096's delay/backpressure harness with preloaded geographic-seam
 captures. Fail frame by frame on a loading overlay, camera jump, incomplete
 destination layer, mixed epoch or second socket/session. Cover every edge,
 backtracking, rejection and two nearby exits; record preload hit rate,
 boundary-to-commit latency and cold-fallback duration separately so a correct
 fallback cannot hide a consistently late preload path.
+
+### Task W-0102 — Cross-region interest and authoritative command routing
+
+- **State:** planned
+- **Phase:** 8
+- **Depends on:** W-0031, W-0095
+
+Give every entity exactly one authoritative MapServer owner and publish bounded,
+read-only observations into neighboring region interest sets keyed by stable
+entity ID, owner region and epoch. Subscription changes are derived from global
+AOI and topology; stale projections disappear idempotently and can never mutate
+gameplay state.
+
+Route a command aimed across a seam to the current owner, then perform range,
+line-of-sight, safe-zone, cooldown and resource checks in canonical global
+coordinates at authority. Handle migration races with epoch/version rejection
+and bounded retry rather than double execution. Test players, NPCs,
+projectiles/spells, drops and chat visibility at borders, including an entity
+moving owners during a command. Use direct region routing/distributed lookup
+and spatial subscriptions; no central process receives every position update.
+
+### Task W-0103 — Hierarchical cross-region navigation and actor policy
+
+- **State:** planned
+- **Phase:** 8
+- **Depends on:** W-0095, W-0102
+
+Compile a high-level connectivity graph over region portals/seams and retain
+local grid pathfinding inside each MapServer. Only actors with an explicit
+cross-region policy—players, pets, escorts, event bosses or migrating ecology—
+may request an authority handoff; ordinary local NPCs remain local and incur no
+global routing work. Cover unreachable/changed topology, seam congestion,
+owner crash, pursuit cancellation and bounded path-search budgets.
+
+### Task W-0104 — Runtime instance world spaces
+
+- **State:** planned
+- **Phase:** 8
+- **Depends on:** W-0064, W-0095, W-0098
+
+Define immutable instance templates separately from runtime UUID-like
+`WorldSpaceId`s. A supervised registry allocates a space, starts/claims its
+region owners idempotently and returns a signed portal destination; it is not on
+movement or AOI hot paths. Specify party membership/admission, reconnect,
+return anchors, persistence boundaries, topology/template version, bounded
+capacity, owner crash recovery and TTL/grace cleanup. A player can never be
+persisted into a destroyed instance without an auditable safe return location.
 
 ### Phase 8 exit gate
 
@@ -1096,16 +1355,26 @@ fallback cannot hide a consistently late preload path.
 - [ ] The same socket/session survives every transfer; each destination
       MapServer was already loaded and no map-process startup lies on the
       transition path.
-- [ ] A preloaded compatible border renders both authorized static worlds in
+- [ ] A preloaded geographic seam renders both authorized static worlds in
       one camera space, crosses with continuous camera motion and produces zero
       blank, partial or loading frames; live destination entities appear only
       from its authoritative snapshot.
 - [ ] Preloaded doors, portals and teleports atomically replace one complete
       scene with another without fabricating spatial adjacency.
 - [ ] The Phase 3 two-second delayed-destination proof remains green against the
-      final per-map resource and composition path.
+      final per-region resource and composition path.
 - [ ] Failure and mid-transfer disconnect recover explicitly; 1,000 transitions
-      leak no scene root, entity, decoded map or texture.
+      leak no scene root, entity, decoded region or texture.
+- [ ] Every activated geographic seam has a reviewed compiler disposition and
+      deterministic ground/collision/gutter ownership; topology/content
+      versions activate atomically.
+- [ ] Cross-region visibility and commands retain one entity owner, reject
+      stale epochs and evaluate gameplay rules globally without a central
+      per-position bottleneck.
+- [ ] Hierarchical pathfinding keeps local work local and transfers only actor
+      classes explicitly allowed to cross a region boundary.
+- [ ] Runtime instance IDs, ownership, admission, reconnect and cleanup are
+      supervised/idempotent and always retain an auditable safe return path.
 
 ## Phase 7b — Persistent cache and coherent updates
 
@@ -1150,6 +1419,27 @@ They are worth more once real data and the final transition lifecycle exist: a
 defect sweep, staging, polished account flows, private diagnostics, a component
 gallery, a worst-case fixture set, a lifecycle stress run and recorded usability
 sessions all test more against a live adapter than against fixtures.
+
+### Task W-0009 — Core Bevy session screens
+
+- **State:** planned
+- **Phase:** 0b
+- **Depends on:** W-0004, W-0005
+
+Build the fixture-driven boot/loading, login, character selection, maintenance,
+reconnect, invalid-session and recovery screens required to enter, retain and
+recover a playable world. These are real Bevy navigation states, not DOM
+placeholders, and include empty/error/slow outcomes. Registration, character
+creation/preview and rankings remain in the same Bevy navigation model but are
+completed with the live account flows in W-0025.
+
+The rail's bottom navigation is a real compact icon-button row using the shared
+control path, localized tooltips and accessible names. It provides supported
+routes for character/statistics, journal/quests, achievements, party/social,
+clan/faction, map and settings plus explicit session/logout. Unimplemented
+destinations are visibly disabled with a reason; production never ships a
+`navigation — not yet wired` text panel. Run W-0085's coordinate probes at all
+dialog corners/edges after resize, DPR, maximize, restore and UI-scale changes.
 
 ### Task W-0093 — Prototype defect sweep
 
@@ -1241,6 +1531,13 @@ sessions.
       chat, a selected target, damaged vitals, a populated inventory/equipment
       state, assigned hotbar items/spells, active cooldowns and pending/rejected
       feedback without overlap or loss of actionability.
+- [ ] Product screens and HUD workflows are Bevy-owned and cover populated,
+      empty, loading, disabled, rejected, disconnected, dead/ghost and malformed
+      fixture states; dialog-boundary pointer probes match rendered controls.
+- [ ] Top-bar and bottom-navigation actions use project-owned icons with
+      localized tooltips and accessible names, while FPS, ping and population
+      remain readable textual status. Disabled destinations explain why they
+      are unavailable.
 - [ ] The native/browser lifecycle stress run completes 250 resizes, 1,000 panel
       cycles and 1,000 tab switches. Shell/camera roots remain unique, invalid
       transient state is cleared and entity/listener/memory counts do not grow
@@ -1589,7 +1886,7 @@ evidence, not closure; the TypeScript renderer is not a compatibility target.
 
 - **State:** planned
 - **Phase:** 6
-- **Depends on:** W-0020, W-0030, W-0062
+- **Depends on:** W-0020, W-0030, W-0062, W-0099
 
 Request missing sheets ahead of movement, retain tall art and despawn material
 outside byte-budgeted windows without visible holes or unbounded GPU growth.
@@ -1597,7 +1894,9 @@ Every dependency in the initial visible window belongs to W-0090's reveal set;
 post-reveal streaming may not use ordinary movement into an unloaded visible
 tile as an excuse for pop-in.
 
-Streaming has to satisfy `W-0062`: two maps can be resident at once during a handoff, and a budget that assumes one is a budget that breaks at the boundary.
+Streaming has to satisfy W-0099: the active region, visible static neighbors,
+prepared destination and rollback source may all be resident. A budget that
+assumes one or exactly two maps will break at a composed boundary.
 
 ### Task W-0052 — Labels, fades, weather and visual FX
 
@@ -1940,9 +2239,12 @@ Candidate investigations:
 - WebGPU, WASM threads and shaders only where profiling supports them;
 - explicit continent travel or multi-region worlds with one character/market
   authority;
-- dynamic zone instancing and population-aware placement;
-- variable-sized maps, coordinates wider than `u8`, chunks and continuous
-  geometry beyond seamless logical-map handoff;
+- population-aware region placement/co-location policies after W-0102 provides
+  measurements; logical ownership must remain stable while physical placement
+  changes;
+- larger local region storage, non-100x100 content and alternative chunk sizes;
+  the canonical composed world and runtime instance spaces are production work,
+  not research;
 - quests, events, subscriptions and community benefits that avoid pay-to-win;
 - positional audio and map-specific music; and
 - further ideas from AO/Argentum United research, the wiki, community feedback
@@ -1967,14 +2269,17 @@ the root roadmap when it enters active execution.
 | Client task | Server change |
 | --- | --- |
 | W-0019 | Serve the Rust client/runtime config from the game origin |
+| W-0097–W-0098 | Compile/version topology; define canonical positions, stable region/entity IDs and checked local adapters |
 | W-0021–W-0023 | Governed protocol-v2 negotiation and schema/fixture source |
 | W-0024–W-0029 | Bootstrap packets, failure semantics and bounded transport |
 | W-0033 | Fresh reconnect/resynchronization snapshot |
+| W-0099–W-0100 | Four-region same-session seamless MVP and versioned global-position persistence migration |
 | W-0042–W-0048 | Gameplay workflow fixtures and versioned metadata |
 | W-0050 | Emit map triggers consumed by the Rust world renderer |
 | W-0055–W-0058 | Indexed assets, hashes, range/immutable serving |
 | W-0062–W-0064 | Handoff parity, structured snapshot, epoch and FIFO batch |
-| W-0094–W-0096 | Atomic-transition evidence, authorized preload dependencies and exact compatible-border transforms |
+| W-0094–W-0096 | Atomic-transition evidence, authorized preload dependencies and exact compiler-authorized placements |
+| W-0101–W-0104 | Production topology activation, cross-region AOI/commands, hierarchical navigation and runtime instances |
 | W-0075, W-0080–W-0081 | Security, rollout compatibility, session ownership and operations |
 
 ## Global definition of done
@@ -1999,8 +2304,10 @@ the root roadmap when it enters active execution.
 
 ## Deliberately out of scope
 
-- Variable or larger-than-100x100 maps during seamless handoff. Server, NIF and
-  current wire coordinates use `u8` tiles; that is W-0083 research.
+- Variable or larger-than-100x100 *local region files* during the MVP. Server,
+  NIF and legacy wire coordinates use `u8` tiles; larger local storage is W-0083
+  research. This does not limit the signed canonical global world composed from
+  existing regions.
 - Preserving or extending the TypeScript client. Incidental deletion during
   unrelated work is also excluded; W-0091 owns its bounded retirement after
   Rust production rollout and reference extraction.
