@@ -88,6 +88,19 @@ pub fn intercept(geometric: PointerTarget, over_control: bool) -> PointerTarget 
     }
 }
 
+/// A modal takes the world with it.
+///
+/// While one is open the world is not a click target at all, whatever is under the
+/// pointer. Without this, the whole-world map is a panel the player can click *through*:
+/// it covers the world geometrically but the classification underneath still said world,
+/// so a click on the map was also a click on the ground behind it.
+pub fn intercept_modal(geometric: PointerTarget, modal_open: bool) -> PointerTarget {
+    match geometric {
+        PointerTarget::World if modal_open => PointerTarget::Interface,
+        other => other,
+    }
+}
+
 /// Half-open containment.
 ///
 /// A rectangle owns its left and top edges and not its right and bottom, so
@@ -213,6 +226,7 @@ fn resolve_pointer(
     // too, and treating every hovered node as interface would make the world
     // permanently unclickable.
     controls: Query<&Interaction, With<super::controls::Control>>,
+    modals: Query<(), With<super::controls::Modal>>,
     mut pointer: ResMut<PointerState>,
 ) {
     let Ok(window) = windows.single() else {
@@ -238,7 +252,8 @@ fn resolve_pointer(
     let camera_centre =
         cameras.iter().next().map(|t| t.translation.truncate()).unwrap_or(Vec2::ZERO);
     let over_control = controls.iter().any(|interaction| !matches!(interaction, Interaction::None));
-    let target = intercept(target_at(position, geometry, view), over_control);
+    let geometric = intercept(target_at(position, geometry, view), over_control);
+    let target = intercept_modal(geometric, !modals.is_empty());
 
     *pointer = PointerState {
         position: Some(position),
@@ -357,6 +372,44 @@ mod tests {
         );
         assert!(state.tile.is_none(), "an intercepted pointer still named a tile");
         assert!(!state.over_world(), "the world would still act on this click");
+    }
+
+    #[test]
+    fn a_modal_takes_the_world_out_of_reach() {
+        // The whole-world map covers the world geometrically, and without this the
+        // classification underneath still said world — so a click on the map was also a
+        // click on the ground behind it.
+        assert_eq!(
+            intercept_modal(PointerTarget::World, true),
+            PointerTarget::Interface,
+            "a modal left the world clickable through it"
+        );
+        assert_eq!(intercept_modal(PointerTarget::World, false), PointerTarget::World);
+        for target in [PointerTarget::Interface, PointerTarget::Outside] {
+            assert_eq!(intercept_modal(target, true), target, "a modal changed {target:?}");
+        }
+    }
+
+    #[test]
+    fn the_world_map_is_not_a_panel_the_player_can_click_through() {
+        // Driven through the production systems, with the overlay's own modal marker: the
+        // pointer sits in the middle of the world and must not resolve to a tile.
+        use super::super::testing;
+
+        let mut app = testing::shell_app(Vec2::new(1280.0, 832.0));
+        let centre = testing::settled(&app).world.center();
+        testing::move_pointer(&mut app, centre);
+        assert!(
+            app.world().resource::<PointerState>().over_world(),
+            "the centre of the world is not over the world to begin with"
+        );
+
+        app.world_mut().spawn((Node::default(), super::super::controls::Modal));
+        testing::move_pointer(&mut app, centre);
+
+        let state = *app.world().resource::<PointerState>();
+        assert!(!state.over_world(), "the world was still reachable under a modal");
+        assert!(state.tile.is_none(), "a modal still named a tile underneath itself");
     }
 
     #[test]

@@ -719,6 +719,121 @@ async function runHitTests(hitPage, label, ratio) {
       );
     }
 
+    // The whole-world map, driven by the keys and the wheel a player uses. Bevy app tests
+    // cover the camera arithmetic; what only a browser can answer is whether a real Tab
+    // press reaches the client, whether the world underneath stops being clickable, and
+    // whether the rail is still there while it is open.
+    const mapState = () =>
+      hitPage.evaluate(() => ({
+        open: window.aoLoaded?.worldMapOpen === true,
+        scale: window.aoLoaded?.worldMapScale ?? 0,
+        centre: [window.aoLoaded?.worldMapCentreX ?? 0, window.aoLoaded?.worldMapCentreY ?? 0],
+        markers: window.aoLoaded?.worldMapMarkers ?? 0,
+      }));
+    const settleMap = async () => {
+      await hitPage.waitForTimeout(Math.min(Math.max(3 * frameMs, 300), 6_000));
+      return mapState();
+    };
+
+    await hitPage.keyboard.press("Tab");
+    let map = await settleMap();
+    check(`${label}: `+"Tab opens the world map", map.open, JSON.stringify(map));
+    check(
+      `${label}: `+"the open map draws its markers",
+      map.markers > 0,
+      `${map.markers} markers`
+    );
+
+    if (map.open) {
+      // The world is not clickable through it. Checked with the pointer over the middle of
+      // the world, where the map is: the classification has to say interface, or a click on
+      // the map is also a click on the ground behind it.
+      const covered = await tileAt(worldRect.x + worldRect.w / 2, worldRect.y + worldRect.h / 2);
+      check("the world is not clickable through the open map", covered === null);
+
+      // Nothing the world would act on. A hotbar key must not cast while the map is up.
+      const before = await hitPage.evaluate(() => window.aoLoaded?.activations ?? 0);
+      await hitPage.keyboard.press("Digit1");
+      await hitPage.waitForTimeout(Math.min(Math.max(3 * frameMs, 300), 6_000));
+      const after = await hitPage.evaluate(() => window.aoLoaded?.activations ?? 0);
+      check(
+        `${label}: `+"a hotbar key does nothing while the map is open",
+        after === before,
+        `${before} -> ${after}`
+      );
+
+      // Zoom is clamped in both directions, driven by the wheel rather than by arithmetic.
+      const fitted = map.scale;
+      await hitPage.mouse.move(
+        canvasBox.x + worldRect.x + worldRect.w / 2,
+        canvasBox.y + worldRect.y + worldRect.h / 2
+      );
+      for (let i = 0; i < 12; i += 1) {
+        await hitPage.mouse.wheel(0, -120);
+      }
+      const zoomedIn = await settleMap();
+      check(
+        `${label}: `+"the wheel zooms in and stops at the maximum",
+        zoomedIn.scale > fitted && Number.isFinite(zoomedIn.scale) && zoomedIn.scale <= 12.001,
+        `${fitted} -> ${zoomedIn.scale}`
+      );
+
+      for (let i = 0; i < 30; i += 1) {
+        await hitPage.mouse.wheel(0, 120);
+      }
+      const zoomedOut = await settleMap();
+      check(
+        `${label}: `+"the wheel cannot zoom out past the whole world",
+        Math.abs(zoomedOut.scale - fitted) <= 0.01,
+        `${fitted} against ${zoomedOut.scale}`
+      );
+
+      // Filtering removes markers and nothing else.
+      const filter = await rectSoon("worldmap.filter.merchant");
+      check(`${label}: `+"the legend publishes a filter to click", filter !== null);
+      if (filter) {
+        const drawn = (await mapState()).markers;
+        await clickAt(
+          filter.x + filter.w / 2,
+          filter.y + filter.h / 2,
+          CLICK_BUDGET_MS,
+          "worldmap.filter.merchant"
+        );
+        const filtered = await settleMap();
+        check(
+          "switching a map category off removes exactly its markers",
+          filtered.markers === drawn - 1,
+          `${drawn} -> ${filtered.markers}`
+        );
+      }
+
+      // The rail is still there and still works.
+      const railTab = await rectSoon("rail.tab.inventory");
+      check(`${label}: `+"the rail is still reachable with the map open", railTab !== null);
+      if (railTab) {
+        const activated = await clickAt(
+          railTab.x + railTab.w / 2,
+          railTab.y + railTab.h / 2,
+          CLICK_BUDGET_MS,
+          "rail.tab.inventory"
+        );
+        check(
+          "a rail control still activates with the map open",
+          activated.key === "rail.tab.inventory",
+          shown([railTab.x + railTab.w / 2, railTab.y + railTab.h / 2], activated)
+        );
+        check(
+          `${label}: `+"clicking the rail did not close the map",
+          (await mapState()).open
+        );
+      }
+
+      await hitPage.keyboard.press("Escape");
+      const closed = await settleMap();
+      check(`${label}: `+"Escape closes the world map", !closed.open, JSON.stringify(closed));
+    }
+
+
 
 }
 

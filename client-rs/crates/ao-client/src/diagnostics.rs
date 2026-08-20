@@ -141,6 +141,9 @@ fn publish(
     windows: Query<&Window>,
     state: Res<crate::ui::state::UiState>,
     drag: Res<crate::ui::character::DragState>,
+    map_open: Res<crate::ui::worldmap::WorldMapOpen>,
+    map_camera: Res<crate::ui::worldmap::WorldMapCamera>,
+    map_markers: Query<(), With<crate::ui::worldmap::WorldMapMarker>>,
     mut frames: Local<u64>,
 ) {
     // Republished every frame: `hovered` changes with the pointer and nothing
@@ -207,6 +210,20 @@ fn publish(
         &wasm_bindgen::JsValue::from_str("inventorySlots"),
         &slots,
     );
+
+    // The whole-world map: whether it is open, where it is looking and how many markers
+    // it drew. Published because the questions this task has to answer in a browser are
+    // about clamping and filtering, and neither is visible from outside without the
+    // numbers the client is using.
+    let _ = js_sys::Reflect::set(
+        &report,
+        &wasm_bindgen::JsValue::from_str("worldMapOpen"),
+        &wasm_bindgen::JsValue::from_bool(map_open.0),
+    );
+    set("worldMapScale", map_camera.view.scale as f64);
+    set("worldMapCentreX", map_camera.view.centre.x as f64);
+    set("worldMapCentreY", map_camera.view.centre.y as f64);
+    set("worldMapMarkers", map_markers.iter().count() as f64);
 
     // Whether a drag is in progress, and over what. Published because a drag that
     // produced no move has two very different causes — the client never saw the gesture
