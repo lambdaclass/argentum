@@ -342,7 +342,7 @@ including close/restore after resize, maximize and fullscreen.
 - **Phase:** 0
 - **Depends on:** W-0006, W-0007, W-0008, W-0088
 
-Nine defects found by running the built client rather than by reading it. Each is
+Ten defects found by running the built client rather than by reading it. Each is
 named with the code that is wrong, because a defect list that describes symptoms
 gets fixed by changing symptoms.
 
@@ -382,6 +382,13 @@ gets fixed by changing symptoms.
 - **A notice never clears.** The populated fixture carries a level-up and the
   notice stack has no expiry, so "level up" sits in the corner for the whole
   session. A notice that never clears has stopped being one.
+- **A missing world pack is drawn, not reported.** With the server down,
+  `net::load_map` fails and the client falls back to the generated map: flat
+  green tiles, a grid, and text where the item icons should be. Nothing on
+  screen says the world could not be fetched. `LoadState::Failed` and
+  `Graphics::failure` both exist and neither reaches a player — the compiler
+  says `failure` is never called. The load state has to be visible, and a
+  placeholder world has to admit that it is one.
 
 Close with tests at the layer that owns each claim: the reason mapping and the
 addressee in `ao-core`, the equipment invariant in the authority, the hotbar
