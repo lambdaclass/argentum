@@ -1645,11 +1645,7 @@ mod tests {
 
         let mut moved = app.world().resource::<UiState>().get().clone();
         moved.service.phase = ao_core::view::ConnectionPhase::Playing;
-        moved.world_map.markers.push(MapMarker {
-            x: 7,
-            y: 9,
-            kind: MarkerKind::Merchant,
-        });
+        moved.world_map.markers.push(MapMarker { x: 7, y: 9, kind: MarkerKind::Merchant });
         UiState::set(&mut app.world_mut().resource_mut::<UiState>(), moved);
         app.update();
         app.update();

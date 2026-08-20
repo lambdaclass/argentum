@@ -852,6 +852,27 @@ async function runHitTests(hitPage, label, ratio) {
         );
       }
 
+      // The overview this device would be given, and what holding it would cost. The
+      // budget is a constant in the client and a number in the manifest; this is the only
+      // place either can be checked against the device actually running it.
+      const overview = await hitPage.evaluate(() => ({
+        limit: window.aoLoaded?.overviewMaxDimension ?? 0,
+        dimension: window.aoLoaded?.overviewDimension ?? -1,
+        bytes: window.aoLoaded?.overviewBytes ?? -1,
+      }));
+      const expected =
+        overview.limit >= 2048 ? 2048 : overview.limit >= 1024 ? 1024 : 0;
+      check(
+        `${label}: `+"the device is offered the largest overview it can hold",
+        overview.dimension === expected,
+        `limit ${overview.limit} offered ${overview.dimension}, expected ${expected}`
+      );
+      check(
+        `${label}: `+"the overview stays inside its memory budget",
+        overview.bytes === expected * expected * 4 && overview.bytes <= 16 * 1024 * 1024,
+        `${overview.bytes} bytes for ${overview.dimension}px`
+      );
+
       // The rail is still there and still works.
       const railTab = await rectSoon("rail.tab.inventory");
       check(`${label}: `+"the rail is still reachable with the map open", railTab !== null);

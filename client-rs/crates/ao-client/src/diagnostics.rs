@@ -149,6 +149,7 @@ fn publish(
     map_open: Res<crate::ui::worldmap::WorldMapOpen>,
     map_camera: Res<crate::ui::worldmap::WorldMapCamera>,
     map_markers: Query<(), With<crate::ui::worldmap::WorldMapMarker>>,
+    limits: Res<crate::ui::scale::TargetLimits>,
     mut frames: Local<u64>,
 ) {
     // Republished every frame: `hovered` changes with the pointer and nothing
@@ -226,6 +227,21 @@ fn publish(
     set("worldMapCentreX", map_camera.view.centre.x as f64);
     set("worldMapCentreY", map_camera.view.centre.y as f64);
     set("worldMapMarkers", map_markers.iter().count() as f64);
+
+    // Which overview this device would be given, and what holding it would cost. The
+    // budget is otherwise a constant only the tests ever look at, and a fallback nothing
+    // outside the client can check is a fallback nobody knows is there.
+    let profile = crate::ui::worldmap::profile_for(limits.max_dimension);
+    set("overviewMaxDimension", limits.max_dimension as f64);
+    set(
+        "overviewDimension",
+        match profile {
+            crate::ui::worldmap::OverviewProfile::Full { dimension }
+            | crate::ui::worldmap::OverviewProfile::Reduced { dimension } => dimension as f64,
+            crate::ui::worldmap::OverviewProfile::Outline => 0.0,
+        },
+    );
+    set("overviewBytes", profile.decoded_bytes() as f64);
 
     // Whether a drag is in progress, and over what. Published because a drag that
     // produced no move has two very different causes — the client never saw the gesture
