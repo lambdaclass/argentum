@@ -34,8 +34,11 @@ Within Phase 2, finish the protocol contract (#13) before the modern launch,
 transport, bootstrap, receipt, reconnect, and seamless-handoff path (#16-#21).
 Do not broaden the Rust/Bevy packet surface until one existing character can
 authenticate and receive a complete authoritative bootstrap without relying on
-fixture state. Once that live world exists, close #21 before broader gameplay
-and presentation work makes loading screens an assumed lifecycle boundary.
+fixture state. As soon as that live world exists, prove #21's early atomic
+milestone with the current validated world pack; do not wait for per-map asset
+packaging, persistent cache, account-flow polish or staging. Then close the
+predictive/continuous-border milestone before broader gameplay and presentation
+work makes loading screens an assumed lifecycle boundary.
 
 ## Phase 1: Deterministic Parity Harness
 
@@ -225,7 +228,17 @@ Work:
 
 21. Make login bootstrap and zero-loading-screen map handoff use one structured
     snapshot boundary.
-   *(Rust/Bevy: W-0030, W-0062-W-0067, W-0094-W-0095.)*
+   *(Rust/Bevy: W-0030, W-0062-W-0067, W-0094-W-0096.)*
+   - **Early atomic milestone:** immediately after live bootstrap, use the
+     current validated world pack to drive one real map exit over the same
+     socket/session. The source remains fully rendered while destination
+     readiness is deliberately delayed by two seconds, then one complete
+     destination frame commits at the ordered end boundary. This milestone
+     must not wait for per-map resource packaging or predictive preload.
+   - **Continuous-border milestone:** after per-map resources and bounded
+     destination readiness exist, preload authorized compatible neighbors,
+     render both static maps in one camera space and cross without a loading
+     overlay, blank/partial frame, camera jump or new connection.
    - Refactor map entry so it returns structured snapshot data instead of
      sending nearby NPCs or other members out of band
    - Make the session process the single ordered writer for begin, snapshot
@@ -248,8 +261,9 @@ Work:
      scene atomically
    - On timeout, crash, overload, or rejected entry, either retain/recover the
      source world or terminate cleanly; never expose a half-entered destination
-   - Add a deterministic delay-injection test: with destination loading delayed
-     by two seconds, the old world remains visible, input is paused, and the
+   - Add the early milestone's deterministic delay-injection test first: with
+     destination loading delayed by two seconds, the old world remains visible,
+     input is paused, the socket/session identity is unchanged and the
      destination appears atomically after the matching end marker
    - Add a frame-by-frame preloaded-border test: held movement crosses without
      a loading overlay, blank/partial frame, camera jump, mixed epoch, second
@@ -276,6 +290,9 @@ Exit criteria:
   reconnect creates a fresh epoch without duplicate or stale state.
 - Login bootstrap and map transfer share a structured, ordered snapshot path;
   no out-of-band map producer can race the completion marker.
+- Before per-map packaging work begins, the current world pack proves one real
+  two-second-delayed transfer keeps the source visible and atomically commits a
+  complete destination on the same socket/session.
 - A normal preloaded border has no visible transition or new connection;
   unrelated exits commit one complete destination frame, and cold/failure paths
   keep the complete source world until commit or recovery.

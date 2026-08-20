@@ -190,23 +190,23 @@ bytes are the player-facing budget; raw bytes remain a diagnostic. The next
 budget task must remeasure rather than silently treating this snapshot as
 current forever.
 
-Map continuity is not implemented yet, and it is scheduled directly after the
-client can complete a real login and hold live world state — Phases 7 and 8 run
-before the HUD vertical slice, the gameplay parity tail and world fidelity.
-Seamless movement is what makes 842 map processes feel like one world rather
-than 842 rooms, and every phase built on top of a loading screen would have to
-be revisited once the screen is removed. Nothing in Phase 7 or Phase 8 depends
-on Phase 4, 5, 6 or later, so the order costs nothing.
+Map continuity is not implemented yet. The first proof now lands inside Phase 3,
+immediately after the client can complete a real login and hold live world
+state. It uses the current validated pack to prove the final structured
+snapshot, epoch, active/pending roots, input pause and one-frame commit before
+asset repackaging can become a blocker. Phases 7 and 8 then replace the pack
+source with bounded predictive resources and remove the camera seam at
+compatible borders, before the HUD vertical slice, gameplay parity tail or
+world-fidelity breadth.
 
 The server can keep every logical map process and its static state loaded, and
 does, but that alone cannot prevent a client hitch: the Rust client still needs
-governed handoff framing, per-map resources, predictive decode/upload, two
-resident scene roots and an atomic or camera-continuous commit. W-0062, W-0094
-and W-0063–W-0067/W-0095 are the single dependency chain that closes that gap,
-and W-0067 is where it is proved: a destination delayed by two seconds must
-leave the old world fully rendered and then appear atomically, and a preloaded
-compatible border must be crossed with no blank or partial frame and no
-perceptible pause.
+governed handoff framing, two resident scene roots, an atomic commit, per-map
+resources and predictive decode/upload. W-0062–W-0066 and W-0096 close the
+first gap in Phase 3: a destination delayed by two seconds must leave the old
+world fully rendered and then appear atomically on the same session. W-0055–
+W-0060/W-0094 and W-0095/W-0067 then prove a preloaded compatible border can be
+crossed with no blank, partial frame, camera jump or perceptible pause.
 
 ## Capability unlock map
 
@@ -217,14 +217,14 @@ table.
 | Phase | Capability unlocked | Depends on |
 | ---: | --- | --- |
 | 0 | Responsive, fixture-backed Bevy product shell | Current renderer |
-| 1 | Browser/native platform foundation with measured budgets | Phase 0 contracts |
+| 1 | WASM platform foundation with measured budgets | Phase 0 contracts |
 | 2 | Truthful authentication and governed protocol | Phase 1 |
-| 3 | Authoritative live world and reconciliation | Phase 2 |
+| 3 | Authoritative live world, reconciliation and atomic map handoff | Phase 2 |
 | 4 | Core combat/HUD vertical slice | Phases 0 and 3 |
 | 5 | Remaining AO workflow parity | Phase 4 |
 | 6 | World/audio fidelity within budgets | Phases 3–5 |
-| 7 | Versioned assets, bounded cache and predictive destination readiness | Phases 1 and 3; enables Phase 8 |
-| 8 | Zero-loading-screen map handoff and compatible-border continuity | Phases 3 and 7 |
+| 7 | Per-map runtime assets and predictive destination readiness | Phases 1 and 3; enables Phase 8 |
+| 8 | Camera-continuous compatible borders | Phases 3 and 7 |
 | 9 | Complete localization/accessibility/UI hardening | Phases 4–6 |
 | 10 | Staged, observable production releases | All production phases |
 | 11 | Measured experiments and future product ideas | Explicit research gates |
@@ -236,24 +236,30 @@ UI-first and fixture-backed; Phase 1 makes the platform boundary real before
 protocol breadth.
 
 Phase 0 keeps only the work that later phases depend on: `W-0085`, `W-0089`,
-`W-0009` — which `W-0025` needs for live account and character flows — and
-`W-0090`, which `W-0030` needs before it can own a world. Closing those unlocks
-Phase 1.
+`W-0009` and `W-0090`, which `W-0030` needs before it can own a world. Closing
+those unlocks Phase 1.
 
-Hardening and validation moved to Phase 0b, after Phase 3, and the Phase 0 exit
-gate list is its checklist. Nothing in that group gates protocol or world work,
-and each of them measures more against a live adapter than against fixtures: a
-component gallery, a worst-case fixture set, a lifecycle stress run and recorded
-usability sessions all answer "does this hold up" and the honest answer needs real
-data behind it. `W-0014` remains required before Phase 0 is product-approved.
+The shortest path to testing travel is explicit: close the two active Phase 0
+tasks, the product shell and the atomic first-scene reveal; build the platform
+boundary; then implement the governed snapshot path, a live authoritative world
+and the Phase 3 atomic-handoff slice. That first slice uses the already validated
+monolithic world pack so asset repackaging cannot delay the proof. Phase 7 then
+makes destinations predictively ready from bounded per-map resources, and Phase
+8 removes the remaining camera seam at compatible borders.
 
-`W-0062` sits in Phase 2 rather than Phase 8 because it is a decision, not an
-implementation: map handoff constrains world and entity lifecycle, and the tasks
-it constrains are cheaper to build to it than to rebuild for it. Phase 7 makes
-likely destinations ready before the boundary; Phase 8 implements atomic
-authority transfer and camera-continuous compatible borders. This is a
-production world invariant, not optional polish: no release can call map travel
-complete while a normal transition exposes a loading screen.
+Hardening, staging, account-flow polish, persistent-cache reuse and developer
+diagnostics are deliberately sequenced after the first seamless-travel proof.
+They remain release work, but they do not make an atomic transfer more correct.
+The Phase 0b checklist retains the prototype evidence; Phase 7b owns persistent
+cache and coherent application updates.
+
+`W-0062` through `W-0064` sit in Phase 2 because handoff packets, structured map
+entry and ordering are protocol foundations, not late presentation features.
+`W-0065`, `W-0066` and `W-0096` produce an early, falsifiable atomic handoff in
+Phase 3. Phase 7 makes likely destinations ready before the boundary; Phase 8
+implements camera-continuous compatible borders. This is a production world
+invariant, not optional polish: no release can call map travel complete while a
+normal transition exposes a loading screen.
 
 ## Phase 0 — Responsive Bevy game shell and UI/UX prototype
 
@@ -382,77 +388,19 @@ interaction, pan/zoom clamping and marker filtering. Capture whole-world,
 zoomed, panned, filtered and unavailable views at the Phase 0 size/DPR matrix,
 including close/restore after resize, maximize and fullscreen.
 
-### Task W-0093 — Prototype defect sweep
-
-- **State:** ready
-- **Phase:** 0
-- **Depends on:** W-0006, W-0007, W-0008, W-0088
-
-Ten defects found by running the built client rather than by reading it. Each is
-named with the code that is wrong, because a defect list that describes symptoms
-gets fixed by changing symptoms.
-
-- **Inventory feedback is one word for every reason.** `authority::rejection_for`
-  answers every refused inventory action with `FeedbackKey::Blocked`, so "your
-  pack is full", "it is too far away" and "you cannot do that while dead" all
-  reach the player as the same notice. The keys already exist; the mapping has to
-  use them, and an accepted action needs an acknowledgement that is not merely
-  the quantity changing.
-- **The hotbar does not refresh what it draws.** `hotbar::present_bindings`
-  rebuilds on the bindings and the count of drawable graphics, so a bound
-  consumable whose quantity changes keeps its old number: drink two potions and
-  the slot still says the old count. The quantity is read at rebuild time and
-  nothing rebuilds.
-- **A whisper has nobody to whisper to.** `Intent::SendChat` carries a channel
-  and a body and no addressee, so the composer's whisper channel cannot name a
-  recipient and the target strip's whisper action can only switch channel. The
-  intent needs the addressee, and the composer needs somewhere to put it.
-- **Equipment can disagree with the inventory.** `authority::equip` marks the
-  item equipped and then places it with `slot_for`, which guesses the slot from
-  substrings of the name key. An item the guess does not recognise is equipped in
-  the inventory and absent from the equipment row: two views of one fact, saying
-  different things. The view model has to carry the slot.
-- **The target is matched by name.** `target::shows_target` decides whether the
-  target is still visible by comparing name and kind against the presences. Two
-  characters with one name, or a rename, breaks it. Presences already carry an
-  id; the target has to carry one too.
-- **Names float over empty ground.** The presences in the populated fixture have
-  coordinates and no bodies, so `labels` draws a name over grass. Either the
-  world draws a stand-in for each presence or a label is not drawn without one.
-- **Two things are called Provisiones.** The fixture's merchant presence collides
-  with a name baked into the map's own artwork, so the same word appears twice
-  for two different things.
-- **Combat text never leaves.** `PresenceView::combat` is drawn for as long as it
-  is set, so the fixture's `-12` and `-34` hang over their characters
-  permanently. A number that does not fade is not damage, it is a label.
-- **A notice never clears.** The populated fixture carries a level-up and the
-  notice stack has no expiry, so "level up" sits in the corner for the whole
-  session. A notice that never clears has stopped being one.
-- **A missing world pack is drawn, not reported.** With the server down,
-  `net::load_map` fails and the client falls back to the generated map: flat
-  green tiles, a grid, and text where the item icons should be. Nothing on
-  screen says the world could not be fetched. `LoadState::Failed` and
-  `Graphics::failure` both exist and neither reaches a player — the compiler
-  says `failure` is never called. The load state has to be visible, and a
-  placeholder world has to admit that it is one.
-
-Close with tests at the layer that owns each claim: the reason mapping and the
-addressee in `ao-core`, the equipment invariant in the authority, the hotbar
-refresh and the fade timings in Bevy app tests, and the fixture coherence in the
-fixture tests. A capture of the busy HUD must show no name without a body, no
-duplicated name, and no notice or damage number that outlives its cause.
-
-### Task W-0009 — Bevy product screens
+### Task W-0009 — Core Bevy session screens
 
 - **State:** planned
 - **Phase:** 0
 - **Depends on:** W-0004, W-0005
 
-Build fixture-driven boot/loading, login, registration, character selection,
-character creation with sprite preview, rankings, maintenance, reconnect,
-invalid-session and recovery screens. These are real Bevy navigation states,
-not DOM placeholders, and include empty/error/slow outcomes before Phase 2
-connects services.
+Build the fixture-driven boot/loading, login, character selection, maintenance,
+reconnect, invalid-session and recovery screens required to enter, retain and
+recover a playable world. These are real Bevy navigation states, not DOM
+placeholders, and include empty/error/slow outcomes before Phase 2 connects
+services. Registration, character creation/preview and rankings remain in the
+same Bevy navigation model but are completed with the live account flows in
+W-0025; they do not gate the first map-transition proof.
 
 The rail's bottom navigation is a real, compact icon-button row using the
 shared control path, localized tooltips and accessible names. It provides the
@@ -582,7 +530,7 @@ dropped, and each item is written out there rather than referred to.
 - [ ] Focus, modal/chat ownership, drag cancellation, tooltips and IME never
       leak unintended world commands.
 
-## Phase 1 — Platform foundation
+## Phase 1 — WASM platform foundation
 
 Make the prototype honest while the platform-specific surface is still small.
 Minimal platform interfaces are scheduled immediately after the Phase 0
@@ -610,17 +558,6 @@ storage denial/quota, history and external-link behavior. Source/browser tests
 must prove the host contains only canvas, pre-WASM fallback and thin adapters—no
 application forms, panels or duplicate state tree.
 
-### Task W-0017 — Native adapters and build parity
-
-- **State:** planned
-- **Phase:** 1
-- **Depends on:** W-0015
-
-Replace native HTTP/WebSocket and platform stubs with real implementations and
-provide cache, clipboard, text composition, window/fullscreen, audio and link
-services. Move pure parsers/rules into `ao-core`; both targets and all
-platform-independent tests remain green.
-
 ### Task W-0018 — Honest lifecycle states
 
 - **State:** planned
@@ -629,26 +566,15 @@ platform-independent tests remain green.
 
 Extend application/session state only when transitions exist:
 `Boot -> Authenticate -> SelectCharacter -> LoadWorld -> Playing`, plus
-`Reconnecting` in Phase 2 and `Handoff` in Phase 8. Keep render memos and redraw
+`Reconnecting` in Phase 2 and `Handoff` in Phase 3. Keep render memos and redraw
 triggers as render concerns/change detection, not application states. Reset
 session-scoped resources explicitly at every transition.
-
-### Task W-0019 — Same-origin staging deployment
-
-- **State:** planned
-- **Phase:** 1
-- **Depends on:** W-0016
-
-Serve the WASM client and runtime configuration from the game origin while
-retaining explicit development overrides. Define a reproducible staging deploy,
-health check, cache headers, rollback and browser smoke path; no production host
-or credential is compiled into the artifact.
 
 ### Task W-0020 — Budgets and capability profiles
 
 - **State:** planned
 - **Phase:** 1
-- **Depends on:** W-0016, W-0017
+- **Depends on:** W-0016
 
 Remeasure optimized raw/gzip WASM and enforce a documented 5% unexplained-
 regression threshold. Establish fixed browser/device/network profiles and
@@ -659,15 +585,14 @@ profile or actionable unsupported-device screen.
 
 ### Phase 1 exit gate
 
-- [ ] `./build.sh check` passes for WASM and native, including both crates and
-      the roadmap gate.
-- [ ] Browser/native platform services share narrow contracts and no platform
-      conditionals leak into gameplay/UI.
+- [ ] `./build.sh check` passes for WASM, both Rust crates and the roadmap gate.
+- [ ] Browser platform services use narrow contracts and no platform
+      conditionals leak into gameplay/UI; the same contracts retain native
+      adapter seams for W-0017.
 - [ ] No credential/production host is compiled in; the browser host contains
       only canvas, fallback and thin adapters.
 - [ ] Lifecycle state is explicit and draw memos/redraw triggers remain render
       concerns.
-- [ ] Same-origin staging deploy, health check, smoke test and rollback repeat.
 - [ ] CI publishes raw/gzip size and fixed startup/frame/draw/heap/GPU/network
       budgets, failing unexplained regressions.
 - [ ] Supported, low-resource and unsupported capability profiles reach stable,
@@ -707,13 +632,14 @@ map/resource dependencies the player is permitted to cache, never destination
 players, NPCs, drops or hidden objectives. Pin malformed, stale-version,
 unauthorized and geometrically inconsistent topology fixtures.
 
-Decided here rather than in Phase 8 because handoff is a constraint on design, not
-a feature bolted on at the end. It dictates world and entity lifecycle: two live
-worlds, epochs, ordered batches, identity across a boundary and a cache that
+Decided here rather than in Phase 8 because handoff is a constraint on design,
+not a feature bolted on at the end. It dictates world and entity lifecycle: two
+live worlds, epochs, ordered batches, identity across a boundary and a cache that
 spans two maps. Settled after the protocol decision and before the tasks it
-constrains — `W-0031`, `W-0033`, `W-0051`, `W-0055` and `W-0059` — so those are
-built to it rather than rebuilt for it. Asset readiness is implemented in Phase
-7 and authority/scene continuity in Phase 8.
+constrains so those are built to it rather than rebuilt for it. The structured
+server path and ordering land in this phase; the first atomic client proof lands
+in Phase 3; predictive asset readiness and continuous border composition follow
+in Phases 7 and 8.
 
 ### Task W-0022 — Negotiated length-framed WebSocket transport
 
@@ -736,39 +662,78 @@ Choose and prove one source: machine-readable schema checked against Elixir
 goldens, an Elixir-source extractor with verification, or manual Rust codecs
 with paired fixtures. Code generation begins only after its source is trusted.
 
+### Task W-0029 — Bounded network queues
+
+- **State:** planned
+- **Phase:** 2
+- **Depends on:** W-0022
+
+Bound incoming frames/decoded packets and pending commands by bytes/count;
+budget processing per frame and observe WebSocket buffered amount. Overflow
+must disconnect/resnapshot explicitly, never grow forever, silently drop
+authoritative state or freeze one render frame.
+
+### Task W-0063 — Structured MapServer snapshot adapter
+
+- **State:** planned
+- **Phase:** 2
+- **Depends on:** W-0062
+
+Refactor `MapServer.enter/3` to return a structured snapshot rather than send
+NPC bytes out of band. Make login, reconnect and map entry consume the same
+internal snapshot shape. If a retained unframed protocol still requires the
+traditional packet sequence, isolate that encoding behind a protocol adapter;
+exact TypeScript behavior is not an acceptance criterion.
+
+Close with server tests proving no map producer calls a client/session process
+to emit a snapshot member and no NPC or object packet can arrive after an end
+marker through an out-of-band path.
+
+### Task W-0064 — Epoch, failure and ordered batch
+
+- **State:** planned
+- **Phase:** 2
+- **Depends on:** W-0022, W-0023, W-0029, W-0063
+
+Own a session `world_epoch`, increment per transfer and key map-local IDs by
+epoch. Keep the source world on failure, correct position and resume input.
+Guarantee `begin < every snapshot member < end` through one ordered,
+non-sheddable batch or critical FIFO; normal coalescing may not reorder, merge
+across or escape the boundary.
+
+Pin the sequence byte-for-byte in Elixir and Rust and force egress pressure in
+the test. Prove login, reconnect and handoff all use the same writer and that a
+late source-epoch envelope is rejected rather than applied to the destination.
+
 ### Task W-0024 — Login bootstrap decoding
 
 - **State:** planned
 - **Phase:** 2
-- **Depends on:** W-0022, W-0023
+- **Depends on:** W-0022, W-0023, W-0064
 
 Decode session token 200, world-pack signature 203, explicit login success and
 all bootstrap/error responses. Validate content version/hash before entering
 the world and prove a real existing character reaches the authoritative
-bootstrap with packet 73.
+bootstrap with packet 73. This first vertical slice may use explicitly supplied
+development credentials from runtime configuration; polished account and
+character navigation is W-0025 and does not block handoff testing.
 
-### Task W-0025 — Live Bevy account and character flows
-
-- **State:** planned
-- **Phase:** 2
-- **Depends on:** W-0009, W-0016, W-0024
-
-Connect Bevy registration, login/logout, server-provided character options,
-creation/preview, selection, launch and rankings to REST and the game socket.
-Use launch token plus character ID; never send account passwords over the game
-protocol. Preserve reloadable routes/history on web and equivalent navigation
-on native.
-
-### Task W-0026 — Normal-play packet coverage
+### Task W-0026 — Authoritative live-world packet coverage
 
 - **State:** planned
 - **Phase:** 2
 - **Depends on:** W-0023, W-0024
 
-Add paired fixtures and Rust handlers for entity create/move/change/remove,
-chat/structured console events, stats, inventory, spells, objects, weather, map
-change, intervals, build/version and errors. Unknown framed packets are counted
-and skipped; unknown legacy packets fail without desync.
+Add paired fixtures and Rust handlers for the minimum authoritative world
+surface needed by W-0030 and W-0096: snapshot begin/end, entity
+create/move/change/remove, map/position/heading change, character composition,
+visible objects, build/content version and transition errors. Unknown framed
+packets are counted and skipped; unknown legacy packets fail without desync.
+
+Incremental chat, detailed inventory/spell/stat updates, weather and other
+gameplay breadth belong to their Phase 4–6 owning tasks and do not gate the
+first real map transition. The bootstrap may still carry their typed initial
+state without requiring every later mutation packet here.
 
 ### Task W-0028 — Redacted trace and deterministic replay
 
@@ -792,17 +757,6 @@ token expiry and explicit `Playing` only after bootstrap. Classify credentials,
 ban/mute, full, maintenance, stale world/assets and preload failures into Bevy
 states with independent retry/reconnect/forget-session actions.
 
-### Task W-0029 — Bounded network queues
-
-- **State:** planned
-- **Phase:** 2
-- **Depends on:** W-0022
-
-Bound incoming frames/decoded packets and pending commands by bytes/count;
-budget processing per frame and observe WebSocket buffered amount. Overflow
-must disconnect/resnapshot explicitly, never grow forever, silently drop
-authoritative state or freeze one render frame.
-
 ### Phase 2 exit gate
 
 - [ ] Protocol v2/new packets are classified and byte-pinned before use; legacy
@@ -814,14 +768,22 @@ authoritative state or freeze one render frame.
       hostile lengths and arbitrary unknown IDs without panic or desync.
 - [ ] A real existing character uses packet 73, validates packet 203, accepts
       token 200 and completes authoritative bootstrap; packet 74 is creation-only.
-- [ ] Registration, preview/creation, selection, launch, rankings, logout, deep
-      links and history work through Bevy.
+- [ ] `MapServer.enter/3` returns structured data; login, reconnect and handoff
+      share one ordered writer and no snapshot member is emitted out of band.
+- [ ] Forced backpressure proves `begin < every member < end`, and a stale world
+      epoch cannot mutate the current world.
 - [ ] Redacted traces replay deterministically and contain no password, token,
       cookie or account secret.
 - [ ] Network bursts stay bounded and every auth/bootstrap failure offers the
       correct recovery without an invisible live session.
 
-## Phase 3 — Authoritative client state and live world
+## Phase 3 — Authoritative live world and atomic map handoff
+
+This phase is the first playable travel milestone. It proves the final authority,
+epoch, scene-root and input contracts with the current validated world pack,
+before per-map packaging or prediction exists. It must be testable on the first
+pair of connected maps; it is not allowed to wait for every asset optimization
+or every compatible border in the world.
 
 ### Task W-0030 — Bootstrap-owned world
 
@@ -878,16 +840,69 @@ Separate transport/session, authoritative model, presentation and Bevy UI before
 packet breadth causes another monolith. Raw packet structures never become
 widget resources.
 
-### Task W-0035 — Bounded developer diagnostics
+### Task W-0065 — Active/pending Bevy worlds
 
 - **State:** planned
 - **Phase:** 3
-- **Depends on:** W-0032, W-0034
+- **Depends on:** W-0034, W-0064, W-0090
 
-Add feature/build-gated Bevy diagnostics for redacted packets, authoritative vs
-predicted position, corrections, cadence, tile inspection, budgets and
-build/world IDs. Release builds keep bounded metrics without private operator
-tools.
+Maintain `ActiveWorld` and `PendingWorld` under separate `MapSceneRoot`s. Keep
+the source root fully rendered while destination map data, assets and the
+complete snapshot become ready. Commit once on a frame boundary; reject queued
+envelopes from a stale map or epoch and destroy a cancelled pending root without
+touching the active one.
+
+Reuse W-0090's reveal-set/readiness contract so initial login and later handoff
+cannot develop different definitions of a complete first destination frame.
+For this early slice, the validated monolithic world pack is an allowed asset
+source: the scene/authority API must already accept a map-scoped dependency set
+so Phase 7 can replace the source without rewriting handoff.
+
+### Task W-0066 — Input and lifecycle handoff behavior
+
+- **State:** planned
+- **Phase:** 3
+- **Depends on:** W-0018, W-0032, W-0033, W-0065
+
+Enter real `Handoff`, pause unsafe gameplay intents and reset `WalkGate` without
+replaying source-epoch steps. Keep the network/session processing. Commit only
+the matching ordered snapshot when the destination scene is complete, then
+resume input against the new epoch. Door, portal and teleport clear held
+movement; compatible-border held-input continuity remains a Phase 8 concern.
+
+On timeout, rejection, disconnect, corrupt/missing assets or memory-budget
+failure, retain or restore the complete source scene with an actionable reason.
+Do not infer completion from packet timing: transfer intentionally suppresses
+`pos_update` today.
+
+### Task W-0096 — Atomic handoff vertical slice
+
+- **State:** planned
+- **Phase:** 3
+- **Depends on:** W-0028, W-0066
+
+Wire one real server map exit through the governed begin/snapshot/end path into
+`PendingWorld`, using the existing world pack, same WebSocket, session process
+and character authority. Add an explicit delay-injection hook and make this the
+first handoff acceptance test:
+
+1. start fully playable on the source map;
+2. delay destination readiness by two seconds;
+3. cross the exit and verify the source world remains completely rendered while
+   unsafe input is paused and the socket/session stay unchanged; record the
+   already-running destination `MapServer` identity and prove no process startup
+   or map parsing occurs on this path;
+4. deliver the matching end boundary and verify the very next committed world
+   frame is a complete destination—never a loading screen, blank, generated
+   fallback, partial layer, duplicate character or mixed epoch;
+5. repeat with rejection, missing/corrupt pack data, stale snapshot members,
+   mid-transfer disconnect and source recovery.
+
+Capture the frames and network/session identity as test artifacts. Run 1,000
+back-and-forth transitions while asserting one active root, at most one pending
+root, one authoritative local character, bounded entities/textures/listeners and
+no monotonic WASM-heap growth. This closes atomic no-blank travel, not yet the
+predictive, camera-continuous compatible border owned by W-0095.
 
 ### Phase 3 exit gate
 
@@ -898,13 +913,21 @@ tools.
       oscillation; interpolation never rewrites authority.
 - [ ] Login/reconnect/handoff reset `WalkGate`, held input and stale epoch state.
 - [ ] Reconnect obtains a fresh snapshot and never replays asleep/offline input.
-- [ ] Fixture, replay and live adapters produce equivalent typed snapshots; no
-      widget reads packets and release builds omit private diagnostics.
+- [ ] Fixture, replay and live adapters produce equivalent typed snapshots and
+      no widget reads packets.
+- [ ] A real exit uses one socket/session and one ordered snapshot boundary;
+      while destination work is delayed two seconds the complete source remains
+      visible, then one frame atomically commits the complete destination.
+- [ ] Failure, stale epoch, missing/corrupt resources and disconnect recover to
+      one explicit authoritative state; 1,000 transitions leak no world root,
+      entity, texture, listener or memory.
 
-## Phase 7 — Versioned assets, persistent cache and destination readiness
+## Phase 7 — Per-map runtime assets and destination readiness
 
-This precedes seamless handoff. A transition cannot be hitch-free if it first
-downloads or materializes the full 58.8 MB pack.
+The Phase 3 atomic transition is already correct with the current world pack.
+This phase makes the normal path ready before contact: a transition cannot be
+hitch-free if it first downloads or materializes the full 58.8 MB pack. Browser
+persistence is useful but does not gate this in-session readiness proof.
 
 ### Task W-0055 — Indexed or per-map world format
 
@@ -927,16 +950,6 @@ The format has to satisfy `W-0062`, which is what makes a per-map request cheap 
 Version maps, indices, sprite sheets and audio; validate packet 203 and prevent
 mixed world builds through atomic activation/invalidation.
 
-### Task W-0057 — Persistent cache service
-
-- **State:** planned
-- **Phase:** 7
-- **Depends on:** W-0015, W-0056
-
-Implement Cache Storage/IndexedDB on web and application cache directories on
-native. Denial, quota exhaustion, eviction, corruption and partial versions
-fall back safely.
-
 ### Task W-0058 — Immutable/range resource serving
 
 - **State:** planned
@@ -944,20 +957,24 @@ fall back safely.
 - **Depends on:** W-0055, W-0056
 
 Serve content-addressed assets with immutable headers and range support where
-the format requires it; prove warm visits do not refetch unchanged resources.
+the format requires it. Prove one map request cannot force transfer of unrelated
+maps and a cancelled range/request cannot activate a partial resource.
 
-### Task W-0059 — Byte-budgeted cache and preloading
+### Task W-0059 — Byte-budgeted residency and preloading
 
 - **State:** planned
 - **Phase:** 7
-- **Depends on:** W-0057, W-0062
+- **Depends on:** W-0056, W-0062
 
 Track compressed, decoded-map, WASM-heap and estimated RGBA/GPU bytes
 separately. Evict by bytes, not entry count. Build a map-to-assets dependency
 index and give speculative exits a separate allowance below authoritative-world
 headroom.
 
-The budget has to satisfy `W-0062`: during a handoff the cache holds the map being left and the map being entered, and eviction that cannot express that will drop the one still on screen.
+The budget has to satisfy `W-0062`: during a handoff the in-memory residency set
+holds the map being left and the map being entered, and eviction that cannot
+express that will drop the one still on screen. Persistent reuse across browser
+sessions is a separate Phase 7b concern.
 
 ### Task W-0060 — Bounded decode and GPU upload
 
@@ -973,7 +990,7 @@ metadata and reject hostile dimensions/counts even when hashes match.
 
 - **State:** planned
 - **Phase:** 7
-- **Depends on:** W-0060, W-0062
+- **Depends on:** W-0058, W-0060, W-0062
 
 Turn the current map's server-authorized exit topology into a bounded preload
 plan before the player reaches a transition. Rank candidates from position,
@@ -999,98 +1016,35 @@ movement-speed/network profile, a normal traversable exit must be ready before
 contact; a miss enters the explicit retained-source fallback owned by W-0066,
 never progressive destination rendering.
 
-### Task W-0061 — Coherent app-shell updates
-
-- **State:** planned
-- **Phase:** 7
-- **Depends on:** W-0056, W-0057
-
-Cache the shell/service worker while remaining honest that play needs a server.
-Install/activate atomically so no tab combines old WASM with a partially updated
-manifest, including rollback.
-
 ### Phase 7 exit gate
 
 - [ ] Loading one map neither downloads nor retains the complete 58.8 MB pack;
       a small manifest activates atomically and prevents mixed builds.
-- [ ] Warm visits do not refetch unchanged maps, sheets or audio.
-- [ ] Storage denial/quota/eviction, corruption, partial downloads and rollback
-      recover automatically.
-- [ ] CI separates cold/warm transfer, cache hit, compressed/decoded/heap/GPU
-      bytes; eviction and speculation are megabyte-bounded.
-- [ ] Cached decode/upload stays under per-frame work/byte ceilings.
+- [ ] A map/range request transfers only its bounded resource set; cancellation,
+      corruption or partial data never activates an incomplete destination.
+- [ ] CI reports compressed transfer, decoded map, WASM heap and GPU bytes;
+      residency, eviction and speculation are megabyte-bounded.
+- [ ] Decode/upload stays under per-frame work/byte ceilings.
 - [ ] Authorized exits produce a bounded destination-readiness plan; normal
       traversable-route tests reach the boundary with the complete destination
       resident, decoded and GPU-ready, while misses retain the source scene.
 - [ ] Prediction cannot recursively fetch the world, disclose live destination
       state, evict the active map or exceed its compressed/decoded/GPU allowance.
-- [ ] Resource fuzzing enforces size/dimension/count limits and service-worker
-      activation/rollback keeps one coherent shell/WASM/manifest set.
+- [ ] Resource fuzzing enforces size, dimension and count limits.
 
-## Phase 8 — Zero-loading-screen authoritative map handoff
+## Phase 8 — Camera-continuous compatible borders
 
-Treat this as approximately 40% server/60% client. The server API and ordering
-changes are core work, not two free packets. One loaded GenServer per logical
-map remains a valid server design: this phase removes that boundary from the
-player experience rather than merging all simulation into one process. The
-socket/session never reconnects for travel, and a preloaded normal transition
-does not display a loading state.
-
-### Task W-0063 — Structured MapServer snapshot adapter
-
-- **State:** planned
-- **Phase:** 8
-- **Depends on:** W-0062
-
-Refactor `MapServer.enter/3` to return a structured snapshot rather than send
-NPC bytes out of band. If the governed unframed protocol still requires the
-traditional packet sequence, isolate it behind a protocol adapter; exact
-TypeScript behavior is not an acceptance criterion.
-
-### Task W-0064 — Epoch, failure and ordered batch
-
-- **State:** planned
-- **Phase:** 8
-- **Depends on:** W-0063
-
-Own a session `world_epoch`, increment per transfer and key map-local IDs by
-epoch. Keep the source world on failure, correct position and resume input.
-Guarantee `begin < every snapshot member < end` through one ordered batch or
-critical FIFO; normal coalescing may not escape the boundary.
-
-### Task W-0065 — Active/pending Bevy worlds
-
-- **State:** planned
-- **Phase:** 8
-- **Depends on:** W-0064, W-0094
-
-Maintain `ActiveWorld` and `PendingWorld` under separate `MapSceneRoot`s. Commit
-once, only when assets and complete snapshot are ready; reject queued envelopes
-from stale map/epoch. Reuse the W-0090 reveal-set/readiness contract so initial
-login and later handoff cannot develop different definitions of a complete
-first destination frame.
-
-### Task W-0066 — Input and lifecycle handoff behavior
-
-- **State:** planned
-- **Phase:** 8
-- **Depends on:** W-0018, W-0065
-
-Enter real `Handoff` and reset `WalkGate` without replaying source-epoch steps.
-When `DestinationReadiness` is already complete, commit on the matching ordered
-snapshot boundary without a player-visible pause. A compatible walkable border
-may carry the currently held direction into one fresh destination-epoch intent
-after acceptance; a door/portal/teleport clears it. If readiness misses, pause
-unsafe gameplay, retain the old rendered world, expose an explanation only
-after a bounded grace period and resume only after atomic commit or explicit
-source recovery. Do not infer completion from packet timing: transfer
-intentionally suppresses `pos_update` today.
+Phase 3 already proved the same-socket, atomic, no-blank authority transfer and
+Phase 7 made likely destinations ready before contact. This phase removes the
+last visible seam for topology that is truly spatially compatible. One loaded
+GenServer per logical map remains valid: the client composes authorized static
+maps continuously while the server keeps simulation authority separated.
 
 ### Task W-0095 — Compatible-border continuous composition
 
 - **State:** planned
 - **Phase:** 8
-- **Depends on:** W-0065, W-0066
+- **Depends on:** W-0065, W-0066, W-0094
 
 For topology classified by W-0062 as `compatible_border`, place the active and
 ready destination map roots in one world coordinate space using the governed
@@ -1120,16 +1074,14 @@ without pretending unrelated spaces are adjacent.
 
 - **State:** planned
 - **Phase:** 8
-- **Depends on:** W-0095
+- **Depends on:** W-0095, W-0096
 
-Add delay injection and forced egress backpressure. Prove a two-second delayed
-destination leaves the old world visible and commits atomically; cover failure,
-mid-transfer disconnect, stale movement, packet ordering and 1,000-transition
-entity/texture cleanup. Capture preloaded compatible borders frame by frame and
-fail on a loading overlay, camera jump, incomplete destination layer, mixed
-epoch or second socket/session. Record preload hit rate, boundary-to-commit
-latency and cold-fallback duration separately so a correct fallback cannot hide
-a consistently late preload path.
+Extend W-0096's delay/backpressure harness with preloaded compatible-border
+captures. Fail frame by frame on a loading overlay, camera jump, incomplete
+destination layer, mixed epoch or second socket/session. Cover every edge,
+backtracking, rejection and two nearby exits; record preload hit rate,
+boundary-to-commit latency and cold-fallback duration separately so a correct
+fallback cannot hide a consistently late preload path.
 
 ### Phase 8 exit gate
 
@@ -1150,18 +1102,126 @@ a consistently late preload path.
       from its authoritative snapshot.
 - [ ] Preloaded doors, portals and teleports atomically replace one complete
       scene with another without fabricating spatial adjacency.
-- [ ] A two-second delayed destination leaves the source visible, pauses input
-      and commits in one frame without black/loading/duplicate artifacts.
+- [ ] The Phase 3 two-second delayed-destination proof remains green against the
+      final per-map resource and composition path.
 - [ ] Failure and mid-transfer disconnect recover explicitly; 1,000 transitions
       leak no scene root, entity, decoded map or texture.
 
+## Phase 7b — Persistent cache and coherent updates
+
+This hardening follows the first correct transition and the first continuous
+border. It improves repeat visits and deployment safety without delaying the
+runtime residency and preload path those milestones need.
+
+### Task W-0057 — Persistent cache service
+
+- **State:** planned
+- **Phase:** 7b
+- **Depends on:** W-0015, W-0056
+
+Implement Cache Storage/IndexedDB on web and application cache directories on
+native. Denial, quota exhaustion, eviction, corruption and partial versions
+fall back safely. Persistent entries feed the same bounded residency API proven
+in Phase 7; they do not create a second asset-loading path.
+
+### Task W-0061 — Coherent app-shell updates
+
+- **State:** planned
+- **Phase:** 7b
+- **Depends on:** W-0056, W-0057
+
+Cache the shell/service worker while remaining honest that play needs a server.
+Install/activate atomically so no tab combines old WASM with a partially updated
+manifest, including rollback.
+
+### Phase 7b hardening checklist
+
+- [ ] Warm visits do not refetch unchanged maps, sheets or audio.
+- [ ] Storage denial, quota exhaustion, eviction, corruption and partial
+      downloads fall back to a correct cold/runtime path.
+- [ ] Service-worker activation and rollback keep one coherent
+      shell/WASM/manifest set across multiple tabs.
+
 ## Phase 0b — Prototype hardening and validation
 
-Deferred out of Phase 0 deliberately. None of these gates protocol or world work,
-and every one of them is worth more once real data exists: a component gallery, a
-worst-case fixture set, a lifecycle stress run and recorded usability sessions all
-test more against a live adapter than against fixtures. They run after Phase 3, and
-the Phase 0 exit gate list is their checklist.
+Deferred out of the critical travel path deliberately. These remain required
+before release, but none is needed to prove atomic or continuous map travel.
+They are worth more once real data and the final transition lifecycle exist: a
+defect sweep, staging, polished account flows, private diagnostics, a component
+gallery, a worst-case fixture set, a lifecycle stress run and recorded usability
+sessions all test more against a live adapter than against fixtures.
+
+### Task W-0093 — Prototype defect sweep
+
+- **State:** planned
+- **Phase:** 0b
+- **Depends on:** W-0006, W-0007, W-0008, W-0088
+
+Fix the concrete defects already found by running the built client:
+
+- map inventory rejection reasons to distinct actionable feedback and emit an
+  acknowledgement for accepted actions;
+- rebuild a bound consumable's hotbar quantity when inventory changes;
+- carry a whisper addressee through the intent and composer;
+- carry the authoritative equipment slot instead of guessing from a name key;
+- identify targets by presence ID rather than display name and kind;
+- draw no world label without a corresponding body/stand-in;
+- remove the fixture's duplicate `Provisiones` identity;
+- expire combat text and level-up/system notices under explicit timing rules;
+  and
+- show an actionable failed-load state when the world pack is missing instead
+  of silently drawing the generated green-grid fallback.
+
+W-0090 and W-0096 independently own truthful failure during first reveal and
+handoff, so deferring this broader sweep cannot permit a placeholder transition.
+Close with layer-owned tests and a busy-HUD capture showing no name without a
+body, duplicated name or feedback that outlives its cause.
+
+### Task W-0017 — Native adapters and build parity
+
+- **State:** planned
+- **Phase:** 0b
+- **Depends on:** W-0015
+
+Replace native HTTP/WebSocket and platform stubs with real implementations and
+provide cache, clipboard, text composition, window/fullscreen, audio and link
+services. Move pure parsers/rules into `ao-core`; both targets and all
+platform-independent tests remain green. This reuses the interfaces proven by
+the WASM vertical slice and cannot fork gameplay, authority or UI behavior.
+
+### Task W-0019 — Same-origin staging deployment
+
+- **State:** planned
+- **Phase:** 0b
+- **Depends on:** W-0016
+
+Serve the WASM client and runtime configuration from the game origin while
+retaining explicit development overrides. Define a reproducible staging deploy,
+health check, cache headers, rollback and browser smoke path; no production host
+or credential is compiled into the artifact.
+
+### Task W-0025 — Live Bevy account and character flows
+
+- **State:** planned
+- **Phase:** 0b
+- **Depends on:** W-0009, W-0016, W-0024
+
+Connect Bevy registration, login/logout, server-provided character options,
+creation/preview, selection, launch and rankings to REST and the game socket.
+Use launch token plus character ID; never send account passwords over the game
+protocol. Preserve reloadable routes/history on web and equivalent navigation
+on native.
+
+### Task W-0035 — Bounded developer diagnostics
+
+- **State:** planned
+- **Phase:** 0b
+- **Depends on:** W-0032, W-0034
+
+Add feature/build-gated Bevy diagnostics for redacted packets, authoritative vs
+predicted position, corrections, cadence, tile inspection, transition readiness,
+budgets and build/world IDs. Release builds keep bounded metrics without private
+operator tools.
 
 ### Phase 0b hardening checklist
 
@@ -1187,6 +1247,12 @@ sessions.
       once per cycle.
 - [ ] Component gallery and production UI share models, intents, fixtures,
       tokens and components; the deterministic golden matrix passes.
+- [ ] Registration, preview/creation, selection, launch, rankings, logout, deep
+      links and history work through Bevy.
+- [ ] Same-origin staging deploy, health check, smoke test and rollback repeat;
+      diagnostics remain feature/build-gated and redact private data.
+- [ ] Native and WASM use the same platform contracts, authoritative models and
+      Bevy UI; both builds and all platform-independent tests remain green.
 - [ ] Source/browser checks find no DOM/CSS application panel, form, navigation
       state or alternate HUD.
 - [ ] Pinned-toolchain format, clippy, WASM/native and test gates pass with no
@@ -1908,7 +1974,7 @@ the root roadmap when it enters active execution.
 | W-0050 | Emit map triggers consumed by the Rust world renderer |
 | W-0055–W-0058 | Indexed assets, hashes, range/immutable serving |
 | W-0062–W-0064 | Handoff parity, structured snapshot, epoch and FIFO batch |
-| W-0094–W-0095 | Authorized transition topology, preload dependencies and exact compatible-border transforms |
+| W-0094–W-0096 | Atomic-transition evidence, authorized preload dependencies and exact compatible-border transforms |
 | W-0075, W-0080–W-0081 | Security, rollout compatibility, session ownership and operations |
 
 ## Global definition of done
