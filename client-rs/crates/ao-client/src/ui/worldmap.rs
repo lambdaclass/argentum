@@ -20,6 +20,97 @@ use super::tokens::{ink, size, space, surface, type_scale};
 use ao_core::view::{MapAvailability, MapMarker, MarkerKind, WorldMapState};
 use bevy::prelude::*;
 
+/// The overview art the map is allowed to draw, and what it may cost.
+///
+/// A separate, bounded asset — never the gameplay world pack. The pack is tens of
+/// megabytes of per-tile data for one map at a time; the overview is one image of the
+/// whole world, and decoding the former to draw the latter would trade a fixed cost for
+/// an unbounded one and still be wrong at the edges of maps the player has not loaded.
+///
+/// Budget, at the maximum profile:
+///
+/// - **Source**: project-owned, generated offline from the same map data the server
+///   already publishes. No third-party art, so no third-party licence: it carries the
+///   repository's own licence, which is what makes it shippable in a web bundle.
+/// - **Maximum dimension**: 2048 x 2048. That is the smallest limit any WebGL2 device in
+///   the support matrix guarantees, so the full profile works everywhere the client runs
+///   at all.
+/// - **Decoded / GPU cost**: 2048 x 2048 x 4 bytes = 16 MiB resident, once, for as long
+///   as the overlay is open.
+/// - **Compressed cost**: budgeted at 2 MiB over the wire. A world overview is flat
+///   colour and hard edges, which is what PNG is good at; the number is a ceiling the
+///   manifest entry is checked against rather than a measurement of art that does not
+///   exist yet.
+/// - **Below the limit**: a device reporting less than 2048 gets the reduced profile at
+///   1024 (4 MiB), and one that cannot manage 1024 gets no art at all and the vector
+///   outline instead. The outline is not a degraded mode with a black rectangle in it —
+///   it is drawn from the same marker data, and it is what every profile falls back to
+///   while the asset is missing.
+///
+/// The art itself does not exist yet, which is why the client draws the outline today and
+/// says so. Phase 7 content-hashes and caches the production asset; this is the entry it
+/// will fill, and the budget it has to fit.
+pub const OVERVIEW_MAX_DIMENSION: u32 = 2048;
+
+/// The reduced dimension for a device that cannot manage the full one.
+pub const OVERVIEW_REDUCED_DIMENSION: u32 = 1024;
+
+/// Bytes per pixel once decoded, which is also what it costs on the GPU.
+pub const OVERVIEW_BYTES_PER_PIXEL: u64 = 4;
+
+/// The ceiling the manifest entry is checked against, over the wire.
+pub const OVERVIEW_MAX_COMPRESSED_BYTES: u64 = 2 * 1024 * 1024;
+
+/// Which overview a device can be asked to hold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverviewProfile {
+    /// The full asset.
+    Full { dimension: u32 },
+    /// A smaller one, for a device that cannot hold the full asset.
+    Reduced { dimension: u32 },
+    /// No art at all: the outline, drawn from the marker data.
+    Outline,
+}
+
+impl OverviewProfile {
+    /// What this profile costs once decoded, in bytes.
+    pub fn decoded_bytes(self) -> u64 {
+        match self {
+            OverviewProfile::Full { dimension } | OverviewProfile::Reduced { dimension } => {
+                dimension as u64 * dimension as u64 * OVERVIEW_BYTES_PER_PIXEL
+            }
+            OverviewProfile::Outline => 0,
+        }
+    }
+}
+
+/// The profile a device reporting `max_dimension` can be given.
+///
+/// Keyed off the device's own `max_texture_dimension_2d`, the same number the world
+/// render target is bounded by, rather than a guess from the user agent.
+pub fn profile_for(max_dimension: u32) -> OverviewProfile {
+    if max_dimension >= OVERVIEW_MAX_DIMENSION {
+        OverviewProfile::Full { dimension: OVERVIEW_MAX_DIMENSION }
+    } else if max_dimension >= OVERVIEW_REDUCED_DIMENSION {
+        OverviewProfile::Reduced { dimension: OVERVIEW_REDUCED_DIMENSION }
+    } else {
+        OverviewProfile::Outline
+    }
+}
+
+/// What to say about the art the player is not seeing.
+///
+/// Two different facts, and a player can act on one of them: a device that cannot hold the
+/// overview will never show it, while art that has not been published yet will appear when
+/// it is. Collapsing them into "no map" would tell someone to go looking for a setting that
+/// does not exist.
+pub fn overview_note(profile: OverviewProfile) -> &'static str {
+    match profile {
+        OverviewProfile::Outline => "map.overview.unsupported",
+        _ => "map.overview.missing",
+    }
+}
+
 /// Categories a player can switch off, in the order the legend shows them.
 pub const CATEGORIES: [MarkerKind; 5] = [
     MarkerKind::Party,
@@ -497,6 +588,7 @@ fn present_overlay(
     open: Res<WorldMapOpen>,
     state: Res<UiState>,
     player: Res<crate::world::LocalPlayer>,
+    limits: Res<super::scale::TargetLimits>,
     geometry: Res<super::shell::AppliedGeometry>,
     camera: Res<WorldMapCamera>,
     filters: Res<CategoryFilters>,
@@ -564,6 +656,10 @@ fn present_overlay(
         super::fallback_label(&map.region_key)
     };
     let heading = format!("{region} — {},{}", player.x, player.y);
+    // Which overview this device would be given, and therefore which of the two honest
+    // things to say about the art it is not seeing.
+    let profile = profile_for(limits.max_dimension);
+    let note = super::fallback_label(overview_note(profile));
     let shows: Vec<bool> = CATEGORIES.into_iter().map(|kind| filters.shows(kind)).collect();
 
     commands.entity(world_region).with_children(|parent| {
@@ -606,6 +702,11 @@ fn present_overlay(
                             Text::new(heading),
                             TextFont { font_size: type_scale::SMALL, ..default() },
                             TextColor(ink::PRIMARY),
+                        )),
+                        Spawn((
+                            Text::new(note),
+                            TextFont { font_size: type_scale::MICRO, ..default() },
+                            TextColor(ink::MUTED),
                         )),
                         Spawn((
                             super::controls::button(
@@ -658,15 +759,31 @@ fn present_overlay(
                                 })
                                 .into_iter(),
                         ),
-                        SpawnIter(markers.into_iter().map(|(at, kind)| {
+                        SpawnIter(markers.into_iter().enumerate().map(|(index, (at, kind))| {
                             (
                                 Node {
                                     position_type: PositionType::Absolute,
                                     left: Val::Px(at.x),
                                     top: Val::Px(at.y),
+                                    // Big enough to point at. The shape inside is small
+                                    // on purpose; the target does not have to be.
+                                    width: Val::Px(size::ICON_BUTTON * 0.6),
+                                    height: Val::Px(size::ICON_BUTTON * 0.6),
+                                    margin: UiRect::axes(
+                                        Val::Px(-size::ICON_BUTTON * 0.3),
+                                        Val::Px(-size::ICON_BUTTON * 0.3),
+                                    ),
+                                    align_items: AlignItems::Center,
+                                    justify_content: JustifyContent::Center,
                                     ..default()
                                 },
-                                Pickable::IGNORE,
+                                // A control, so it has hover and focus states and a
+                                // tooltip that says what it is. A marker a player cannot
+                                // interrogate is a coloured dot.
+                                super::controls::interactive(920 + index as u32, true),
+                                super::icons::AccessibleName::new(kind.name_key()),
+                                super::icons::ShowsTooltip,
+                                super::controls::ControlKey::indexed("worldmap.marker", index),
                                 WorldMapMarker(kind),
                                 children![super::minimap::marker_node(kind)],
                             )
@@ -1004,6 +1121,103 @@ mod tests {
     }
 
     #[test]
+    fn the_map_says_which_of_the_two_missing_art_stories_applies() {
+        // A device that cannot hold the overview will never show it; art that has not been
+        // published yet will appear when it is. Collapsing them into "no map" sends someone
+        // looking for a setting that does not exist.
+        use super::super::testing;
+
+        let mut app = map_app();
+        app.world_mut()
+            .insert_resource(super::super::scale::TargetLimits::for_device(8192));
+        testing::tap_key(&mut app, KeyCode::Tab);
+        app.update();
+        app.update();
+        let published = overlay_text(&mut app).join(" | ");
+        assert!(
+            published.to_lowercase().contains("missing"),
+            "a capable device is not told the art is unpublished: {published}"
+        );
+
+        let mut app = map_app();
+        app.world_mut().insert_resource(super::super::scale::TargetLimits::for_device(512));
+        testing::tap_key(&mut app, KeyCode::Tab);
+        app.update();
+        app.update();
+        let unsupported = overlay_text(&mut app).join(" | ");
+        assert!(
+            unsupported.to_lowercase().contains("unsupported"),
+            "a device below the limit is not told why it never will: {unsupported}"
+        );
+    }
+
+    #[test]
+    fn a_marker_can_be_interrogated_rather_than_only_looked_at() {
+        // Hover, focus and a name. A marker a player cannot ask about is a coloured dot.
+        use super::super::testing;
+
+        let mut app = map_app();
+        testing::tap_key(&mut app, KeyCode::Tab);
+        app.update();
+        app.update();
+
+        let markers: Vec<Entity> = app
+            .world_mut()
+            .query_filtered::<Entity, With<WorldMapMarker>>()
+            .iter(app.world())
+            .collect();
+        assert!(!markers.is_empty(), "nothing was drawn to interrogate");
+
+        for entity in markers {
+            let kind = app.world().get::<WorldMapMarker>(entity).expect("a marker").0;
+            assert!(
+                app.world().get::<Interaction>(entity).is_some(),
+                "{kind:?} cannot be hovered or focused"
+            );
+            let named = app
+                .world()
+                .get::<super::super::icons::AccessibleName>(entity)
+                .map(|name| name.0.clone())
+                .unwrap_or_default();
+            assert!(!named.is_empty(), "{kind:?} has no name to read out");
+            let readable = super::super::fallback_label(&named);
+            assert!(!readable.contains('.'), "{kind:?} would announce a key: {readable}");
+            assert!(
+                app.world().get::<super::super::icons::ShowsTooltip>(entity).is_some(),
+                "{kind:?} says nothing on hover"
+            );
+        }
+    }
+
+    #[test]
+    fn an_out_of_date_overview_says_so_and_is_worth_retrying() {
+        use ao_core::view::MapUnavailable;
+        assert!(
+            MapUnavailable::Stale.is_retryable(),
+            "an out-of-date map cannot be refreshed, which is the only fix it has"
+        );
+        let readable = super::super::fallback_label(MapUnavailable::Stale.name_key());
+        assert!(!readable.contains('.'), "the stale state would show a key: {readable}");
+
+        use super::super::testing;
+        let mut app = map_app();
+        let mut stale = app.world().resource::<UiState>().get().clone();
+        stale.world_map.availability = MapAvailability::Unavailable(MapUnavailable::Stale);
+        UiState::set(&mut app.world_mut().resource_mut::<UiState>(), stale);
+        app.update();
+        testing::tap_key(&mut app, KeyCode::Tab);
+        app.update();
+        app.update();
+
+        let shown = overlay_text(&mut app).join(" | ");
+        assert!(
+            shown.to_lowercase().contains("stale"),
+            "an out-of-date overview opened without saying so: {shown}"
+        );
+        assert!(markers_drawn(&mut app).is_empty(), "a stale overview still drew markers");
+    }
+
+    #[test]
     fn an_unavailable_world_map_says_so_rather_than_opening_black() {
         use super::super::testing;
 
@@ -1049,6 +1263,68 @@ mod tests {
             !texts.iter().any(|text| text.starts_with("map.")),
             "a semantic key reached the screen: {texts:?}"
         );
+    }
+
+    #[test]
+    fn a_device_gets_the_largest_overview_it_can_actually_hold() {
+        // Keyed off the device's own texture limit, which is the same number the world
+        // render target is bounded by. Guessing from the user agent is how a client ends up
+        // asking a phone for sixteen megabytes.
+        assert_eq!(
+            profile_for(8192),
+            OverviewProfile::Full { dimension: OVERVIEW_MAX_DIMENSION }
+        );
+        assert_eq!(
+            profile_for(OVERVIEW_MAX_DIMENSION),
+            OverviewProfile::Full { dimension: OVERVIEW_MAX_DIMENSION },
+            "a device at exactly the limit can hold the full asset"
+        );
+        assert_eq!(
+            profile_for(OVERVIEW_MAX_DIMENSION - 1),
+            OverviewProfile::Reduced { dimension: OVERVIEW_REDUCED_DIMENSION }
+        );
+        assert_eq!(
+            profile_for(OVERVIEW_REDUCED_DIMENSION - 1),
+            OverviewProfile::Outline,
+            "a device below the reduced limit gets the outline rather than a broken texture"
+        );
+        assert_eq!(profile_for(0), OverviewProfile::Outline);
+    }
+
+    #[test]
+    fn the_overview_budget_is_the_one_the_documentation_states() {
+        // Sixteen megabytes at the full profile, four at the reduced one, nothing for the
+        // outline. Written as a test because a budget in a comment is a wish.
+        assert_eq!(
+            OverviewProfile::Full { dimension: OVERVIEW_MAX_DIMENSION }.decoded_bytes(),
+            16 * 1024 * 1024
+        );
+        assert_eq!(
+            OverviewProfile::Reduced { dimension: OVERVIEW_REDUCED_DIMENSION }.decoded_bytes(),
+            4 * 1024 * 1024
+        );
+        assert_eq!(OverviewProfile::Outline.decoded_bytes(), 0);
+
+        // And the wire ceiling is smaller than what the world pack costs, which is the
+        // whole reason this is a separate asset.
+        assert!(OVERVIEW_MAX_COMPRESSED_BYTES < 4 * 1024 * 1024);
+    }
+
+    #[test]
+    fn the_overlay_never_asks_for_the_gameplay_world_pack() {
+        // The invariant this asset exists for, checked against the source: nothing in the
+        // overlay reaches for the pack, the map loader or a tile sheet. A world overview
+        // decoded out of gameplay data would trade a fixed cost for an unbounded one.
+        // The production half only: this test names the forbidden words, so reading the
+        // whole file would find them in its own list.
+        let whole = include_str!("worldmap.rs");
+        let source = whole.split("#[cfg(test)]").next().expect("a production half");
+        for forbidden in ["world_pack", "PackedMap", "LoadedMap", "SheetTextures", "resolve_grh"] {
+            assert!(
+                !source.contains(forbidden),
+                "the overlay reaches for {forbidden}, which belongs to the gameplay pack"
+            );
+        }
     }
 
     #[test]

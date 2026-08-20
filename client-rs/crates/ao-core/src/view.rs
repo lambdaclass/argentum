@@ -595,6 +595,12 @@ pub enum MapUnavailable {
     Failed,
     /// This map genuinely has no data to show.
     NoData,
+    /// The overview a client holds is older than the world it is meant to describe.
+    ///
+    /// Its own state because it is the one unavailability a player can act on without
+    /// leaving: an out-of-date map is worse than none, since it looks right. Retryable,
+    /// because fetching the current one is exactly the fix.
+    Stale,
 }
 
 impl MapUnavailable {
@@ -605,12 +611,13 @@ impl MapUnavailable {
             MapUnavailable::Offline => "map.unavailable.offline",
             MapUnavailable::Failed => "map.unavailable.failed",
             MapUnavailable::NoData => "map.unavailable.no_data",
+            MapUnavailable::Stale => "map.unavailable.stale",
         }
     }
 
     /// Whether asking again could succeed.
     pub fn is_retryable(self) -> bool {
-        matches!(self, MapUnavailable::Failed)
+        matches!(self, MapUnavailable::Failed | MapUnavailable::Stale)
     }
 }
 
