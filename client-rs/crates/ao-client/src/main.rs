@@ -13,6 +13,7 @@ mod graphics;
 mod hud;
 mod net;
 mod platform;
+mod reveal;
 mod session;
 mod ui;
 mod world;
