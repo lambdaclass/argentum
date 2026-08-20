@@ -325,50 +325,6 @@ same browser viewport: the target is comparable information clarity and
 interaction quality, not pixel-for-pixel reproduction. Every shipped icon and
 decorative asset is project-owned or licensed for this client.
 
-### Task W-0089 — Tab world-map overlay
-
-- **State:** active
-- **Phase:** 0
-- **Depends on:** W-0003, W-0004, W-0005, W-0008, W-0085, W-0088
-
-Implement the full world map as a Bevy-owned overlay within the world viewport,
-leaving the global top bar and character rail visible and interactive as in the
-reference workflow. In gameplay/world input context, Tab opens the map and Tab
-or Escape closes it. Opening the map hides or disables the world hotbar and
-world targeting, releases any armed spell/drag/pointer capture under their
-documented cancellation rules, and pauses movement/combat command emission
-without pausing the authoritative session.
-
-The initial view fits the whole known world while preserving aspect ratio with
-intentional crop/letterbox treatment. Support bounded pointer-wheel and
-keyboard zoom, pointer drag and keyboard pan, reset-to-fit, recenter-on-player
-and stable zoom-around-cursor behavior. Clamp every path to finite map bounds;
-malformed coordinates, a zero-sized viewport or repeated open/close cannot
-produce NaN transforms, reveal uninitialized texture memory or lose the last
-valid camera state. Persist the last valid pan/zoom for the session while a
-separate reset action always restores the whole-world view.
-
-Render the player marker, current region name and world coordinates plus typed,
-toggleable categories for merchants, quests, dungeons and points of interest.
-Markers are project-owned icons with localized labels, hover/focus states and
-non-color distinctions. The client renders only discovered or server-authorized
-markers; map resources cannot reveal hidden NPCs, players, objectives or
-resources. Filtering changes presentation only and never authoritative world
-state. Empty, unavailable, loading, stale-version and missing-icon states remain
-actionable and cannot silently degrade into a black rectangle.
-
-Use a dedicated bounded world-map asset/manifest entry rather than decoding or
-retaining the complete gameplay world pack to draw the overview. Specify source
-license, compressed/decoded/GPU byte cost, maximum texture dimensions and a
-fallback for devices below that limit; Phase 7 later content-hashes and caches
-the production asset.
-
-Close with Bevy app and browser tests proving input-context priority, one toggle
-per keypress, no movement/cast/target command while open, correct rail
-interaction, pan/zoom clamping and marker filtering. Capture whole-world,
-zoomed, panned, filtered and unavailable views at the Phase 0 size/DPR matrix,
-including close/restore after resize, maximize and fullscreen.
-
 ### Task W-0090 — Atomic first-scene reveal
 
 - **State:** planned

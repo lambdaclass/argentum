@@ -19,6 +19,99 @@ Never reuse a completed ID in the active roadmap.
 
 ## Closed tasks
 
+### Completed Task W-0089 — Tab world-map overlay
+
+Closed: 2026-08-20 (`c377ec9`)
+
+Tab opens a whole-world map inside the world viewport. The top bar and character
+rail stay where they were and stay clickable, because a map is something you
+consult while playing rather than a screen you leave the game for. Tab or Escape
+closes it, once per press.
+
+While it is open the world does not act. It is a modal — the same rule a dialog
+uses, stated once instead of in every gameplay system: no movement, no casting, no
+targeting, and a click over the map is not also a click on the ground behind it. An
+armed spell and a drag in progress are released under their own cancellation rules
+rather than left pointing at something the player can no longer see. What the map
+suppresses is what the *player* can send: a snapshot arriving while the map is up
+still reaches it, because a client that stopped applying server state would look
+frozen and would show a stale world the moment the map closed.
+
+The view fits the whole world and letterboxes the spare axis. The wheel and `=`/`-`
+zoom, the arrow keys and a drag pan, `whole world` refits, `centre on me`
+recentres. Every path is clamped: a malformed view, a zero-sized world or a
+zero-sized viewport falls back to the last view that worked rather than producing a
+NaN transform, and zooming out cannot take the world out of its own frame. Clamping
+outranks anchored zoom at a letterboxed axis — keeping the world in frame matters
+more than keeping the tile under the cursor still — and that precedence is asserted
+rather than left to whichever branch ran last.
+
+It draws the region name, the player's coordinates, the player's own position as a
+gold ring, and one marker per category with hover, focus, a tooltip and a distinct
+*shape*, so no category depends on colour. The legend is also the filter, and each
+entry carries the same glyph the map draws, from the same builder, so the two
+cannot drift apart. Filtering changes only what is drawn.
+
+What it draws is what the server sent. The snapshot carries five presences, two of
+them hostile creatures, and clearing the marker list empties the map completely — a
+map that drew a dot per presence would look richer and would be telling the player
+where the monsters are.
+
+The overview art does not exist yet, so `assets/world-map/MANIFEST.md` is its
+entry: id, path, source, licence, 2048 maximum and 1024 reduced dimensions, a 2 MiB
+compressed ceiling, 16 MiB decoded, and the outline for anything below the reduced
+profile. The client embeds it and fails a test if the numbers disagree with the
+constants it compiles in, and publishes the profile the running device would
+actually get, so the fallback can be observed rather than asserted. Which profile a
+device gets is decided from its own reported texture limit, never from the user
+agent — guessing from the user agent is how a client asks a phone for sixteen
+megabytes.
+
+The first capture of this overlay was a black rectangle with six dots in it: exactly
+the state this task forbids by name, drawn by the code meant to prevent one. My own
+documentation had promised a vector outline and never drawn it. Finding it needed
+someone to look at the picture — the byte sizes were entirely consistent with a
+working overlay. The world's rectangle and a ten-tile grid are drawn now, through
+the same camera as the markers so they pan and zoom together, and an unavailable map
+draws no outline at all, because an outline around nothing is a claim that the world
+is that size.
+
+Evidence:
+
+- `./build.sh check` from clean HEAD: roadmap structure, formatting, wasm target,
+  native target, 552 tests, configuration check.
+- 37 `ui::worldmap` tests, including the outline and grid moving with the camera,
+  no outline for an unavailable map, the manifest agreeing with the compiled budget,
+  markers coming only from the snapshot, the legend sampling every category, and the
+  session continuing to apply snapshots behind the open map.
+- `scripts/browser-test.mjs` at build `c377ec9`: **780 checks, 0 failures**. Tab
+  opens and Escape closes; three presses read open, shut, open; the world is not
+  clickable through the map; a hotbar key does nothing; arrow keys are refused at
+  the fitted view and pan a zoomed one while the player does not move; the wheel
+  clamps in both directions; a legend filter changes exactly its own markers and
+  restores them; the rail is still reachable and still activates; the device is
+  offered the largest overview it can hold within its memory budget and its wire
+  ceiling matches the manifest; and the map survives windowed, maximized and
+  fullscreen mode changes and still closes.
+- `scripts/capture.mjs`: 30 map captures — whole-world, zoomed, panned, filtered and
+  closed at every ratio in the matrix, the unavailable view from a separate boot at
+  `?scenario=disconnected`, and the map open across maximize and restore. Looked at,
+  not merely counted.
+
+Three harness defects were found and fixed rather than retried: a fixed frame wait
+read a half-rebuilt overlay after a ratio change; the replacement accepted "has not
+started yet" as "has settled" and reported five map checks as client failures; and
+the filter check assumed which way a toggle pointed, so a pass that inherited a
+filtered map read filtering as *adding* a marker. `--only map` now runs the same map
+assertions in 348 checks instead of 780, because paying hours to validate one
+overlay change is how a harness bug survives to the third run.
+
+Not covered: real fullscreen needs a user gesture automation cannot supply, so the
+adapter is tested for reporting the mode it actually reached and the map is captured
+across maximize instead. HiDPI rasterisation sharpness is W-0092's. The wording of
+the unavailable states is a label rather than an instruction, which W-0093 owns
+along with the rest of the client's placeholder honesty.
+
 ### Completed Task W-0085 — Pointer and hit-test coordinate integrity
 
 Closed: 2026-08-20 (`d0e5af2`, verified again at `c377ec9`)
