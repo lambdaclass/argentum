@@ -34,11 +34,19 @@ const skipVersionCheck = args.includes("--any-build");
 /// of an hour under software rendering, and iterating on one question at that cost is
 /// how a harness stops being run at all.
 const only = flag("only", null);
-const SECTIONS = ["layout", "hits"];
+// `--only map` is the world-map subset: the host-mode map checks from the layout
+// section and the map block from the pointer battery, without the per-control click
+// battery that dominates the wall clock. A full run takes hours on a software renderer,
+// and paying that to validate one overlay change cost three of them in a day. The
+// assertions are the same ones; the full matrix stays the pre-closure gate.
+const SECTIONS = ["layout", "hits", "map"];
 if (only && !SECTIONS.includes(only)) {
   throw new Error(`--only takes one of ${SECTIONS.join(", ")}`);
 }
-const runs = (section) => !only || only === section;
+const mapOnly = only === "map";
+// The map subset lives inside both sections, so both are entered and the parts that are
+// not about the map are skipped from within.
+const runs = (section) => !only || only === section || (mapOnly && section !== "map");
 
 /// Sizes the task requires, plus a deliberately awkward one.
 const VIEWPORTS = [
@@ -415,6 +423,14 @@ async function runHitTests(hitPage, label, ratio) {
       ` after ${result.ms}ms (${result.before}->${result.after})` +
       (result.note ? ` — ${result.note}` : "");
 
+    // Everything from here to the world rectangle below is the per-control click
+    // battery: the pixel-precision sweep, the spellbook probe and the drag. It is what
+    // makes a full run take hours on a software renderer, because every negative check
+    // has to wait out a budget derived from a frame that takes a fifth of a second.
+    // `--only map` skips it to validate a world-map change in minutes; the full matrix
+    // remains the gate a task closes against.
+    if (!mapOnly) {
+
     // A representative spread rather than every control: four different panels, four
     // different sizes and four different builders. The top-bar icon goes last, because
     // activating it is the one that may put something else on screen.
@@ -629,6 +645,8 @@ async function runHitTests(hitPage, label, ratio) {
         `${JSON.stringify(before.slice(0, 8))} -> ${JSON.stringify(after.slice(0, 8))}`
       );
     }
+
+    } // end of the click battery skipped by `--only map`
 
     // The world half of the same question: clicking the middle of the viewport must
     // select the tile drawn in the middle of the viewport. The camera follows the
