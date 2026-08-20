@@ -294,7 +294,7 @@ click just outside it does not, and puts the inventory back.
 
 ### Task W-0089 — Tab world-map overlay
 
-- **State:** planned
+- **State:** active
 - **Phase:** 0
 - **Depends on:** W-0003, W-0004, W-0005, W-0008, W-0085, W-0088
 
@@ -335,6 +335,59 @@ per keypress, no movement/cast/target command while open, correct rail
 interaction, pan/zoom clamping and marker filtering. Capture whole-world,
 zoomed, panned, filtered and unavailable views at the Phase 0 size/DPR matrix,
 including close/restore after resize, maximize and fullscreen.
+
+### Task W-0093 — Prototype defect sweep
+
+- **State:** ready
+- **Phase:** 0
+- **Depends on:** W-0006, W-0007, W-0008, W-0088
+
+Nine defects found by running the built client rather than by reading it. Each is
+named with the code that is wrong, because a defect list that describes symptoms
+gets fixed by changing symptoms.
+
+- **Inventory feedback is one word for every reason.** `authority::rejection_for`
+  answers every refused inventory action with `FeedbackKey::Blocked`, so "your
+  pack is full", "it is too far away" and "you cannot do that while dead" all
+  reach the player as the same notice. The keys already exist; the mapping has to
+  use them, and an accepted action needs an acknowledgement that is not merely
+  the quantity changing.
+- **The hotbar does not refresh what it draws.** `hotbar::present_bindings`
+  rebuilds on the bindings and the count of drawable graphics, so a bound
+  consumable whose quantity changes keeps its old number: drink two potions and
+  the slot still says the old count. The quantity is read at rebuild time and
+  nothing rebuilds.
+- **A whisper has nobody to whisper to.** `Intent::SendChat` carries a channel
+  and a body and no addressee, so the composer's whisper channel cannot name a
+  recipient and the target strip's whisper action can only switch channel. The
+  intent needs the addressee, and the composer needs somewhere to put it.
+- **Equipment can disagree with the inventory.** `authority::equip` marks the
+  item equipped and then places it with `slot_for`, which guesses the slot from
+  substrings of the name key. An item the guess does not recognise is equipped in
+  the inventory and absent from the equipment row: two views of one fact, saying
+  different things. The view model has to carry the slot.
+- **The target is matched by name.** `target::shows_target` decides whether the
+  target is still visible by comparing name and kind against the presences. Two
+  characters with one name, or a rename, breaks it. Presences already carry an
+  id; the target has to carry one too.
+- **Names float over empty ground.** The presences in the populated fixture have
+  coordinates and no bodies, so `labels` draws a name over grass. Either the
+  world draws a stand-in for each presence or a label is not drawn without one.
+- **Two things are called Provisiones.** The fixture's merchant presence collides
+  with a name baked into the map's own artwork, so the same word appears twice
+  for two different things.
+- **Combat text never leaves.** `PresenceView::combat` is drawn for as long as it
+  is set, so the fixture's `-12` and `-34` hang over their characters
+  permanently. A number that does not fade is not damage, it is a label.
+- **A notice never clears.** The populated fixture carries a level-up and the
+  notice stack has no expiry, so "level up" sits in the corner for the whole
+  session. A notice that never clears has stopped being one.
+
+Close with tests at the layer that owns each claim: the reason mapping and the
+addressee in `ao-core`, the equipment invariant in the authority, the hotbar
+refresh and the fade timings in Bevy app tests, and the fixture coherence in the
+fixture tests. A capture of the busy HUD must show no name without a body, no
+duplicated name, and no notice or damage number that outlives its cause.
 
 ### Task W-0009 — Bevy product screens
 
@@ -405,17 +458,13 @@ download the full optional asset set.
 
 ### Phase 0 exit gate
 
-Phase 1 unlocks when `W-0085`, `W-0089`, `W-0009` and `W-0090` close. The checks
-below are the full prototype gate, owned by `W-0013` in Phase 0b: the ones about
-scaling, pointer integrity, product screens, the first-scene reveal and the two
-maps belong to tasks in this phase, and the rest — UI-scale persistence,
-worst-case fixtures, the busy-HUD capture, the lifecycle stress run, the component
-gallery, the evidence sweep and the usability protocol — belong to the Phase 0b
-group and are checked there. Participant checks close through `W-0014`.
+Phase 1 unlocks when `W-0085`, `W-0089`, `W-0009` and `W-0090` close, and these
+are the checks that gate it: the shell's geometry and scaling, pointer integrity,
+the product screens, the first-scene reveal, and the two maps.
 
-Nothing here is dropped by the split. What changes is when it is answered, and the
-reason is that most of these questions have a better answer once the client is
-talking to a server than they do against fixtures.
+The hardening and validation checks are not listed here. They belong to the tasks
+that own them and are checked in the Phase 0b hardening checklist — nothing was
+dropped, and each item is written out there rather than referred to.
 
 - [ ] At 720p, 1080p, 1440p, ultrawide and small-laptop sizes, the world expands,
       the rail remains usable, compact mode is deliberate and the hotbar stays
@@ -467,9 +516,6 @@ talking to a server than they do against fixtures.
       localized tooltips and accessible names, while FPS, ping and population
       remain readable textual status. Disabled destinations explain why they
       are unavailable.
-- [ ] Persistent 90/100/110/125% UI-scale choices (or measured equivalents)
-      preserve world framing, focus, selection and camera center; text remains
-      legible, pixel icons remain crisp and tooltips stay inside the viewport.
 - [ ] Pointer and keyboard input traverse, focus and activate real spawned Bevy
       controls. Inventory/spell/hotbar interactions emit typed intents through
       the shared control path; no production control model exists only in tests.
@@ -480,32 +526,8 @@ talking to a server than they do against fixtures.
 - [ ] Twenty identical snapshot writes produce no Bevy change tick or UI
       rebuild; one semantic change produces exactly one rebuild; malformed NaN
       data settles without whole-snapshot debug formatting.
-- [ ] The named worst-case fixture renders bounded maximum inventory, equipment,
-      spells, hotbar and chat data plus longest labels. Missing GRH/font/key and
-      malformed-value variants remain stable, legible and free of raw semantic
-      keys; entity/rebuild/frame baselines are recorded.
-- [ ] A realistic busy-HUD capture contains nearby named players/NPCs, bounded
-      chat, a selected target, damaged vitals, a populated inventory/equipment
-      state, assigned hotbar items/spells, active cooldowns and pending/rejected
-      feedback without overlap or loss of actionability.
 - [ ] Focus, modal/chat ownership, drag cancellation, tooltips and IME never
       leak unintended world commands.
-- [ ] The native/browser lifecycle stress run completes 250 resizes, 1,000 panel
-      cycles and 1,000 tab switches. Shell/camera roots remain unique, invalid
-      transient state is cleared and entity/listener/memory counts do not grow
-      once per cycle.
-- [ ] Component gallery and production UI share models, intents, fixtures,
-      tokens and components; the deterministic golden matrix passes.
-- [ ] Source/browser checks find no DOM/CSS application panel, form, navigation
-      state or alternate HUD.
-- [ ] Pinned-toolchain format, clippy, WASM/native and test gates pass with no
-      unused imports and no unexplained dead production UI path. Recorded
-      evidence includes test counts, browser/GPU details and raw+gzip size.
-- [ ] Every closed Phase 0 task has exactly one dated `Completed Task W-NNNN`
-      changelog entry with commit and evidence, and no closed body remains in
-      the active execution sequence.
-- [ ] Veterans and newcomers complete the recorded usability protocol; findings,
-      revisions and deliberately rejected suggestions are documented.
 
 ## Phase 1 — Platform foundation
 
@@ -821,6 +843,41 @@ worst-case fixture set, a lifecycle stress run and recorded usability sessions a
 test more against a live adapter than against fixtures. They run after Phase 3, and
 the Phase 0 exit gate list is their checklist.
 
+### Phase 0b hardening checklist
+
+Deliberately not called an exit gate: Phase 0 is gated by its own list above, and
+these items answer a different question — whether the prototype holds up once it
+is pushed. `W-0013` owns the technical sweep and `W-0014` the participant
+sessions.
+
+- [ ] Persistent 90/100/110/125% UI-scale choices (or measured equivalents)
+      preserve world framing, focus, selection and camera center; text remains
+      legible, pixel icons remain crisp and tooltips stay inside the viewport.
+- [ ] The named worst-case fixture renders bounded maximum inventory, equipment,
+      spells, hotbar and chat data plus longest labels. Missing GRH/font/key and
+      malformed-value variants remain stable, legible and free of raw semantic
+      keys; entity/rebuild/frame baselines are recorded.
+- [ ] A realistic busy-HUD capture contains nearby named players/NPCs, bounded
+      chat, a selected target, damaged vitals, a populated inventory/equipment
+      state, assigned hotbar items/spells, active cooldowns and pending/rejected
+      feedback without overlap or loss of actionability.
+- [ ] The native/browser lifecycle stress run completes 250 resizes, 1,000 panel
+      cycles and 1,000 tab switches. Shell/camera roots remain unique, invalid
+      transient state is cleared and entity/listener/memory counts do not grow
+      once per cycle.
+- [ ] Component gallery and production UI share models, intents, fixtures,
+      tokens and components; the deterministic golden matrix passes.
+- [ ] Source/browser checks find no DOM/CSS application panel, form, navigation
+      state or alternate HUD.
+- [ ] Pinned-toolchain format, clippy, WASM/native and test gates pass with no
+      unused imports and no unexplained dead production UI path. Recorded
+      evidence includes test counts, browser/GPU details and raw+gzip size.
+- [ ] Every closed Phase 0 task has exactly one dated `Completed Task W-NNNN`
+      changelog entry with commit and evidence, and no closed body remains in
+      the active execution sequence.
+- [ ] Veterans and newcomers complete the recorded usability protocol; findings,
+      revisions and deliberately rejected suggestions are documented.
+
 ### Task W-0010 — Secondary windows and interaction ownership
 
 - **State:** planned
@@ -933,9 +990,11 @@ native and a real browser, not only against pure layout functions.
 - **Phase:** 0b
 - **Depends on:** W-0001, W-0002, W-0003, W-0004, W-0005, W-0006, W-0007, W-0008, W-0009, W-0010, W-0011, W-0012, W-0085, W-0086, W-0087, W-0088, W-0089, W-0090
 
-Run the Phase 0 technical checklist, archive capture artifacts and correct every
-failed contract. This closes the engineering gate and unlocks Phase 1; it does
-not fabricate the human usability evidence owned by W-0014.
+Run the prototype's technical checklist, archive capture artifacts and correct
+every failed contract. Phase 1 is no longer gated on this: it unlocks when the
+Phase 0 tasks named in the execution sequence close. This is the full-prototype
+evidence sweep, and it does not fabricate the human usability evidence owned by
+W-0014.
 
 Run formatting, clippy, WASM/native checks and tests from the pinned Nix
 toolchain. Phase 0 UI code has no unused imports; production interaction types
