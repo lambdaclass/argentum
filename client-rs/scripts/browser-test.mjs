@@ -1041,6 +1041,40 @@ async function main() {
         (await modePage.evaluate(() => window.aoWindow.getMode())) === "windowed"
       );
 
+      // The world map across the same three modes. It is sized from the world region, so
+      // a mode change resizes it while it is open — the case where a stale camera would
+      // put the world half outside its own panel, or lose it entirely.
+      const mapAfter = async () => {
+        await modePage.waitForTimeout(600);
+        return modePage.evaluate(() => ({
+          open: window.aoLoaded?.worldMapOpen === true,
+          markers: window.aoLoaded?.worldMapMarkers ?? 0,
+          scale: window.aoLoaded?.worldMapScale ?? 0,
+        }));
+      };
+      // The canvas has to own the keyboard first. Nothing in this context has clicked it,
+      // and a Tab pressed at the browser chrome moves browser focus instead of opening the
+      // map — which is the correct behaviour and not what is being tested here.
+      await modePage.evaluate(() => document.getElementById("ao-canvas").focus());
+      await modePage.keyboard.press("Tab");
+      const openedWindowed = await mapAfter();
+      check("the map opens in the windowed host", openedWindowed.open);
+      if (openedWindowed.open) {
+        for (const mode of ["maximized", "fullscreen", "windowed"]) {
+          // Fullscreen falls back to maximized without a user gesture; either way the
+          // map has to survive whatever mode the host actually reached.
+          const got = await modePage.evaluate((m) => window.aoWindow.setMode(m), mode);
+          const state = await mapAfter();
+          check(
+            `the map stays open and drawn through ${mode} (host reached ${got})`,
+            state.open && state.markers === openedWindowed.markers && state.scale > 0,
+            JSON.stringify(state)
+          );
+        }
+        await modePage.keyboard.press("Escape");
+        check("the map still closes after a mode change", !(await mapAfter()).open);
+      }
+
       await modeContext.close();
     }
 
