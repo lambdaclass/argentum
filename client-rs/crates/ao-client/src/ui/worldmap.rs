@@ -902,6 +902,72 @@ mod tests {
     }
 
     #[test]
+    fn focus_navigation_owns_tab_while_it_is_on() {
+        // Input-context priority, and the documented trade: F6 turns focus navigation on
+        // precisely because Tab is a gameplay key here. While it is on, Tab walks the focus
+        // ring and must not also open a map over the control the player is walking to.
+        use super::super::testing;
+
+        let mut app = map_app();
+        app.world_mut().resource_mut::<super::super::controls::FocusNavigation>().active = true;
+
+        testing::tap_key(&mut app, KeyCode::Tab);
+        app.update();
+
+        assert!(
+            !app.world().resource::<WorldMapOpen>().0,
+            "Tab opened the map while focus navigation owned it"
+        );
+
+        // And with it off again, Tab is the map's.
+        app.world_mut().resource_mut::<super::super::controls::FocusNavigation>().active = false;
+        testing::tap_key(&mut app, KeyCode::Tab);
+        app.update();
+        assert!(app.world().resource::<WorldMapOpen>().0, "Tab stopped opening the map");
+    }
+
+    #[test]
+    fn closing_and_reopening_keeps_the_view_the_player_arranged() {
+        // The session persistence the task asks for, and the reason it is separate from
+        // reset: a player who zoomed into a corner and closed the map to fight did not ask
+        // to lose the corner.
+        use super::super::testing;
+
+        let mut app = map_app();
+        testing::tap_key(&mut app, KeyCode::Tab);
+        app.update();
+        app.update();
+
+        let viewport =
+            overlay_viewport(app.world().resource::<super::super::shell::AppliedGeometry>())
+                .expect("the overlay has a viewport");
+        let world = Vec2::new(100.0, 100.0);
+        {
+            let mut camera = app.world_mut().resource_mut::<WorldMapCamera>();
+            let zoomed = zoom_around(camera.view, viewport, world, viewport / 2.0, 4.0);
+            camera.set(pan_by(zoomed, viewport, world, Vec2::new(60.0, 40.0)));
+        }
+        let arranged = app.world().resource::<WorldMapCamera>().view;
+        assert!(arranged.scale > fit_scale(viewport, world), "the arrangement did not take");
+
+        // Close and open twice: repeated cycles must not quietly reset it either.
+        for _ in 0..2 {
+            testing::tap_key(&mut app, KeyCode::Escape);
+            app.update();
+            app.update();
+            testing::tap_key(&mut app, KeyCode::Tab);
+            app.update();
+            app.update();
+        }
+
+        assert_eq!(
+            app.world().resource::<WorldMapCamera>().view,
+            arranged,
+            "reopening the map threw away the view the player had arranged"
+        );
+    }
+
+    #[test]
     fn tab_while_typing_is_a_character_and_not_a_map() {
         use super::super::testing;
 
