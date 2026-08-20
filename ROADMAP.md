@@ -30,15 +30,17 @@ gameplay fixtures, the map-layer effects migration, VB6 source anchors, packet
 byte-level fixtures, and RNG guardrails are all shipped; the source-data
 parity tail has explicit fixtures.
 
-Within Phase 2, finish the protocol contract (#13) before the modern launch,
-transport, bootstrap, receipt, reconnect, and seamless-handoff path (#16-#21).
-Do not broaden the Rust/Bevy packet surface until one existing character can
-authenticate and receive a complete authoritative bootstrap without relying on
-fixture state. As soon as that live world exists, prove #21's early atomic
-milestone with the current validated world pack; do not wait for per-map asset
-packaging, persistent cache, account-flow polish or staging. Then close the
-predictive/continuous-border milestone before broader gameplay and presentation
-work makes loading screens an assumed lifecycle boundary.
+Within Phase 2, the immediate product milestone is #21-#24: a small canonical
+world in which a real Rust/Bevy client walks among four local MapServers without
+seeing a map transition. Close the remaining client Phase 0 blockers, then
+compile #21's topology/coordinate contract while the protocol contract (#13)
+closes. Do not broaden packet or account-flow UI coverage: implement only the
+modern launch/transport/bootstrap/reconnect and structured handoff path
+(#16-#22) needed by #23. Use the current validated monolithic world pack so
+per-region packaging, persistent cache, UI polish and staging cannot delay the
+test. Only after the four-region slice is repeatable and failure-safe should
+#24 make global position authoritative in persistence and broader gameplay or
+production-topology work resume.
 
 ## Phase 1: Deterministic Parity Harness
 
@@ -226,48 +228,92 @@ Work:
     - Prove reconnect leaves one session, one visible entity, and no duplicated
       inventory, trade, guild, party, or combat effects
 
-21. Make login bootstrap and zero-loading-screen map handoff use one structured
-    snapshot boundary.
-   *(Rust/Bevy: W-0030, W-0062-W-0067, W-0094-W-0096.)*
-   - **Early atomic milestone:** immediately after live bootstrap, use the
-     current validated world pack to drive one real map exit over the same
-     socket/session. The source remains fully rendered while destination
-     readiness is deliberately delayed by two seconds, then one complete
-     destination frame commits at the ordered end boundary. This milestone
-     must not wait for per-map resource packaging or predictive preload.
-   - **Continuous-border milestone:** after per-map resources and bounded
-     destination readiness exist, preload authorized compatible neighbors,
-     render both static maps in one camera space and cross without a loading
-     overlay, blank/partial frame, camera jump or new connection.
+21. Compile and govern the canonical virtual world before handoff code invents
+    its own geography. *(Rust/Bevy: W-0097-W-0098.)*
+   - Compile the 842 CSM maps, exits, `mapsworlddata.dat`, metadata and reviewed
+     overrides into one deterministic, content-hashed `WorldTopology`
+   - Emit stable world spaces/regions, signed global origins, storage/core/
+     transition-band/gutter bounds, valid/simulated-tile masks for void or
+     irregular space, per-layer seam ownership, dependencies and transition
+     classes: geographic seam, door, portal, teleport or instance entrance
+   - Recompute and report the audited baseline: 100x100 storage; provisional
+     74x80 core (`x=14..87`, `y=11..90`); bands `x=13/88`, `y=10/91`;
+     158,549 exits; 157,304 valid cross-map; 156,084 standard seam records;
+     1,220 valid exceptions; 49 same-map; 1,196 missing/sentinel; 1,091
+     reciprocal seam pairs; 58 placement conflicts; 237 components
+   - Treat existing contradictions as a reviewed baseline and fail on new or
+     unexplained drift. No active geographic seam may retain an unresolved
+     placement conflict or silently chosen winner
+   - Use tile/collision overlap as review evidence: at least 95% is an
+     automatic candidate, 85-95% requires review and below 85% requires
+     correction or explicit non-geographic classification
+   - Define shared Elixir/Rust `WorldPosition`, `WorldSpaceId`, stable
+     `RegionId`/`EntityId`, `TopologyVersion`, `AuthorityEpoch`, `TransferId`
+     and checked global/local conversions with cross-language fixtures
+   - Make global position canonical for modern client/protocol/persistence/
+     logs/markers while MapServers keep their local collision/occupancy grids;
+     local map coordinates are derived adapters, not a second authority
+   - Keep the compiled topology in immutable/local read structures so movement
+     conversion never calls one central world-position process
+   - Keep stable identity separate from content hash, runtime PID/node and
+     dynamic instance identity; never persist a transition-band position
+
+22. Make login bootstrap and handoff one structured, ordered, failure-safe
+    authority operation. *(Rust/Bevy: W-0030, W-0062-W-0066, W-0096.)*
+   - Classify and byte-pin all new packets before implementation; bootstrap and
+     handoff carry topology version/hash, space/region, canonical position,
+     stable identity, epoch and transfer ID
    - Refactor map entry so it returns structured snapshot data instead of
      sending nearby NPCs or other members out of band
    - Make the session process the single ordered writer for begin, snapshot
      members, end, and failure
-   - Keep the same socket, session process and character authority across the
-     transfer; every destination MapServer remains loaded, so process startup
-     and map parsing never lie on the transition path
-   - Publish versioned, server-authorized transition topology: source exit,
-     destination entry, transition class, static resource dependencies and a
-     coordinate/orientation transform only for borders that can be stitched
-     exactly; never disclose destination entities or hidden objectives as a
-     preload hint
-   - Key map-local character/entity identifiers by world epoch and reject
-     queued envelopes from a previous map or epoch
+   - The source owns through prepare; destination validates topology, capacity,
+     collision and readiness; one commit transfers authority. Abort, timeout,
+     duplicate, crash, overload and topology races leave exactly one owner
+   - Keep the same socket/session and stable character identity; reject queued
+     envelopes from an old region/epoch and never trust a client transform or
+     destination
    - Keep snapshot and handoff messages non-sheddable and forbid egress
      coalescing from reordering or crossing the atomic boundary
-   - Let the Rust client preload, decode and upload likely destinations before
-     contact while the source map stays pinned; compatible borders render both
-     static maps in one camera space, while doors/portals/teleports replace the
-     scene atomically
-   - On timeout, crash, overload, or rejected entry, either retain/recover the
-     source world or terminate cleanly; never expose a half-entered destination
-   - Add the early milestone's deterministic delay-injection test first: with
-     destination loading delayed by two seconds, the old world remains visible,
-     input is paused, the socket/session identity is unchanged and the
-     destination appears atomically after the matching end marker
-   - Add a frame-by-frame preloaded-border test: held movement crosses without
-     a loading overlay, blank/partial frame, camera jump, mixed epoch, second
-     connection or destination entity appearing before its snapshot
+   - Define server-authorized static preload dependencies separately from live
+     entity authority; never disclose hidden destination state
+   - With destination readiness delayed by two seconds, prove the old world
+     remains visible on the same session, then one complete destination frame
+     commits at the matching boundary; failures restore source or terminate
+     explicitly, never expose a half-entered destination
+
+23. Prove a four-region seamless-world MVP before production packaging or
+    broad rollout. *(Rust/Bevy: W-0099.)*
+   - Select one compiler-confirmed 2x2 geographic group; maps 1/2/11/14 are only
+     candidates until the compiler proves their placements and seam quality
+   - Use the monolithic pack, four global `RegionSceneRoot`s and one camera;
+     retain one already-running local-coordinate MapServer per region
+   - Walk north, south, east and west under held input. One step crosses the
+     seam; player/camera/world-map/debug coordinates and stable identity remain
+     continuous with zero paused movement frames on the prepared path while
+     internal owner/epoch changes on the same socket
+   - Expose no map number, loading/fade, blank/partial frame, camera reset,
+     duplicate character, mixed epoch or durable transition-band coordinate
+   - Separately delay preparation two seconds after static art is ready: keep
+     the complete composed world visible and the player on the last source tile,
+     then cross when ready. Also test rejection, stale topology/epoch,
+     overload, crash, disconnect, corners, rapid backtracking and 1,000
+     crossings with flat memory
+   - Keep cross-border live visibility/combat/AI out of this MVP; static neighbor
+     rendering and invisible player handoff are mandatory
+
+24. Migrate character persistence to versioned canonical global position after
+    the slice is proven. *(Rust/Bevy: W-0100.)*
+   - Persist world space, signed global x/y and topology version; stable region
+     is a lookup hint, and legacy map/local fields are a compatibility view
+   - Migrate a legacy record on login through its pinned topology version,
+     dual-write during a controlled release and audit every rewrite
+   - During movement, advance global state first and compare its derived local
+     position with the actual MapServer/local owner; do not verify a value by
+     re-deriving it from the same legacy source
+   - Define offline backfill, rollback, ambiguous/obsolete topology handling and
+     the safe flip criteria: zero unexplained shadow mismatches in slice/soak
+     evidence
 
 Exit criteria:
 
@@ -288,16 +334,26 @@ Exit criteria:
   of view.
 - Mutating client commands receive correlated authoritative results, and
   reconnect creates a fresh epoch without duplicate or stale state.
+- The deterministic topology compiler emits a versioned/hash-addressed,
+  reviewable world; every activated geographic seam has exact round trips and
+  zero unresolved placement contradiction.
+- Elixir and Rust share canonical global position and stable identity fixtures;
+  local MapServer/VB6 coordinates are checked adapters and transition bands are
+  never durable state.
 - Login bootstrap and map transfer share a structured, ordered snapshot path;
   no out-of-band map producer can race the completion marker.
-- Before per-map packaging work begins, the current world pack proves one real
+- Before per-region packaging work begins, the current world pack proves one real
   two-second-delayed transfer keeps the source visible and atomically commits a
   complete destination on the same socket/session.
-- A normal preloaded border has no visible transition or new connection;
-  unrelated exits commit one complete destination frame, and cold/failure paths
-  keep the complete source world until commit or recovery.
+- A compiler-confirmed four-region slice crosses every cardinal border on one
+  connection with continuous player/camera/global coordinates and no visible
+  map transition or prepared-path movement stall; unrelated exits still
+  atomically replace one complete scene.
 - Delayed and failed transfers preserve one authoritative world and never leave
   duplicate entities or mixed epochs.
+- Versioned global-position migration, dual write and shadow comparison have an
+  auditable rollback and zero unexplained slice/soak mismatches before the
+  authoritative persistence read flips.
 - Performance regressions have stored baselines, explicit budgets, and a
   failing gate.
 - Failed proof-gate runs preserve enough evidence to reproduce the failure
@@ -475,6 +531,47 @@ Work:
      500 ms NPC tick budget — there is no latency problem yet, only a shape
      that will not scale
 
+10. Curate and atomically activate the production world topology after the
+    four-region MVP. *(Rust/Bevy: W-0101, W-0095.)*
+   - Give every legacy exception/conflict a reviewed disposition: corrected
+     geography, non-geographic transition or unsupported seam
+   - Require zero unresolved contradiction in an activated geographic component
+   - Compile deterministic ownership for ground, collision, gutters,
+     decorations/roofs, corners, occlusion, weather/audio and world-map layout
+   - Version topology and content together; pin an existing session or
+     resnapshot it explicitly during activation
+
+11. Add bounded cross-region interest and command routing without splitting
+    authority. *(Rust/Bevy: W-0102.)*
+   - One MapServer owns each entity; adjacent regions receive only read-only,
+     delta/batchable projections keyed by stable entity ID, owner and epoch
+   - Route attacks/spells/interactions asynchronously to the target owner with
+     command IDs/idempotency; validate global range, line of sight, zones,
+     cooldowns and cost exactly once at authority
+   - Never block a local simulation tick on a neighbor, replicate private/full
+     entity state or send every position update through one central process
+   - Bound AOI radius, update bytes/rate, stale age, queues and work per tick;
+     record local versus cross-node latency and drop/resnapshot behavior
+   - Test ownership movement during an in-flight command, slow/crashed
+     neighbors, crowded seams, projectiles, visibility and duplicate delivery
+
+12. Add hierarchical cross-region navigation with explicit actor policy.
+    *(Rust/Bevy: W-0103.)*
+   - Compile a high-level seam/portal graph and keep tile A* inside the owning
+     MapServer rather than building one giant hot-path navmesh
+   - Keep ordinary NPCs local; only players, pets, escorts, event bosses or
+     explicitly migratory actors may transfer authority
+   - Bound high-level search and cover topology change, unreachable goals,
+     congestion, owner crash and pursuit cancellation
+
+13. Add supervised runtime instance world spaces. *(Rust/Bevy: W-0104.)*
+   - Keep immutable instance templates separate from UUID-like runtime
+     `WorldSpaceId`s and region owners
+   - Allocate/admit idempotently through a registry/supervisor that is not on
+     movement/AOI hot paths
+   - Define capacity, party admission, reconnect, owner crash, topology/content
+     version, TTL/grace cleanup and an auditable safe return anchor
+
 Exit criteria:
 
 - An idle world does not burn a core on maps nobody is standing in, and no map
@@ -482,6 +579,11 @@ Exit criteria:
 - NPC and pet targeting avoid full-map scans on hot paths.
 - Guild code has clear module boundaries.
 - Persistence writes have explicit ownership and failure semantics.
+- Production topology activation is contradiction-free and atomic.
+- Cross-region AOI/commands preserve one owner and stay inside explicit
+  latency, queue, byte and per-tick work budgets without a central hot path.
+- Hierarchical navigation keeps local work local, and runtime instances have
+  supervised ownership, cleanup and safe-return semantics.
 
 ## Phase 6: Release And Deployment
 
