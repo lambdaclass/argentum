@@ -1176,6 +1176,20 @@ async function main() {
         (await modePage.evaluate(() => window.aoWindow.getMode())) === "windowed"
       );
 
+      // The fullscreen button exists on this host. It is drawn only where the platform
+      // service says the host has the concept at all — a browser needs a user gesture,
+      // which is exactly what pressing the button is, so "not right now" must not remove
+      // it. A host with no fullscreen concept gets no button, and that is the case a
+      // native build exercises; this is the other side of the same rule.
+      const bar = await modePage.evaluate(() =>
+        (window.aoLoaded?.controls ?? []).map((control) => control.key)
+      );
+      check(
+        "the browser is offered the fullscreen action",
+        bar.includes("action.fullscreen"),
+        `top-bar keys: ${bar.filter((key) => key.startsWith("action.")).join(", ")}`
+      );
+
       // The world map across the same three modes. It is sized from the world region, so
       // a mode change resizes it while it is open — the case where a stale camera would
       // put the world half outside its own panel, or lose it entirely.
