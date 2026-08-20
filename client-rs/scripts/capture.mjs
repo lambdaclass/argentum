@@ -342,9 +342,21 @@ async function main() {
       await page.waitForTimeout(1_500);
       shots.push(await shoot(page, `${viewport.name}-maximized`));
 
+      // The map, open across a host-mode change. The overlay is laid out from the world
+      // viewport, so maximising with it open is exactly the case where a fixed-size
+      // overlay would be left describing the window it was opened in.
+      await page.keyboard.press("Tab");
+      await page.waitForTimeout(900);
+      shots.push(await shoot(page, `${viewport.name}-maximized-map`));
+
       // And back, which is where a restore that leaves scrollbars shows up.
       await page.evaluate(() => window.aoWindow?.setMode("windowed"));
       await page.waitForTimeout(1_500);
+      shots.push(await shoot(page, `${viewport.name}-restored-map`));
+
+      // Closed again, so the pair shows the map went away rather than being covered.
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(900);
       shots.push(await shoot(page, `${viewport.name}-restored`));
 
       const overflow = await page.evaluate(() => ({

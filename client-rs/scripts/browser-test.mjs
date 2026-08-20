@@ -792,7 +792,10 @@ async function runHitTests(hitPage, label, ratio) {
       const filter = await rectSoon("worldmap.filter.merchant");
       check(`${label}: `+"the legend publishes a filter to click", filter !== null);
       if (filter) {
-        const drawn = (await mapState()).markers;
+        // Settled before reading, not merely read. The overlay is rebuilt by the wheel
+        // above, and a count taken mid-rebuild caught five of six markers — which then
+        // read as filtering *adding* one.
+        const drawn = (await settleMap()).markers;
         await clickAt(
           filter.x + filter.w / 2,
           filter.y + filter.h / 2,

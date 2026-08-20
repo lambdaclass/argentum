@@ -106,9 +106,54 @@ pub fn profile_for(max_dimension: u32) -> OverviewProfile {
 /// does not exist.
 pub fn overview_note(profile: OverviewProfile) -> &'static str {
     match profile {
-        OverviewProfile::Outline => "map.overview.unsupported",
-        _ => "map.overview.missing",
+        OverviewProfile::Outline => "map.overview.this-device-shows-the-outline-only",
+        _ => "map.overview.overview-art-is-not-published-yet",
     }
+}
+
+/// How many tiles apart the grid lines are drawn.
+///
+/// The outline alone tells a player where the world ends and nothing else. Ten-tile lines
+/// are what make a pan or a zoom *visible*: without them the map is a black field with
+/// dots in it, and the first capture of this overlay was exactly that — the unexplained
+/// black rectangle this task forbids, drawn by the code that was supposed to prevent one.
+const GRID_TILES: f32 = 10.0;
+
+/// The world's own rectangle on screen, and the grid lines inside it.
+///
+/// Returned as plain rectangles so the placement stays testable and the drawing stays
+/// dumb. Every one is projected through the same camera as the markers, so they pan and
+/// zoom together — a grid that stayed put while the markers moved would be worse than none.
+pub fn outline_and_grid(view: MapView, viewport: Vec2, world: Vec2) -> (Rect, Vec<Rect>) {
+    let extent = world.max(Vec2::splat(1.0));
+    let top_left = project(Vec2::ZERO, view, viewport);
+    let bottom_right = project(extent, view, viewport);
+    let outline = Rect::from_corners(top_left, bottom_right);
+
+    let mut lines = Vec::new();
+    if !outline.min.is_finite() || !outline.max.is_finite() {
+        return (outline, lines);
+    }
+
+    let mut tile = GRID_TILES;
+    while tile < extent.x {
+        let x = project(Vec2::new(tile, 0.0), view, viewport).x;
+        lines.push(Rect::from_corners(
+            Vec2::new(x, outline.min.y),
+            Vec2::new(x + 1.0, outline.max.y),
+        ));
+        tile += GRID_TILES;
+    }
+    let mut tile = GRID_TILES;
+    while tile < extent.y {
+        let y = project(Vec2::new(0.0, tile), view, viewport).y;
+        lines.push(Rect::from_corners(
+            Vec2::new(outline.min.x, y),
+            Vec2::new(outline.max.x, y + 1.0),
+        ));
+        tile += GRID_TILES;
+    }
+    (outline, lines)
 }
 
 /// Categories a player can switch off, in the order the legend shows them.
@@ -641,6 +686,17 @@ fn present_overlay(
 
     // The region and where the player is, in words: a map you cannot read a position off
     // is a map you cannot use to tell a party where to meet.
+    // The outline first, so the markers sit on something. Empty when there is no map to
+    // describe: an outline around nothing would be a claim that the world is that size.
+    let outline: Vec<(Rect, bool)> = if unavailable.is_some() {
+        Vec::new()
+    } else {
+        let (world_rect, grid) = outline_and_grid(view, viewport, world);
+        std::iter::once((world_rect, true))
+            .chain(grid.into_iter().map(|line| (line, false)))
+            .collect()
+    };
+
     let region = if map.region_key.trim().is_empty() {
         format!("map {}", map.focus_map)
     } else {
@@ -728,6 +784,34 @@ fn present_overlay(
                         ..default()
                     },
                     Children::spawn((
+                        // The world's own rectangle and its ten-tile grid, under
+                        // everything else: without them this panel is a black field with
+                        // dots in it, which is the state this task forbids by name.
+                        SpawnIter(outline.into_iter().map(|(rect, is_outline)| {
+                            (
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    left: Val::Px(rect.min.x),
+                                    top: Val::Px(rect.min.y),
+                                    width: Val::Px(rect.width().max(1.0)),
+                                    height: Val::Px(rect.height().max(1.0)),
+                                    border: UiRect::all(Val::Px(if is_outline {
+                                        size::BORDER
+                                    } else {
+                                        0.0
+                                    })),
+                                    ..default()
+                                },
+                                BackgroundColor(if is_outline {
+                                    surface::WELL
+                                } else {
+                                    surface::EDGE.with_alpha(0.35)
+                                }),
+                                BorderColor::all(surface::EDGE),
+                                Pickable::IGNORE,
+                                WorldMapOutline,
+                            )
+                        })),
                         SpawnIter(
                             unavailable
                                 .clone()
@@ -813,6 +897,10 @@ fn present_overlay(
         ));
     });
 }
+
+/// Marks the world's rectangle or one of its grid lines.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct WorldMapOutline;
 
 /// Marks a marker drawn on the world map.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
@@ -1174,6 +1262,63 @@ mod tests {
     }
 
     #[test]
+    fn the_world_has_an_outline_and_a_grid_that_move_with_the_camera() {
+        // The first capture of this overlay was a black field with six dots in it — the
+        // unexplained black rectangle this task forbids, drawn by the code meant to prevent
+        // one. The outline says where the world is and the grid is what makes a pan or a
+        // zoom visible at all.
+        let (outline, grid) = outline_and_grid(fit(VIEWPORT, WORLD), VIEWPORT, WORLD);
+        assert!(outline.width() > 1.0 && outline.height() > 1.0, "no outline: {outline:?}");
+        assert!(grid.len() >= 18, "a hundred tiles at ten apart is eighteen lines: {}", grid.len());
+        for line in &grid {
+            assert!(
+                line.min.x >= outline.min.x - 1.0
+                    && line.max.x <= outline.max.x + 1.0
+                    && line.min.y >= outline.min.y - 1.0
+                    && line.max.y <= outline.max.y + 1.0,
+                "a grid line at {line:?} is outside the world at {outline:?}"
+            );
+        }
+
+        // And it moves with the camera, or the markers would slide over a fixed backdrop.
+        let zoomed = zoom_around(fit(VIEWPORT, WORLD), VIEWPORT, WORLD, VIEWPORT / 2.0, 3.0);
+        let (bigger, _) = outline_and_grid(zoomed, VIEWPORT, WORLD);
+        assert!(
+            bigger.width() > outline.width(),
+            "zooming in did not grow the world: {} against {}",
+            bigger.width(),
+            outline.width()
+        );
+
+        let panned = pan_by(zoomed, VIEWPORT, WORLD, Vec2::new(80.0, 0.0));
+        let (moved, _) = outline_and_grid(panned, VIEWPORT, WORLD);
+        assert_ne!(moved.min.x, bigger.min.x, "panning did not move the world under the markers");
+    }
+
+    #[test]
+    fn a_map_with_nothing_to_describe_draws_no_outline_around_it() {
+        // An outline around nothing is a claim that the world is that size.
+        use super::super::testing;
+
+        let mut app = map_app();
+        let mut offline = app.world().resource::<UiState>().get().clone();
+        offline.world_map.availability =
+            MapAvailability::Unavailable(ao_core::view::MapUnavailable::Offline);
+        UiState::set(&mut app.world_mut().resource_mut::<UiState>(), offline);
+        app.update();
+        testing::tap_key(&mut app, KeyCode::Tab);
+        app.update();
+        app.update();
+
+        let outlines = app
+            .world_mut()
+            .query_filtered::<Entity, With<WorldMapOutline>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(outlines, 0, "an unavailable map drew a world outline anyway");
+    }
+
+    #[test]
     fn the_map_says_which_of_the_two_missing_art_stories_applies() {
         // A device that cannot hold the overview will never show it; art that has not been
         // published yet will appear when it is. Collapsing them into "no map" sends someone
@@ -1187,7 +1332,7 @@ mod tests {
         app.update();
         let published = overlay_text(&mut app).join(" | ");
         assert!(
-            published.to_lowercase().contains("missing"),
+            published.to_lowercase().contains("not published"),
             "a capable device is not told the art is unpublished: {published}"
         );
 
@@ -1198,7 +1343,7 @@ mod tests {
         app.update();
         let unsupported = overlay_text(&mut app).join(" | ");
         assert!(
-            unsupported.to_lowercase().contains("unsupported"),
+            unsupported.to_lowercase().contains("outline only"),
             "a device below the limit is not told why it never will: {unsupported}"
         );
     }
