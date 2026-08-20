@@ -24,9 +24,20 @@ impl Plugin for HudPlugin {
                 ONLINE_INTERVAL_SECS,
                 TimerMode::Repeating,
             )))
-            .add_systems(Update, (reset_schedule_on_reconnect, send_ping, poll_online).chain());
+            .init_resource::<OnlineRequest>()
+            .add_systems(
+                Update,
+                (reset_schedule_on_reconnect, send_ping, poll_online, claim_online).chain(),
+            );
     }
 }
+
+/// The online-count request waiting for an answer, if any.
+///
+/// One at a time on purpose: polling every fifteen seconds against a host that has
+/// stopped answering would otherwise queue requests faster than they retire.
+#[derive(Resource, Default)]
+struct OnlineRequest(Option<crate::platform::RequestId>);
 
 /// Values shared with the async poller.
 #[derive(Resource, Clone)]
@@ -150,12 +161,54 @@ fn send_ping(
     }
 }
 
+/// Claim the online count, if it has arrived.
+///
+/// A separate system from the one that asks, because the answer arrives whenever the host
+/// produces it. The code this replaces had a detached task write into an `Arc<Mutex<_>>`
+/// that the readout also read, so the value reached the screen through a channel no system
+/// declared. Now it is in the schedule, where it can be read and tested.
+fn claim_online(
+    platform: Res<crate::platform::Platform>,
+    stats: Res<HudStats>,
+    mut outstanding: ResMut<OnlineRequest>,
+) {
+    for outcome in platform.http.take_outcomes() {
+        if outstanding.0 != Some(outcome.id) {
+            // Not the answer this system is waiting for.
+            continue;
+        }
+        outstanding.0 = None;
+
+        match outcome.result {
+            Ok(body) => stats.write(None, parse_online(&body)),
+            // A count nobody could fetch is unknown, not zero: "0 players online" is a
+            // claim about the world, and a failed fetch is a claim about the network.
+            Err(_) => stats.write(None, None),
+        }
+    }
+}
+
+/// Pull the count out of the meta document.
+///
+/// A targeted extraction rather than a JSON dependency for one integer, and pure, so the
+/// shapes that have actually broken it can be tested without a network.
+fn parse_online(body: &str) -> Option<u32> {
+    let digits: String = body
+        .split("\"online\":")
+        .nth(1)?
+        .chars()
+        .skip_while(|c| !c.is_ascii_digit())
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    digits.parse::<u32>().ok()
+}
+
 fn poll_online(
     time: Res<Time>,
     mut timer: ResMut<OnlineTimer>,
-    stats: Res<HudStats>,
     config: Res<ClientConfig>,
     platform: Res<crate::platform::Platform>,
+    mut outstanding: ResMut<OnlineRequest>,
 ) {
     if !timer.0.tick(time.delta()).just_finished() {
         return;
@@ -163,36 +216,163 @@ fn poll_online(
     if !platform.clock.is_visible() {
         return;
     }
-    poll(stats.clone(), config.asset_origin.clone());
-}
+    if outstanding.0.is_some() {
+        return;
+    }
 
-/// Read the player count.
-#[cfg(target_arch = "wasm32")]
-fn poll(stats: HudStats, asset_origin: String) {
-    wasm_bindgen_futures::spawn_local(async move {
-        match crate::net::fetch_text_public(&format!("{asset_origin}/api/meta/online")).await {
-            Ok(body) => {
-                let online = body.split("\"online\":").nth(1).and_then(|rest| {
-                    let digits: String = rest
-                        .chars()
-                        .skip_while(|c| !c.is_ascii_digit())
-                        .take_while(|c| c.is_ascii_digit())
-                        .collect();
-                    digits.parse::<u32>().ok()
-                });
-                stats.write(None, online);
-            }
-            Err(_) => stats.write(None, None),
-        }
-    });
+    outstanding.0 =
+        Some(platform.http.get_text(&format!("{}/api/meta/online", config.asset_origin)));
 }
-
-#[cfg(not(target_arch = "wasm32"))]
-fn poll(_stats: HudStats, _asset_origin: String) {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A host whose fetches answer exactly what a test says, when the test says.
+    #[derive(Default)]
+    struct ScriptedHttp {
+        started: std::sync::Mutex<Vec<String>>,
+        answers: std::sync::Mutex<Vec<crate::platform::Outcome>>,
+    }
+
+    impl crate::platform::HostHttp for ScriptedHttp {
+        fn get_text(&self, url: &str) -> crate::platform::RequestId {
+            let mut started = self.started.lock().expect("lock");
+            started.push(url.to_string());
+            crate::platform::RequestId(started.len() as u64)
+        }
+
+        fn take_outcomes(&self) -> Vec<crate::platform::Outcome> {
+            std::mem::take(&mut *self.answers.lock().expect("lock"))
+        }
+    }
+
+    fn online_app(http: Arc<ScriptedHttp>) -> App {
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default())
+            .insert_resource(crate::platform::Platform {
+                http: http.clone(),
+                ..crate::platform::Platform::with_clock(0.0, true)
+            })
+            .insert_resource(OnlineTimer(Timer::from_seconds(
+                ONLINE_INTERVAL_SECS,
+                TimerMode::Repeating,
+            )))
+            .init_resource::<OnlineRequest>()
+            .init_resource::<HudStats>()
+            .insert_resource(crate::config::ClientConfig {
+                asset_origin: "http://host".to_string(),
+                gateway_url: "ws://host".to_string(),
+                scenario: None,
+                credentials: None,
+                client_hash: String::new(),
+            })
+            .add_systems(Update, (poll_online, claim_online).chain());
+        app
+    }
+
+    #[test]
+    fn the_online_count_is_read_out_of_the_answer() {
+        // The shape the server actually sends, plus the shapes that have broken naive
+        // parsing: another number first, and whitespace.
+        assert_eq!(parse_online(r#"{"online":42,"maps":842}"#), Some(42));
+        assert_eq!(parse_online(r#"{"maps":842,"online":7}"#), Some(7));
+        assert_eq!(parse_online(r#"{"online": 128 }"#), Some(128));
+
+        // And the shapes that are not an answer at all. None of them may become a count:
+        // a made-up number on the status bar is worse than a dash.
+        assert_eq!(parse_online("{}"), None);
+        assert_eq!(parse_online(r#"{"online":"many"}"#), None);
+        assert_eq!(parse_online("<html>502 Bad Gateway</html>"), None);
+        assert_eq!(parse_online(""), None);
+    }
+
+    #[test]
+    fn one_poll_is_in_flight_at_a_time() {
+        // Fifteen seconds apart against a host that stopped answering would otherwise
+        // queue requests faster than they retire.
+        let http = Arc::new(ScriptedHttp::default());
+        let mut app = online_app(http.clone());
+
+        for _ in 0..4 {
+            advance(&mut app, ONLINE_INTERVAL_SECS);
+            app.update();
+        }
+
+        assert_eq!(
+            http.started.lock().expect("lock").len(),
+            1,
+            "a poll was started while one was already outstanding"
+        );
+    }
+
+    #[test]
+    fn an_answer_reaches_the_readout_and_frees_the_next_poll() {
+        let http = Arc::new(ScriptedHttp::default());
+        let mut app = online_app(http.clone());
+
+        advance(&mut app, ONLINE_INTERVAL_SECS);
+        app.update();
+        let id = crate::platform::RequestId(1);
+        assert_eq!(app.world().resource::<OnlineRequest>().0, Some(id));
+
+        http.answers
+            .lock()
+            .expect("lock")
+            .push(crate::platform::Outcome { id, result: Ok(r#"{"online":314}"#.to_string()) });
+        app.update();
+
+        assert_eq!(app.world().resource::<HudStats>().online(), Some(314));
+        assert_eq!(app.world().resource::<OnlineRequest>().0, None, "the slot stayed taken");
+
+        // And the next interval starts a fresh one.
+        advance(&mut app, ONLINE_INTERVAL_SECS);
+        app.update();
+        assert_eq!(http.started.lock().expect("lock").len(), 2);
+    }
+
+    #[test]
+    fn a_failed_fetch_leaves_the_count_unknown_rather_than_zero() {
+        // "0 players online" is a claim about the world; a failed fetch is a claim about
+        // the network. The readout has a dash for the second and must use it.
+        let http = Arc::new(ScriptedHttp::default());
+        let mut app = online_app(http.clone());
+
+        advance(&mut app, ONLINE_INTERVAL_SECS);
+        app.update();
+        http.answers.lock().expect("lock").push(crate::platform::Outcome {
+            id: crate::platform::RequestId(1),
+            result: Err(crate::platform::FetchError::Transport("socket closed".into())),
+        });
+        app.update();
+
+        assert_eq!(app.world().resource::<HudStats>().online(), None);
+        assert_eq!(app.world().resource::<OnlineRequest>().0, None);
+    }
+
+    #[test]
+    fn an_answer_to_somebody_elses_request_is_left_alone() {
+        // The queue is shared with every other fetch the client makes. Claiming an
+        // outcome this system never asked for would consume it and report it as an online
+        // count, which is how one service's answer becomes another's bug.
+        let http = Arc::new(ScriptedHttp::default());
+        let mut app = online_app(http.clone());
+
+        advance(&mut app, ONLINE_INTERVAL_SECS);
+        app.update();
+        http.answers.lock().expect("lock").push(crate::platform::Outcome {
+            id: crate::platform::RequestId(999),
+            result: Ok(r#"{"online":5}"#.to_string()),
+        });
+        app.update();
+
+        assert_eq!(app.world().resource::<HudStats>().online(), None);
+        assert_eq!(
+            app.world().resource::<OnlineRequest>().0,
+            Some(crate::platform::RequestId(1)),
+            "the outstanding request was retired by somebody else's answer"
+        );
+    }
 
     #[test]
     fn a_dead_socket_reports_nothing_to_measure() {

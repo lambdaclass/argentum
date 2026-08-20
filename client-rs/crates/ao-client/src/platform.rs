@@ -120,6 +120,59 @@ pub trait HostWindow: Send + Sync + 'static {
     fn presentation_box(&self) -> Option<(Vec2, f32)>;
 }
 
+/// One-shot document fetches.
+///
+/// Not a general HTTP client: the client asks for a handful of documents by URL and this
+/// is the whole surface. Started-then-claimed rather than `async fn`, because the caller
+/// is a Bevy system that cannot await, and because a boxed async trait method needs a
+/// runtime the wasm build does not have.
+///
+/// The shape matters beyond convenience. The code this replaces spawned a detached task
+/// that wrote the answer into an `Arc<Mutex<_>>` the interface also read, so a fetch's
+/// result reached the screen through a side channel no system declared. Now the request
+/// is started by a system and claimed by a system, and the flow is visible in the
+/// schedule.
+pub trait HostHttp: Send + Sync + 'static {
+    /// Start fetching `url` as text. The handle is how the answer is recognised.
+    fn get_text(&self, url: &str) -> RequestId;
+
+    /// Take whatever finished since the last call.
+    ///
+    /// Draining rather than peeking, so two systems cannot both act on one answer, and
+    /// so an answer nobody claimed does not accumulate forever.
+    fn take_outcomes(&self) -> Vec<Outcome>;
+}
+
+/// A fetch in flight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct RequestId(pub u64);
+
+/// A finished fetch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Outcome {
+    pub id: RequestId,
+    pub result: Result<String, FetchError>,
+}
+
+/// Why a fetch did not return a document.
+///
+/// Two variants rather than a string because the callers that matter branch on them: a
+/// transport failure is worth asking again, an answer the client cannot parse is not, and
+/// a client that retries the second hammers a broken endpoint forever.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FetchError {
+    /// The host cannot fetch at all.
+    Unsupported,
+    /// It never completed: no route, closed document, refused connection.
+    Transport(String),
+}
+
+impl FetchError {
+    pub fn is_worth_retrying(&self) -> bool {
+        matches!(self, FetchError::Transport(_))
+    }
+}
+
 /// Every service the client has, behind one resource.
 ///
 /// Bundled so a system can take `Res<Platform>` and reach the part it needs, and cloned
@@ -130,6 +183,7 @@ pub trait HostWindow: Send + Sync + 'static {
 pub struct Platform {
     pub clock: Arc<dyn HostClock>,
     pub window: Arc<dyn HostWindow>,
+    pub http: Arc<dyn HostHttp>,
 }
 
 impl Platform {
@@ -138,7 +192,11 @@ impl Platform {
     /// One place, so a test can substitute the whole host and a system never has to know
     /// which host it got.
     pub fn host() -> Self {
-        Self { clock: Arc::new(host::Clock), window: Arc::new(host::Window) }
+        Self {
+            clock: Arc::new(host::Clock),
+            window: Arc::new(host::Window),
+            http: Arc::new(host::Http::default()),
+        }
     }
 }
 
@@ -231,6 +289,58 @@ mod host {
         #[cfg(not(target_arch = "wasm32"))]
         fn is_visible(&self) -> bool {
             true
+        }
+    }
+
+    /// Fetches, and the answers waiting to be claimed.
+    ///
+    /// The queue is a module-level static rather than state on this struct because a
+    /// browser fetch is a detached task that cannot borrow the service that started it.
+    #[derive(Default)]
+    pub struct Http {
+        next: std::sync::atomic::AtomicU64,
+    }
+
+    static FINISHED: std::sync::Mutex<Vec<Outcome>> = std::sync::Mutex::new(Vec::new());
+
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    fn finish(outcome: Outcome) {
+        if let Ok(mut queue) = FINISHED.lock() {
+            queue.push(outcome);
+        }
+    }
+
+    impl HostHttp for Http {
+        fn get_text(&self, url: &str) -> RequestId {
+            let id = RequestId(self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+
+            #[cfg(target_arch = "wasm32")]
+            {
+                let url = url.to_string();
+                wasm_bindgen_futures::spawn_local(async move {
+                    let result =
+                        crate::net::fetch_text_public(&url).await.map_err(FetchError::Transport);
+                    finish(Outcome { id, result });
+                });
+            }
+
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                // Native has no fetch of its own yet, and saying so immediately is better
+                // than a request that never answers: the caller sees a failure it can
+                // classify instead of a permanently pending handle.
+                let _ = url;
+                finish(Outcome { id, result: Err(FetchError::Unsupported) });
+            }
+
+            id
+        }
+
+        fn take_outcomes(&self) -> Vec<Outcome> {
+            match FINISHED.lock() {
+                Ok(mut queue) => std::mem::take(&mut *queue),
+                Err(_) => Vec::new(),
+            }
         }
     }
 
@@ -360,7 +470,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(Platform {
             clock: Arc::new(FakeClock { ms: 1_234.0, visible: false }),
-            window: Arc::new(super::host::Window),
+            ..Platform::host()
         });
 
         let platform = app.world().resource::<Platform>().clone();
