@@ -144,7 +144,18 @@ impl Plugin for TopBarPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Maximised>()
             .add_systems(Startup, populate.after(super::shell::spawn_shell))
-            .add_systems(Update, (update_readout, handle_bar_clicks, refresh_maximised));
+            .add_systems(
+                Update,
+                (
+                    update_readout,
+                    // In the consume set, with every other activation consumer: reading
+                    // `Activated` after the panels rebuild would act on an entity that no
+                    // longer exists, which is the bug that made tab clicks need three
+                    // attempts.
+                    handle_bar_clicks.in_set(super::controls::ControlSet::Consume),
+                    refresh_maximised,
+                ),
+            );
     }
 }
 
@@ -372,15 +383,22 @@ fn update_readout(
     }
 }
 
-/// Act on a pressed bar button.
+/// Act on an activated bar button.
+///
+/// Reviewed and found: this read `Interaction::Pressed` directly, while every other
+/// control in the client activates through `Activated` — on *release*, and from the
+/// keyboard as well as the pointer. So maximise and fullscreen could not be reached with
+/// Enter or Space, and a press that slid off the button still fired. Reading the shared
+/// message instead is the whole fix; the ordering guarantees come with it.
 fn handle_bar_clicks(
-    buttons: Query<(&Interaction, &BarAction), Changed<Interaction>>,
+    mut activations: MessageReader<super::controls::Activated>,
+    buttons: Query<&BarAction>,
     mut maximised: ResMut<Maximised>,
 ) {
-    for (interaction, action) in &buttons {
-        if *interaction != Interaction::Pressed {
+    for activation in activations.read() {
+        let Ok(action) = buttons.get(activation.entity) else {
             continue;
-        }
+        };
         let wanted = match action {
             BarAction::ToggleMaximise => maximised.0.toggled_maximize(),
             BarAction::ToggleFullscreen => maximised.0.toggled_fullscreen(),
@@ -456,6 +474,33 @@ mod tests {
 
     fn actions(app: &mut App) -> Vec<BarAction> {
         app.world_mut().query::<&BarAction>().iter(app.world()).copied().collect::<Vec<_>>()
+    }
+
+    #[test]
+    fn a_bar_action_is_reached_by_keyboard_as_well_as_pointer() {
+        // Reviewed and found: the handler read `Interaction::Pressed` directly, so these
+        // buttons were the only controls in the client that could not be activated with
+        // Enter or Space — and a press that slid off them still fired, because a press is
+        // not a completed activation.
+        let mut app = App::new();
+        app.init_resource::<Maximised>()
+            .add_message::<super::super::controls::Activated>()
+            .add_systems(Update, handle_bar_clicks);
+
+        let button = app.world_mut().spawn(BarAction::ToggleMaximise).id();
+        let before = app.world().resource::<Maximised>().0;
+
+        app.world_mut().write_message(super::super::controls::Activated {
+            entity: button,
+            source: super::super::controls::ActivationSource::Keyboard,
+        });
+        app.update();
+
+        assert_ne!(
+            app.world().resource::<Maximised>().0,
+            before,
+            "a keyboard activation did not reach the bar"
+        );
     }
 
     #[test]
