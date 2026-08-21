@@ -957,9 +957,51 @@ fn apply_loaded_map(
                     }
                 }
             }
+            // The objects standing in the visible area, whose artwork resolves through the
+            // same map index as the terrain. Without these the loader fetched every sheet
+            // the *ground* needs and none of the ones the barrels, signs and trees need —
+            // so the first-scene requirement could never be satisfied, and the barrier sat
+            // at thirty-seven of thirty-eight sheets forever.
+            if let Some(objects) = graphics.objects() {
+                for object in &map.objects {
+                    if !within_area_of_interest(
+                        object.x as i32,
+                        object.y as i32,
+                        player.x,
+                        player.y,
+                    ) {
+                        continue;
+                    }
+                    if let Some(grh) = objects.get(&(object.obj_id as i32)) {
+                        wanted.push(*grh);
+                    }
+                }
+            }
+
             wanted.sort_unstable();
             wanted.dedup();
-            start_graphics_load(graphics.clone(), config.asset_origin.clone(), wanted);
+
+            // The objects standing in the visible area, passed as *object ids* rather than
+            // graphic ids: the table mapping one to the other is fetched by the loader
+            // itself, so it does not exist yet here. Without them the loader asked for
+            // every sheet the ground needs and none of the ones the barrels, signs and
+            // trees need, so the first-scene requirement could never be satisfied — the
+            // barrier sat at thirty-seven of thirty-eight sheets forever.
+            let visible_objects: Vec<i32> = map
+                .objects
+                .iter()
+                .filter(|object| {
+                    within_area_of_interest(object.x as i32, object.y as i32, player.x, player.y)
+                })
+                .map(|object| object.obj_id as i32)
+                .collect();
+
+            start_graphics_load(
+                graphics.clone(),
+                config.asset_origin.clone(),
+                wanted,
+                visible_objects,
+            );
 
             loaded.0 = Some(map);
             next.set(AppState::Playing);

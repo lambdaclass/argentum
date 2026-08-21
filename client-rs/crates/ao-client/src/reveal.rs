@@ -406,7 +406,7 @@ impl Default for Reveal {
 /// world can load is its own kind of bug, and "keep per-frame work bounded" is in this
 /// task's contract.
 #[derive(Resource, Default)]
-struct Requirements {
+pub struct Requirements {
     /// The sheets the first frame needs, and whether the entity tables were available when
     /// it was computed — they arrive after the map, and a set computed without them is
     /// missing every character.
@@ -414,6 +414,12 @@ struct Requirements {
     /// Tiles the painter could draw, and how many sheets were uploaded when that was
     /// counted. A newly uploaded sheet is the only thing that can change it.
     drawable: Option<(usize, usize)>,
+    /// The first required sheet that has not arrived.
+    ///
+    /// Published for automation. "Thirty-seven of thirty-eight" is not a diagnosis: the
+    /// name is what says whether the missing file is one the loader never asked for, one
+    /// the server does not have, or one that failed to decode.
+    pub missing_sheet: Option<String>,
 }
 
 /// What the first playable frame of this client needs.
@@ -540,6 +546,8 @@ fn report_members(
                 );
             } else {
                 let have = required.iter().filter(|name| sheets.0.contains_key(*name)).count();
+                requirements.missing_sheet =
+                    required.iter().find(|name| !sheets.0.contains_key(*name)).cloned();
                 let state = if have == required.len() && !required.is_empty() {
                     MemberState::Ready
                 } else {

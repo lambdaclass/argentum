@@ -501,7 +501,14 @@ fn request_item_graphics(
     }
 
     if !wanted.is_empty() {
-        crate::net::start_graphics_load(graphics.clone(), config.asset_origin.clone(), wanted);
+        // No object ids: this is the item-icon path, and an inventory icon is not a thing
+        // standing on the ground.
+        crate::net::start_graphics_load(
+            graphics.clone(),
+            config.asset_origin.clone(),
+            wanted,
+            Vec::new(),
+        );
     }
 }
 

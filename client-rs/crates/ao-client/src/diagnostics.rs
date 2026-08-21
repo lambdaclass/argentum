@@ -151,6 +151,7 @@ fn publish(
     map_markers: Query<(), With<crate::ui::worldmap::WorldMapMarker>>,
     limits: Res<crate::ui::scale::TargetLimits>,
     reveal: Res<crate::reveal::Reveal>,
+    requirements: Res<crate::reveal::Requirements>,
     mut frames: Local<u64>,
 ) {
     // Republished every frame: `hovered` changes with the pointer and nothing
@@ -213,6 +214,13 @@ fn publish(
             &report,
             &wasm_bindgen::JsValue::from_str("revealWaitingOn"),
             &wasm_bindgen::JsValue::from_str(&detail),
+        );
+    }
+    if let Some(sheet) = requirements.missing_sheet.as_deref() {
+        let _ = js_sys::Reflect::set(
+            &report,
+            &wasm_bindgen::JsValue::from_str("revealMissingSheet"),
+            &wasm_bindgen::JsValue::from_str(sheet),
         );
     }
     set("sheets", scene.sheets as f64);

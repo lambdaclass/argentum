@@ -194,7 +194,12 @@ async fn fetch_bytes(url: &str) -> Result<Vec<u8>, String> {
 /// Sheets are fetched once per file even though hundreds of regions share one,
 /// which is the whole reason the index carries a file number plus a rect.
 #[cfg(target_arch = "wasm32")]
-pub fn start_graphics_load(graphics: Graphics, origin: String, grh_ids: Vec<i32>) {
+pub fn start_graphics_load(
+    graphics: Graphics,
+    origin: String,
+    grh_ids: Vec<i32>,
+    object_ids: Vec<i32>,
+) {
     wasm_bindgen_futures::spawn_local(async move {
         let index_url = format!("{origin}/indices/graficos_full.json");
         let json = match fetch_text(&index_url).await {
@@ -245,6 +250,17 @@ pub fn start_graphics_load(graphics: Graphics, origin: String, grh_ids: Vec<i32>
         for id in &grh_ids {
             if let Some(grh) = index.resolve(*id) {
                 ground.insert(grh.sheet);
+            }
+        }
+
+        // The objects in view. Their artwork resolves through this same index, but the
+        // table from object id to graphic id is one this function fetched a moment ago —
+        // which is why the caller passes object ids and the resolution happens here.
+        if let Some(objects) = graphics.objects() {
+            for id in &object_ids {
+                if let Some(grh) = objects.get(id).and_then(|grh| index.resolve(*grh)) {
+                    ground.insert(grh.sheet);
+                }
             }
         }
 
@@ -339,7 +355,12 @@ pub fn start_graphics_load(graphics: Graphics, origin: String, grh_ids: Vec<i32>
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn start_graphics_load(graphics: Graphics, _origin: String, _grh_ids: Vec<i32>) {
+pub fn start_graphics_load(
+    graphics: Graphics,
+    _origin: String,
+    _grh_ids: Vec<i32>,
+    _object_ids: Vec<i32>,
+) {
     graphics.fail("native graphics fetch not implemented yet".into());
 }
 
