@@ -7,6 +7,7 @@
 //! sync with this one.
 
 pub mod authority;
+pub mod barrier;
 pub mod character;
 pub mod chat;
 pub mod controls;
@@ -84,6 +85,8 @@ impl Plugin for UiPlugin {
             labels::LabelPlugin,
             minimap::MinimapPlugin,
             worldmap::WorldMapPlugin,
+            // Last, so it is spawned above whatever the panels put on screen this frame.
+            barrier::BarrierPlugin,
         ));
     }
 }

@@ -150,6 +150,7 @@ fn publish(
     map_camera: Res<crate::ui::worldmap::WorldMapCamera>,
     map_markers: Query<(), With<crate::ui::worldmap::WorldMapMarker>>,
     limits: Res<crate::ui::scale::TargetLimits>,
+    reveal: Res<crate::reveal::Reveal>,
     mut frames: Local<u64>,
 ) {
     // Republished every frame: `hovered` changes with the pointer and nothing
@@ -175,6 +176,24 @@ fn publish(
     // system's own invocation count, which is once per frame by construction.
     *frames += 1;
     set("frames", *frames as f64);
+
+    // The first-scene barrier's own decision, so automation can assert that no world
+    // pixel appeared before it lifted — a screenshot cannot distinguish "revealed" from
+    // "still loading but the loading screen happens to be dark".
+    let _ = js_sys::Reflect::set(
+        &report,
+        &wasm_bindgen::JsValue::from_str("revealed"),
+        &wasm_bindgen::JsValue::from_bool(reveal.0.is_committed()),
+    );
+    set("revealFraction", reveal.0.fraction_ready() as f64);
+    set(
+        "revealWaiting",
+        reveal
+            .0
+            .members()
+            .filter(|(_, state)| !matches!(state, crate::reveal::MemberState::Ready))
+            .count() as f64,
+    );
     set("sheets", scene.sheets as f64);
     set("painted", scene.painted as f64);
     set("placeholders", scene.placeholders as f64);

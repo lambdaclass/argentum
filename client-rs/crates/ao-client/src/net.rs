@@ -243,11 +243,6 @@ pub fn start_graphics_load(graphics: Graphics, origin: String, grh_ids: Vec<i32>
         }
         graphics.set_index(index);
 
-        // Recorded before the first fetch, because "no sheets yet" and "all the sheets
-        // there will ever be" are otherwise the same observation. The first-scene
-        // barrier needs the difference to know when the visible world is complete.
-        graphics.set_required_sheets(files.iter().cloned().collect());
-
         for sheet in files {
             let url = format!("{origin}/{sheet}");
             match fetch_bytes(&url).await {

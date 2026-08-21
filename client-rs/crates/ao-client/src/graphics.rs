@@ -11,7 +11,7 @@
 //! are fetched once and reused as Bevy `Image` assets with per-sprite `rect`s.
 
 use bevy::prelude::*;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 /// One drawable region within a sheet.
@@ -343,12 +343,6 @@ pub struct GraphicsInner {
     /// Sheet file number -> decoded RGBA, awaiting upload as a Bevy image.
     pub pending_sheets: Vec<(String, u32, u32, Vec<u8>)>,
     pub failed: Option<String>,
-    /// Every sheet this load decided it needs, recorded before any of them is fetched.
-    ///
-    /// The loader has always computed this set — it is what it iterates over — and then
-    /// dropped it, so nothing outside could tell "no sheets yet" from "all the sheets
-    /// there will ever be". `None` means the loader has not got that far.
-    pub required_sheets: Option<BTreeSet<String>>,
     /// Sheets that will not arrive, with the reason.
     ///
     /// Previously a `log::warn!` and nothing else, on the principle that one unreadable
@@ -385,17 +379,6 @@ impl Graphics {
 
     pub fn failure(&self) -> Option<String> {
         self.inner.lock().ok().and_then(|g| g.failed.clone())
-    }
-
-    /// Record what this load is going to need, before it starts fetching.
-    pub fn set_required_sheets(&self, sheets: BTreeSet<String>) {
-        if let Ok(mut g) = self.inner.lock() {
-            g.required_sheets = Some(sheets);
-        }
-    }
-
-    pub fn required_sheets(&self) -> Option<BTreeSet<String>> {
-        self.inner.lock().ok().and_then(|g| g.required_sheets.clone())
     }
 
     /// Record a sheet that will not arrive.

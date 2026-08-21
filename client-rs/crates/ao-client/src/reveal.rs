@@ -416,8 +416,20 @@ pub const REQUIRED: [Member; 7] = [
 
 impl Plugin for RevealPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Reveal>().add_systems(Update, report_members);
+        app.init_resource::<Reveal>()
+            .add_systems(Update, (report_members, commit_when_ready).chain());
     }
+}
+
+/// Show the scene once every member is there.
+///
+/// Separate from the reporters so that "everything has arrived" and "the world is now
+/// visible" are two decisions in the schedule rather than one side effect of a report.
+fn commit_when_ready(mut reveal: ResMut<Reveal>) {
+    if reveal.0.is_committed() || !reveal.0.is_ready() {
+        return;
+    }
+    reveal.0.commit();
 }
 
 /// Ask each layer whether its member has arrived.
@@ -427,6 +439,8 @@ fn report_members(
     sheets: Res<crate::graphics::SheetTextures>,
     map: Res<crate::world::LoadedMap>,
     state: Res<crate::ui::state::UiState>,
+    player: Res<crate::world::LocalPlayer>,
+    radius: Res<crate::world::ViewRadius>,
     fonts: Res<Assets<Font>>,
 ) {
     let generation = reveal.0.generation();
@@ -440,10 +454,20 @@ fn report_members(
         set.report(generation, Member::MapData, MemberState::Failed(Failure::Unreachable(reason)));
     }
 
-    // Sheets: the loader records what it needs before fetching, so this is a comparison
-    // rather than a guess. A required sheet that failed is a failure of the scene, not a
-    // hole to draw around.
-    match graphics.required_sheets() {
+    // Sheets: the ones the first visible frame needs, computed from the map and the paint
+    // window rather than taken from the loader's plan. The loader's plan covers the whole
+    // map and every character look — on map 1 it includes sheets the server answers 404
+    // for — so waiting on it would hold the first frame for artwork nobody at the spawn
+    // point can see. A sheet the *window* needs that failed is a failure of the scene, not
+    // a hole to draw around.
+    let required = match (map.0.as_ref(), graphics.index()) {
+        (Some(map), Some(index)) => {
+            Some(crate::world::sheets_for_window(map, &index, player.x, player.y, radius.0))
+        }
+        _ => None,
+    };
+
+    match required {
         None => {}
         Some(required) => {
             let failures = graphics.failed_sheets();
@@ -523,6 +547,41 @@ mod tests {
         assert!(set.is_ready(), "a set did not reach ready");
     }
 
+    /// A map with two tiles: one at the spawn point, one at the far corner.
+    ///
+    /// The far tile is the point of the fixture. Its sheet is needed eventually and not
+    /// for the first frame, and the reveal set must not wait for it — measured on the real
+    /// map 1, the loader's full plan includes sheets the server answers 404 for, so a set
+    /// scoped to "every sheet the map could use" never completes at all.
+    fn two_tile_map() -> ao_core::PackedMap {
+        let mut layers: [Vec<ao_core::mappack::LayerTile>; 4] = Default::default();
+        layers[0].push(ao_core::mappack::LayerTile { x: 50, y: 50, grh: 1 });
+        layers[0].push(ao_core::mappack::LayerTile { x: 99, y: 99, grh: 2 });
+
+        ao_core::PackedMap {
+            map_id: 1,
+            name: "fixture".into(),
+            width: 100,
+            height: 100,
+            music_hi: 0,
+            music_low: 0,
+            tiles: vec![0; 100 * 100],
+            layers,
+            npcs: Vec::new(),
+            objects: Vec::new(),
+            exits: Vec::new(),
+        }
+    }
+
+    /// An index resolving those two grhs to two different sheet files.
+    fn two_sheet_index() -> crate::graphics::GrhIndex {
+        crate::graphics::GrhIndex::parse(
+            r#"[{"id":1,"grafico":"near","width":32,"height":32},
+                {"id":2,"grafico":"far","width":32,"height":32}]"#,
+            "graficos",
+        )
+    }
+
     /// An app with the reporters and the resources they read, and nothing else.
     fn reporting_app() -> App {
         let mut app = App::new();
@@ -543,6 +602,8 @@ mod tests {
         .init_resource::<crate::graphics::Graphics>()
         .init_resource::<crate::graphics::SheetTextures>()
         .insert_resource(crate::world::LoadedMap(None))
+        .init_resource::<crate::world::LocalPlayer>()
+        .init_resource::<crate::world::ViewRadius>()
         .init_resource::<crate::ui::state::UiState>()
         .add_systems(Update, report_members);
         app
@@ -575,31 +636,44 @@ mod tests {
         // The loader records what it needs before fetching, so a set with nothing
         // delivered reports zero of two rather than staying silent.
         let graphics = app.world().resource::<crate::graphics::Graphics>().clone();
-        graphics.set_required_sheets(["3.png".to_string(), "7.png".to_string()].into());
+        graphics.set_index(two_sheet_index());
+        app.world_mut().resource_mut::<crate::world::LoadedMap>().0 =
+            Some(Box::new(two_tile_map()));
         app.update();
+
+        // The map arriving readies its own member, and now the sheet requirement is
+        // knowable: one sheet, for the tile at the spawn point. Not two — the far corner's
+        // artwork is not part of the first visible frame.
+        assert_eq!(state_of(&app, Member::MapData), MemberState::Ready);
         assert_eq!(
             state_of(&app, Member::Sheets),
-            MemberState::Loading { done: Some(0), total: Some(2) }
+            MemberState::Loading { done: Some(0), total: Some(1) },
+            "the reveal set is waiting for artwork outside the first frame"
         );
 
-        // One sheet arrives: progress, not readiness.
+        // It arrives: ready.
         app.world_mut()
             .resource_mut::<crate::graphics::SheetTextures>()
             .0
-            .insert("3.png".to_string(), Handle::default());
-        app.update();
-        assert_eq!(
-            state_of(&app, Member::Sheets),
-            MemberState::Loading { done: Some(1), total: Some(2) }
-        );
-
-        // Both: ready.
-        app.world_mut()
-            .resource_mut::<crate::graphics::SheetTextures>()
-            .0
-            .insert("7.png".to_string(), Handle::default());
+            .insert("graficos/near.png".to_string(), Handle::default());
         app.update();
         assert_eq!(state_of(&app, Member::Sheets), MemberState::Ready);
+    }
+
+    #[test]
+    fn a_sheet_the_first_frame_cannot_see_is_not_waited_for() {
+        // Measured on the real map: the loader's plan includes `graficos/1001.png`, which
+        // the server answers 404 for. A reveal set scoped to the whole map would hold the
+        // first frame forever for a sheet nobody can see from the spawn point.
+        let map = two_tile_map();
+        let index = two_sheet_index();
+        let required = crate::world::sheets_for_window(&map, &index, 50, 50, IVec2::new(8, 6));
+
+        assert!(required.contains("graficos/near.png"));
+        assert!(
+            !required.contains("graficos/far.png"),
+            "the far corner's artwork is in the first frame's requirements: {required:?}"
+        );
     }
 
     #[test]
@@ -610,13 +684,18 @@ mod tests {
         // task exists to stop.
         let mut app = reporting_app();
         let graphics = app.world().resource::<crate::graphics::Graphics>().clone();
-        graphics.set_required_sheets(["3.png".to_string()].into());
-        graphics.sheet_failed("3.png".to_string(), "decode: truncated".to_string());
+        graphics.set_index(two_sheet_index());
+        graphics.sheet_failed("graficos/near.png".to_string(), "decode: truncated".to_string());
+        app.world_mut().resource_mut::<crate::world::LoadedMap>().0 =
+            Some(Box::new(two_tile_map()));
         app.update();
 
         match state_of(&app, Member::Sheets) {
             MemberState::Failed(Failure::Corrupt(detail)) => {
-                assert!(detail.contains("3.png"), "the failure does not name the sheet: {detail}");
+                assert!(
+                    detail.contains("near.png"),
+                    "the failure does not name the sheet: {detail}"
+                );
             }
             other => panic!("expected a corrupt failure, got {other:?}"),
         }
@@ -629,12 +708,16 @@ mod tests {
         // exactly the case the loader's tolerance was written for.
         let mut app = reporting_app();
         let graphics = app.world().resource::<crate::graphics::Graphics>().clone();
-        graphics.set_required_sheets(["3.png".to_string()].into());
-        graphics.sheet_failed("99.png".to_string(), "fetch: 404".to_string());
+        graphics.set_index(two_sheet_index());
+        // The far corner's sheet, which is exactly the case the loader's tolerance was
+        // written for: needed eventually, not needed to show the first frame.
+        graphics.sheet_failed("graficos/far.png".to_string(), "fetch: 404".to_string());
+        app.world_mut().resource_mut::<crate::world::LoadedMap>().0 =
+            Some(Box::new(two_tile_map()));
         app.world_mut()
             .resource_mut::<crate::graphics::SheetTextures>()
             .0
-            .insert("3.png".to_string(), Handle::default());
+            .insert("graficos/near.png".to_string(), Handle::default());
         app.update();
 
         assert_eq!(state_of(&app, Member::Sheets), MemberState::Ready);

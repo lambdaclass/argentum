@@ -91,7 +91,16 @@ async function waitForClient(page) {
     },
     { timeout: 30_000 }
   );
-  await page.waitForTimeout(2_000);
+
+  // And then wait to be *playable*, which is a different question and the one every check
+  // below depends on. The client holds a Bevy-owned barrier over the world until the
+  // first scene can be presented complete, so before that point the world is not
+  // clickable, no tile resolves and the rail is behind an opaque panel — a harness that
+  // starts here reports a broken client. Measured against the dev server under software
+  // rendering: about ninety seconds, dominated by fetching forty-seven sheets one after
+  // another.
+  await page.waitForFunction(() => window.aoLoaded?.revealed === true, { timeout: 240_000 });
+  await page.waitForTimeout(500);
 }
 
 /// How long one frame takes, right now, in this context.

@@ -63,6 +63,40 @@ fn within_paint_window(x: i32, y: i32, px: i32, py: i32, radius: IVec2) -> bool 
         && dy <= radius.y + SPAWN_MARGIN + TALL_ART_TILES
 }
 
+/// The sheets the *first visible frame* needs, and no others.
+///
+/// The loader fetches every sheet the whole map and every character look could use. That
+/// list is right for the background load and wrong for the reveal barrier: measured on
+/// map 1, it includes sheets the server does not even have (`graficos/1001.png` answers
+/// 404), so waiting for all of it would hold the first frame forever for artwork nobody
+/// standing at the spawn point can see.
+///
+/// This is the same walk `paint_scene` does — the tiles inside the paint window, which is
+/// the viewport plus its spawn margin and the tall-art rows below it — reduced to the set
+/// of sheet files those tiles resolve to. Pure, so the set can be asserted without a GPU.
+pub fn sheets_for_window(
+    map: &ao_core::PackedMap,
+    index: &crate::graphics::GrhIndex,
+    px: i32,
+    py: i32,
+    radius: IVec2,
+) -> std::collections::BTreeSet<String> {
+    let mut sheets = std::collections::BTreeSet::new();
+
+    for layer in map.layers.iter() {
+        for tile in layer {
+            if !within_paint_window(tile.x as i32, tile.y as i32, px, py, radius) {
+                continue;
+            }
+            if let Some(grh) = index.resolve(tile.grh) {
+                sheets.insert(grh.sheet);
+            }
+        }
+    }
+
+    sheets
+}
+
 /// Where the client is in its own startup, as distinct from where the
 /// connection is.
 ///
