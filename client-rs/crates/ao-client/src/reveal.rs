@@ -407,19 +407,36 @@ impl Default for Reveal {
 /// task's contract.
 #[derive(Resource, Default)]
 pub struct Requirements {
-    /// The sheets the first frame needs, and whether the entity tables were available when
-    /// it was computed — they arrive after the map, and a set computed without them is
-    /// missing every character.
-    sheets: Option<(std::collections::BTreeSet<String>, bool)>,
-    /// Tiles the painter could draw, and how many sheets were uploaded when that was
-    /// counted. A newly uploaded sheet is the only thing that can change it.
-    drawable: Option<(usize, usize)>,
+    /// The sheets the first frame needs, what view it was computed for, and whether the
+    /// entity tables were available at the time — they arrive after the map, and a set
+    /// computed without them is missing every character.
+    ///
+    /// The view is part of the key because a resize changes which tiles are in frame. A
+    /// cache that ignored it would keep requiring the sheets of the *old* window, so a
+    /// window that grew mid-load could reveal with its new edge unpainted — which is the
+    /// pop-in this task exists to prevent, arriving through the one event the contract
+    /// names as cancelling a candidate.
+    sheets: Option<(std::collections::BTreeSet<String>, View, bool)>,
+    /// Tiles the painter could draw, the view they were counted for, and how many sheets
+    /// were uploaded at the time. A newly uploaded sheet or a changed view can change it.
+    drawable: Option<(usize, View, usize)>,
     /// The first required sheet that has not arrived.
     ///
     /// Published for automation. "Thirty-seven of thirty-eight" is not a diagnosis: the
     /// name is what says whether the missing file is one the loader never asked for, one
     /// the server does not have, or one that failed to decode.
     pub missing_sheet: Option<String>,
+}
+
+/// The view a requirement was computed for: where the player is and how much is in frame.
+///
+/// Compared rather than remembered vaguely, because "the window changed" is the whole
+/// reason a cached requirement goes stale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct View {
+    x: i32,
+    y: i32,
+    radius: IVec2,
 }
 
 /// What the first playable frame of this client needs.
@@ -444,9 +461,10 @@ pub const REQUIRED: [Member; 8] = [
 
 impl Plugin for RevealPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Reveal>()
-            .init_resource::<Requirements>()
-            .add_systems(Update, (cancel_on_reconnect, report_members, commit_when_ready).chain());
+        app.init_resource::<Reveal>().init_resource::<Requirements>().add_systems(
+            Update,
+            (cancel_on_reconnect, cancel_on_view_change, report_members, commit_when_ready).chain(),
+        );
     }
 }
 
@@ -471,6 +489,36 @@ fn cancel_on_reconnect(
     *previous = Some(current);
 
     if !restarted || reveal.0.is_committed() {
+        return;
+    }
+
+    let next = Generation(reveal.0.generation().0 + 1);
+    reveal.0 = RevealSet::new(next, REQUIRED);
+    *requirements = Requirements::default();
+}
+
+/// Abandon a candidate scene when the window it was being built for changes shape.
+///
+/// A resize changes which tiles are in frame, so a candidate computed for the old window
+/// has the wrong requirement: it is missing the sheets the newly exposed edge needs. A
+/// member cannot be un-readied within a generation — progress does not go backwards — so
+/// the honest response is the one the contract names for a resize: cancel this candidate
+/// and start another.
+///
+/// Only while it is still a candidate. Once the world is on screen a resize is just a
+/// resize, and the painter extends the scene as tiles come into view.
+fn cancel_on_view_change(
+    player: Res<crate::world::LocalPlayer>,
+    radius: Res<crate::world::ViewRadius>,
+    mut reveal: ResMut<Reveal>,
+    mut requirements: ResMut<Requirements>,
+    mut previous: Local<Option<View>>,
+) {
+    let view = View { x: player.x, y: player.y, radius: radius.0 };
+    let changed = previous.is_some_and(|last| last != view);
+    *previous = Some(view);
+
+    if !changed || reveal.0.is_committed() {
         return;
     }
 
@@ -547,9 +595,14 @@ fn report_members(
     // for — so waiting on it would hold the first frame for artwork nobody at the spawn
     // point can see. A sheet the *window* needs that failed is a failure of the scene, not
     // a hole to draw around.
-    // Computed once, and again only if it was computed before the entity tables arrived.
-    let complete = requirements.sheets.as_ref().is_some_and(|(_, with_entities)| *with_entities);
-    if !complete {
+    // Computed once per view, and again if it was computed before the entity tables
+    // arrived or if the window has changed shape since.
+    let view = View { x: player.x, y: player.y, radius: radius.0 };
+    let usable = requirements
+        .sheets
+        .as_ref()
+        .is_some_and(|(_, computed_for, with_entities)| *with_entities && *computed_for == view);
+    if !usable {
         if let (Some(map), Some(index)) = (map.0.as_ref(), graphics.index()) {
             let mut sheets =
                 crate::world::sheets_for_window(map, &index, player.x, player.y, radius.0);
@@ -570,11 +623,11 @@ fn report_members(
                 && graphics.bodies().is_some()
                 && graphics.npcs().is_some()
                 && graphics.objects().is_some();
-            requirements.sheets = Some((sheets, tables_ready));
+            requirements.sheets = Some((sheets, view, tables_ready));
         }
     }
 
-    let required = requirements.sheets.as_ref().map(|(sheets, _)| sheets.clone());
+    let required = requirements.sheets.as_ref().map(|(sheets, _, _)| sheets.clone());
 
     match required {
         None => {}
@@ -629,12 +682,12 @@ fn report_members(
         // the only thing that triggers the walk again.
         let uploaded = sheets.0.len();
         let drawable = match requirements.drawable {
-            Some((at, drawable)) if at == uploaded => drawable,
+            Some((at, counted_for, drawable)) if at == uploaded && counted_for == view => drawable,
             _ => {
                 let drawable = crate::world::drawable_tiles_in_window(
                     map, &index, &sheets.0, player.x, player.y, radius.0,
                 );
-                requirements.drawable = Some((uploaded, drawable));
+                requirements.drawable = Some((uploaded, view, drawable));
                 drawable
             }
         };
@@ -759,7 +812,7 @@ mod tests {
         .init_resource::<crate::world::LocalPlayer>()
         .init_resource::<crate::world::ViewRadius>()
         .init_resource::<crate::ui::state::UiState>()
-        .add_systems(Update, report_members);
+        .add_systems(Update, (cancel_on_view_change, report_members).chain());
         app
     }
 
@@ -1076,6 +1129,39 @@ mod tests {
             other => panic!("expected a corrupt failure, got {other:?}"),
         }
         assert!(!app.world().resource::<Reveal>().0.is_ready());
+    }
+
+    #[test]
+    fn a_window_that_grows_mid_load_requires_the_tiles_it_exposed() {
+        // A resize changes which tiles are in frame, and the requirement is cached. A cache
+        // that ignored the view would keep requiring the *old* window's sheets, so a window
+        // that grew while loading could reveal with its new edge unpainted — the pop-in
+        // this task exists to prevent, arriving through one of the events the contract
+        // names as cancelling a candidate.
+        let mut app = reporting_app();
+        let graphics = app.world().resource::<crate::graphics::Graphics>().clone();
+        graphics.set_index(two_sheet_index());
+        app.world_mut().resource_mut::<crate::world::LoadedMap>().0 =
+            Some(Box::new(two_tile_map()));
+        app.world_mut()
+            .resource_mut::<crate::graphics::SheetTextures>()
+            .0
+            .insert("graficos/near.png".to_string(), Handle::default());
+        app.update();
+
+        // The spawn tile's sheet is all the small window needs.
+        assert_eq!(state_of(&app, Member::Sheets), MemberState::Ready);
+
+        // Now the window covers the whole map, which brings the far corner's artwork into
+        // frame. It has not arrived, so the scene is no longer complete.
+        app.world_mut().resource_mut::<crate::world::ViewRadius>().0 = IVec2::new(60, 60);
+        app.update();
+
+        assert!(
+            matches!(state_of(&app, Member::Sheets), MemberState::Loading { .. }),
+            "a grown window kept the old window's requirement: {:?}",
+            state_of(&app, Member::Sheets)
+        );
     }
 
     #[test]

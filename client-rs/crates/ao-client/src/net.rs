@@ -15,8 +15,12 @@ use crate::graphics::Graphics;
 use crate::graphics::{decode_png, parse_directional, parse_npcs, parse_objects, GrhIndex};
 use bevy::prelude::Resource;
 #[cfg(target_arch = "wasm32")]
+// The sheet fetch pool is wasm-only, and so are the collections it needs.
+#[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
+#[cfg(target_arch = "wasm32")]
 use std::collections::{BTreeSet, HashSet, VecDeque};
+#[cfg(target_arch = "wasm32")]
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
