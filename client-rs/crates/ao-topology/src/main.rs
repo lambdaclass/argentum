@@ -45,10 +45,20 @@ fn main() {
     println!("    other valid            {}", b.other_valid);
     println!("  same-map                 {}", b.same_map);
     println!("  missing destination      {}", b.missing_destination);
-    println!("  reciprocal seam pairs    {}", b.reciprocal_pairs);
+    println!("  reciprocal placements    {}", b.reciprocal_placements);
+    println!("  unique reciprocal pairs  {}", b.reciprocal_pairs);
+    println!("  one-sided placements     {}", b.one_sided_placements);
     println!("  contested sides          {}", b.contested_sides);
-    println!("  placement conflicts      {}", b.placement_conflicts);
-    println!("  connected components     {}", b.components);
+    println!("  weak components          {}", b.weak_components);
+    println!("  reciprocal-only comps    {}", b.reciprocal_components);
+    println!("  inconsistent components  {}", b.inconsistent_components);
+    println!("  cycle witnesses          {}", b.cycle_witnesses);
+    println!("  conflict clusters        {}", b.conflict_clusters);
+    println!("  inconsistent maps        {}", b.inconsistent_maps);
+    println!(
+        "  (blamed constraints      {}, algorithm-dependent)",
+        found.constraint_conflicts.len()
+    );
 
     // The largest components, because that is what a first seamless region is chosen from.
     let mut sizes: BTreeMap<u16, usize> = BTreeMap::new();
@@ -99,6 +109,31 @@ fn main() {
                  and say in the commit which numbers moved and why."
             );
             std::process::exit(1);
+        }
+    }
+
+    // The review unit: clusters, with the loops that prove them, smallest first — a
+    // three-map loop out by 74 tiles is a root cause somebody can act on this afternoon.
+    let clusters = topology::conflict_clusters(&found.witnesses);
+    if !clusters.is_empty() {
+        println!("  conflict clusters, smallest first:");
+        let mut ordered: Vec<&std::collections::BTreeSet<u16>> = clusters.iter().collect();
+        ordered.sort_by_key(|cluster| cluster.len());
+        for cluster in ordered.iter().take(6) {
+            let sample: Vec<String> = cluster.iter().take(8).map(|map| map.to_string()).collect();
+            println!(
+                "    {} maps: {}{}",
+                cluster.len(),
+                sample.join(", "),
+                if cluster.len() > 8 { ", ..." } else { "" }
+            );
+        }
+
+        println!("  shortest loops that do not close:");
+        let mut loops = found.witnesses.clone();
+        loops.sort_by_key(|witness| witness.loop_maps.len());
+        for witness in loops.iter().take(6) {
+            println!("    {:?} out by {:?}", witness.loop_maps, witness.residual);
         }
     }
 
