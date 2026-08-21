@@ -33,7 +33,13 @@ impl Plugin for BarrierPlugin {
             Update,
             // In the presentation set, like every other panel: it is drawn from the
             // reveal set after the frame's interactions have been consumed.
-            present_barrier.in_set(super::controls::ControlSet::Present),
+            (
+                // Before the rebuild, like every other activation consumer: a retry that
+                // ran after the barrier was rebuilt would act on an entity that no longer
+                // exists.
+                retry_on_activation.in_set(super::controls::ControlSet::Consume),
+                present_barrier.in_set(super::controls::ControlSet::Present),
+            ),
         );
     }
 }
@@ -127,6 +133,7 @@ fn barrier_root(shown: BarrierShown, may_retry: bool) -> impl Bundle {
             // bar at 0% says the opposite of what happened.
             SpawnIter(failure.is_none().then(|| stage_list(stages, fraction)).into_iter()),
             Spawn(failure_note(note, may_retry)),
+            Spawn(retry_button(may_retry)),
         )),
     )
 }
@@ -224,17 +231,67 @@ fn failure_note(failure: Option<(Member, Failure)>, may_retry: bool) -> impl Bun
                 TextFont { font_size: type_scale::MICRO, ..default() },
                 TextColor(ink::MUTED),
             ));
-            if may_retry {
-                parts.push((
-                    Node::default(),
-                    Text::new(super::fallback_label("reveal.retry")),
-                    TextFont { font_size: type_scale::SMALL, ..default() },
-                    TextColor(ink::GOLD),
-                ));
-            }
             parts
         }))),
     )
+}
+
+/// Marks the retry button, so activating it can be recognised.
+#[derive(Component)]
+pub struct BarrierRetry;
+
+/// Try again, as a control rather than a word.
+///
+/// Reviewed and found: this said "retry" and did nothing, so the only way out of a failed
+/// load was to reload the page. A screen that names an action it cannot perform is worse
+/// than one that names none.
+fn retry_button(may_retry: bool) -> impl Bundle {
+    (
+        Node { flex_direction: FlexDirection::Row, ..default() },
+        Children::spawn(SpawnIter(
+            may_retry
+                .then(|| {
+                    (
+                        super::controls::button(
+                            &super::fallback_label("reveal.retry"),
+                            super::controls::ControlState::Normal,
+                            0,
+                        ),
+                        super::controls::ControlKey::new("reveal.retry"),
+                        BarrierRetry,
+                    )
+                })
+                .into_iter(),
+        )),
+    )
+}
+
+/// Start a fresh load when the retry is activated.
+///
+/// A new generation, not a reset of this one: the work already dispatched cannot be
+/// recalled, and its answers must not be able to complete the scene the player just asked
+/// to be rebuilt. Reviewed and found missing — generations existed in the model and
+/// nothing in production ever created a second one, so the isolation they provide was
+/// theoretical.
+fn retry_on_activation(
+    mut activations: MessageReader<super::controls::Activated>,
+    retries: Query<(), With<BarrierRetry>>,
+    mut reveal: ResMut<Reveal>,
+    mut reload: MessageWriter<crate::world::ReloadWorld>,
+) {
+    for activation in activations.read() {
+        if retries.get(activation.entity).is_err() {
+            continue;
+        }
+
+        let next = crate::reveal::Generation(reveal.0.generation().0 + 1);
+        reveal.0 = crate::reveal::RevealSet::new(next, crate::reveal::REQUIRED);
+
+        // And the work starts again. A new set on its own is a barrier that waits forever
+        // for a fetch nobody re-issued — a worse failure than the one the player was
+        // trying to escape, because it looks like progress.
+        reload.write(crate::world::ReloadWorld);
+    }
 }
 
 #[cfg(test)]
@@ -375,6 +432,90 @@ mod tests {
                 || line.to_lowercase().contains("again")),
             "offered a retry for a device limit: {text:?}"
         );
+    }
+
+    #[test]
+    fn the_retry_starts_a_fresh_load_rather_than_reusing_the_failed_one() {
+        // Reviewed and found: "retry" was a word with nothing behind it, so a failed load
+        // could only be escaped by reloading the page — and generations existed in the
+        // model with nothing in production ever creating a second one, which made their
+        // isolation theoretical.
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+            .init_asset::<Font>()
+            .init_resource::<Reveal>()
+            .add_message::<super::super::controls::Activated>()
+            .add_message::<crate::world::ReloadWorld>()
+            .add_systems(Update, (retry_on_activation, present_barrier).chain());
+
+        {
+            let mut reveal = app.world_mut().resource_mut::<Reveal>();
+            let generation = reveal.0.generation();
+            reveal.0.report(
+                generation,
+                Member::MapData,
+                MemberState::Failed(Failure::Unreachable("origin unreachable".into())),
+            );
+        }
+        app.update();
+
+        let before = app.world().resource::<Reveal>().0.generation();
+        let button = app
+            .world_mut()
+            .query_filtered::<Entity, With<BarrierRetry>>()
+            .iter(app.world())
+            .next()
+            .expect("a retry button, not a label");
+
+        app.world_mut().write_message(super::super::controls::Activated {
+            entity: button,
+            source: super::super::controls::ActivationSource::Pointer,
+        });
+        app.update();
+
+        let after = app.world().resource::<Reveal>().0.generation();
+        assert!(after > before, "the retry did not start a new load: {before:?} -> {after:?}");
+
+        // And it asked for the world again. A new set with no fetch behind it is a barrier
+        // that waits forever, which looks like progress and is worse than the failure the
+        // player was escaping.
+        let reloads =
+            app.world_mut().resource_mut::<Messages<crate::world::ReloadWorld>>().drain().count();
+        assert_eq!(reloads, 1, "the retry did not re-issue the fetch");
+
+        // A fresh candidate: nothing carried over from the failed one, and an answer from
+        // it can no longer complete this scene.
+        let mut reveal = app.world_mut().resource_mut::<Reveal>();
+        assert!(reveal.0.failure().is_none(), "the new load inherited the old failure");
+        assert!(
+            !reveal.0.report(before, Member::MapData, MemberState::Ready),
+            "an answer from the abandoned load was accepted"
+        );
+        assert!(matches!(barrier_for(&reveal.0), Barrier::Loading { .. }));
+    }
+
+    #[test]
+    fn a_failure_that_cannot_be_retried_offers_no_button() {
+        // A device limit will not change on a second attempt, and a button that cannot
+        // work is worse than none.
+        let mut app = barrier_app();
+        {
+            let mut reveal = app.world_mut().resource_mut::<Reveal>();
+            let generation = reveal.0.generation();
+            reveal.0.report(
+                generation,
+                Member::Sheets,
+                MemberState::Failed(Failure::TooLarge { needed: 2, allowed: 1 }),
+            );
+        }
+        app.update();
+
+        let buttons = app
+            .world_mut()
+            .query_filtered::<Entity, With<BarrierRetry>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(buttons, 0);
     }
 
     #[test]

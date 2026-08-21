@@ -97,6 +97,36 @@ pub fn sheets_for_window(
     sheets
 }
 
+/// Ask for the world to be fetched again.
+///
+/// Written by the first-scene barrier's retry. A message rather than the barrier calling
+/// the loader itself: `ui` may not touch the network, and the map id and origin belong to
+/// this module.
+#[derive(Message, Debug, Clone, Copy)]
+pub struct ReloadWorld;
+
+/// Start the map fetch over.
+///
+/// Only useful while nothing has been revealed: a failed *first* load has drawn nothing,
+/// so there is nothing to tear down. Retrying after a scene has been shown is a different
+/// problem — two resident scene roots and a committed world to keep on screen — and it
+/// belongs to W-0065, which owns that machinery.
+fn reload_world(
+    mut requests: MessageReader<ReloadWorld>,
+    loader: Res<MapLoader>,
+    config: Res<ClientConfig>,
+) {
+    let mut asked = false;
+    for _ in requests.read() {
+        asked = true;
+    }
+
+    if asked {
+        info!("reloading map {INITIAL_MAP} from {}", config.asset_origin);
+        loader.start(config.asset_origin.clone(), INITIAL_MAP);
+    }
+}
+
 /// How many tiles in the paint window the painter is able to draw right now.
 ///
 /// The reveal set compares this with the number actually spawned. A tile only becomes a
@@ -255,6 +285,8 @@ impl Plugin for WorldPlugin {
             .insert_resource(SheetAtlases::default())
             .init_state::<AppState>()
             .add_systems(Startup, (setup, start_map_load, connect_to_server))
+            .add_message::<ReloadWorld>()
+            .add_systems(Update, reload_world)
             .add_systems(Update, leave_boot.run_if(in_state(AppState::Boot)))
             // Runs only while a load is outstanding, which is what makes the
             // apply-once behaviour structural. It was previously a `reported`
