@@ -2,10 +2,15 @@ defmodule Arena.MapIdleLifecycleTest do
   @moduledoc """
   What a map process does when nobody is standing on it.
 
-  Every map in the world is loaded and stays loaded. The timers stay armed. What
-  changes is that a tick with no players returns immediately instead of doing
-  per-player work for nobody, and that the process compacts its own heap at the
-  transitions where no player can be waiting on it.
+  Every map in the world is loaded and stays loaded, and no map is ever unloaded,
+  hibernated or restarted. What changes is that an empty map stops rearming its NPC,
+  buff and regen timers — the wakeups themselves were 94.6% of an idle server's
+  reductions — and arms them again when a player enters. Autosave keeps its own
+  schedule everywhere, because it both persists a populated map and keeps an empty
+  map's heap compact.
+
+  Each fast tick carries the generation that armed it, so a tick already in flight
+  when the map emptied cannot rearm itself after entry has started a fresh chain.
 
   The reason this exists: BEAM's collector is generational, `fullsweep_after`
   defaults to 65535 minor collections, and a map process manages a handful of
@@ -33,6 +38,9 @@ defmodule Arena.MapIdleLifecycleTest do
 
   # A production-shaped id, for the handlers whose bodies test maps skip entirely.
   @live_map_id 1
+
+  # The same map, started for real: the arming path runs only on a production map.
+  @production_map_id 1
 
   setup_all do
     Application.ensure_all_started(:phoenix_pubsub)
@@ -128,6 +136,35 @@ defmodule Arena.MapIdleLifecycleTest do
   end
 
   defp state_of(pid), do: :sys.get_state(pid)
+
+  defp ensure_started(map_id) do
+    case Registry.lookup(Arena.MapRegistry, map_id) do
+      [{_pid, _}] -> :ok
+      [] -> Arena.Map.MapSupervisor.start_map(map_id)
+    end
+
+    wait_ready(map_id, 100)
+  end
+
+  defp wait_ready(_map_id, 0), do: :ok
+
+  defp wait_ready(map_id, retries) do
+    if MapServer.ready?(map_id) do
+      :ok
+    else
+      Process.sleep(100)
+      wait_ready(map_id, retries - 1)
+    end
+  rescue
+    _ ->
+      Process.sleep(100)
+      wait_ready(map_id, retries - 1)
+  end
+
+  defp pid_of(map_id) do
+    [{pid, _}] = Registry.lookup(Arena.MapRegistry, map_id)
+    pid
+  end
 
   describe "an empty map" do
     test "has compacted its heap by the time it is ready", %{pid: pid} do
@@ -309,19 +346,63 @@ defmodule Arena.MapIdleLifecycleTest do
       refute_receive :regen_tick, 50
     end
 
-    test "the first player arms one chain of each timer", %{pid: pid} do
-      # A test map does not arm them at all — its ticks are no-ops by design — so this is
-      # asserted on the state the arming records rather than by counting messages in
-      # somebody else's mailbox.
-      refute state_of(pid).fast_timers_armed
+    @tag :production_map
+    test "the first player arms one chain of each timer, on a real map" do
+      # Reviewed and found vacuous: this used to run against a synthetic map, where the
+      # production code deliberately refuses to arm anything, and then asserted that the
+      # generation was `>= 0`. It proved nothing at all.
+      #
+      # Map 1 is a real map with real NPCs, which is the only place the arming path
+      # actually runs.
+      ensure_started(@production_map_id)
+      pid = pid_of(@production_map_id)
 
-      session = enter(301, "Aldar")
-      state = state_of(pid)
+      before = :sys.get_state(pid)
+      refute before.fast_timers_armed, "an empty production map had its fast timers armed"
 
-      # Test maps deliberately stay unarmed; production maps arm on entry. Whichever this
-      # is, entry must never leave a *stale* generation behind.
-      assert state.fast_timer_gen >= 0
+      parent = self()
+
+      session =
+        spawn(fn ->
+          reply =
+            GenServer.call(
+              MapServer.via(@production_map_id),
+              {:enter, entity(401, "Armer"), [position: {50, 50}]},
+              15_000
+            )
+
+          send(parent, {:entered, reply})
+
+          receive do
+            :never -> :ok
+          end
+        end)
+
+      assert_receive {:entered, {:ok, _index, _players, _weather}}, 15_000
+
+      after_entry = :sys.get_state(pid)
+      assert after_entry.fast_timers_armed, "entry did not arm the chain"
+      assert after_entry.fast_timer_gen > before.fast_timer_gen, "the generation did not advance"
+
+      # A second entry must not arm a second chain: two chains of the same timer is a map
+      # quietly twice as busy as its neighbours, with nothing on screen to say so.
+      {:ok, _, _, _} =
+        GenServer.call(
+          MapServer.via(@production_map_id),
+          {:enter, entity(402, "Second"), [position: {51, 50}]},
+          15_000
+        )
+
+      second = :sys.get_state(pid)
+      assert second.fast_timer_gen == after_entry.fast_timer_gen, "a second chain was armed"
+
+      GenServer.call(MapServer.via(@production_map_id), {:leave, 401})
+      GenServer.call(MapServer.via(@production_map_id), {:leave, 402})
       Process.exit(session, :kill)
+
+      # Empty again: the next tick of each chain stops rearming, and the heap is compacted.
+      emptied = await(pid, &(map_size(&1.players) == 0))
+      assert emptied.idle_compacted
     end
 
     test "arming twice does not produce two chains" do
