@@ -1647,6 +1647,88 @@ async function main() {
 
       await failContext.close();
     }
+
+    // A second load in the same browser, with the assets cached, and a maximize while it
+    // is still a candidate.
+    console.log("  first-scene warm cache and maximize");
+    {
+      const warmContext = await browser.newContext({
+        viewport: { width: 1280, height: 800 },
+        deviceScaleFactor: 1,
+      });
+      const page = await warmContext.newPage();
+
+      // Warm the cache with one complete load, then do it again. The second pass is the
+      // one under test: caching must not let the barrier lift on a partly composed scene,
+      // which is exactly the risk when everything arrives at once.
+      await page.goto(url, { waitUntil: "load" });
+      await page.waitForFunction(() => window.aoLoaded?.revealed === true, null, {
+        timeout: 240_000,
+      });
+
+      const cold = await page.evaluate(() => window.aoLoaded?.sheets);
+
+      let held = null;
+      await page.route("**/graficos/*.png", async (route) => {
+        const requested = route.request().url();
+        if (held === null) {
+          held = requested;
+        }
+        if (requested === held) {
+          await new Promise((resolve) => setTimeout(resolve, 30_000));
+        }
+        await route.continue();
+      });
+
+      await page.reload({ waitUntil: "load" });
+      await page.waitForSelector("#ao-canvas", { timeout: 30_000 });
+      await page.waitForFunction(() => document.getElementById("boot")?.hidden === true, null, {
+        timeout: 60_000,
+      });
+
+      // Maximized mid-load: the host grows the shell, and the barrier has to grow with it.
+      const reached = await page.evaluate(() => window.aoWindow?.setMode("maximized"));
+      await page.waitForTimeout(1_500);
+
+      const box = await (await page.$("#ao-canvas")).boundingBox();
+      const heldBefore = await page.evaluate(() => window.aoLoaded?.revealed === false);
+      const shot = await page.screenshot({
+        clip: { x: box.x, y: box.y, width: box.width, height: box.height },
+      });
+      const heldAfter = await page.evaluate(() => window.aoLoaded?.revealed === false);
+      const corners = await page.evaluate(async (bytes) => {
+        const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
+        const bitmap = await createImageBitmap(blob);
+        const surface = new OffscreenCanvas(bitmap.width, bitmap.height);
+        const context = surface.getContext("2d");
+        context.drawImage(bitmap, 0, 0);
+        const at = (fx, fy) => {
+          const x = Math.min(bitmap.width - 1, Math.floor(bitmap.width * fx));
+          const y = Math.min(bitmap.height - 1, Math.floor(bitmap.height * fy));
+          const [r, g, b] = context.getImageData(x, y, 1, 1).data;
+          return { fx, fy, r, g, b };
+        };
+        return [at(0.02, 0.02), at(0.98, 0.02), at(0.02, 0.98), at(0.98, 0.98)];
+      }, Array.from(shot));
+
+      check(
+        `maximizing while the scene loads keeps it covered (host reached ${reached})`,
+        heldBefore && heldAfter && corners.every((p) => p.r <= 16 && p.g <= 16 && p.b <= 28),
+        `held ${heldBefore}/${heldAfter}, corners ${JSON.stringify(corners)}`
+      );
+
+      await page.waitForFunction(() => window.aoLoaded?.revealed === true, null, {
+        timeout: 240_000,
+      });
+      const warm = await page.evaluate(() => window.aoLoaded?.sheets);
+      check(
+        "a warm second load still commits a complete scene",
+        warm >= cold,
+        `cold ${cold} sheets, warm ${warm}`
+      );
+
+      await warmContext.close();
+    }
     }
 
     if (runs("hits")) {
