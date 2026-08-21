@@ -15,6 +15,7 @@ pub mod mappack;
 pub mod movement;
 pub mod protocol;
 pub mod tiles;
+pub mod topology;
 pub mod view;
 
 pub use mappack::{decode_map, PackedMap};

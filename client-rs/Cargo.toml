@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/ao-core", "crates/ao-client"]
+members = ["crates/ao-core", "crates/ao-topology", "crates/ao-client"]
 
 [workspace.package]
 edition = "2021"

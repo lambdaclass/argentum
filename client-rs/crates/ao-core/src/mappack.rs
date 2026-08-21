@@ -168,6 +168,22 @@ pub fn decode_map(bytes: &[u8], wanted_id: u16) -> Result<Option<PackedMap>, Pac
     Ok(None)
 }
 
+/// Every map in the pack, decoded once.
+///
+/// For the topology compiler, which needs all of them together: the alternative is 842
+/// passes over a 61 MB file, each one re-reading every map before the one it wants.
+pub fn decode_all(bytes: &[u8]) -> Result<Vec<PackedMap>, PackError> {
+    let mut r = Reader::new(bytes);
+    read_header(&mut r)?;
+    let count = r.u16()?;
+
+    let mut maps = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        maps.push(read_map(&mut r)?);
+    }
+    Ok(maps)
+}
+
 /// Map ids present in the pack, without decoding their contents.
 pub fn list_map_ids(bytes: &[u8]) -> Result<Vec<u16>, PackError> {
     let mut r = Reader::new(bytes);
