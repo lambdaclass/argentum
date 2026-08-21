@@ -239,8 +239,19 @@ Work:
    - Recompute and report the audited baseline: 100x100 storage; provisional
      74x80 core (`x=14..87`, `y=11..90`); bands `x=13/88`, `y=10/91`;
      158,549 exits; 157,304 valid cross-map; 156,084 standard seam records;
-     1,220 valid exceptions; 49 same-map; 1,196 missing/sentinel; 1,091
-     reciprocal seam pairs; 58 placement conflicts; 237 components
+     1,220 valid exceptions; 49 same-map; 1,196 missing/sentinel
+   - **Corrected 2026-08-21.** The figures above reproduce exactly from the
+     corpus. Three others in the original audit are superseded, because their
+     names were ambiguous or their values depended on a traversal: 1,091
+     reciprocal seam pairs becomes 1,102 reciprocal *placements* and 1,098
+     unique *pairs* (four pairs claim two opposite placements: 37-168, 37-264,
+     167-168, 167-264), plus 15 one-sided placements; 237 components becomes 226
+     weak or 232 reciprocal-only, and the roadmap must say which graph it means;
+     58 placement conflicts is withdrawn rather than corrected, because moving
+     the traversal root moved it from 48 to 161. Stable replacements: 2
+     inconsistent components, 2 conflict clusters, 50 cycle witnesses, 125 maps
+     implicated, 428 inside an inconsistent component. Reproduce with
+     `ao-topology --check`; `client-rs` holds the pinned values
    - Treat existing contradictions as a reviewed baseline and fail on new or
      unexplained drift. No active geographic seam may retain an unresolved
      placement conflict or silently chosen winner

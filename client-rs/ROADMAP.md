@@ -420,9 +420,40 @@ Pin the audited corpus baseline in a reviewable report: 100x100 storage; the
 provisional 74x80 core (`x=14..87`, `y=11..90`); standard transition bands at
 `x=13/88` and `y=10/91`; 158,549 exits, of which 157,304 are valid cross-map,
 156,084 follow the standard seam offsets and 1,220 are other valid exceptions;
-49 same-map exits; 1,196 missing/sentinel destinations; 1,091 reciprocal seam
-pairs; 58 inferred placement conflicts; and 237 connected components. Recompute
-and fail on unexplained drift rather than treating these counts as eternal.
+49 same-map exits; and 1,196 missing/sentinel destinations. Recompute and fail on
+unexplained drift rather than treating these counts as eternal.
+
+**Corrected 2026-08-21.** Those first seven figures reproduce exactly from the
+corpus and stand. Three others in the original audit are superseded, and the
+reason each was wrong is the reason the replacements are named as they are:
+
+- *1,091 reciprocal seam pairs* → **1,102 reciprocal placements** and **1,098
+  unique reciprocal pairs**. The old name counted relationships and was read as
+  pairs; four pairs claim two opposite placements each — 37 with 168, 37 with
+  264, 167 with 168, 167 with 264. There are also **15 one-sided placements**,
+  claims the other map does not return.
+- *237 connected components* → **226 weak components** counting every geographic
+  claim, or **232 reciprocal-only components** counting placements both maps
+  return. The graph has to be named for the number to mean anything.
+- *58 inferred placement conflicts* → withdrawn, not corrected. It was a
+  depth-first traversal's report, and moving the root of the 424-map component
+  moved it from 48 to 161. So is any count of *blamed constraints*: union-find
+  over sorted claims blames 55, collapsing a traversal's contradictions blames
+  42, restricting to reciprocal claims blames 30, and all three describe the same
+  corpus. Blaming one edge of an inconsistent loop is a choice. What replaces it
+  is stable: **2 inconsistent components** (the 424-map continent and a four-map
+  group), **2 conflict clusters**, **50 cycle witnesses** — loops that do not
+  close, with the residual that says by how much — and **125 maps implicated**
+  against **428 inside an inconsistent component**.
+
+Reproduce all of it with `ao-topology --check <pack>`, which `./build.sh check`
+runs whenever the corpus is present and says so when it is not. `ao_core::topology`
+holds the pinned values and the definitions beside them.
+
+The corpus also yields **87 conflict-free 2x2 squares**: four maps whose internal
+seams are all reciprocal, in a component with no contradiction anywhere. `W-0099`
+takes its slice from that list, and curating the 424-map continent stays in
+`W-0101` where it cannot delay the prototype.
 
 Do not silently choose geography. Existing conflicts become an explicit
 versioned baseline with one reviewed disposition each: corrected data,
