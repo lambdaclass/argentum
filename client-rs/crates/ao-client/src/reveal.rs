@@ -446,7 +446,50 @@ impl Plugin for RevealPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Reveal>()
             .init_resource::<Requirements>()
-            .add_systems(Update, (report_members, commit_when_ready).chain());
+            .add_systems(Update, (cancel_on_reconnect, report_members, commit_when_ready).chain());
+    }
+}
+
+/// Abandon a candidate scene when the session restarts underneath it.
+///
+/// A reconnect means the state the destination scene was being built for is gone, so its
+/// answers must not be able to complete it. Only while the scene is still a candidate: a
+/// reconnect after the world is on screen must not blank it — that case needs two resident
+/// scene roots and belongs to W-0065.
+///
+/// Reviewed and found missing: generations existed in the model and nothing in production
+/// ever created a second one, so their isolation was theoretical.
+fn cancel_on_reconnect(
+    session: Res<crate::session::Session>,
+    mut reveal: ResMut<Reveal>,
+    mut requirements: ResMut<Requirements>,
+    mut previous: Local<Option<ao_core::view::ConnectionPhase>>,
+) {
+    let current = phase_of(&session);
+    let restarted = matches!(current, ao_core::view::ConnectionPhase::Connecting)
+        && !matches!(*previous, Some(ao_core::view::ConnectionPhase::Connecting));
+    *previous = Some(current);
+
+    if !restarted || reveal.0.is_committed() {
+        return;
+    }
+
+    let next = Generation(reveal.0.generation().0 + 1);
+    reveal.0 = RevealSet::new(next, REQUIRED);
+    *requirements = Requirements::default();
+}
+
+/// The session's phase, in the vocabulary the view uses.
+fn phase_of(session: &crate::session::Session) -> ao_core::view::ConnectionPhase {
+    use crate::session::ConnectionState;
+    use ao_core::view::ConnectionPhase;
+
+    match session.state() {
+        ConnectionState::Offline => ConnectionPhase::Offline,
+        ConnectionState::Connecting => ConnectionPhase::Connecting,
+        ConnectionState::Authenticating => ConnectionPhase::Authenticating,
+        ConnectionState::Playing => ConnectionPhase::Playing,
+        _ => ConnectionPhase::Failed,
     }
 }
 
@@ -864,6 +907,99 @@ mod tests {
             required.contains("graficos_char/body.png"),
             "the NPC beside the player is not part of the first frame: {required:?}"
         );
+    }
+
+    #[test]
+    fn a_reconnect_abandons_the_candidate_scene_but_not_a_shown_one() {
+        // A reconnect means the state the scene was being built for is gone, so its
+        // answers must not be able to complete it. After the world is on screen the rule
+        // reverses: blanking a playing world to rebuild it is worse than a stale frame,
+        // and doing it properly needs two resident scene roots — W-0065's machinery.
+        let mut app = reporting_app();
+        app.init_resource::<crate::session::Session>().add_systems(Update, cancel_on_reconnect);
+        app.update();
+
+        let first = app.world().resource::<Reveal>().0.generation();
+        app.world()
+            .resource::<crate::session::Session>()
+            .set_state_for_test(crate::session::ConnectionState::Connecting);
+        app.update();
+
+        let second = app.world().resource::<Reveal>().0.generation();
+        assert!(second > first, "a reconnect did not abandon the candidate: {first:?}");
+
+        // An answer from the abandoned load is refused.
+        let mut reveal = app.world_mut().resource_mut::<Reveal>();
+        assert!(!reveal.0.report(first, Member::Font, MemberState::Ready));
+        drop(reveal);
+
+        // Now commit a scene and reconnect again: the shown world stays shown.
+        {
+            let mut reveal = app.world_mut().resource_mut::<Reveal>();
+            let generation = reveal.0.generation();
+            for member in REQUIRED {
+                reveal.0.report(generation, member, MemberState::Ready);
+            }
+            assert!(reveal.0.commit());
+        }
+        app.world()
+            .resource::<crate::session::Session>()
+            .set_state_for_test(crate::session::ConnectionState::Playing);
+        app.update();
+        app.world()
+            .resource::<crate::session::Session>()
+            .set_state_for_test(crate::session::ConnectionState::Connecting);
+        app.update();
+
+        let reveal = app.world().resource::<Reveal>();
+        assert!(reveal.0.is_committed(), "a reconnect blanked a world that was already shown");
+        assert_eq!(reveal.0.generation(), second, "a committed scene was replaced");
+    }
+
+    #[test]
+    fn a_thousand_load_and_cancel_cycles_leave_one_barrier_and_no_debris() {
+        // The contract asks for a thousand cycles with cleanup checked. At this layer that
+        // means the app does not accumulate: one barrier at a time, and an entity count
+        // that returns to where it started rather than climbing by a scene each round.
+        use super::super::ui::barrier::BarrierRoot;
+
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+            .init_asset::<Font>()
+            .init_resource::<Reveal>()
+            .add_systems(Update, super::super::ui::barrier::present_barrier_for_test);
+        app.update();
+
+        let baseline = app.world().entities().len();
+
+        for cycle in 1..=1_000u64 {
+            {
+                let mut reveal = app.world_mut().resource_mut::<Reveal>();
+                reveal.0 = RevealSet::new(Generation(cycle), REQUIRED);
+            }
+            app.update();
+
+            let roots = app
+                .world_mut()
+                .query_filtered::<Entity, With<BarrierRoot>>()
+                .iter(app.world())
+                .count();
+            assert_eq!(roots, 1, "cycle {cycle} left {roots} barriers");
+        }
+
+        // Commit the last one so the barrier goes away, then check nothing is left over.
+        {
+            let mut reveal = app.world_mut().resource_mut::<Reveal>();
+            let generation = reveal.0.generation();
+            for member in REQUIRED {
+                reveal.0.report(generation, member, MemberState::Ready);
+            }
+            reveal.0.commit();
+        }
+        app.update();
+
+        let after = app.world().entities().len();
+        assert!(after <= baseline, "a thousand cycles left {} entities behind", after - baseline);
     }
 
     #[test]

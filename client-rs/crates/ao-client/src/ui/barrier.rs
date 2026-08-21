@@ -44,6 +44,16 @@ impl Plugin for BarrierPlugin {
     }
 }
 
+/// The presentation system, for a test that drives it without the whole plugin.
+#[cfg(test)]
+pub fn present_barrier_for_test(
+    reveal: Res<Reveal>,
+    existing: Query<(Entity, &BarrierShown), With<BarrierRoot>>,
+    commands: Commands,
+) {
+    present_barrier(reveal, existing, commands)
+}
+
 /// Marks the barrier's root, so it can be found and removed in one place.
 #[derive(Component)]
 pub struct BarrierRoot;
