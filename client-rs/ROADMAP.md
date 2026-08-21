@@ -1381,7 +1381,14 @@ Fix the concrete defects already found by running the built client:
 - expire combat text and level-up/system notices under explicit timing rules;
   and
 - show an actionable failed-load state when the world pack is missing instead
-  of silently drawing the generated green-grid fallback.
+  of silently drawing the generated green-grid fallback; and
+- make the six inert top-bar actions honest. `Support`, `Language`, `Screenshot`,
+  `MuteAudio`, `MuteCombat` and `Settings` are spawned as enabled, focusable
+  buttons with hover states, and `handle_bar_clicks` matches only maximise and
+  fullscreen — every other press falls through its catch-all. A control that looks
+  live and does nothing teaches a player the client is broken, so either implement
+  them or draw them as unavailable with a stated reason, and include one of them in
+  the browser hit battery's sample either way.
 
 W-0090 and W-0096 independently own truthful failure during first reveal and
 handoff, so deferring this broader sweep cannot permit a placeholder transition.
