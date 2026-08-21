@@ -398,13 +398,31 @@ impl Default for Reveal {
     }
 }
 
+/// What the first frame needs, worked out once rather than every frame.
+///
+/// The requirement is a walk of every tile in the map's four layers, and the drawable
+/// count is another. Doing both per frame cost enough that a browser run could not size
+/// its canvas within thirty seconds — a barrier that measures the world faster than the
+/// world can load is its own kind of bug, and "keep per-frame work bounded" is in this
+/// task's contract.
+#[derive(Resource, Default)]
+struct Requirements {
+    /// The sheets the first frame needs, and whether the entity tables were available when
+    /// it was computed — they arrive after the map, and a set computed without them is
+    /// missing every character.
+    sheets: Option<(std::collections::BTreeSet<String>, bool)>,
+    /// Tiles the painter could draw, and how many sheets were uploaded when that was
+    /// counted. A newly uploaded sheet is the only thing that can change it.
+    drawable: Option<(usize, usize)>,
+}
+
 /// What the first playable frame of this client needs.
 ///
 /// A constant so the set is reviewable in one place. `Fallbacks` and `HudAtlas` are
 /// installed synchronously with the interface, and `Font` is embedded in the binary;
 /// they are listed anyway, because a member that stops being synchronous later should
 /// change one line here rather than being discovered missing.
-pub const REQUIRED: [Member; 7] = [
+pub const REQUIRED: [Member; 8] = [
     Member::MapData,
     Member::Sheets,
     Member::Character,
@@ -412,11 +430,16 @@ pub const REQUIRED: [Member; 7] = [
     Member::Font,
     Member::HudAtlas,
     Member::Snapshot,
+    // Reviewed and found absent from this list, which made every other member's readiness
+    // a statement about bytes rather than about a frame: the scene can be composed only
+    // after the tiles are actually spawned from uploaded artwork.
+    Member::GpuReady,
 ];
 
 impl Plugin for RevealPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Reveal>()
+            .init_resource::<Requirements>()
             .add_systems(Update, (report_members, commit_when_ready).chain());
     }
 }
@@ -439,11 +462,20 @@ fn report_members(
     sheets: Res<crate::graphics::SheetTextures>,
     map: Res<crate::world::LoadedMap>,
     loader: Res<crate::net::MapLoader>,
+    drawn: Res<crate::world::CharacterDrawn>,
+    scene: Res<crate::diagnostics::LoadedScene>,
     state: Res<crate::ui::state::UiState>,
     player: Res<crate::world::LocalPlayer>,
     radius: Res<crate::world::ViewRadius>,
     fonts: Res<Assets<Font>>,
+    mut requirements: ResMut<Requirements>,
 ) {
+    // Nothing to report once the scene is shown, and nothing that can change: without
+    // this the reporters keep walking every tile of the map for the rest of the session.
+    if reveal.0.is_committed() {
+        return;
+    }
+
     let generation = reveal.0.generation();
     let set = &mut reveal.0;
 
@@ -466,12 +498,34 @@ fn report_members(
     // for — so waiting on it would hold the first frame for artwork nobody at the spawn
     // point can see. A sheet the *window* needs that failed is a failure of the scene, not
     // a hole to draw around.
-    let required = match (map.0.as_ref(), graphics.index()) {
-        (Some(map), Some(index)) => {
-            Some(crate::world::sheets_for_window(map, &index, player.x, player.y, radius.0))
+    // Computed once, and again only if it was computed before the entity tables arrived.
+    let complete = requirements.sheets.as_ref().is_some_and(|(_, with_entities)| *with_entities);
+    if !complete {
+        if let (Some(map), Some(index)) = (map.0.as_ref(), graphics.index()) {
+            let mut sheets =
+                crate::world::sheets_for_window(map, &index, player.x, player.y, radius.0);
+
+            // And the entities in it. Reviewed and found missing: waiting for terrain only
+            // let the barrier lift with the player still a coloured box and the NPCs and
+            // ground items absent, which is pop-in after reveal — the thing the barrier
+            // exists to prevent.
+            sheets.extend(crate::world::entity_sheets_for_window(
+                map,
+                &graphics,
+                player.x,
+                player.y,
+                player.heading,
+            ));
+
+            let tables_ready = graphics.char_index().is_some()
+                && graphics.bodies().is_some()
+                && graphics.npcs().is_some()
+                && graphics.objects().is_some();
+            requirements.sheets = Some((sheets, tables_ready));
         }
-        _ => None,
-    };
+    }
+
+    let required = requirements.sheets.as_ref().map(|(sheets, _)| sheets.clone());
 
     match required {
         None => {}
@@ -499,10 +553,43 @@ fn report_members(
         }
     }
 
-    // The local character's own artwork, which comes from a different index and would
-    // otherwise let a player be revealed as an empty tile.
-    if graphics.char_index().is_some() && graphics.bodies().is_some() {
+    // The local character, drawn rather than merely describable. Reviewed and found: this
+    // checked that the index and body tables existed, which says nothing about whether the
+    // player's own body and head textures are there — so the barrier could lift with the
+    // player as a coloured box.
+    if drawn.0 {
         set.report(generation, Member::Character, MemberState::Ready);
+    }
+
+    // The composed frame: every tile the painter is willing to draw has been drawn.
+    //
+    // This is what "GPU uploads needed by the first frame" reduces to here. Bevy offers no
+    // observable "this texture is resident" signal from the main world, and inventing one
+    // would be a claim rather than a check; a tile only becomes a `SceneTile` once its
+    // sheet has been uploaded as an image and its atlas built, so a fully painted window
+    // is the honest form of the same question.
+    if let (Some(map), Some(index)) = (map.0.as_ref(), graphics.index()) {
+        // Only a newly uploaded sheet can change how many tiles are drawable, so that is
+        // the only thing that triggers the walk again.
+        let uploaded = sheets.0.len();
+        let drawable = match requirements.drawable {
+            Some((at, drawable)) if at == uploaded => drawable,
+            _ => {
+                let drawable = crate::world::drawable_tiles_in_window(
+                    map, &index, &sheets.0, player.x, player.y, radius.0,
+                );
+                requirements.drawable = Some((uploaded, drawable));
+                drawable
+            }
+        };
+        let painted = scene.painted;
+
+        let state = if drawable > 0 && painted >= drawable {
+            MemberState::Ready
+        } else {
+            MemberState::Loading { done: Some(painted as u64), total: Some(drawable as u64) }
+        };
+        set.report(generation, Member::GpuReady, state);
     }
 
     // Installed with the interface rather than fetched: the interface font replaces the
@@ -610,6 +697,9 @@ mod tests {
         .init_resource::<crate::graphics::SheetTextures>()
         .insert_resource(crate::world::LoadedMap(None))
         .init_resource::<crate::net::MapLoader>()
+        .init_resource::<Requirements>()
+        .insert_resource(crate::world::CharacterDrawn(false))
+        .init_resource::<crate::diagnostics::LoadedScene>()
         .init_resource::<crate::world::LocalPlayer>()
         .init_resource::<crate::world::ViewRadius>()
         .init_resource::<crate::ui::state::UiState>()
@@ -681,6 +771,90 @@ mod tests {
         assert!(
             !required.contains("graficos/far.png"),
             "the far corner's artwork is in the first frame's requirements: {required:?}"
+        );
+    }
+
+    #[test]
+    fn terrain_alone_does_not_reveal_a_scene() {
+        // Reviewed and found: `GpuReady` existed and was not required, and `Character` was
+        // satisfied by the *tables* that describe a character rather than by the character
+        // being drawn. Between them the barrier could lift on a painted floor with the
+        // player as a coloured box and the NPCs absent — pop-in after reveal, which is what
+        // the barrier exists to prevent.
+        assert!(REQUIRED.contains(&Member::GpuReady), "the composed frame is not required");
+
+        let mut app = reporting_app();
+        let graphics = app.world().resource::<crate::graphics::Graphics>().clone();
+        graphics.set_index(two_sheet_index());
+        app.world_mut().resource_mut::<crate::world::LoadedMap>().0 =
+            Some(Box::new(two_tile_map()));
+        app.world_mut()
+            .resource_mut::<crate::graphics::SheetTextures>()
+            .0
+            .insert("graficos/near.png".to_string(), Handle::default());
+        app.world_mut().resource_mut::<crate::ui::state::UiState>().set(Default::default());
+        app.update();
+
+        // Terrain is there and the scene is not: nothing is painted and no character has
+        // been drawn.
+        assert_eq!(state_of(&app, Member::Sheets), MemberState::Ready);
+        assert_eq!(state_of(&app, Member::Character), MemberState::Waiting);
+        assert!(matches!(state_of(&app, Member::GpuReady), MemberState::Loading { .. }));
+        assert!(!app.world().resource::<Reveal>().0.is_ready());
+
+        // The painter draws the one drawable tile, and the character arrives.
+        app.world_mut().resource_mut::<crate::diagnostics::LoadedScene>().painted = 1;
+        app.world_mut().resource_mut::<crate::world::CharacterDrawn>().0 = true;
+        app.update();
+
+        assert_eq!(state_of(&app, Member::GpuReady), MemberState::Ready);
+        assert_eq!(state_of(&app, Member::Character), MemberState::Ready);
+        assert!(app.world().resource::<Reveal>().0.is_ready(), "the scene never completed");
+    }
+
+    #[test]
+    fn the_entities_in_view_are_part_of_the_first_frame() {
+        // An NPC standing next to the spawn point is in the frame a player sees, so its
+        // artwork is a requirement; one across the map is not. Bounded by the area of
+        // interest rather than the paint window, because terrain is public map data and an
+        // entity outside the AoI is something the server never disclosed.
+        let mut map = two_tile_map();
+        map.npcs.push(ao_core::mappack::MapNpc { x: 51, y: 50, npc_id: 1 });
+        map.npcs.push(ao_core::mappack::MapNpc { x: 99, y: 99, npc_id: 1 });
+
+        let graphics = crate::graphics::Graphics::default();
+        graphics.set_index(two_sheet_index());
+        graphics.set_char_index(crate::graphics::GrhIndex::parse(
+            r#"[{"id":5,"grafico":"body","width":32,"height":32}]"#,
+            "graficos_char",
+        ));
+        graphics.set_bodies(std::collections::HashMap::from([(
+            1,
+            crate::graphics::Directional {
+                north: 5,
+                east: 5,
+                south: 5,
+                west: 5,
+                head_offset: Vec2::ZERO,
+            },
+        )]));
+        graphics.set_heads(std::collections::HashMap::new());
+        graphics.set_npcs(std::collections::HashMap::from([(
+            1,
+            crate::graphics::NpcLook { body: 1, head: 0, heading: 3 },
+        )]));
+
+        let required = crate::world::entity_sheets_for_window(
+            &map,
+            &graphics,
+            50,
+            50,
+            crate::graphics::Heading::South,
+        );
+
+        assert!(
+            required.contains("graficos_char/body.png"),
+            "the NPC beside the player is not part of the first frame: {required:?}"
         );
     }
 

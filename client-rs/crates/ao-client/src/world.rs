@@ -97,6 +97,115 @@ pub fn sheets_for_window(
     sheets
 }
 
+/// How many tiles in the paint window the painter is able to draw right now.
+///
+/// The reveal set compares this with the number actually spawned. A tile only becomes a
+/// `SceneTile` once its sheet has been uploaded as an image and its atlas layout built, so
+/// "every drawable tile is drawn" is the observable form of "the first frame's uploads are
+/// done" — Bevy's main world offers no residency signal to ask directly, and inventing one
+/// would be a claim rather than a check.
+pub fn drawable_tiles_in_window(
+    map: &ao_core::PackedMap,
+    index: &crate::graphics::GrhIndex,
+    sheets: &HashMap<String, Handle<Image>>,
+    px: i32,
+    py: i32,
+    radius: IVec2,
+) -> usize {
+    let mut drawable = 0;
+
+    for layer in map.layers.iter() {
+        for tile in layer {
+            if !within_paint_window(tile.x as i32, tile.y as i32, px, py, radius) {
+                continue;
+            }
+            let Some(grh) = index.resolve(tile.grh) else {
+                continue;
+            };
+            if sheets.contains_key(&grh.sheet) {
+                drawable += 1;
+            }
+        }
+    }
+
+    drawable
+}
+
+/// The character, NPC and object sheets the first visible frame needs.
+///
+/// Separate from the terrain walk because they resolve through a different index and are
+/// bounded by the server's area of interest rather than the paint window: terrain is
+/// public map-pack data, while an entity outside the AoI is something the server never
+/// told this player about.
+///
+/// Reviewed and found missing: the first-scene barrier waited for terrain only, so it
+/// could lift with the player still a coloured box and the NPCs and ground items still
+/// absent — pop-in after reveal, which is the thing the barrier exists to prevent.
+pub fn entity_sheets_for_window(
+    map: &ao_core::PackedMap,
+    graphics: &crate::graphics::Graphics,
+    px: i32,
+    py: i32,
+    heading: Heading,
+) -> std::collections::BTreeSet<String> {
+    let mut sheets = std::collections::BTreeSet::new();
+
+    let (Some(char_index), Some(bodies), Some(heads)) =
+        (graphics.char_index(), graphics.bodies(), graphics.heads())
+    else {
+        // Nothing to require yet: the tables the resolution needs have not arrived, and a
+        // requirement that cannot be computed must not be reported as satisfied.
+        return sheets;
+    };
+
+    let add_look = |sheets: &mut std::collections::BTreeSet<String>,
+                    body_id: i32,
+                    head_id: i32,
+                    heading: Heading| {
+        if let Some(body) = bodies.get(&body_id) {
+            if let Some(grh) = char_index.resolve(body.for_heading(heading)) {
+                sheets.insert(grh.sheet);
+            }
+        }
+        if head_id > 0 {
+            if let Some(head) = heads.get(&head_id) {
+                if let Some(grh) = char_index.resolve(head.for_heading(heading)) {
+                    sheets.insert(grh.sheet);
+                }
+            }
+        }
+    };
+
+    // The local player, in the direction they are actually facing.
+    add_look(&mut sheets, DEFAULT_BODY, DEFAULT_HEAD, heading);
+
+    if let Some(looks) = graphics.npcs() {
+        for npc in &map.npcs {
+            if !within_area_of_interest(npc.x as i32, npc.y as i32, px, py) {
+                continue;
+            }
+            if let Some(look) = looks.get(&(npc.npc_id as i32)) {
+                add_look(&mut sheets, look.body, look.head, heading_from_id(look.heading));
+            }
+        }
+    }
+
+    if let (Some(objects), Some(index)) = (graphics.objects(), graphics.index()) {
+        for object in &map.objects {
+            if !within_area_of_interest(object.x as i32, object.y as i32, px, py) {
+                continue;
+            }
+            if let Some(grh) =
+                objects.get(&(object.obj_id as i32)).and_then(|grh| index.resolve(*grh))
+            {
+                sheets.insert(grh.sheet);
+            }
+        }
+    }
+
+    sheets
+}
+
 /// Where the client is in its own startup, as distinct from where the
 /// connection is.
 ///
@@ -666,7 +775,7 @@ fn fade_overlays(
 /// Whether the player's body and head sprites are current. Cleared when the
 /// heading changes so the character is redrawn facing the new way.
 #[derive(Resource)]
-struct CharacterDrawn(bool);
+pub struct CharacterDrawn(pub bool);
 
 /// Visual duration of one step, as a fraction of the walk interval.
 ///
