@@ -582,11 +582,16 @@ fn report_members(
             let failures = graphics.failed_sheets();
             if let Some((sheet, reason)) = failures.iter().find(|(name, _)| required.contains(name))
             {
-                set.report(
-                    generation,
-                    Member::Sheets,
-                    MemberState::Failed(Failure::Corrupt(format!("{sheet}: {reason}"))),
-                );
+                // A fetch that failed is not a corrupt file, and the difference decides
+                // whether the player is offered another attempt. The loader records which
+                // it was; mapping both to `Corrupt` would refuse a retry to someone whose
+                // network dropped for a second.
+                let failure = if reason.starts_with("fetch:") {
+                    Failure::Unreachable(format!("{sheet}: {reason}"))
+                } else {
+                    Failure::Corrupt(format!("{sheet}: {reason}"))
+                };
+                set.report(generation, Member::Sheets, MemberState::Failed(failure));
             } else {
                 let have = required.iter().filter(|name| sheets.0.contains_key(*name)).count();
                 requirements.missing_sheet =
@@ -1071,6 +1076,43 @@ mod tests {
             other => panic!("expected a corrupt failure, got {other:?}"),
         }
         assert!(!app.world().resource::<Reveal>().0.is_ready());
+    }
+
+    #[test]
+    fn a_sheet_that_could_not_be_fetched_is_worth_another_attempt() {
+        // A dropped connection and a truncated file both stop the scene, and they lead
+        // somewhere different: one is worth trying again and the other never will be.
+        // Mapping both to "corrupt" refuses a retry to somebody whose network blinked.
+        let mut app = reporting_app();
+        let graphics = app.world().resource::<crate::graphics::Graphics>().clone();
+        graphics.set_index(two_sheet_index());
+        graphics.sheet_failed("graficos/near.png".to_string(), "fetch: 503".to_string());
+        app.world_mut().resource_mut::<crate::world::LoadedMap>().0 =
+            Some(Box::new(two_tile_map()));
+        app.update();
+
+        match state_of(&app, Member::Sheets) {
+            MemberState::Failed(failure) => {
+                assert!(failure.is_worth_retrying(), "a failed fetch refused a retry");
+            }
+            other => panic!("expected a failure, got {other:?}"),
+        }
+
+        // And a decode failure still does not offer one.
+        let mut app = reporting_app();
+        let graphics = app.world().resource::<crate::graphics::Graphics>().clone();
+        graphics.set_index(two_sheet_index());
+        graphics.sheet_failed("graficos/near.png".to_string(), "decode: truncated".to_string());
+        app.world_mut().resource_mut::<crate::world::LoadedMap>().0 =
+            Some(Box::new(two_tile_map()));
+        app.update();
+
+        match state_of(&app, Member::Sheets) {
+            MemberState::Failed(failure) => {
+                assert!(!failure.is_worth_retrying(), "a corrupt file invited a retry");
+            }
+            other => panic!("expected a failure, got {other:?}"),
+        }
     }
 
     #[test]

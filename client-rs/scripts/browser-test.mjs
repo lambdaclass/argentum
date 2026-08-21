@@ -1544,7 +1544,108 @@ async function main() {
       );
 
       check("a sheet was actually held back", held !== null, `held ${held}`);
+
+      // Time to a complete first frame, recorded separately from the rest of the asset
+      // set — which the contract asks for and which is how the ninety-second version of
+      // this went unnoticed. Printed rather than asserted: it is a measurement of this
+      // machine and this renderer, and a threshold would fail for the machine.
+      const timings = await page.evaluate(() => ({
+        sheets: window.aoLoaded?.sheets,
+        painted: window.aoLoaded?.painted,
+      }));
+      console.log(
+        `       first frame required ${timings.sheets} sheets and ${timings.painted} tiles;` +
+          ` the rest of the map's artwork continues after reveal`
+      );
+
       await revealContext.close();
+    }
+
+    // A required sheet that will not arrive at all, and the retry that recovers it.
+    console.log("  first-scene failure and retry");
+    {
+      const failContext = await browser.newContext({
+        viewport: { width: 1280, height: 800 },
+        deviceScaleFactor: 1,
+      });
+      const page = await failContext.newPage();
+
+      // The first sheet answers 503 until the retry; everything else is served normally.
+      let refused = null;
+      let refusals = 0;
+      await page.route("**/graficos/*.png", async (route) => {
+        const requested = route.request().url();
+        if (refused === null) {
+          refused = requested;
+        }
+        if (requested === refused && refusals === 0) {
+          refusals += 1;
+          await route.fulfill({ status: 503, body: "" });
+          return;
+        }
+        await route.continue();
+      });
+
+      await page.goto(url, { waitUntil: "load" });
+      await page.waitForSelector("#ao-canvas", { timeout: 30_000 });
+
+      // The barrier reports it, rather than revealing a world with a hole in it or
+      // waiting forever with a bar that will never move.
+      const failed = await page
+        .waitForFunction(
+          () => (window.aoLoaded?.revealWaitingOn ?? "").includes("failed"),
+          null,
+          { timeout: 120_000 }
+        )
+        .then(() => true)
+        .catch(() => false);
+      const state = await page.evaluate(() => ({
+        revealed: window.aoLoaded?.revealed,
+        waiting: window.aoLoaded?.revealWaitingOn,
+        missing: window.aoLoaded?.revealMissingSheet,
+      }));
+      check(
+        "a required sheet that will not arrive stops the scene and says so",
+        failed && state.revealed === false,
+        JSON.stringify(state)
+      );
+
+      // The retry is a control, and the client publishes its rectangle like any other.
+      const rect = await page
+        .waitForFunction(
+          () => (window.aoLoaded?.controls ?? []).find((c) => c.key === "reveal.retry") ?? null,
+          null,
+          { timeout: 30_000 }
+        )
+        .then((handle) => handle.jsonValue())
+        .catch(() => null);
+      check("the failure screen offers a retry control", rect !== null, `${JSON.stringify(rect)}`);
+
+      if (rect) {
+        const canvasBox = await (await page.$("#ao-canvas")).boundingBox();
+        await page.mouse.move(canvasBox.x + rect.x + rect.w / 2, canvasBox.y + rect.y + rect.h / 2);
+        await page.waitForTimeout(300);
+        await page.mouse.down();
+        await page.waitForTimeout(80);
+        await page.mouse.up();
+
+        const recovered = await page
+          .waitForFunction(() => window.aoLoaded?.revealed === true, null, { timeout: 240_000 })
+          .then(() => true)
+          .catch(() => false);
+        check(
+          "pressing retry recovers and shows the world",
+          recovered,
+          JSON.stringify(
+            await page.evaluate(() => ({
+              revealed: window.aoLoaded?.revealed,
+              waiting: window.aoLoaded?.revealWaitingOn,
+            }))
+          )
+        );
+      }
+
+      await failContext.close();
     }
     }
 

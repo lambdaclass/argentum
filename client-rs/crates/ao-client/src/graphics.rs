@@ -392,6 +392,17 @@ impl Graphics {
         self.inner.lock().map(|g| g.failed_sheets.clone()).unwrap_or_default()
     }
 
+    /// Forget the failures, for a load that is being started again.
+    ///
+    /// The list is cumulative, which is right while one load is in flight and wrong across
+    /// a retry: a sheet that failed an hour ago kept the new attempt's scene failed
+    /// forever, so pressing retry changed nothing at all.
+    pub fn clear_failed_sheets(&self) {
+        if let Ok(mut g) = self.inner.lock() {
+            g.failed_sheets.clear();
+        }
+    }
+
     pub fn bodies(&self) -> Option<Arc<HashMap<i32, Directional>>> {
         self.inner.lock().ok().and_then(|g| g.bodies.clone())
     }

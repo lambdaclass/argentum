@@ -287,6 +287,7 @@ fn retry_on_activation(
     mut activations: MessageReader<super::controls::Activated>,
     retries: Query<(), With<BarrierRetry>>,
     mut reveal: ResMut<Reveal>,
+    mut requirements: ResMut<crate::reveal::Requirements>,
     mut reload: MessageWriter<crate::world::ReloadWorld>,
 ) {
     for activation in activations.read() {
@@ -296,6 +297,9 @@ fn retry_on_activation(
 
         let next = crate::reveal::Generation(reveal.0.generation().0 + 1);
         reveal.0 = crate::reveal::RevealSet::new(next, crate::reveal::REQUIRED);
+        // The cached requirement goes with it: it was computed from the map the abandoned
+        // load fetched, and the retry may bring a different one.
+        *requirements = crate::reveal::Requirements::default();
 
         // And the work starts again. A new set on its own is a barrier that waits forever
         // for a fetch nobody re-issued — a worse failure than the one the player was
@@ -454,6 +458,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
             .init_asset::<Font>()
             .init_resource::<Reveal>()
+            .init_resource::<crate::reveal::Requirements>()
             .add_message::<super::super::controls::Activated>()
             .add_message::<crate::world::ReloadWorld>()
             .add_systems(Update, (retry_on_activation, present_barrier).chain());

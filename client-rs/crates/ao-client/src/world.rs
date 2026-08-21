@@ -115,16 +115,34 @@ fn reload_world(
     mut requests: MessageReader<ReloadWorld>,
     loader: Res<MapLoader>,
     config: Res<ClientConfig>,
+    graphics: Res<Graphics>,
+    state: Res<State<AppState>>,
+    mut next: ResMut<NextState<AppState>>,
 ) {
     let mut asked = false;
     for _ in requests.read() {
         asked = true;
     }
 
-    if asked {
-        info!("reloading map {INITIAL_MAP} from {}", config.asset_origin);
-        loader.start(config.asset_origin.clone(), INITIAL_MAP);
+    if !asked {
+        return;
     }
+
+    info!("reloading map {INITIAL_MAP} from {}", config.asset_origin);
+
+    // Previous failures are forgotten. The list is cumulative, which is right within one
+    // load and wrong across a retry: a sheet that failed before kept the *new* attempt's
+    // scene failed forever, so pressing retry visibly changed nothing.
+    graphics.clear_failed_sheets();
+
+    // And back into the loading state, or the arriving map is never applied: the system
+    // that consumes it runs only in `LoadingWorld`, and a first load that failed has left
+    // the machine in `Playing` with a generated grid behind the barrier.
+    if *state.get() != AppState::LoadingWorld {
+        next.set(AppState::LoadingWorld);
+    }
+
+    loader.start(config.asset_origin.clone(), INITIAL_MAP);
 }
 
 /// How many tiles in the paint window the painter is able to draw right now.
