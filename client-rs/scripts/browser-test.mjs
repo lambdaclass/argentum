@@ -39,7 +39,7 @@ const only = flag("only", null);
 // battery that dominates the wall clock. A full run takes hours on a software renderer,
 // and paying that to validate one overlay change cost three of them in a day. The
 // assertions are the same ones; the full matrix stays the pre-closure gate.
-const SECTIONS = ["layout", "hits", "map"];
+const SECTIONS = ["layout", "hits", "map", "reveal"];
 if (only && !SECTIONS.includes(only)) {
   throw new Error(`--only takes one of ${SECTIONS.join(", ")}`);
 }
@@ -81,14 +81,17 @@ function headStamp() {
 
 async function waitForClient(page) {
   await page.waitForSelector("#ao-canvas", { timeout: 30_000 });
-  await page.waitForFunction(() => document.getElementById("boot")?.hidden === true, {
-    timeout: 60_000,
-  });
+  await page.waitForFunction(
+    () => document.getElementById("boot")?.hidden === true,
+    null,
+    { timeout: 60_000 }
+  );
   await page.waitForFunction(
     () => {
       const canvas = document.getElementById("ao-canvas");
       return canvas instanceof HTMLCanvasElement && canvas.width > 0 && canvas.height > 0;
     },
+    null,
     { timeout: 30_000 }
   );
 
@@ -99,7 +102,15 @@ async function waitForClient(page) {
   // starts here reports a broken client. Measured against the dev server under software
   // rendering: about ninety seconds, dominated by fetching forty-seven sheets one after
   // another.
-  await page.waitForFunction(() => window.aoLoaded?.revealed === true, { timeout: 240_000 });
+  // Three arguments, not two: `waitForFunction(fn, arg, options)` reads a lone object as
+  // the *argument*, so every timeout in this file was silently the thirty-second default —
+  // which is how a wait for a ninety-second load reported itself as a thirty-second
+  // failure, and cost an afternoon of looking at the client instead of the harness.
+  await page.waitForFunction(
+    () => window.aoLoaded?.revealed === true,
+    null,
+    { timeout: 240_000 }
+  );
   await page.waitForTimeout(500);
 }
 
@@ -1343,6 +1354,152 @@ async function main() {
       `backing store went through ${JSON.stringify(sizes)}`
     );
     await settleContext.close();
+    }
+
+    if (runs("reveal")) {
+    // The first-scene barrier, with one required sheet held back on purpose.
+    //
+    // This is the acceptance question of W-0090 and it cannot be asked any other way: a
+    // Bevy test can prove the decision, and a screenshot after the fact proves nothing
+    // about what was on screen *before* the decision. Playwright can hold one response,
+    // so the pre-reveal state is a window this test controls rather than a race it hopes
+    // to win — the client now reaches a complete first frame in about five seconds.
+    console.log("  first-scene reveal");
+    {
+      const revealContext = await browser.newContext({
+        viewport: { width: 1280, height: 800 },
+        deviceScaleFactor: 1,
+      });
+      const page = await revealContext.newPage();
+
+      // One sheet, delayed. Not the map and not the index: a single texture the visible
+      // scene needs, which is exactly the case the contract names.
+      // Long enough that every check below can be taken inside the window: decoding a
+      // screenshot in the page takes seconds, and the first version of this test read the
+      // pointer *after* the held sheet had arrived and reported the barrier as leaky.
+      const HELD_MS = 60_000;
+      // Every request for the chosen sheet, not merely the first one seen. The item-icon
+      // loader asks for sheets too, so holding "the first request" let a second request for
+      // the same file through and the scene completed anyway — the pixels proved the
+      // barrier was up while the flag said it had already lifted.
+      let held = null;
+      await page.route("**/graficos/*.png", async (route) => {
+        const requested = route.request().url();
+        if (held === null) {
+          held = requested;
+        }
+        if (requested === held) {
+          await new Promise((resolve) => setTimeout(resolve, HELD_MS));
+        }
+        await route.continue();
+      });
+
+      await page.goto(url, { waitUntil: "load" });
+      await page.waitForSelector("#ao-canvas", { timeout: 30_000 });
+      await page.waitForFunction(
+        () => document.getElementById("boot")?.hidden === true,
+        null,
+        { timeout: 60_000 }
+      );
+
+      // The pointer first, and read together with the reveal flag: a check that samples
+      // the two at different moments cannot tell a leaky barrier from a lifted one.
+      const canvasBox = await (await page.$("#ao-canvas")).boundingBox();
+      await page.mouse.move(
+        canvasBox.x + canvasBox.width / 2,
+        canvasBox.y + canvasBox.height / 2
+      );
+      await page.waitForTimeout(400);
+
+      const state = await page.evaluate(() => ({
+        revealed: window.aoLoaded?.revealed,
+        waiting: window.aoLoaded?.revealWaitingOn,
+        fraction: window.aoLoaded?.revealFraction,
+        target: window.aoLoaded?.pointerTarget,
+      }));
+      check(
+        "the world is still held back while a required sheet is missing",
+        state.revealed === false,
+        JSON.stringify(state)
+      );
+      check(
+        "the world is not clickable before it is shown",
+        state.revealed === false && state.target !== "world",
+        `pointer resolved ${state.target} at reveal=${state.revealed}`
+      );
+
+      // No world pixel. Sampled away from the middle, where the barrier draws its own
+      // text and bar: the four quadrant centres must all be the barrier's own background.
+      // A scrim would fail this, which is the point — the task forbids showing the world
+      // behind anything, not merely dimming it.
+      // Bracketed by the reveal flag, and decoded afterwards. The first version read the
+      // flag *after* decoding the image inside the page, which takes seconds — so a valid
+      // screenshot of the barrier was compared against a reveal that had since happened,
+      // and the check failed for a reason that had nothing to do with the pixels.
+      const box = canvasBox;
+      const heldBeforeShot = await page.evaluate(() => window.aoLoaded?.revealed === false);
+      const shot = await page.screenshot({
+        clip: { x: box.x, y: box.y, width: box.width, height: box.height },
+      });
+      const heldAfterShot = await page.evaluate(() => window.aoLoaded?.revealed === false);
+      const samples = await page.evaluate(async (bytes) => {
+        const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
+        const bitmap = await createImageBitmap(blob);
+        const surface = new OffscreenCanvas(bitmap.width, bitmap.height);
+        const context = surface.getContext("2d");
+        context.drawImage(bitmap, 0, 0);
+        const at = (fx, fy) => {
+          const x = Math.floor(bitmap.width * fx);
+          const y = Math.floor(bitmap.height * fy);
+          const [r, g, b] = context.getImageData(x, y, 1, 1).data;
+          return { fx, fy, r, g, b };
+        };
+        return [at(0.2, 0.2), at(0.8, 0.2), at(0.2, 0.8), at(0.8, 0.8), at(0.5, 0.15)];
+      }, Array.from(shot));
+
+      // The barrier's background is `surface::VOID`, a near-black blue that arrives on
+      // screen as about rgb(7, 7, 14). The tolerance is deliberately tight: the first
+      // version allowed anything under 40 per channel, which passes for grass in shadow —
+      // and grass in shadow is exactly the failure this check exists to catch.
+      const worldish = samples.filter((p) => p.r > 16 || p.g > 16 || p.b > 28);
+      check(
+        "no world pixel is on screen before the scene is committed",
+        heldBeforeShot && heldAfterShot && worldish.length === 0,
+        `held ${heldBeforeShot}/${heldAfterShot}, sampled ${JSON.stringify(samples)}`
+      );
+
+      // Then the held sheet arrives and the scene appears.
+      // Three arguments, not two: `waitForFunction(fn, arg, options)` reads a lone object as
+  // the *argument*, so every timeout in this file was silently the thirty-second default —
+  // which is how a wait for a ninety-second load reported itself as a thirty-second
+  // failure, and cost an afternoon of looking at the client instead of the harness.
+  await page.waitForFunction(
+    () => window.aoLoaded?.revealed === true,
+    null,
+    { timeout: 240_000 }
+  );
+      const after = await page.evaluate(() => ({
+        painted: window.aoLoaded?.painted,
+        sheets: window.aoLoaded?.sheets,
+      }));
+      check(
+        "the committed frame is a drawn world, not an empty one",
+        after.painted > 0 && after.sheets > 0,
+        JSON.stringify(after)
+      );
+
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.waitForTimeout(400);
+      const revealedTarget = await page.evaluate(() => window.aoLoaded?.pointerTarget);
+      check(
+        "the world is clickable once it is shown",
+        revealedTarget === "world",
+        `pointer resolved ${revealedTarget}`
+      );
+
+      check("a sheet was actually held back", held !== null, `held ${held}`);
+      await revealContext.close();
+    }
     }
 
     if (runs("hits")) {
