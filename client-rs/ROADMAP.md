@@ -325,54 +325,6 @@ same browser viewport: the target is comparable information clarity and
 interaction quality, not pixel-for-pixel reproduction. Every shipped icon and
 decorative asset is project-owned or licensed for this client.
 
-### Task W-0090 — Atomic first-scene reveal
-
-- **State:** planned
-- **Phase:** 0
-- **Depends on:** W-0001, W-0003, W-0004, W-0089
-
-Keep a Bevy-owned loading/recovery barrier fully visible until the first playable
-scene can be presented as one complete frame. Do not expose the world camera,
-partially populated rail, checkerboard, missing sprites or progressively
-appearing map layers while required first-scene work is still downloading,
-decoding, spawning or uploading to the GPU.
-
-Define a versioned `FirstSceneRevealSet` rather than interpreting “everything”
-as the entire game archive. At minimum it contains validated current-map data;
-every texture sheet and tall-overlay dependency intersecting the initial
-viewport plus its bounded prefetch margin; local-player body/head/equipment;
-required fallback sprites; primary font and HUD/icon atlases; initial typed HUD
-snapshot; shader/pipeline readiness where observable; and completion of the
-GPU uploads needed by the first frame. Unrelated maps, optional music and assets
-outside the reveal set may continue through bounded background loading after
-reveal, but an asset already required by the visible scene may not pop in later.
-
-Stage the candidate under a monotonically increasing load generation in a
-hidden/pending scene root. Commit visibility on one frame boundary only after
-all reveal-set members are ready and one complete candidate frame passes its
-readiness check. A retry, character switch, reconnect, resize or newer map/load
-generation cancels the stale candidate and its work; late completions cannot
-reveal an obsolete scene. Gameplay input and world intents remain disabled
-until commit, while the network/session continues processing within its normal
-bounds.
-
-Progress is truthful and monotonic within one generation: report named map,
-asset, decode/GPU and snapshot stages plus known bytes/items, never infer 100%
-from request dispatch or asset-handle creation. Required failure, timeout,
-corruption, unsupported texture size and memory-budget rejection stay on an
-actionable loading/error screen with retry/back/logout choices. An explicitly
-approved visible fallback may satisfy a missing optional visual; silently
-revealing a partial world may not.
-
-Close with deterministic loader tests that shuffle completion order and delay
-one required texture by two seconds: every frame before readiness contains the
-loading screen and no world pixel, and the next visible world frame contains
-all reveal-set layers, character composition and HUD. Repeat with warm cache,
-one failed asset, stale-generation completion, resize/maximize/fullscreen and
-1,000 load/cancel/retry cycles while checking entity, texture, listener and
-memory cleanup. Record time-to-complete-first-frame separately from time to
-download the full optional asset set.
-
 ### Phase 0 exit gate
 
 Phase 1 unlocks when `W-0085`, `W-0089` and `W-0090` close. These checks gate

@@ -19,6 +19,96 @@ Never reuse a completed ID in the active roadmap.
 
 ## Closed tasks
 
+### Completed Task W-0090 — Atomic first-scene reveal
+
+Closed: 2026-08-21 (`4dcbc9d`)
+
+The world is not shown until it is worth looking at. Before this, the boot screen was
+a page element that lifted two frames after `init()` resolved — when the wasm module
+*starts* — so a player watched the world assemble: a placeholder grid, then sheets
+arriving one at a time, then item icons replacing their own names. The screenshot that
+prompted the task showed flat green tiles and text where artwork belongs, with nothing
+on screen admitting it was still loading.
+
+`reveal` owns the decision as pure data: a named set of members, a monotonic load
+generation, and progress counted from completions. Nothing about it touches Bevy,
+because the questions that go wrong here are about order and identity — which members
+are required, which load an answer belongs to, whether progress can regress, whether a
+late answer from an abandoned load can reveal a scene nobody is waiting for — and every
+one can be tested exhaustively without a GPU. None can be tested honestly through a
+screenshot.
+
+`ui::barrier` draws it: opaque, above every panel, carrying the same `Modal` marker a
+dialog does so gameplay suppression is the rule that already exists rather than a
+second one. A failure replaces the progress bar instead of sitting beside it, because
+86% next to a dead load says "nearly there" about something that will never finish.
+
+**What the first frame requires**, and why each is there: the map's own data; every
+sheet the paint window needs; the character *drawn*, not merely describable; the NPCs
+and ground items in view, bounded by the server's area of interest because terrain is
+public map data and an entity outside the AoI is something the server never disclosed;
+the interface font, checked by asking whether it actually replaced the default handle;
+the HUD atlases and fallbacks; a snapshot that was published, which the resource
+records rather than something to infer from its contents; and a composed frame — every
+drawable tile in the window actually spawned, which is the observable form of "the
+first frame's uploads are done" since Bevy's main world offers no residency signal and
+inventing one would be a claim rather than a check.
+
+**Four defects the barrier found by existing.** Four sheets in `resources/raw/Graficos`
+are named `.PNG` while every index asks for `.png`, so on a case-sensitive filesystem
+they 404 — and one is ground art at Ullathorpe's spawn point, where every character
+starts. Both clients had drawn that hole silently for as long as the server has
+existed. The loader never fetched object artwork at all, so barrels, signs and trees
+were never part of any first frame. A failed sheet was a `log::warn!` and nothing else,
+which is right for an optional sheet and wrong for one the visible scene needs. And a
+failed map fetch left the barrier waiting forever while the state machine moved on to
+`Playing` behind it.
+
+**Time to a complete first frame**, against the dev server under software rendering:
+ninety seconds when the barrier first existed, then seventy-two once the spawn view's
+tiles were fetched before every body and head, then thirty with six workers instead of
+one await at a time, then **five** once the required set matched what was actually
+being fetched. The first frame needs 48 sheets and 2,434 tiles; the rest of the map's
+artwork continues afterwards, which is what the contract asks be recorded separately.
+
+Evidence:
+
+- `./build.sh check` from clean HEAD: roadmap structure, formatting, wasm target,
+  native target, 589 tests, configuration check.
+- 25 `reveal` tests and 9 `ui::barrier` tests: an empty set is never ready, completion
+  order is irrelevant, one slow member holds the whole scene, an answer from an
+  abandoned generation is refused, an unrequired member is refused rather than added,
+  progress cannot regress except to a failure, a failure outranks the bar, a revealed
+  scene stays revealed, byte totals stay unknown until every reporter knows its own, a
+  fetch failure is retryable and a corrupt file is not, a window that grows mid-load
+  starts a new candidate, a reconnect abandons a candidate but not a shown world, and a
+  thousand load-and-cancel cycles leave one barrier and no entities behind.
+- `scripts/browser-test.mjs --only reveal`, 13 checks: with one required sheet held by
+  request interception, the reveal flag is false, the pointer over the middle of the
+  world does not resolve to world, arrow keys leave the player where they were, and
+  five pixels sampled away from the barrier's text are all exactly rgb(7, 7, 14) —
+  `surface::VOID`. A resize and a maximize mid-load keep all four corners covered. Then
+  the sheet arrives and the world is drawn and clickable. Separately: a required sheet
+  answering 503 stops the scene and says so, the retry control appears in the published
+  rectangles, and a real click on it re-fetches and reveals. And a warm second load,
+  where every asset is cached, still commits a complete scene.
+- Full browser gate at build `4dcbc9d`: **794 checks, 0 failures**.
+
+Not covered, and owned elsewhere rather than quietly dropped:
+
+- The candidate is staged behind an opaque barrier rather than in a hidden scene root.
+  For a *first* scene these are observably identical — nothing was on screen before —
+  and the pending-root machinery belongs to `W-0065`, which needs two resident worlds
+  for handoff.
+- The failure screen offers retry but not back or logout, which need the session
+  screens in `W-0009`.
+- Equipment is not part of the character composition anywhere in the client yet, so it
+  cannot be a member of this set; the player's body and head are.
+- Real fullscreen needs a user gesture automation cannot supply — `W-0073` — so the
+  maximize path is what the mid-load checks use.
+- Entity cleanup across a thousand cycles is asserted; texture and listener residency
+  have no honest measurement from Bevy's main world, so no claim is made about them.
+
 ### Completed Task W-0089 — Tab world-map overlay
 
 Closed: 2026-08-20 (`c377ec9`)
