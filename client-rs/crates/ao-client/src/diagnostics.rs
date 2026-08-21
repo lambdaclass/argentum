@@ -194,6 +194,27 @@ fn publish(
             .filter(|(_, state)| !matches!(state, crate::reveal::MemberState::Ready))
             .count() as f64,
     );
+    // Which member, and how far it has got. A count alone leaves "still loading" and
+    // "stuck forever" looking identical from outside, which is how ninety seconds of
+    // sequential sheet fetching went unnoticed.
+    if let Some((member, state)) =
+        reveal.0.members().find(|(_, state)| !matches!(state, crate::reveal::MemberState::Ready))
+    {
+        let detail = match state {
+            crate::reveal::MemberState::Loading { done, total } => {
+                format!("{}: {}/{}", member.name_key(), done.unwrap_or(0), total.unwrap_or(0))
+            }
+            crate::reveal::MemberState::Failed(failure) => {
+                format!("{}: {}", member.name_key(), failure.explanation_key())
+            }
+            _ => member.name_key().to_string(),
+        };
+        let _ = js_sys::Reflect::set(
+            &report,
+            &wasm_bindgen::JsValue::from_str("revealWaitingOn"),
+            &wasm_bindgen::JsValue::from_str(&detail),
+        );
+    }
     set("sheets", scene.sheets as f64);
     set("painted", scene.painted as f64);
     set("placeholders", scene.placeholders as f64);
