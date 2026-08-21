@@ -1432,6 +1432,30 @@ async function main() {
       // text and bar: the four quadrant centres must all be the barrier's own background.
       // A scrim would fail this, which is the point — the task forbids showing the world
       // behind anything, not merely dimming it.
+      // Gameplay input stays disabled until commit. The barrier carries the same `Modal`
+      // marker a dialog does, so this is the rule that already exists rather than a second
+      // one — but a rule nobody checks is a comment, and walking behind a loading screen
+      // would put the player somewhere they never saw themselves go.
+      const standing = await page.evaluate(() => [
+        window.aoLoaded?.playerX,
+        window.aoLoaded?.playerY,
+      ]);
+      await page.keyboard.press("ArrowRight");
+      await page.keyboard.press("ArrowDown");
+      await page.waitForTimeout(600);
+      const stillStanding = await page.evaluate(() => [
+        window.aoLoaded?.playerX,
+        window.aoLoaded?.playerY,
+      ]);
+      const heldWhileTyping = await page.evaluate(() => window.aoLoaded?.revealed === false);
+      check(
+        "the player cannot walk behind the loading screen",
+        heldWhileTyping &&
+          stillStanding[0] === standing[0] &&
+          stillStanding[1] === standing[1],
+        `held=${heldWhileTyping}, ${standing} -> ${stillStanding}`
+      );
+
       // Bracketed by the reveal flag, and decoded afterwards. The first version read the
       // flag *after* decoding the image inside the page, which takes seconds — so a valid
       // screenshot of the barrier was compared against a reveal that had since happened,
