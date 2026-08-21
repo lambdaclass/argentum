@@ -32,6 +32,7 @@
 //! request nobody made. Every completion carries the generation that asked for it and
 //! anything older is dropped.
 
+use bevy::prelude::*;
 use std::collections::BTreeMap;
 
 /// A required part of the first playable frame.
@@ -379,6 +380,118 @@ pub fn barrier_for(set: &RevealSet) -> Barrier {
     Barrier::Loading { fraction: set.fraction_ready(), stages: set.stages() }
 }
 
+/// Bevy wiring: the set as a resource, and one reporter per member.
+///
+/// The reporters are deliberately dull. Each one asks the layer that owns a member
+/// whether it is there, and says so. Nothing here decides when to reveal — that is
+/// [`RevealSet`] and [`barrier_for`], which is why they are testable without any of
+/// this.
+pub struct RevealPlugin;
+
+/// The candidate first scene.
+#[derive(Resource, Debug, Clone)]
+pub struct Reveal(pub RevealSet);
+
+impl Default for Reveal {
+    fn default() -> Self {
+        Self(RevealSet::new(Generation(1), REQUIRED))
+    }
+}
+
+/// What the first playable frame of this client needs.
+///
+/// A constant so the set is reviewable in one place. `Fallbacks` and `HudAtlas` are
+/// installed synchronously with the interface, and `Font` is embedded in the binary;
+/// they are listed anyway, because a member that stops being synchronous later should
+/// change one line here rather than being discovered missing.
+pub const REQUIRED: [Member; 7] = [
+    Member::MapData,
+    Member::Sheets,
+    Member::Character,
+    Member::Fallbacks,
+    Member::Font,
+    Member::HudAtlas,
+    Member::Snapshot,
+];
+
+impl Plugin for RevealPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<Reveal>().add_systems(Update, report_members);
+    }
+}
+
+/// Ask each layer whether its member has arrived.
+fn report_members(
+    mut reveal: ResMut<Reveal>,
+    graphics: Res<crate::graphics::Graphics>,
+    sheets: Res<crate::graphics::SheetTextures>,
+    map: Res<crate::world::LoadedMap>,
+    state: Res<crate::ui::state::UiState>,
+    fonts: Res<Assets<Font>>,
+) {
+    let generation = reveal.0.generation();
+    let set = &mut reveal.0;
+
+    // The map's own data: the world cannot be composed without it, and every other
+    // member's requirements are derived from it.
+    if map.0.is_some() {
+        set.report(generation, Member::MapData, MemberState::Ready);
+    } else if let Some(reason) = graphics.failure() {
+        set.report(generation, Member::MapData, MemberState::Failed(Failure::Unreachable(reason)));
+    }
+
+    // Sheets: the loader records what it needs before fetching, so this is a comparison
+    // rather than a guess. A required sheet that failed is a failure of the scene, not a
+    // hole to draw around.
+    match graphics.required_sheets() {
+        None => {}
+        Some(required) => {
+            let failures = graphics.failed_sheets();
+            if let Some((sheet, reason)) = failures.iter().find(|(name, _)| required.contains(name))
+            {
+                set.report(
+                    generation,
+                    Member::Sheets,
+                    MemberState::Failed(Failure::Corrupt(format!("{sheet}: {reason}"))),
+                );
+            } else {
+                let have = required.iter().filter(|name| sheets.0.contains_key(*name)).count();
+                let state = if have == required.len() && !required.is_empty() {
+                    MemberState::Ready
+                } else {
+                    MemberState::Loading {
+                        done: Some(have as u64),
+                        total: Some(required.len() as u64),
+                    }
+                };
+                set.report(generation, Member::Sheets, state);
+            }
+        }
+    }
+
+    // The local character's own artwork, which comes from a different index and would
+    // otherwise let a player be revealed as an empty tile.
+    if graphics.char_index().is_some() && graphics.bodies().is_some() {
+        set.report(generation, Member::Character, MemberState::Ready);
+    }
+
+    // Installed with the interface rather than fetched: the interface font replaces the
+    // asset behind the default handle, so its presence there is the honest check. Listed
+    // as members so that this stops being true loudly rather than quietly.
+    if fonts.get(&Handle::<Font>::default()).is_some() {
+        set.report(generation, Member::Font, MemberState::Ready);
+        set.report(generation, Member::Fallbacks, MemberState::Ready);
+        set.report(generation, Member::HudAtlas, MemberState::Ready);
+    }
+
+    // A snapshot with something in it. `UiState` starts at its default, which is not a
+    // snapshot the server sent and not something to draw a HUD from.
+    let snapshot = state.get();
+    if snapshot.world.minute_of_day != 0 || !snapshot.chat.lines.is_empty() {
+        set.report(generation, Member::Snapshot, MemberState::Ready);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -408,6 +521,123 @@ mod tests {
             set.report(Generation(generation), member, MemberState::Ready);
         }
         assert!(set.is_ready(), "a set did not reach ready");
+    }
+
+    /// An app with the reporters and the resources they read, and nothing else.
+    fn reporting_app() -> App {
+        let mut app = App::new();
+        // The asset plugin, because the font member is answered by asking the asset store
+        // whether the interface font replaced the default handle — which is the honest
+        // check, and needs a real store to ask.
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+            // The layer that owns the font member, rather than a test pretending to be
+            // it: this is what production installs, and if it stops replacing the default
+            // handle the member stops being ready here too.
+            crate::ui::fonts::FontPlugin,
+        ))
+        .init_asset::<Font>()
+        .init_asset::<Image>()
+        .init_resource::<Reveal>()
+        .init_resource::<crate::graphics::Graphics>()
+        .init_resource::<crate::graphics::SheetTextures>()
+        .insert_resource(crate::world::LoadedMap(None))
+        .init_resource::<crate::ui::state::UiState>()
+        .add_systems(Update, report_members);
+        app
+    }
+
+    fn state_of(app: &App, member: Member) -> MemberState {
+        app.world()
+            .resource::<Reveal>()
+            .0
+            .members()
+            .find(|(m, _)| *m == member)
+            .map(|(_, state)| state.clone())
+            .expect("a required member")
+    }
+
+    #[test]
+    fn the_reporters_fill_the_set_from_the_layers_that_own_each_member() {
+        // The model is tested above without any of this; what this proves is that the
+        // wiring reads the real resources, because a reveal set nothing reports into
+        // would hold the barrier up forever.
+        let mut app = reporting_app();
+        app.update();
+
+        // Nothing has loaded, so nothing but the synchronous members is ready.
+        assert_eq!(state_of(&app, Member::MapData), MemberState::Waiting);
+        assert_eq!(state_of(&app, Member::Sheets), MemberState::Waiting, "sheets before a plan");
+        assert_eq!(state_of(&app, Member::Font), MemberState::Ready, "the font is embedded");
+        assert!(!app.world().resource::<Reveal>().0.is_ready());
+
+        // The loader records what it needs before fetching, so a set with nothing
+        // delivered reports zero of two rather than staying silent.
+        let graphics = app.world().resource::<crate::graphics::Graphics>().clone();
+        graphics.set_required_sheets(["3.png".to_string(), "7.png".to_string()].into());
+        app.update();
+        assert_eq!(
+            state_of(&app, Member::Sheets),
+            MemberState::Loading { done: Some(0), total: Some(2) }
+        );
+
+        // One sheet arrives: progress, not readiness.
+        app.world_mut()
+            .resource_mut::<crate::graphics::SheetTextures>()
+            .0
+            .insert("3.png".to_string(), Handle::default());
+        app.update();
+        assert_eq!(
+            state_of(&app, Member::Sheets),
+            MemberState::Loading { done: Some(1), total: Some(2) }
+        );
+
+        // Both: ready.
+        app.world_mut()
+            .resource_mut::<crate::graphics::SheetTextures>()
+            .0
+            .insert("7.png".to_string(), Handle::default());
+        app.update();
+        assert_eq!(state_of(&app, Member::Sheets), MemberState::Ready);
+    }
+
+    #[test]
+    fn a_required_sheet_that_will_not_arrive_stops_the_scene() {
+        // The loader's own rule is that one unreadable sheet must not stop the rest of
+        // the world drawing, and that is right for an optional sheet. For one the visible
+        // scene needs it means drawing a hole and saying nothing, which is what this
+        // task exists to stop.
+        let mut app = reporting_app();
+        let graphics = app.world().resource::<crate::graphics::Graphics>().clone();
+        graphics.set_required_sheets(["3.png".to_string()].into());
+        graphics.sheet_failed("3.png".to_string(), "decode: truncated".to_string());
+        app.update();
+
+        match state_of(&app, Member::Sheets) {
+            MemberState::Failed(Failure::Corrupt(detail)) => {
+                assert!(detail.contains("3.png"), "the failure does not name the sheet: {detail}");
+            }
+            other => panic!("expected a corrupt failure, got {other:?}"),
+        }
+        assert!(!app.world().resource::<Reveal>().0.is_ready());
+    }
+
+    #[test]
+    fn a_sheet_that_failed_but_nobody_needs_does_not_stop_anything() {
+        // The other half of the same rule. A sheet outside the required set failing is
+        // exactly the case the loader's tolerance was written for.
+        let mut app = reporting_app();
+        let graphics = app.world().resource::<crate::graphics::Graphics>().clone();
+        graphics.set_required_sheets(["3.png".to_string()].into());
+        graphics.sheet_failed("99.png".to_string(), "fetch: 404".to_string());
+        app.world_mut()
+            .resource_mut::<crate::graphics::SheetTextures>()
+            .0
+            .insert("3.png".to_string(), Handle::default());
+        app.update();
+
+        assert_eq!(state_of(&app, Member::Sheets), MemberState::Ready);
     }
 
     #[test]

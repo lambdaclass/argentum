@@ -243,16 +243,29 @@ pub fn start_graphics_load(graphics: Graphics, origin: String, grh_ids: Vec<i32>
         }
         graphics.set_index(index);
 
+        // Recorded before the first fetch, because "no sheets yet" and "all the sheets
+        // there will ever be" are otherwise the same observation. The first-scene
+        // barrier needs the difference to know when the visible world is complete.
+        graphics.set_required_sheets(files.iter().cloned().collect());
+
         for sheet in files {
             let url = format!("{origin}/{sheet}");
             match fetch_bytes(&url).await {
                 Ok(bytes) => match decode_png(&bytes) {
                     Ok((w, h, rgba)) => graphics.push_sheet(sheet.clone(), w, h, rgba),
-                    // One unreadable sheet must not stop the rest of the world
-                    // from drawing.
-                    Err(e) => log::warn!("sheet {sheet}: {e}"),
+                    // One unreadable sheet must not stop the rest of the world from
+                    // drawing — but it must not be invisible either. Recorded as well as
+                    // logged, so a sheet the visible scene needs becomes something the
+                    // player is told about instead of a hole in the world.
+                    Err(e) => {
+                        log::warn!("sheet {sheet}: {e}");
+                        graphics.sheet_failed(sheet.clone(), format!("decode: {e}"));
+                    }
                 },
-                Err(e) => log::warn!("sheet {sheet}: {e}"),
+                Err(e) => {
+                    log::warn!("sheet {sheet}: {e}");
+                    graphics.sheet_failed(sheet.clone(), format!("fetch: {e}"));
+                }
             }
         }
     });

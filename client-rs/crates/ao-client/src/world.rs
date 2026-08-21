@@ -492,7 +492,7 @@ impl Default for MapLoadTimeout {
 
 /// The decoded map, retained so the scene can be drawn once sheets arrive.
 #[derive(Resource)]
-struct LoadedMap(Option<Box<ao_core::PackedMap>>);
+pub struct LoadedMap(pub Option<Box<ao_core::PackedMap>>);
 
 /// Tiles already spawned, keyed by (layer, x, y).
 ///
