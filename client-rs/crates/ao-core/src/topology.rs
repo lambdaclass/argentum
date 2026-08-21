@@ -222,8 +222,13 @@ pub struct Baseline {
     pub cycle_witnesses: usize,
     /// Groups of maps tied together by those loops. One disposition each.
     pub conflict_clusters: usize,
-    /// Maps inside an inconsistent component.
+    /// Maps inside an inconsistent component. Larger than the maps actually implicated in
+    /// a contradiction: a component cannot be laid out until its contradictions have a
+    /// disposition, whether or not a given map is named in one.
     pub inconsistent_maps: usize,
+    /// Squares of four maps with all four internal seams reciprocal and no contradiction
+    /// anywhere in their component. What the seamless-world MVP can be built on today.
+    pub conflict_free_quads: usize,
 }
 
 /// The corpus this baseline was measured against.
@@ -271,9 +276,10 @@ pub const BASELINE: Baseline = Baseline {
     weak_components: 226,
     reciprocal_components: 232,
     inconsistent_components: 2,
-    cycle_witnesses: 992,
-    conflict_clusters: 9,
+    cycle_witnesses: 50,
+    conflict_clusters: 2,
     inconsistent_maps: 428,
+    conflict_free_quads: 87,
 };
 
 /// How `found` differs from `expected`, field by field, or nothing if it does not.
@@ -309,6 +315,7 @@ pub fn drift(expected: &Baseline, found: &Baseline) -> Vec<String> {
     note("cycle witnesses", expected.cycle_witnesses, found.cycle_witnesses);
     note("conflict clusters", expected.conflict_clusters, found.conflict_clusters);
     note("inconsistent maps", expected.inconsistent_maps, found.inconsistent_maps);
+    note("conflict-free quads", expected.conflict_free_quads, found.conflict_free_quads);
 
     lines
 }
@@ -427,22 +434,38 @@ pub fn evidence(maps: &[PackedMap]) -> Evidence {
     baseline.cycle_witnesses = witnesses.len();
     baseline.conflict_clusters = conflict_clusters(&witnesses).len();
 
-    let tainted = inconsistent_maps(&adjacencies, &constraint_conflicts);
-    baseline.inconsistent_maps = tainted.len();
-    baseline.inconsistent_components = components(&tainted, &adjacencies)
-        - tainted
-            .iter()
-            .filter(|map| !adjacencies.iter().any(|e| e.from_map == **map || e.to_map == **map))
-            .count();
+    // Every map in a component that contains a contradiction, found through component
+    // identity rather than by counting components of the tainted subgraph — that subgraph
+    // is not the same shape as the components its maps came from, and counting it reported
+    // two inconsistent components while the cluster evidence showed contradictions in maps
+    // that a 2x2 candidate search was then happy to build on.
+    let of_component = component_of(&known, &adjacencies);
+    let inconsistent_components: BTreeSet<u16> = witnesses
+        .iter()
+        .flat_map(|witness| witness.loop_maps.iter())
+        .filter_map(|map| of_component.get(map).copied())
+        .collect();
 
-    Evidence {
+    let tainted: BTreeSet<u16> = of_component
+        .iter()
+        .filter(|(_, component)| inconsistent_components.contains(component))
+        .map(|(map, _)| *map)
+        .collect();
+
+    baseline.inconsistent_maps = tainted.len();
+    baseline.inconsistent_components = inconsistent_components.len();
+
+    let evidence = Evidence {
         baseline,
         adjacencies,
         conflicts,
         constraint_conflicts,
         witnesses,
         inconsistent: tainted,
-    }
+    };
+
+    let quads = conflict_free_quads(&evidence).len();
+    Evidence { baseline: Baseline { conflict_free_quads: quads, ..evidence.baseline }, ..evidence }
 }
 
 /// How many groups the maps fall into, joined by standard seams alone.
@@ -587,6 +610,48 @@ pub fn constraint_conflicts(adjacencies: &BTreeSet<Adjacency>) -> BTreeSet<Const
         .collect()
 }
 
+/// Which component each map belongs to, named by its smallest member.
+///
+/// Named by the smallest id rather than by wherever a walk started, so the name is a fact
+/// about the group. Needed because "how many components are inconsistent" was inferred
+/// from the shape of the tainted subgraph, which is not the shape of the components those
+/// maps came from — it reported two while a 2x2 candidate search was happily building on
+/// maps that appear in a conflict cluster.
+pub fn component_of(
+    known: &BTreeSet<u16>,
+    adjacencies: &BTreeSet<Adjacency>,
+) -> BTreeMap<u16, u16> {
+    let mut neighbours: BTreeMap<u16, BTreeSet<u16>> = BTreeMap::new();
+    for edge in adjacencies {
+        neighbours.entry(edge.from_map).or_default().insert(edge.to_map);
+        neighbours.entry(edge.to_map).or_default().insert(edge.from_map);
+    }
+
+    let mut assigned: BTreeMap<u16, u16> = BTreeMap::new();
+
+    for map in known {
+        if assigned.contains_key(map) {
+            continue;
+        }
+        let mut group = BTreeSet::new();
+        let mut stack = vec![*map];
+        while let Some(current) = stack.pop() {
+            if !group.insert(current) {
+                continue;
+            }
+            if let Some(next) = neighbours.get(&current) {
+                stack.extend(next.iter().copied());
+            }
+        }
+        let name = group.iter().copied().next().unwrap_or(*map);
+        for member in group {
+            assigned.insert(member, name);
+        }
+    }
+
+    assigned
+}
+
 /// A loop of maps whose offsets do not close, and by how much.
 ///
 /// This is the stable form of a contradiction. How many *constraints* get blamed for an
@@ -651,10 +716,18 @@ pub fn cycle_witnesses(adjacencies: &BTreeSet<Adjacency>) -> Vec<CycleWitness> {
     }
 
     // Offset from each map to its root, by walking the tree.
+    // Position relative to the root, accumulated up the tree.
+    //
+    // `parent[child] = (parent, delta)` records that the child sits `delta` from its
+    // parent, so the child's offset from the root is its parent's offset *plus* delta.
+    // Subtracting instead — the sign I wrote first — makes every second edge of a square
+    // look like a contradiction: a consistent 2x2 came out "out by 148 tiles", which is
+    // two core widths, and the same figure then appeared all over the corpus and read
+    // convincingly as a systematic two-map displacement in the data. It was arithmetic.
     let offset_to_root = |mut map: u16| {
         let mut total = (0i64, 0i64);
         while let Some((up, delta)) = parent.get(&map).copied() {
-            total = (total.0 - delta.0, total.1 - delta.1);
+            total = (total.0 + delta.0, total.1 + delta.1);
             map = up;
         }
         total
@@ -793,6 +866,85 @@ pub fn inconsistent_maps(
 pub struct Origin {
     pub x: i64,
     pub y: i64,
+}
+
+/// A square of four maps that can be composed with no contradiction anywhere in it.
+///
+/// What the seamless-world MVP needs: two by two, every internal seam reciprocal, and the
+/// whole group outside any inconsistent component. Curating the 424-map continent is a
+/// separate job — a candidate here has to be provably safe, not merely likely.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Quad {
+    pub north_west: u16,
+    pub north_east: u16,
+    pub south_west: u16,
+    pub south_east: u16,
+}
+
+/// Every conflict-free 2x2 square in the corpus, in deterministic order.
+///
+/// A square qualifies only if all four of its internal seams are reciprocal — both maps
+/// name each other — and none of its maps sits in a component that cannot be laid out. The
+/// second condition matters even though the square itself closes: a map inside an
+/// inconsistent component has a position that depends on which contradiction is resolved,
+/// so building the MVP on it would mean rebuilding it afterwards.
+pub fn conflict_free_quads(evidence: &Evidence) -> Vec<Quad> {
+    let mut east: BTreeMap<u16, u16> = BTreeMap::new();
+    let mut south: BTreeMap<u16, u16> = BTreeMap::new();
+
+    for edge in &evidence.adjacencies {
+        // Reciprocal only, checked in both directions.
+        let mutual = evidence.adjacencies.contains(&Adjacency {
+            from_map: edge.to_map,
+            side: edge.side.opposite(),
+            to_map: edge.from_map,
+        });
+        if !mutual {
+            continue;
+        }
+        match edge.side {
+            Side::East => {
+                east.insert(edge.from_map, edge.to_map);
+            }
+            Side::South => {
+                south.insert(edge.from_map, edge.to_map);
+            }
+            _ => {}
+        }
+    }
+
+    let mut quads = Vec::new();
+
+    for (north_west, north_east) in &east {
+        let Some(south_west) = south.get(north_west) else {
+            continue;
+        };
+        let Some(south_east) = south.get(north_east) else {
+            continue;
+        };
+        // The fourth corner has to agree from both directions, or the square is not one.
+        if east.get(south_west) != Some(south_east) {
+            continue;
+        }
+
+        let quad = Quad {
+            north_west: *north_west,
+            north_east: *north_east,
+            south_west: *south_west,
+            south_east: *south_east,
+        };
+
+        let clean = [quad.north_west, quad.north_east, quad.south_west, quad.south_east]
+            .iter()
+            .all(|map| !evidence.inconsistent.contains(map));
+
+        if clean {
+            quads.push(quad);
+        }
+    }
+
+    quads.sort();
+    quads
 }
 
 /// The global tile a local coordinate maps to, given where its core sits.
@@ -1079,6 +1231,85 @@ mod tests {
             classify(1, &exit(BAND_X.0, BAND_Y.0, 2, 50, 50), &known),
             ExitKind::NonGeographic
         );
+    }
+
+    #[test]
+    fn a_loop_that_closes_produces_no_witness() {
+        // The test this module was missing, and its absence let a sign error stand: a
+        // square whose four seams agree is consistent, so it must yield nothing at all.
+        // Without it, `cycle_witnesses` reported a contradiction for essentially every
+        // non-tree edge in the corpus — 992 of them, more than the number of non-tree
+        // edges — and the conclusion "no conflict-free square exists" was manufactured.
+        let corpus = vec![
+            map(1, vec![exit(BAND_X.1, 50, 2, CORE_X.0, 50), exit(50, BAND_Y.1, 3, 50, CORE_Y.0)]),
+            map(2, vec![exit(BAND_X.0, 50, 1, CORE_X.1, 50), exit(50, BAND_Y.1, 4, 50, CORE_Y.0)]),
+            map(3, vec![exit(50, BAND_Y.0, 1, 50, CORE_Y.1), exit(BAND_X.1, 50, 4, CORE_X.0, 50)]),
+            map(4, vec![exit(50, BAND_Y.0, 2, 50, CORE_Y.1), exit(BAND_X.0, 50, 3, CORE_X.1, 50)]),
+        ];
+
+        let found = evidence(&corpus);
+        assert_eq!(
+            found.witnesses,
+            Vec::new(),
+            "a square whose seams agree was reported as contradictory"
+        );
+        assert_eq!(found.baseline.cycle_witnesses, 0);
+        assert_eq!(found.baseline.inconsistent_components, 0);
+        assert_eq!(found.baseline.inconsistent_maps, 0);
+    }
+
+    #[test]
+    fn a_loop_that_does_not_close_produces_exactly_one_witness_per_direction() {
+        // Three maps in a row where the third also claims to be east of the first. The loop
+        // is out by two core widths, which is the residual a reader acts on.
+        let corpus = vec![
+            map(1, vec![exit(BAND_X.1, 50, 2, CORE_X.0, 50)]),
+            map(2, vec![exit(BAND_X.0, 50, 1, CORE_X.1, 50), exit(BAND_X.1, 50, 3, CORE_X.0, 50)]),
+            map(3, vec![exit(BAND_X.0, 50, 2, CORE_X.1, 50), exit(BAND_X.1, 50, 1, CORE_X.0, 50)]),
+        ];
+
+        let found = evidence(&corpus);
+        assert!(!found.witnesses.is_empty(), "an impossible loop was accepted");
+        assert!(
+            found.witnesses.iter().all(|witness| witness.residual != (0, 0)),
+            "a witness with no residual is not a contradiction"
+        );
+        // Three maps in a row, and the third claims the first is one step east of it: the
+        // loop is out by three core widths, because that is how far the first map would
+        // have to move for the claim to hold.
+        assert!(
+            found.witnesses.iter().any(|w| w.residual.0.abs() == 3 * PITCH_X),
+            "the residual does not name the displacement: {:?}",
+            found.witnesses
+        );
+        assert_eq!(found.baseline.inconsistent_components, 1);
+    }
+
+    #[test]
+    fn a_conflict_free_square_needs_all_four_seams_and_a_clean_component() {
+        // What the MVP is built on has to be provably safe rather than probably fine: four
+        // reciprocal seams that close, in maps whose positions do not depend on resolving
+        // somebody else's contradiction.
+        let corpus = vec![
+            map(1, vec![exit(BAND_X.1, 50, 2, CORE_X.0, 50), exit(50, BAND_Y.1, 3, 50, CORE_Y.0)]),
+            map(2, vec![exit(BAND_X.0, 50, 1, CORE_X.1, 50), exit(50, BAND_Y.1, 4, 50, CORE_Y.0)]),
+            map(3, vec![exit(50, BAND_Y.0, 1, 50, CORE_Y.1), exit(BAND_X.1, 50, 4, CORE_X.0, 50)]),
+            map(4, vec![exit(50, BAND_Y.0, 2, 50, CORE_Y.1), exit(BAND_X.0, 50, 3, CORE_X.1, 50)]),
+        ];
+
+        let found = evidence(&corpus);
+        let quads = conflict_free_quads(&found);
+
+        assert_eq!(
+            quads,
+            vec![Quad { north_west: 1, north_east: 2, south_west: 3, south_east: 4 }]
+        );
+
+        // One seam made one-sided and the square is no longer a candidate: a claim the
+        // other map does not return is weaker evidence than the MVP should rest on.
+        let mut weaker = corpus.clone();
+        weaker[3].exits.retain(|exit| exit.target_map != 3);
+        assert!(conflict_free_quads(&evidence(&weaker)).is_empty());
     }
 
     #[test]

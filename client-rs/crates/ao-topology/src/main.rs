@@ -112,6 +112,16 @@ fn main() {
         }
     }
 
+    // What the seamless-world MVP can be built on today.
+    let quads = topology::conflict_free_quads(&found);
+    println!("  conflict-free 2x2 squares {}", quads.len());
+    for quad in quads.iter().take(6) {
+        println!(
+            "    {} {} / {} {}",
+            quad.north_west, quad.north_east, quad.south_west, quad.south_east
+        );
+    }
+
     // The review unit: clusters, with the loops that prove them, smallest first — a
     // three-map loop out by 74 tiles is a root cause somebody can act on this afternoon.
     let clusters = topology::conflict_clusters(&found.witnesses);
