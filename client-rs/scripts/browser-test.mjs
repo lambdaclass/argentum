@@ -1468,6 +1468,52 @@ async function main() {
         `held ${heldBeforeShot}/${heldAfterShot}, sampled ${JSON.stringify(samples)}`
       );
 
+      // Resized mid-load. The barrier is a full-window node, so a window that changes
+      // shape while the scene is still a candidate must not open a gap at the edges — and
+      // a resize is one of the events the contract names as cancelling a candidate, so
+      // this also checks the client survives being asked to start again mid-flight.
+      await page.setViewportSize({ width: 900, height: 700 });
+      await page.waitForTimeout(1_200);
+      const resizedBox = await (await page.$("#ao-canvas")).boundingBox();
+      const heldBeforeResizeShot = await page.evaluate(
+        () => window.aoLoaded?.revealed === false
+      );
+      const resizedShot = await page.screenshot({
+        clip: {
+          x: resizedBox.x,
+          y: resizedBox.y,
+          width: resizedBox.width,
+          height: resizedBox.height,
+        },
+      });
+      const heldAfterResizeShot = await page.evaluate(
+        () => window.aoLoaded?.revealed === false
+      );
+      const resizedSamples = await page.evaluate(async (bytes) => {
+        const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
+        const bitmap = await createImageBitmap(blob);
+        const surface = new OffscreenCanvas(bitmap.width, bitmap.height);
+        const context = surface.getContext("2d");
+        context.drawImage(bitmap, 0, 0);
+        const at = (fx, fy) => {
+          const x = Math.min(bitmap.width - 1, Math.floor(bitmap.width * fx));
+          const y = Math.min(bitmap.height - 1, Math.floor(bitmap.height * fy));
+          const [r, g, b] = context.getImageData(x, y, 1, 1).data;
+          return { fx, fy, r, g, b };
+        };
+        // The corners this time: a barrier that does not follow a resize leaks there
+        // first.
+        return [at(0.02, 0.02), at(0.98, 0.02), at(0.02, 0.98), at(0.98, 0.98)];
+      }, Array.from(resizedShot));
+
+      check(
+        "resizing while the scene is still loading does not open a gap",
+        heldBeforeResizeShot &&
+          heldAfterResizeShot &&
+          resizedSamples.every((p) => p.r <= 16 && p.g <= 16 && p.b <= 28),
+        `held ${heldBeforeResizeShot}/${heldAfterResizeShot}, corners ${JSON.stringify(resizedSamples)}`
+      );
+
       // Then the held sheet arrives and the scene appears.
       // Three arguments, not two: `waitForFunction(fn, arg, options)` reads a lone object as
   // the *argument*, so every timeout in this file was silently the thirty-second default —
