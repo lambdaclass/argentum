@@ -438,6 +438,7 @@ fn report_members(
     graphics: Res<crate::graphics::Graphics>,
     sheets: Res<crate::graphics::SheetTextures>,
     map: Res<crate::world::LoadedMap>,
+    loader: Res<crate::net::MapLoader>,
     state: Res<crate::ui::state::UiState>,
     player: Res<crate::world::LocalPlayer>,
     radius: Res<crate::world::ViewRadius>,
@@ -448,9 +449,14 @@ fn report_members(
 
     // The map's own data: the world cannot be composed without it, and every other
     // member's requirements are derived from it.
+    //
+    // The failure comes from the map loader, which is the thing that fetches it. An
+    // earlier version read the *graphics* failure here, so a map fetch that failed left
+    // this member `Waiting` and the barrier up forever with nothing to say — while the
+    // application state machine had already moved on to `Playing` behind it.
     if map.0.is_some() {
         set.report(generation, Member::MapData, MemberState::Ready);
-    } else if let Some(reason) = graphics.failure() {
+    } else if let crate::net::LoadState::Failed(reason) = loader.state() {
         set.report(generation, Member::MapData, MemberState::Failed(Failure::Unreachable(reason)));
     }
 
@@ -508,10 +514,11 @@ fn report_members(
         set.report(generation, Member::HudAtlas, MemberState::Ready);
     }
 
-    // A snapshot with something in it. `UiState` starts at its default, which is not a
-    // snapshot the server sent and not something to draw a HUD from.
-    let snapshot = state.get();
-    if snapshot.world.minute_of_day != 0 || !snapshot.chat.lines.is_empty() {
+    // A snapshot that was actually published, which is a fact the resource records rather
+    // than something to infer from its contents. Inferring it — "the clock is not midnight
+    // or there is chat" — blocks forever on a legitimate midnight snapshot in a quiet
+    // channel, and passes on anything that happens to look populated.
+    if state.has_snapshot() {
         set.report(generation, Member::Snapshot, MemberState::Ready);
     }
 }
@@ -602,6 +609,7 @@ mod tests {
         .init_resource::<crate::graphics::Graphics>()
         .init_resource::<crate::graphics::SheetTextures>()
         .insert_resource(crate::world::LoadedMap(None))
+        .init_resource::<crate::net::MapLoader>()
         .init_resource::<crate::world::LocalPlayer>()
         .init_resource::<crate::world::ViewRadius>()
         .init_resource::<crate::ui::state::UiState>()
@@ -674,6 +682,51 @@ mod tests {
             !required.contains("graficos/far.png"),
             "the far corner's artwork is in the first frame's requirements: {required:?}"
         );
+    }
+
+    #[test]
+    fn a_map_that_will_not_load_reaches_the_barrier_as_a_failure() {
+        // Reviewed and found: the reporter read the *graphics* failure here, so a map fetch
+        // that failed left this member `Waiting` — the barrier stayed up forever with
+        // nothing to say, while the application state machine had already moved on to
+        // `Playing` behind it with a generated grid. A hang is the worst of the three
+        // possible outcomes, because it is the one a player cannot act on.
+        let mut app = reporting_app();
+        app.world().resource::<crate::net::MapLoader>().fail_for_test("origin unreachable");
+        app.update();
+
+        match state_of(&app, Member::MapData) {
+            MemberState::Failed(Failure::Unreachable(reason)) => {
+                assert!(reason.contains("unreachable"), "the reason was lost: {reason}");
+            }
+            other => panic!("a failed map load reported {other:?}"),
+        }
+
+        // And that is a barrier a player can read, not a bar at 71%.
+        let reveal = app.world().resource::<Reveal>();
+        assert!(matches!(barrier_for(&reveal.0), Barrier::Failed { may_retry: true, .. }));
+    }
+
+    #[test]
+    fn a_snapshot_is_recognised_by_having_arrived_rather_than_by_its_contents() {
+        // Reviewed and found: readiness was inferred from "the clock is not midnight or
+        // there is chat". A legitimate midnight snapshot in a quiet channel would hold the
+        // barrier up forever, and anything that happened to look populated would pass.
+        use ao_core::view::UiSnapshot;
+
+        let mut app = reporting_app();
+        app.update();
+        assert_eq!(state_of(&app, Member::Snapshot), MemberState::Waiting);
+
+        // Midnight, no chat: indistinguishable from the default by inspection, and still
+        // a snapshot the server sent.
+        let mut midnight = UiSnapshot::default();
+        midnight.world.minute_of_day = 0;
+        midnight.chat.lines.clear();
+        app.world_mut().resource_mut::<crate::ui::state::UiState>().set(midnight);
+        app.update();
+
+        assert_eq!(state_of(&app, Member::Snapshot), MemberState::Ready);
     }
 
     #[test]

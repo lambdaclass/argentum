@@ -172,19 +172,22 @@ fn claim_online(
     stats: Res<HudStats>,
     mut outstanding: ResMut<OnlineRequest>,
 ) {
-    for outcome in platform.http.take_outcomes() {
-        if outstanding.0 != Some(outcome.id) {
-            // Not the answer this system is waiting for.
-            continue;
-        }
-        outstanding.0 = None;
+    let Some(id) = outstanding.0 else {
+        return;
+    };
+    // Claimed by request, so this system cannot consume an answer meant for another. The
+    // previous version drained the whole queue and dropped what it did not recognise,
+    // which destroyed other consumers' results the moment there was one.
+    let Some(outcome) = platform.http.claim(id) else {
+        return;
+    };
+    outstanding.0 = None;
 
-        match outcome.result {
-            Ok(body) => stats.write(None, parse_online(&body)),
-            // A count nobody could fetch is unknown, not zero: "0 players online" is a
-            // claim about the world, and a failed fetch is a claim about the network.
-            Err(_) => stats.write(None, None),
-        }
+    match outcome.result {
+        Ok(body) => stats.write(None, parse_online(&body)),
+        // A count nobody could fetch is unknown, not zero: "0 players online" is a claim
+        // about the world, and a failed fetch is a claim about the network.
+        Err(_) => stats.write(None, None),
     }
 }
 
@@ -193,13 +196,15 @@ fn claim_online(
 /// A targeted extraction rather than a JSON dependency for one integer, and pure, so the
 /// shapes that have actually broken it can be tested without a network.
 fn parse_online(body: &str) -> Option<u32> {
-    let digits: String = body
-        .split("\"online\":")
-        .nth(1)?
-        .chars()
-        .skip_while(|c| !c.is_ascii_digit())
-        .take_while(|c| c.is_ascii_digit())
-        .collect();
+    // The token immediately after the key, not the next digits anywhere in the document.
+    // Skipping forward to the first digit turns `{"online":null,"maps":842}` into 842 —
+    // a number from another field, reported to the player as the population.
+    let after = body.split("\"online\":").nth(1)?.trim_start();
+
+    let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        return None;
+    }
     digits.parse::<u32>().ok()
 }
 
@@ -227,6 +232,7 @@ fn poll_online(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::platform::HostHttp;
 
     /// A host whose fetches answer exactly what a test says, when the test says.
     #[derive(Default)]
@@ -242,8 +248,14 @@ mod tests {
             crate::platform::RequestId(started.len() as u64)
         }
 
-        fn take_outcomes(&self) -> Vec<crate::platform::Outcome> {
-            std::mem::take(&mut *self.answers.lock().expect("lock"))
+        fn claim(&self, id: crate::platform::RequestId) -> Option<crate::platform::Outcome> {
+            let mut answers = self.answers.lock().expect("lock");
+            let at = answers.iter().position(|outcome| outcome.id == id)?;
+            Some(answers.remove(at))
+        }
+
+        fn abandon(&self, id: crate::platform::RequestId) {
+            self.answers.lock().expect("lock").retain(|outcome| outcome.id != id);
         }
     }
 
@@ -282,6 +294,10 @@ mod tests {
         // And the shapes that are not an answer at all. None of them may become a count:
         // a made-up number on the status bar is worse than a dash.
         assert_eq!(parse_online("{}"), None);
+        // Reviewed and found: skipping forward to the first digit read a number out of the
+        // *next* field and reported it as the population.
+        assert_eq!(parse_online(r#"{"online":null,"maps":842}"#), None);
+        assert_eq!(parse_online(r#"{"online":,"maps":842}"#), None);
         assert_eq!(parse_online(r#"{"online":"many"}"#), None);
         assert_eq!(parse_online("<html>502 Bad Gateway</html>"), None);
         assert_eq!(parse_online(""), None);
@@ -351,10 +367,11 @@ mod tests {
     }
 
     #[test]
-    fn an_answer_to_somebody_elses_request_is_left_alone() {
-        // The queue is shared with every other fetch the client makes. Claiming an
-        // outcome this system never asked for would consume it and report it as an online
-        // count, which is how one service's answer becomes another's bug.
+    fn an_answer_to_somebody_elses_request_is_left_where_it_was() {
+        // Reviewed and found: the earlier version drained the whole queue and skipped what
+        // it did not recognise — so the answer was gone, not left. Invisible with one
+        // consumer, broken the moment there are two. This asserts the answer is *still
+        // there* afterwards, which is the part that matters.
         let http = Arc::new(ScriptedHttp::default());
         let mut app = online_app(http.clone());
 
@@ -372,6 +389,10 @@ mod tests {
             Some(crate::platform::RequestId(1)),
             "the outstanding request was retired by somebody else's answer"
         );
+
+        // Still claimable by whoever it belongs to.
+        let theirs = http.claim(crate::platform::RequestId(999));
+        assert!(theirs.is_some(), "another consumer's answer was consumed and discarded");
     }
 
     #[test]

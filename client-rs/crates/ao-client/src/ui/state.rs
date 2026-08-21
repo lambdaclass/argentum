@@ -19,11 +19,29 @@ use bevy::prelude::*;
 #[derive(Resource, Debug, Clone, Default)]
 pub struct UiState {
     snapshot: UiSnapshot,
+    /// How many snapshots have been published into this resource.
+    ///
+    /// Zero means the interface is showing its own default and nothing has told it
+    /// anything. That distinction cannot be recovered from the contents: the first-scene
+    /// barrier previously inferred it from "the clock is not midnight or there is chat",
+    /// which blocks forever on a legitimate midnight snapshot with a quiet channel and
+    /// passes on anything that happens to look populated. A count is the fact itself.
+    revision: u64,
 }
 
 impl UiState {
     pub fn get(&self) -> &UiSnapshot {
         &self.snapshot
+    }
+
+    /// Whether anything has ever been published into this resource.
+    pub fn has_snapshot(&self) -> bool {
+        self.revision > 0
+    }
+
+    /// How many snapshots have been published. Monotonic.
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// Replace the snapshot. The only way it changes.
@@ -44,6 +62,10 @@ impl UiState {
     /// rebuilds twenty times a second.
     #[cfg(test)]
     pub fn set(&mut self, snapshot: UiSnapshot) {
+        // The revision counts publications, not changes: a snapshot identical to the
+        // default is still something the server said, and the barrier is waiting to be
+        // told anything at all.
+        self.revision += 1;
         if snapshot.same_state_as(&self.snapshot) {
             return;
         }
@@ -59,6 +81,11 @@ impl UiState {
     /// explicitly, which is the only way to make "nothing happened" cost
     /// nothing.
     pub fn publish(state: &mut ResMut<'_, UiState>, snapshot: UiSnapshot) {
+        // Counted even when the value is unchanged, and without ticking detection for it:
+        // "a snapshot arrived" and "the interface must be rebuilt" are different facts,
+        // and the barrier needs the first one.
+        state.bypass_change_detection().revision += 1;
+
         if snapshot.same_state_as(&state.bypass_change_detection().snapshot) {
             return;
         }

@@ -136,11 +136,21 @@ pub trait HostHttp: Send + Sync + 'static {
     /// Start fetching `url` as text. The handle is how the answer is recognised.
     fn get_text(&self, url: &str) -> RequestId;
 
-    /// Take whatever finished since the last call.
+    /// Claim the answer to `id`, if it has arrived.
     ///
-    /// Draining rather than peeking, so two systems cannot both act on one answer, and
-    /// so an answer nobody claimed does not accumulate forever.
-    fn take_outcomes(&self) -> Vec<Outcome>;
+    /// By request rather than "everything that finished": a single drained queue means the
+    /// first system to look takes every other system's answers with it, and discarding the
+    /// ones it does not recognise destroys them. That is invisible while one consumer
+    /// exists and breaks the moment a second one does — which is exactly what W-0016 adds.
+    ///
+    /// Claiming removes it, so two systems cannot both act on one answer.
+    fn claim(&self, id: RequestId) -> Option<Outcome>;
+
+    /// Discard the answer to `id`, whether or not it has arrived.
+    ///
+    /// For a caller that has stopped caring — a superseded poll, a closed screen. Without
+    /// it an abandoned request's answer sits in the queue forever.
+    fn abandon(&self, id: RequestId);
 }
 
 /// A fetch in flight.
@@ -336,10 +346,15 @@ mod host {
             id
         }
 
-        fn take_outcomes(&self) -> Vec<Outcome> {
-            match FINISHED.lock() {
-                Ok(mut queue) => std::mem::take(&mut *queue),
-                Err(_) => Vec::new(),
+        fn claim(&self, id: RequestId) -> Option<Outcome> {
+            let mut queue = FINISHED.lock().ok()?;
+            let at = queue.iter().position(|outcome| outcome.id == id)?;
+            Some(queue.remove(at))
+        }
+
+        fn abandon(&self, id: RequestId) {
+            if let Ok(mut queue) = FINISHED.lock() {
+                queue.retain(|outcome| outcome.id != id);
             }
         }
     }
