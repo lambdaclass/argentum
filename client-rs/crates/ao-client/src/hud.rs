@@ -37,7 +37,18 @@ impl Plugin for HudPlugin {
 /// One at a time on purpose: polling every fifteen seconds against a host that has
 /// stopped answering would otherwise queue requests faster than they retire.
 #[derive(Resource, Default)]
-struct OnlineRequest(Option<crate::platform::RequestId>);
+struct OnlineRequest {
+    id: Option<crate::platform::RequestId>,
+    /// Polls that have come round while this one was still outstanding.
+    ///
+    /// Without a limit, a request whose answer never arrives freezes the count for the
+    /// rest of the session: `id` stays taken and every later poll declines to start. After
+    /// a few intervals the request is abandoned and the next poll is allowed.
+    waited: u8,
+}
+
+/// How many poll intervals an outstanding request may miss before it is abandoned.
+const ONLINE_PATIENCE: u8 = 3;
 
 /// Values shared with the async poller.
 #[derive(Resource, Clone)]
@@ -172,7 +183,7 @@ fn claim_online(
     stats: Res<HudStats>,
     mut outstanding: ResMut<OnlineRequest>,
 ) {
-    let Some(id) = outstanding.0 else {
+    let Some(id) = outstanding.id else {
         return;
     };
     // Claimed by request, so this system cannot consume an answer meant for another. The
@@ -181,7 +192,8 @@ fn claim_online(
     let Some(outcome) = platform.http.claim(id) else {
         return;
     };
-    outstanding.0 = None;
+    outstanding.id = None;
+    outstanding.waited = 0;
 
     match outcome.result {
         Ok(body) => stats.write(None, parse_online(&body)),
@@ -221,11 +233,18 @@ fn poll_online(
     if !platform.clock.is_visible() {
         return;
     }
-    if outstanding.0.is_some() {
-        return;
+    if let Some(id) = outstanding.id {
+        outstanding.waited = outstanding.waited.saturating_add(1);
+        if outstanding.waited < ONLINE_PATIENCE {
+            return;
+        }
+        // Given up on: the answer may still arrive, and nobody is waiting for it.
+        platform.http.abandon(id);
+        outstanding.id = None;
     }
 
-    outstanding.0 =
+    outstanding.waited = 0;
+    outstanding.id =
         Some(platform.http.get_text(&format!("{}/api/meta/online", config.asset_origin)));
 }
 
@@ -310,16 +329,44 @@ mod tests {
         let http = Arc::new(ScriptedHttp::default());
         let mut app = online_app(http.clone());
 
-        for _ in 0..4 {
-            advance(&mut app, ONLINE_INTERVAL_SECS);
-            app.update();
-        }
+        // `advance` updates once itself, so one call is two ticks of the poll timer: the
+        // first starts a request and the second must decline to start another.
+        advance(&mut app, ONLINE_INTERVAL_SECS);
 
         assert_eq!(
             http.started.lock().expect("lock").len(),
             1,
             "a poll was started while one was already outstanding"
         );
+    }
+
+    #[test]
+    fn a_request_that_is_never_answered_is_given_up_on() {
+        // The other half, and the reason "one at a time" cannot be the whole rule: an
+        // answer that never arrives would otherwise hold the slot for the rest of the
+        // session and freeze the count permanently.
+        let http = Arc::new(ScriptedHttp::default());
+        let mut app = online_app(http.clone());
+
+        // Driven until it recovers, with a bound: the exact tick it happens on is timer
+        // bookkeeping, but that it happens within a few intervals is the contract.
+        let bound = usize::from(ONLINE_PATIENCE) + 2;
+        let mut started = 0;
+        for _ in 0..bound {
+            advance(&mut app, ONLINE_INTERVAL_SECS);
+            started = http.started.lock().expect("lock").len();
+            if started >= 2 {
+                break;
+            }
+        }
+
+        assert!(
+            started >= 2,
+            "the poll never recovered from an unanswered request in {bound} intervals"
+        );
+
+        // And the abandoned one is not left in the queue for somebody else to find.
+        assert!(http.claim(crate::platform::RequestId(1)).is_none());
     }
 
     #[test]
@@ -330,7 +377,7 @@ mod tests {
         advance(&mut app, ONLINE_INTERVAL_SECS);
         app.update();
         let id = crate::platform::RequestId(1);
-        assert_eq!(app.world().resource::<OnlineRequest>().0, Some(id));
+        assert_eq!(app.world().resource::<OnlineRequest>().id, Some(id));
 
         http.answers
             .lock()
@@ -339,7 +386,7 @@ mod tests {
         app.update();
 
         assert_eq!(app.world().resource::<HudStats>().online(), Some(314));
-        assert_eq!(app.world().resource::<OnlineRequest>().0, None, "the slot stayed taken");
+        assert_eq!(app.world().resource::<OnlineRequest>().id, None, "the slot stayed taken");
 
         // And the next interval starts a fresh one.
         advance(&mut app, ONLINE_INTERVAL_SECS);
@@ -363,7 +410,7 @@ mod tests {
         app.update();
 
         assert_eq!(app.world().resource::<HudStats>().online(), None);
-        assert_eq!(app.world().resource::<OnlineRequest>().0, None);
+        assert_eq!(app.world().resource::<OnlineRequest>().id, None);
     }
 
     #[test]
@@ -385,7 +432,7 @@ mod tests {
 
         assert_eq!(app.world().resource::<HudStats>().online(), None);
         assert_eq!(
-            app.world().resource::<OnlineRequest>().0,
+            app.world().resource::<OnlineRequest>().id,
             Some(crate::platform::RequestId(1)),
             "the outstanding request was retired by somebody else's answer"
         );

@@ -39,11 +39,6 @@ impl UiState {
         self.revision > 0
     }
 
-    /// How many snapshots have been published. Monotonic.
-    pub fn revision(&self) -> u64 {
-        self.revision
-    }
-
     /// Replace the snapshot. The only way it changes.
     ///
     /// Bevy's change detection fires on any call that takes `ResMut`, including
