@@ -419,6 +419,48 @@ fn main() {
         spaces.len()
     });
 
+    // What the biggest spaces need loaded. This is the input to per-region asset budgets:
+    // a space that needs 12,000 graphics is a different proposition from one that needs 400.
+    let mut by_weight: Vec<&ao_core::manifest::SpaceEntry> = manifest.spaces.iter().collect();
+    by_weight.sort_by_key(|space| std::cmp::Reverse(space.dependencies.graphics.len()));
+    println!("    heaviest spaces by graphics:");
+    for space in by_weight.iter().take(5) {
+        println!(
+            "      space {:<5} {:>3} maps  {:>6} graphics  {:>4} npcs  {:>4} objects  {}",
+            space.id,
+            space.origins.len(),
+            space.dependencies.graphics.len(),
+            space.dependencies.npcs.len(),
+            space.dependencies.objects.len(),
+            space.dependencies.digest(),
+        );
+    }
+    let lightest = by_weight.last().map(|space| space.dependencies.graphics.len()).unwrap_or(0);
+    println!("      lightest space needs {lightest} graphics");
+
+    if let Some(index) = args.iter().position(|arg| arg == "--dependencies") {
+        match args.get(index + 1) {
+            Some(dir) => {
+                if let Err(error) = std::fs::create_dir_all(dir) {
+                    eprintln!("{dir}: {error}");
+                    std::process::exit(1);
+                }
+                for space in &manifest.spaces {
+                    let path = format!("{dir}/space-{}.txt", space.id);
+                    if let Err(error) = std::fs::write(&path, space.dependencies.encode()) {
+                        eprintln!("{path}: {error}");
+                        std::process::exit(1);
+                    }
+                }
+                println!("    wrote {} dependency lists to {dir}", manifest.spaces.len());
+            }
+            None => {
+                eprintln!("--dependencies needs a directory");
+                std::process::exit(2);
+            }
+        }
+    }
+
     if let Some(index) = args.iter().position(|arg| arg == "--manifest") {
         match args.get(index + 1) {
             Some(path) => match std::fs::write(path, manifest.encode()) {

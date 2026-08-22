@@ -38,7 +38,7 @@ pub const FORMAT: u32 = 1;
 /// either is encoded fails the build until somebody says which of those they meant. This is
 /// the determinism proof with teeth: a test can show two runs agree with each other, and only
 /// a pinned value shows they agree with what was reviewed.
-pub const CONTENT_HASH: &str = "2f9e143e727d3074";
+pub const CONTENT_HASH: &str = "3e6df36b27c82aab";
 
 /// The hand-recorded dispositions, compiled in.
 ///
@@ -166,6 +166,77 @@ impl Reviews {
     }
 }
 
+/// What a space needs loaded before a character can stand in it.
+///
+/// Named in content ids, not files. Which sheet a graphic lives on is a runtime fact the
+/// client learns from the server's graphics index, and baking a file layout into a topology
+/// manifest would couple the world's shape to how its art happens to be packed this month.
+/// The manifest says "this space needs these graphics"; the runtime resolves them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Dependencies {
+    pub graphics: BTreeSet<i32>,
+    pub npcs: BTreeSet<u16>,
+    pub objects: BTreeSet<u16>,
+}
+
+impl Dependencies {
+    /// Everything the given maps draw or spawn.
+    pub fn of<'a>(maps: impl Iterator<Item = &'a PackedMap>) -> Dependencies {
+        let mut found = Dependencies::default();
+        for map in maps {
+            for layer in &map.layers {
+                for tile in layer {
+                    found.graphics.insert(tile.grh);
+                }
+            }
+            for npc in &map.npcs {
+                found.npcs.insert(npc.npc_id);
+            }
+            for object in &map.objects {
+                found.objects.insert(object.obj_id);
+            }
+        }
+        found
+    }
+
+    /// A hash over the sorted ids, so the manifest can carry the identity of a dependency
+    /// set without carrying ten thousand numbers per space.
+    pub fn digest(&self) -> String {
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut eat = |value: i64| {
+            for byte in value.to_le_bytes() {
+                hash ^= byte as u64;
+                hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        };
+        for grh in &self.graphics {
+            eat(*grh as i64);
+        }
+        for npc in &self.npcs {
+            eat(*npc as i64 | 1 << 40);
+        }
+        for object in &self.objects {
+            eat(*object as i64 | 1 << 41);
+        }
+        format!("{hash:016x}")
+    }
+
+    /// The full list, for a runtime that needs the ids rather than their identity.
+    pub fn encode(&self) -> String {
+        let mut out = String::new();
+        for grh in &self.graphics {
+            out.push_str(&format!("graphic {grh}\n"));
+        }
+        for npc in &self.npcs {
+            out.push_str(&format!("npc {npc}\n"));
+        }
+        for object in &self.objects {
+            out.push_str(&format!("object {object}\n"));
+        }
+        out
+    }
+}
+
 /// One coordinate space in the manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpaceEntry {
@@ -181,6 +252,7 @@ pub struct SpaceEntry {
     /// Whether every map in this space can be addressed as `map_id + u8 x/y` by the retained
     /// legacy adapter.
     pub legacy_representable: bool,
+    pub dependencies: Dependencies,
 }
 
 /// One boundary in the manifest, with the evidence a reviewer needs beside it.
@@ -229,6 +301,13 @@ impl Manifest {
                 space.overlapping_cells,
                 space.unresolved_claims,
                 space.legacy_representable,
+            ));
+            out.push_str(&format!(
+                "  needs {} graphics {} npcs {} objects digest {}\n",
+                space.dependencies.graphics.len(),
+                space.dependencies.npcs.len(),
+                space.dependencies.objects.len(),
+                space.dependencies.digest(),
             ));
             for (map, origin) in &space.origins {
                 out.push_str(&format!("  map {} at {},{}\n", map, origin.x, origin.y));
@@ -336,6 +415,10 @@ pub fn build(maps: &[PackedMap], evidence: &Evidence, reviews: &Reviews) -> Mani
             Status::Candidate
         };
 
+        let dependencies = Dependencies::of(
+            region.origins.keys().filter_map(|id| maps.iter().find(|map| map.map_id == *id)),
+        );
+
         spaces.push(SpaceEntry {
             id: region.id,
             geometry: region.geometry,
@@ -345,6 +428,7 @@ pub fn build(maps: &[PackedMap], evidence: &Evidence, reviews: &Reviews) -> Mani
             unresolved_claims,
             origins: region.origins.clone(),
             legacy_representable,
+            dependencies,
         });
     }
 
@@ -586,5 +670,71 @@ mod tests {
         assert!(manifest.spaces[0].legacy_representable);
         assert_eq!(CORE_X.0, 14);
         assert_eq!((PITCH_X, PITCH_Y), (74, 80));
+    }
+}
+
+#[cfg(test)]
+mod dependencies {
+    use super::*;
+    use crate::mappack::{LayerTile, MapNpc, MapObject};
+    use crate::topology::STORAGE;
+
+    fn drawn(map_id: u16, graphics: &[i32], npcs: &[u16], objects: &[u16]) -> PackedMap {
+        PackedMap {
+            map_id,
+            name: format!("map {map_id}"),
+            width: STORAGE as u16,
+            height: STORAGE as u16,
+            music_hi: 0,
+            music_low: 0,
+            tiles: vec![0; STORAGE as usize * STORAGE as usize],
+            layers: [
+                graphics.iter().map(|grh| LayerTile { x: 20, y: 20, grh: *grh }).collect(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            ],
+            npcs: npcs.iter().map(|id| MapNpc { x: 20, y: 20, npc_id: *id }).collect(),
+            objects: objects
+                .iter()
+                .map(|id| MapObject { x: 20, y: 20, obj_id: *id, amount: 1 })
+                .collect(),
+            exits: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_space_needs_the_union_of_what_its_maps_draw() {
+        let maps = [drawn(1, &[10, 20], &[5], &[7]), drawn(2, &[20, 30], &[5, 6], &[])];
+        let needs = Dependencies::of(maps.iter());
+
+        assert_eq!(needs.graphics, BTreeSet::from([10, 20, 30]));
+        assert_eq!(needs.npcs, BTreeSet::from([5, 6]));
+        assert_eq!(needs.objects, BTreeSet::from([7]));
+    }
+
+    #[test]
+    fn the_digest_depends_on_the_ids_and_not_on_their_order() {
+        let forward = Dependencies::of([drawn(1, &[10, 20, 30], &[], &[])].iter());
+        let backward = Dependencies::of([drawn(1, &[30, 20, 10], &[], &[])].iter());
+        assert_eq!(forward.digest(), backward.digest());
+
+        let different = Dependencies::of([drawn(1, &[10, 20, 31], &[], &[])].iter());
+        assert_ne!(forward.digest(), different.digest());
+    }
+
+    #[test]
+    fn an_npc_and_an_object_with_the_same_number_are_different_dependencies() {
+        // Tagged separately in the digest, because npc 7 and object 7 are unrelated things
+        // and a digest that conflated them would call two different worlds identical.
+        let as_npc = Dependencies::of([drawn(1, &[], &[7], &[])].iter());
+        let as_object = Dependencies::of([drawn(1, &[], &[], &[7])].iter());
+        assert_ne!(as_npc.digest(), as_object.digest());
+    }
+
+    #[test]
+    fn the_encoding_lists_every_id_in_sorted_order() {
+        let needs = Dependencies::of([drawn(1, &[30, 10], &[2], &[9])].iter());
+        assert_eq!(needs.encode(), "graphic 10\ngraphic 30\nnpc 2\nobject 9\n");
     }
 }
