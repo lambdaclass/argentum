@@ -30,6 +30,22 @@ Execution starts at the first active task in
 detailed task bodies are the only priority list; there is no summary queue to
 keep synchronized with them.
 
+Findings are reported in four separated stages, and the separation is the point:
+
+1. **Observation** — what was measured, named for exactly what it counts.
+2. **Reproducible evidence** — the command that recomputes it, and a pinned baseline so it
+   cannot drift silently.
+3. **Inference** — what the observation appears to mean, stated as a claim that could be
+   wrong, with the check that would falsify it.
+4. **Activation decision** — a person choosing to depend on the inference.
+
+A baseline pins stage 1 and 2. It must never promote stage 3, because a confidently wrong
+classifier produces perfectly stable numbers: this corpus had `seam_exits_across_medium`
+pinned and gated at 897 while the true count was 4, and had 278 maps classified as ocean
+while nine of them were dry rock. Neither ever drifted. Cross-checking a reading against the
+code that owns the meaning — `fixtures/tile_semantics.txt` against `Arena.Map.CsmParser` and
+`Arena.Map.Movement` — is what catches that class of error; a drift gate cannot.
+
 Each active task has an immutable `W-NNNN` identity. IDs are never renumbered,
 reused or made to encode priority. New urgent work receives the next unused ID
 and is inserted explicitly at the correct point in the sequence. A commit,
@@ -516,6 +532,34 @@ Prove determinism, bidirectional adjacency where required, collision/edge
 compatibility, all four cardinal transforms and the rule that one walk across a
 standard seam advances exactly one global tile. Produce a human-readable map,
 conflict list and per-seam evidence beside the machine manifest.
+
+**Seam evidence, delivered 2026-08-22.** `ao_core::seam` judges a seam on what a
+character can do at it, not on whether the artwork lines up — art continuity was
+silent while a three-state field was read as two, so it is reported as a review
+signal and never as a verdict. Each tile pair is classified over the whole
+three-tile path (core edge, transition band, arrival), because the band is what
+fires the exit and what gates whether a walker can leave at all.
+
+Across 931 candidate land seams and 71,528 tile pairs: 41,560 crossable on foot,
+12,176 by boat, 17,336 blocked by solid ground, **638 seams with no defect at all**,
+zero round-trip failures, and 912 pairs not one tile apart — all of them inside the
+region whose 99 claims already do not close. Two findings artwork could not produce:
+**4 exits leave a walker standing on water**, because
+`Arena.Map.Movement.check_tile_exit/5` transfers on the exit's destination without
+checking the arrival tile or `navigating`; and **899 of 931 seams have the transition
+band repeating the neighbour's edge art** for at least 95% of crossable pairs, which
+is what the render gutters are.
+
+The acceptance artifact is one real square, `199 274 / 573 570`, reported end to end:
+four seams with no defects and 100% ground continuity, 53 of its 308 crossings
+navigable water, a corner closing on four distinct contiguous tiles, and one walk
+advancing exactly one tile east and south. A boolean reading of the blocked layer
+would have called that waterway a wall.
+
+Still outstanding here: the content-hashed `WorldTopology` manifest and its
+determinism proof, valid/simulated tile masks, per-layer seam ownership, resource
+dependencies, transition classification, `u8`-unrepresentable shapes, and
+rendered-pixel comparison against the actual GRH artwork rather than grh identity.
 
 ### Task W-0098 — Canonical world-position and stable-identity contract
 
