@@ -417,7 +417,7 @@ deterministic adapters until this phase.
 
 ### Task W-0097 — Versioned world-topology compiler
 
-- **State:** planned
+- **State:** active
 - **Phase:** 1
 - **Depends on:** W-0089
 
