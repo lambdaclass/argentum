@@ -452,8 +452,36 @@ holds the pinned values and the definitions beside them.
 
 The corpus also yields **87 conflict-free 2x2 squares**: four maps whose internal
 seams are all reciprocal, in a component with no contradiction anywhere. `W-0099`
-takes its slice from that list, and curating the 424-map continent stays in
-`W-0101` where it cannot delay the prototype.
+takes its slice from that list.
+
+**Corrected again 2026-08-21, by drawing the tiles.** Every measurement above was
+taken of a *plane*, and the plane is the wrong shape. Reproduce with
+`cargo run -p ao-topology --example render` and `--example wrap`:
+
+- Laying out the land from seam evidence alone places **148 maps with zero
+  contradicting seams**, and the render is a coherent continent — coastlines, roads
+  and city walls unbroken across every map boundary. That is the 74x80 pitch and
+  the band-to-core-edge seam rule confirmed by looking, which no count could do.
+- **278 of 842 maps are at least 95% blocked**: open water, crossed by boat, named
+  `Alta Mar` and `Mar este del desierto`, bolted onto coastlines at opposite ends of
+  the world. No plane holds both them and the land. Set them aside and **every
+  remaining piece of the world is consistent as a plane — 0 failing claims, where
+  the planar model reported 109.**
+- The four-map group is not inconsistent. Each of its pairs claims the other on
+  *both* opposite sides (37 has 168 to its West and to its East), which is a 2x2
+  world that loops, and it closes exactly as a **148x160 torus**.
+
+So the compiler emits a **region geometry** alongside each region: a plane, or a
+torus/cylinder with an integer period, or a no-seam region reached only by
+transition. Geometry is measured, never assumed: candidate periods come from a
+region's own failing loops, and a period is admissible only if the region still
+*fits* it — no two maps in one cell. Without that test a 2-map wrap "explains" 424
+maps in 44 cells, which is how the first run of this analysis was wrong. The
+`BASELINE` counts stay as they are: they are the planar drift gate, and they are
+correct about the plane.
+
+Water is classified by measuring the blocked fraction, not by matching a name, and
+the threshold ships in the manifest so it is arguable rather than hidden.
 
 Do not silently choose geography. Existing conflicts become an explicit
 versioned baseline with one reviewed disposition each: corrected data,
@@ -478,8 +506,16 @@ conflict list and per-seam evidence beside the machine manifest.
 
 Define shared Elixir/Rust fixtures and checked conversion APIs for
 `WorldSpaceId`, stable `RegionId`, `WorldPosition<i32>`, bounded
-`LocalPosition`, `RegionPlacement`, `TopologyVersion`, `TransitionKind`, stable
-`EntityId`, `AuthorityEpoch` and `TransferId`. New modern-domain code stores,
+`LocalPosition`, `RegionPlacement`, `RegionGeometry`, `TopologyVersion`,
+`TransitionKind`, stable `EntityId`, `AuthorityEpoch` and `TransferId`.
+
+Global coordinates are per-region and exact, because W-0097 found the world is not
+one plane: land regions are planes, the Newbie Dungeon is a 148x160 torus, and open
+water is entered only by transition. `RegionGeometry` carries that, and position
+arithmetic goes through it — a step in a toroidal region reduces modulo the period,
+a step off the edge of a planar region is a transition, and no caller may add tiles
+to a `WorldPosition` without saying which region it is in. Two positions in
+different regions are never comparable and never subtractable. New modern-domain code stores,
 compares, logs and transmits global positions; a MapServer derives local
 coordinates at its boundary for collision, occupancy and legacy content.
 
@@ -1147,12 +1183,20 @@ replace one loaded MapServer per legacy map with a global bottleneck.
 - **Phase:** 8
 - **Depends on:** W-0097, W-0099
 
-Resolve every one of W-0097's baseline placement conflicts and classify every
-non-standard exit and low-quality seam as corrected geographic data, a
-door/portal/teleport/instance transition, or unsupported geography. An active
-geographic component may contain no unresolved contradiction. Not all 842 maps
-must become one continent: disconnected components and explicit portals are
-valid, but approximate transforms and silent compiler winners are not.
+Classify every non-standard exit and low-quality seam as corrected geographic data,
+a door/portal/teleport/instance transition, or unsupported geography. An active
+region may contain no unresolved contradiction. Not all 842 maps must become one
+continent: disconnected regions and explicit portals are valid, but approximate
+transforms and silent compiler winners are not.
+
+**Rescoped 2026-08-21.** This task used to open with "resolve every one of W-0097's
+baseline placement conflicts", and that premise is gone: W-0097's renders show the
+land is already consistent, with 0 failing claims once open water is a region of its
+own and the Newbie Dungeon is a torus. There is no corpus repair standing between us
+and W-0099 or W-0095. What remains here is genuine curation of the classes W-0097
+can only propose — which sea transitions are boat routes, which are map-edge wraps,
+which low-overlap seams are art rather than geography — plus the per-layer and
+activation work below.
 
 Define per-layer seam ownership. Ground/collision comes from the region that
 owns a global tile; gutter decorations/roofs may cross a core boundary only by
