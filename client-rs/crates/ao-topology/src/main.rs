@@ -263,6 +263,70 @@ fn main() {
         );
     }
 
+    // One quad, end to end: the acceptance artifact. Every check this compiler can make,
+    // reported for four real maps, so a person can decide whether to activate them. The
+    // aggregate says 638 seams have no defect; this says what that means for a specific
+    // four, which is what an activation decision actually needs.
+    if let Some(quad) = quads.iter().find(|quad| {
+        [quad.north_west, quad.north_east, quad.south_west, quad.south_east]
+            .iter()
+            .all(|map| placed.contains_key(map))
+    }) {
+        println!(
+            "\n  acceptance quad {} {} / {} {}",
+            quad.north_west, quad.north_east, quad.south_west, quad.south_east
+        );
+        let by_id: std::collections::BTreeMap<u16, &ao_core::mappack::PackedMap> =
+            maps.iter().map(|map| (map.map_id, map)).collect();
+
+        for (from, side, to) in [
+            (quad.north_west, topology::Side::East, quad.north_east),
+            (quad.south_west, topology::Side::East, quad.south_east),
+            (quad.north_west, topology::Side::South, quad.south_west),
+            (quad.north_east, topology::Side::South, quad.south_east),
+        ] {
+            let evidence =
+                ao_core::seam::evidence(by_id[&from], by_id[&to], side, placed[&from], placed[&to]);
+            let defects = evidence.defects();
+            println!(
+                "    {from} {side:?} {to}: {} pairs, {} on foot, {} by boat, {} blocked, \
+                 continuity {}%, {}",
+                evidence.pairs.len(),
+                evidence.count(ao_core::seam::Crossing::OnFoot),
+                evidence.count(ao_core::seam::Crossing::ByBoat),
+                evidence.count(ao_core::seam::Crossing::Blocked),
+                evidence
+                    .ground_continuity()
+                    .map(|percent| percent.to_string())
+                    .unwrap_or_else(|| "n/a".to_string()),
+                if defects.is_empty() { "no defects".to_string() } else { defects.join("; ") },
+            );
+        }
+
+        let corner = ao_core::seam::corner_evidence(
+            (quad.north_west, placed[&quad.north_west]),
+            (quad.north_east, placed[&quad.north_east]),
+            (quad.south_west, placed[&quad.south_west]),
+            (quad.south_east, placed[&quad.south_east]),
+        );
+        println!(
+            "    corner: tiles {:?}, contiguous {}, distinct {}",
+            corner.tiles, corner.contiguous, corner.distinct
+        );
+
+        // The four cardinal walks, each one tile, checked as integers rather than asserted.
+        let centre = placed[&quad.north_west];
+        let east = placed[&quad.north_east];
+        let south = placed[&quad.south_west];
+        println!(
+            "    one walk one tile: east {} south {}",
+            ao_core::seam::to_local(east, (centre.x + topology::PITCH_X, centre.y + 40))
+                == Some((topology::CORE_X.0, topology::CORE_Y.0 + 40)),
+            ao_core::seam::to_local(south, (centre.x + 40, centre.y + topology::PITCH_Y))
+                == Some((topology::CORE_X.0 + 40, topology::CORE_Y.0)),
+        );
+    }
+
     // The review unit: clusters, with the loops that prove them, smallest first — a
     // three-map loop out by 74 tiles is a root cause somebody can act on this afternoon.
     let clusters = topology::conflict_clusters(&found.witnesses);
