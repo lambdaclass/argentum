@@ -310,8 +310,24 @@ Work:
      overrides into one deterministic, content-hashed `WorldTopology`
    - Emit stable world spaces/regions, signed global origins, storage/core/
      transition-band/gutter bounds, valid/simulated-tile masks for void or
-     irregular space, per-layer seam ownership, dependencies and transition
+     irregular space, per-layer ownership *records*, dependencies and transition
      classes: geographic seam, door, portal, teleport or instance entrance
+   - **Ownership boundary, settled 2026-08-22.** The compiler emits per-layer
+     ownership as evidence marked unreviewed and never guesses an owner: for
+     every layer of every seam it records which map draws the tile, whether the
+     neighbour draws the same graphic, and whether their collision agrees. The
+     artist-reviewed rule that picks an owner and activates it belongs to the
+     production classification task (`W-0101`). Choosing a ground owner decides
+     what a player may walk on, and the only signal available to a compiler is
+     art -- which measured 100% continuity across a boundary that walks a
+     character into the sea. The sizes handed over: 365 land, 823 shore and
+     10,264 sea boundary tiles where two maps draw the same layer differently,
+     and 826/375/6 where their collision values disagree
+   - Transition *content* classes are not measurable and are not guessed: the
+     compiler reports the geometric shape of every non-seam exit -- 0 mis-typed
+     seams, 0 arrivals into a band, 19 band-to-interior, 1,201 from map
+     interiors -- and door/portal/teleport/instance is a recorded human
+     disposition
    - Recompute and report the audited baseline: 100x100 storage; provisional
      74x80 core (`x=14..87`, `y=11..90`); bands `x=13/88`, `y=10/91`;
      158,549 exits; 157,304 valid cross-map; 156,084 standard seam records;

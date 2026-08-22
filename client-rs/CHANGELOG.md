@@ -19,6 +19,78 @@ Never reuse a completed ID in the active roadmap.
 
 ## Closed tasks
 
+### Completed Task W-0097 — Versioned world-topology compiler
+
+Closed: 2026-08-22 (`5633b9ae`)
+
+Compiles the 842 CSM maps into a deterministic, content-hashed `WorldTopology`
+(`3e6df36b27c82aab`, 3,903 lines) and refuses to decide anything the data cannot
+support. Four statuses separate what was measured from what was permitted:
+`unresolved`, `candidate`, `reviewed`, `active`. Active requires *both* a
+hand-recorded `geographic` disposition in `assets/world-topology/reviews.txt` and
+agreement from the evidence, so 0 seams are active and 164 are candidates awaiting
+review. A test proves a review cannot activate a seam the measurements reject, and
+another proves 100% ground-art continuity activates nothing.
+
+**Geometry.** The world is not one plane. `Geometry` is `Plane | Cylinder | Torus |
+Discrete`, measured from each space's own failing loops and admissible only if the
+space still fits it — without that test a 2-map wrap "explained" 424 maps in 44
+cells. 226 spaces, 199 of them reachable only by transition, 1 torus (148x160, the
+Newbie Dungeon, a candidate shape pending review). The 74x80 core pitch and the
+band-to-core-edge seam rule are confirmed visually by `--example render`, which lays
+the world out from seam evidence alone.
+
+**Evidence per seam.** 2,219 candidate seams, 170,836 tile pairs, judged on what a
+character can do rather than on whether artwork matches: 41,560 crossable on foot,
+12,176 by boat, and the three-tile path (core edge, transition band, arrival)
+classified together because the band gates whether a walker can leave at all.
+`Atlas` resolves a global position to exactly one map or reports `Ambiguous`, which
+inverting `to_global` with its own origin never could.
+
+**Four defects found, none corrected here.** 169 exits transfer a character into
+solid rock, 48 arrive on a tile with no ground, 4 leave a walker standing on water,
+and 2,444 void tiles across 47 maps read as walkable floor. All four are the exit
+path trusting a destination it never checks —
+`Arena.Map.Movement.check_tile_exit/5` consults neither the arrival tile nor
+`navigating` — and they are one server change, recorded for `W-0101`. A client that
+predicted a refusal the server does not make would desynchronise exactly where a
+player is most likely to be lost.
+
+**Cross-language.** `Arena.Map.TileSemantics` owns what a tile value means;
+`Arena.Map.Movement` calls it and so does the fixture generator, so a handwritten
+table cannot drift from behaviour. `fixtures/tile_semantics.txt` pins 143 positions
+across eleven maps covering all three tile classes, checked in unit tests without a
+corpus and against the pack in `--check`: 0 disagreements. `mappack::Tile` now
+delegates to `tiles::TileKind`, closing a second "same byte, two meanings" gap where
+VB6 value 4 was walkable to one reader and solid to the other.
+
+**Ownership boundary.** Per-layer ownership is emitted as unreviewed records with no
+field for an owner; `W-0101` supplies the artist rule. Handed over: 365 land, 823
+shore and 10,264 sea tiles where two maps draw a layer differently, and 826/375/6
+where their collision disagrees.
+
+**Acceptance.** 87 squares have reciprocal seams and no contradiction; only **42
+survive all eight directed crossings**, which retired the first candidate
+(`199 274 / 573 570` transfers two characters into rock walking north). The artifact
+is `330 269 / 274 287`: eight clean crossings, 100% gutter continuity, a corner
+closing on four distinct contiguous tiles, and four pinned walking routes in
+`fixtures/walking_paths.txt` — all on foot, each advancing exactly one global tile,
+each handing authority between MapServers, east/west and north/south exact inverses.
+Rendered pixels agree 100% across every sampled crossing, decoded from the real
+sheets rather than compared by graphic id.
+
+Evidence: `./build.sh check` from clean HEAD `5633b9ae` — roadmap structure,
+formatting, wasm target, native target, 589 + 155 + 3 tests, configuration, world
+topology baseline; `ao-topology --check` exit 0 with the manifest hash, the tile
+semantics fixture and the walking routes all verified against the corpus;
+`mix test apps/arena/test/tile_semantics_test.exs` 9 tests; renders at
+`--example render`; `--manifest`, `--dependencies`, `--walks` and `--pixels` outputs.
+
+Deliberately not done, and recorded rather than assumed: the artist-reviewed
+per-layer ownership rule and the activation of any geography (`W-0101`), the ocean's
+own geometry and its 34 sea-to-sea contradictions (`W-0101`), and the server-side
+destination check for the four defect classes above.
+
 ### Completed Task W-0090 — Atomic first-scene reveal
 
 Closed: 2026-08-21 (`4dcbc9d`)
