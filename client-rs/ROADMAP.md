@@ -1625,6 +1625,14 @@ handoff, so deferring this broader sweep cannot permit a placeholder transition.
 Close with layer-owned tests and a busy-HUD capture showing no name without a
 body, duplicated name or feedback that outlives its cause.
 
+- **Refused movement sends no correction.** `Arena.Map.Movement` returns `{:error, :blocked}`
+  for water without a boat and `{:error, :too_early}` for a step inside the walk interval,
+  both with an empty effect list, and `SessionLogic` discards the result. A client that
+  predicts movement locally therefore keeps drawing the character where the server refused to
+  put them. `W-0105` fixed this for arrival refusals because it introduced that path; these
+  two predate it and are recorded rather than changed inside a defect fix. The fix is the
+  same: emit the authoritative position the character still holds.
+
 ### Task W-0017 — Native adapters and build parity
 
 - **State:** planned
