@@ -666,9 +666,24 @@ standing on water**. These are not three curation problems; they are one server 
 and `W-0101` should take them together. None is corrected here: the client must not
 predict a refusal the server does not make.
 
-Still outstanding here: per-layer gutter ownership as an artist rule, resource
-dependencies, and rendered-pixel comparison against decoded GRH artwork rather than
-graphic identity. Nothing may be promoted on graphic identity alone.
+**Dependencies and pixels, delivered 2026-08-22.** `manifest::Dependencies` records what
+each space needs in content ids, not files — space 1 needs 14,976 graphics, space 199
+needs 4,375, one single-map space needs 4,500 — with `--dependencies <dir>` writing the
+full lists and a digest in the manifest. `ao_core::grh` holds the one graphics-index
+parser, moved out of the client so the compiler could not grow a second copy, and
+`--pixels` decodes the real sheets: **every sampled crossing is 100% pixel-identical**.
+The gutter hypothesis holds at the level of the picture, not just the id.
+
+**The first acceptance quad was wrong.** `199 274 / 573 570` was reported clean in all
+eight directed crossings; `573 North 199` transfers two characters into solid rock, which
+only became visible once `Blocked` was split from `IntoSolid`. **42 of the 87
+conflict-free squares survive being walked in every direction**, and `W-0099` must take
+its slice from those 42. The acceptance artifact is now `330 269 / 274 287`: eight clean
+crossings, 100% gutter continuity, a closing corner, and four unique cardinal walks.
+
+Still outstanding here: per-layer gutter ownership as an artist rule, which needs an
+artist rather than a measurement. Nothing may be promoted on graphic identity alone, and
+nothing has been.
 
 ### Task W-0098 — Canonical world-position and stable-identity contract
 
