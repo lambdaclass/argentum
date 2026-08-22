@@ -204,18 +204,24 @@ defmodule Arena.World.ArrivalOwnershipTest do
       assert transfers(effects) == 1
     end
 
-    test "asking twice yields one transfer each time and never two owners" do
-      # Idempotence at this layer: the decision is a pure function of the exit and the entity,
-      # so a duplicated movement message cannot produce a second owner by producing a second
-      # decision. What the transfer runner does with the effect is W-0096's to prove.
+    test "the decision is deterministic, which is not the same as deduplicated" do
+      # Named for what it proves. Three calls produce three transfer effects, one per call:
+      # the classification is a pure function of the exit and the entity, so repeating the
+      # question never changes the answer. That is worth pinning, and it is *not* idempotence
+      # -- nothing here would stop a duplicated movement message from starting two handoffs.
+      # Deduplication needs a transfer id and a prepare/commit state machine, and that is
+      # W-0096's to build and to prove.
       state = state(exit_at(:walkable, true))
 
-      for _ <- 1..3 do
-        {returned, transferring?, effects} = Movement.check_tile_exit(state, 7, entity(), 88, 50)
-        assert transferring?
-        assert transfers(effects) == 1, "one transfer per decision, never two"
-        assert owners(returned, 7) == 1, "the source has not removed anybody yet"
-      end
+      results =
+        for _ <- 1..3 do
+          {returned, transferring?, effects} = Movement.check_tile_exit(state, 7, entity(), 88, 50)
+          assert transferring?
+          assert owners(returned, 7) == 1, "the source has not removed anybody yet"
+          transfers(effects)
+        end
+
+      assert results == [1, 1, 1], "one transfer per decision, three decisions"
     end
   end
 

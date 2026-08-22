@@ -5,6 +5,11 @@ defmodule Arena.Application do
 
   @impl true
   def start(_type, _args) do
+    # Fail here rather than serving a world whose every exit refuses. The annotations are a
+    # build artefact and a missing one is a setup mistake, so it gets named once, loudly,
+    # instead of appearing later as "transfers do not work".
+    Arena.World.ExitAnnotations.verify!()
+
     Arena.Metrics.setup()
 
     children = [

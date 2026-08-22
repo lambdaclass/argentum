@@ -184,6 +184,32 @@ case "$TARGET" in
     else
       echo "    corpus not present; baseline NOT verified (build the server's map pack)"
     fi
+
+    echo "==> exit annotations match the corpus"
+    committed="../server/apps/arena/priv/arrival"
+    if [ -n "$pack" ] && [ -d "$committed" ]; then
+      # Regenerate into a scratch directory and compare byte for byte. The pinned baseline
+      # proves the corpus has not changed shape; this proves the 842 committed annotation
+      # files still describe it. Without this a changed CSM and a stale annotation pass
+      # together, and a stale annotation is worse than a missing one because the server
+      # trusts it.
+      scratch="$(mktemp -d)"
+      trap 'rm -rf "$scratch"' EXIT
+      cargo run --quiet --release -p ao-topology -- "$pack" --exit-annotations "$scratch" \
+        >/dev/null
+      if diff -r --brief "$committed" "$scratch" >/tmp/annotation-drift.txt 2>&1; then
+        echo "    842 files identical to a fresh compile"
+      else
+        echo "    exit annotations are stale:" >&2
+        sed 's/^/      /' /tmp/annotation-drift.txt >&2
+        echo "" >&2
+        echo "    Regenerate them and commit the result:" >&2
+        echo "      cargo run --release -p ao-topology -- $pack --exit-annotations $committed" >&2
+        exit 1
+      fi
+    else
+      echo "    corpus or annotations not present; drift NOT verified"
+    fi
     ;;
 
   *)

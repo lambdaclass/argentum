@@ -133,7 +133,20 @@ defmodule Arena.Map.Movement do
 
                     match?({:error, _}, arrival) ->
                       {:error, reason} = arrival
-                      {:ok, state, {:error, {:arrival_blocked, reason}}, []}
+
+                      # Correct the client immediately. It predicts movement locally, so a
+                      # refusal that says nothing leaves it drawing the character on the
+                      # transition band while the server has them where they started -- a
+                      # silent desync at the one tile where a player is most likely to keep
+                      # walking. The typed `arrival_blocked` receipt is W-0096's; an
+                      # authoritative position is owed now.
+                      correction =
+                        Effects.send(
+                          char_id,
+                          Encoder.encode({:pos_update, %{x: entity.x, y: entity.y}})
+                        )
+
+                      {:ok, state, {:error, {:arrival_blocked, reason}}, [correction]}
 
                     Helpers.get_occupancy(state.occupancy, nx, ny) == nil ->
                       # Normal move into empty tile

@@ -1,5 +1,5 @@
 # Arrival classification for every exit of map 213.
-# version 17afc00c9c7e0b4c
+# version 8e2d8d3f8301be7c
 # Generated: ao-topology <pack> --exit-annotations <dir>
 # An exit absent from this file has no annotation, and the server refuses it.
 # columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>

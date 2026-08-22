@@ -560,6 +560,18 @@ fn main() {
             std::process::exit(1);
         }
 
+        // Hashed from the bytes actually read, not from the pinned corpus constant. Stamping
+        // a constant would let annotations compiled from one pack claim to be from another,
+        // which is the one thing the version is there to prevent.
+        let input_hash = {
+            let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+            for byte in &bytes {
+                hash ^= *byte as u64;
+                hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+            format!("{hash:016x}")
+        };
+
         let by_id: std::collections::BTreeMap<u16, &ao_core::mappack::PackedMap> =
             maps.iter().map(|map| (map.map_id, map)).collect();
         let mut written = 0usize;
@@ -607,7 +619,7 @@ fn main() {
                  # An exit absent from this file has no annotation, and the server refuses it.\n\
                  # columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>\n{}\n",
                 map.map_id,
-                topology::CORPUS,
+                input_hash,
                 lines.join("\n")
             );
             let path = format!("{dir}/map-{}.txt", map.map_id);
@@ -618,9 +630,18 @@ fn main() {
             written += 1;
         }
 
+        // The version the server must expect, written once beside the annotations so the two
+        // cannot drift apart: they are produced by the same run from the same bytes.
+        let version_path = format!("{dir}/version.txt");
+        if let Err(error) = std::fs::write(&version_path, format!("{input_hash}\n")) {
+            eprintln!("{version_path}: {error}");
+            std::process::exit(1);
+        }
+
         println!(
-            "\n  wrote {written} exit-annotation files to {dir}: {annotated} exits annotated, \
-             {unresolvable} left unannotated because their destination map does not exist"
+            "\n  wrote {written} exit-annotation files to {dir} at version {input_hash}: \
+             {annotated} exits annotated, {unresolvable} left unannotated because their \
+             destination map does not exist"
         );
     }
 

@@ -102,8 +102,65 @@ defmodule Arena.World.ExitAnnotations do
       Path.join(:code.priv_dir(:arena), "arrival")
   end
 
-  @doc "The world version the server expects annotations to have been compiled from."
-  def expected_version, do: Application.get_env(:arena, :topology_version)
+  @doc """
+  The world version the server expects annotations to have been compiled from.
+
+  Read from `version.txt`, which the generator writes in the same run and from the same bytes
+  as the annotations themselves, so the two cannot drift apart. Configuration overrides it,
+  for a deployment that pins a version deliberately.
+
+  Returns `nil` only when there is nothing to read, and `nil` is not a wildcard: `verify!/0`
+  turns it into a boot failure. An earlier version of this accepted every annotation when the
+  expected version was unset, which is the same failing-open mistake as allowing a transfer
+  when the destination could not be judged.
+  """
+  @spec expected_version() :: String.t() | nil
+  def expected_version do
+    case Application.get_env(:arena, :topology_version) do
+      version when is_binary(version) ->
+        version
+
+      _ ->
+        case File.read(Path.join(directory(), "version.txt")) do
+          {:ok, text} -> String.trim(text)
+          {:error, _} -> nil
+        end
+    end
+  end
+
+  @doc """
+  Fail the boot if the annotations are absent or unversioned.
+
+  Every fixed exit in the world is refused without them, so starting anyway would produce a
+  server where nothing works and nothing says why. Raising here names the cause once.
+  """
+  def verify! do
+    dir = directory()
+
+    cond do
+      not File.dir?(dir) ->
+        raise """
+        Exit annotations are missing: #{dir} does not exist.
+
+        Every fixed exit is refused without them, because the source MapServer has no other
+        way to know what its destinations are. Generate them with:
+
+            cargo run --release -p ao-topology -- <pack> --exit-annotations #{dir}
+        """
+
+      expected_version() == nil ->
+        raise """
+        Exit annotations in #{dir} have no version.
+
+        #{Path.join(dir, "version.txt")} is missing and :topology_version is not configured, so
+        nothing can tell whether these annotations describe this world. Regenerate them, or set
+        config :arena, topology_version: "<hash>" deliberately.
+        """
+
+      true ->
+        :ok
+    end
+  end
 
   defp version_of(text) do
     case Regex.run(~r/^#\s*version\s+(\S+)/m, text) do
@@ -112,7 +169,15 @@ defmodule Arena.World.ExitAnnotations do
     end
   end
 
-  defp check_version(_version, nil, _map_id), do: :ok
+  # No expected version is not a wildcard. Not knowing which world these annotations describe
+  # is the same position as not having them, and the answer to both is to refuse.
+  defp check_version(_version, nil, map_id) do
+    Logger.warning(
+      "Map #{map_id}: no expected world version, so its exit annotations are not trusted"
+    )
+
+    :version_mismatch
+  end
 
   defp check_version(version, expected, map_id) do
     if version == expected do
