@@ -16,6 +16,7 @@ pub mod manifest;
 pub mod mappack;
 pub mod mask;
 pub mod movement;
+pub mod position;
 pub mod protocol;
 pub mod seam;
 pub mod tiles;

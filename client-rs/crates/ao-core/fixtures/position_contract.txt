@@ -1,0 +1,162 @@
+# The world-position contract, as cases both languages must satisfy.
+#
+# This file is the specification, not a recording of one implementation. It is hand-authored
+# so that neither the Rust nor the Elixir side defines truth by having gone first: both parse
+# these lines and both must produce these answers. A disagreement is a diff here, in review,
+# rather than two languages confidently placing a player in different rooms.
+#
+# Directives:
+#   space <id> <plane|cylinder-x:N|cylinder-y:N|torus:WxH|discrete>
+#   place <space> <map> <ox>,<oy>
+#   global <space> <map> <x>,<y> -> <gx>,<gy> | none
+#   local  <space> <gx>,<gy> -> <map> <x>,<y> | none
+#   step   <space> <gx>,<gy> by <dx>,<dy> -> inside <gx>,<gy> | leaves
+#   render <space> <gx>,<gy> near <nx>,<ny> -> <rx>,<ry>
+#   legacy <space> <gx>,<gy> -> <map> <x>,<y> | unrepresentable
+#
+# The core is x=14..87, y=11..90 and the pitch is 74x80, so a map's local (14,11) is its
+# origin and local (87,90) is origin + (73,79).
+
+# ---------------------------------------------------------------------------------------
+# A plane of two maps, side by side. The ordinary case.
+# ---------------------------------------------------------------------------------------
+space 1 plane
+place 1 1 0,0
+place 1 2 74,0
+
+# Corners of the first map, so the core bounds are pinned rather than assumed.
+global 1 1 14,11 -> 0,0
+global 1 1 87,11 -> 73,0
+global 1 1 14,90 -> 0,79
+global 1 1 87,90 -> 73,79
+local 1 0,0 -> 1 14,11
+local 1 73,79 -> 1 87,90
+
+# The seam: the neighbour's west column is one tile east of this map's east column.
+global 1 1 87,50 -> 73,39
+global 1 2 14,50 -> 74,39
+step 1 73,39 by 1,0 -> inside 74,39
+step 1 74,39 by -1,0 -> inside 73,39
+
+# Transition bands and the storage margin are not places and have no global position.
+global 1 1 13,50 -> none
+global 1 1 88,50 -> none
+global 1 1 50,10 -> none
+global 1 1 50,91 -> none
+global 1 1 1,1 -> none
+global 1 1 100,100 -> none
+
+# A plane has edges, and stepping off one leaves the space rather than wrapping.
+step 1 0,39 by -1,0 -> leaves
+step 1 147,39 by 1,0 -> leaves
+step 1 0,0 by 0,-1 -> leaves
+step 1 0,79 by 0,1 -> leaves
+
+# Nothing covers these, so there is no local tile and no legacy address.
+local 1 -1,0 -> none
+local 1 148,0 -> none
+local 1 0,80 -> none
+legacy 1 74,39 -> 2 14,50
+legacy 1 148,0 -> unrepresentable
+
+# A plane never unwraps: the render position is the position, however far the camera is.
+render 1 40,40 near 10000,-10000 -> 40,40
+
+# ---------------------------------------------------------------------------------------
+# The Newbie Dungeon's shape: 2x2 maps wrapping both ways, 148x160 tiles.
+# ---------------------------------------------------------------------------------------
+space 37 torus:148x160
+place 37 168 0,0
+place 37 37 74,0
+place 37 167 0,80
+place 37 264 74,80
+
+global 37 168 14,11 -> 0,0
+global 37 37 14,11 -> 74,0
+global 37 264 87,90 -> 147,159
+
+# Walking east off the eastern column returns to the western one. One tile in the world.
+step 37 147,39 by 1,0 -> inside 0,39
+local 37 0,39 -> 168 14,50
+step 37 0,39 by -1,0 -> inside 147,39
+
+# The same both ways on the other axis.
+step 37 40,159 by 0,1 -> inside 40,0
+step 37 40,0 by 0,-1 -> inside 40,159
+
+# The stored position jumps a whole period; the drawn one moves a single tile. Both are
+# correct, and confusing them snaps the camera across the map.
+render 37 0,39 near 147,39 -> 148,39
+render 37 147,39 near 0,39 -> -1,39
+render 37 40,0 near 40,159 -> 40,160
+
+# ---------------------------------------------------------------------------------------
+# A cylinder: one axis wraps and the other does not.
+# ---------------------------------------------------------------------------------------
+space 5 cylinder-x:148
+place 5 10 0,0
+place 5 11 74,0
+
+step 5 147,39 by 1,0 -> inside 0,39
+step 5 40,0 by 0,-1 -> leaves
+step 5 40,79 by 0,1 -> leaves
+render 5 0,39 near 147,39 -> 148,39
+render 5 40,39 near 40,39 -> 40,39
+
+# ---------------------------------------------------------------------------------------
+# A space of one map, reached only by transition. 199 of the corpus's spaces are these.
+# ---------------------------------------------------------------------------------------
+space 41 discrete
+place 41 41 0,0
+
+global 41 41 50,50 -> 36,39
+local 41 36,39 -> 41 50,50
+step 41 0,0 by -1,0 -> leaves
+step 41 73,79 by 1,0 -> leaves
+
+# ---------------------------------------------------------------------------------------
+# A cell two maps claim. W-0097 measured 26 of these in the real corpus, and a position
+# there means two places: both languages must refuse rather than pick.
+# ---------------------------------------------------------------------------------------
+space 900 plane
+place 900 901 0,0
+place 900 902 0,0
+
+local 900 10,10 -> none
+legacy 900 10,10 -> unrepresentable
+
+# ---------------------------------------------------------------------------------------
+# The real acceptance square, space 199 of the pinned corpus: maps 330, 269, 274 and 287
+# at their compiled origins. The four routes in `walking_paths.txt` are re-derived from
+# these, so both languages agree about the same seams a player will actually walk.
+# ---------------------------------------------------------------------------------------
+space 199 plane
+place 199 330 148,160
+place 199 269 222,160
+place 199 274 148,240
+place 199 287 222,240
+
+# east: 330 (87,65) -> 269 (14,65)
+global 199 330 87,65 -> 221,214
+global 199 269 14,65 -> 222,214
+step 199 221,214 by 1,0 -> inside 222,214
+local 199 222,214 -> 269 14,65
+
+# west is the exact inverse, which is the round trip rather than a restatement of it.
+step 199 222,214 by -1,0 -> inside 221,214
+local 199 221,214 -> 330 87,65
+
+# south: 330 (14,90) -> 274 (14,11)
+global 199 330 14,90 -> 148,239
+global 199 274 14,11 -> 148,240
+step 199 148,239 by 0,1 -> inside 148,240
+local 199 148,240 -> 274 14,11
+
+# north, the inverse.
+step 199 148,240 by 0,-1 -> inside 148,239
+local 199 148,239 -> 330 14,90
+
+# The far corner of the square, so the whole extent is pinned and not just its seams.
+global 199 287 87,90 -> 295,319
+legacy 199 295,319 -> 287 87,90
+render 199 295,319 near 0,0 -> 295,319

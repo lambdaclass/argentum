@@ -1,0 +1,167 @@
+defmodule Arena.World.Position do
+  @moduledoc """
+  Global world positions, in a world that is not one plane.
+
+  The Rust side of this contract is `ao_core::position`, and neither implementation defines
+  the answers: both read `client-rs/crates/ao-core/fixtures/position_contract.txt`, which is
+  hand-authored precisely so that going first does not make one of them right. A disagreement
+  becomes a failing case in review rather than the server and the client placing a player in
+  different rooms.
+
+  `W-0097` compiled the corpus into 226 coordinate spaces: most planes, one 148x160 torus,
+  199 reachable only by transition. So a position is a pair of numbers *in a space*, and the
+  space decides what arithmetic means — a step east can wrap, or leave, depending on shape.
+
+  Nothing here persists or transmits anything yet. This is the coordinate contract alone;
+  storage and protocol follow once it is proven on both sides.
+  """
+
+  @core_x 14..87
+  @core_y 11..90
+  @pitch_x 74
+  @pitch_y 80
+
+  @typedoc "A coordinate space's shape. Periods are in tiles; 0 means the axis does not wrap."
+  @type geometry ::
+          :plane
+          | :discrete
+          | {:cylinder, :x | :y, pos_integer()}
+          | {:torus, pos_integer(), pos_integer()}
+
+  @typedoc "A space: its shape and where each map's core sits in its coordinates."
+  @type space :: %{id: non_neg_integer(), geometry: geometry(), placements: %{integer() => {integer(), integer()}}}
+
+  @typedoc "A tile inside one map, as legacy content and the collision grid address it."
+  @type local :: {map_id :: integer(), x :: integer(), y :: integer()}
+
+  @doc "The simulated core bounds and pitch, so callers do not restate them."
+  def core_x, do: @core_x
+  def core_y, do: @core_y
+  def pitch, do: {@pitch_x, @pitch_y}
+
+  @doc """
+  Whether a tile is inside the simulated core.
+
+  A transition band tile is not a place: a character occupies one for the instant between
+  stepping onto it and the exit firing, so it has no global position and must never be
+  persisted as one.
+  """
+  @spec in_core?(local()) :: boolean()
+  def in_core?({_map, x, y}), do: x in @core_x and y in @core_y
+
+  @doc "The wrap period of each axis, `0` where the space does not wrap."
+  @spec periods(geometry()) :: {integer(), integer()}
+  def periods(:plane), do: {0, 0}
+  def periods(:discrete), do: {0, 0}
+  def periods({:cylinder, :x, period}), do: {period, 0}
+  def periods({:cylinder, :y, period}), do: {0, period}
+  def periods({:torus, width, height}), do: {width, height}
+
+  @doc "Bring a coordinate pair into a geometry's canonical range."
+  @spec reduce(geometry(), {integer(), integer()}) :: {integer(), integer()}
+  def reduce(geometry, {x, y}) do
+    {px, py} = periods(geometry)
+    {axis(x, px), axis(y, py)}
+  end
+
+  defp axis(value, 0), do: value
+  defp axis(value, period), do: Integer.mod(value, period)
+
+  @doc """
+  The global position of a local tile, or `:none`.
+
+  `:none` where the tile is outside the core or the map is not in this space — a band tile
+  deliberately has no global coordinates.
+  """
+  @spec to_global(space(), local()) :: {:ok, {integer(), integer()}} | :none
+  def to_global(space, {map, x, y} = local) do
+    with true <- in_core?(local),
+         {ox, oy} when is_integer(ox) <- Map.get(space.placements, map, :missing) do
+      {:ok, reduce(space.geometry, {ox + (x - @core_x.first), oy + (y - @core_y.first)})}
+    else
+      _ -> :none
+    end
+  end
+
+  @doc """
+  The local tile a global position falls on, or `:none`.
+
+  `:none` also when *more than one* map covers it. `W-0097` measured 26 such cells, and a
+  position there means two places; answering with either would be a guess presented as a
+  location.
+  """
+  @spec to_local(space(), {integer(), integer()}) :: {:ok, local()} | :none
+  def to_local(space, position) do
+    {gx, gy} = reduce(space.geometry, position)
+
+    covering =
+      Enum.flat_map(space.placements, fn {map, {ox, oy}} ->
+        {rox, roy} = reduce(space.geometry, {ox, oy})
+        dx = gx - rox
+        dy = gy - roy
+
+        if dx >= 0 and dy >= 0 and dx < @pitch_x and dy < @pitch_y do
+          [{map, @core_x.first + dx, @core_y.first + dy}]
+        else
+          []
+        end
+      end)
+
+    case covering do
+      [only] -> {:ok, only}
+      _ -> :none
+    end
+  end
+
+  @doc """
+  Move one tile. The only way to change a global position, because the answer depends on the
+  shape: a wrapping axis comes back around, a planar edge leaves the space.
+  """
+  @spec step(space(), {integer(), integer()}, {integer(), integer()}) ::
+          {:inside, {integer(), integer()}} | :leaves
+  def step(space, {x, y}, {dx, dy}) do
+    landed = reduce(space.geometry, {x + dx, y + dy})
+
+    case to_local(space, landed) do
+      {:ok, _} -> {:inside, landed}
+      :none -> :leaves
+    end
+  end
+
+  @doc """
+  A render position for a wrapping space, chosen nearest to where the camera already is.
+
+  The canonical position stays reduced; only rendering unwraps. Crossing a torus seam moves a
+  character one tile in the world and a whole period in stored coordinates, and drawing the
+  stored value would snap the camera across the map. The two must never be confused: one is
+  where the character is, the other is where to draw them this frame.
+  """
+  @spec nearest_unwrapped(space(), {integer(), integer()}, {integer(), integer()}) ::
+          {integer(), integer()}
+  def nearest_unwrapped(space, {x, y}, {near_x, near_y}) do
+    {px, py} = periods(space.geometry)
+    {nearest_on_axis(x, near_x, px), nearest_on_axis(y, near_y, py)}
+  end
+
+  defp nearest_on_axis(value, _near, 0), do: value
+
+  defp nearest_on_axis(value, near, period) do
+    [value - period, value, value + period]
+    |> Enum.min_by(fn candidate -> abs(candidate - near) end)
+  end
+
+  @doc """
+  Project a global position to legacy `map_id + x/y`, or refuse.
+
+  Refuses rather than approximates: an uncovered or ambiguous position has no legacy address,
+  and rounding one to the nearest map would place a character on a map that does not contain
+  them.
+  """
+  @spec to_legacy(space(), {integer(), integer()}) :: {:ok, local()} | :unrepresentable
+  def to_legacy(space, position) do
+    case to_local(space, position) do
+      {:ok, local} -> {:ok, local}
+      :none -> :unrepresentable
+    end
+  end
+end
