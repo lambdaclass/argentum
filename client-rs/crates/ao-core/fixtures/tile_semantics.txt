@@ -2,9 +2,10 @@
 # Regenerate: mix run apps/arena/test/generate_tile_semantics_fixture.exs
 #
 # Source of truth:
-#   Arena.Map.CsmParser.build_tile_grid/1 -- 0 walkable, 1 solid, 2 navigable water
-#   Arena.Map.Movement                    -- water is blocked unless the character is
-#                                            navigating; nothing blocks a boat on land
+#   Arena.Map.CsmParser.build_tile_grid/1 -- writes the values
+#   Arena.Map.TileSemantics.class/1       -- 0 walkable, 1 solid, 2 navigable water
+#   Arena.Map.TileSemantics.enterable?/2  -- water needs a boat; nothing blocks a boat on
+#                                            land. Called by Arena.Map.Movement itself.
 #
 # columns: map_id x y tile_value class enterable_on_foot enterable_while_navigating
 1 14 11 0 walkable true true

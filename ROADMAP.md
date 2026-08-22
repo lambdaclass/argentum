@@ -249,9 +249,12 @@ Work:
      weak or 232 reciprocal-only, and the roadmap must say which graph it means;
      58 placement conflicts is withdrawn rather than corrected, because moving
      the traversal root moved it from 48 to 161. Stable replacements: 2
-     inconsistent components, 2 conflict clusters, 50 cycle witnesses, 125 maps
-     implicated, 428 inside an inconsistent component. Reproduce with
-     `ao-topology --check`; `client-rs` holds the pinned values
+     inconsistent components, 2 conflict clusters, 56 cycle witnesses, 125 maps
+     implicated, 428 inside an inconsistent component. 56, not the 50 first
+     recorded here: the spanning forest keyed tree edges by map pair, so a
+     second contradictory claim between the same two maps was mistaken for the
+     tree edge and produced no witness. Reproduce with `ao-topology --check`;
+     `client-rs` holds the pinned values
    - Treat existing contradictions as a reviewed baseline and fail on new or
      unexplained drift. No active geographic seam may retain an unresolved
      placement conflict or silently chosen winner

@@ -18,8 +18,9 @@
 #
 # The rules encoded here, quoted from the code that owns them:
 #
-#   Arena.Map.CsmParser.build_tile_grid/1  -- 0 walkable, 1 solid, 2 navigable water
-#   Arena.Map.Movement (line ~120)         -- `tile_val == 2 and not entity.navigating`
+#   Arena.Map.CsmParser.build_tile_grid/1 -- writes the values
+#   Arena.Map.TileSemantics               -- says what they mean; called by both
+#                                            Arena.Map.Movement and this generator
 #
 # Note the asymmetry, which is the server's behaviour and not a typo here: water requires a
 # boat, and *nothing* stops a boat on dry land.
@@ -75,11 +76,16 @@ end
 
 by_id = Map.new(maps, fn {id, w, h, tiles} -> {id, {w, h, tiles}} end)
 
-# What the server's rules say about one tile value.
-semantics = fn
-  0 -> {"walkable", true, true}
-  2 -> {"water", false, true}
-  _ -> {"solid", false, false}
+# What the server's rules say about one tile value -- by asking the server, not by writing
+# the rule down again here. A handwritten table can agree with a stale copy of a rule; this
+# calls the same function `Arena.Map.Movement` calls, so the fixture cannot describe
+# behaviour the server does not have.
+semantics = fn value ->
+  {
+    Atom.to_string(Arena.Map.TileSemantics.class(value)),
+    Arena.Map.TileSemantics.enterable?(value, false),
+    Arena.Map.TileSemantics.enterable?(value, true)
+  }
 end
 
 # Sample positions that matter rather than a uniform grid: the core edges and transition
@@ -111,9 +117,10 @@ header = """
 # Regenerate: mix run apps/arena/test/generate_tile_semantics_fixture.exs
 #
 # Source of truth:
-#   Arena.Map.CsmParser.build_tile_grid/1 -- 0 walkable, 1 solid, 2 navigable water
-#   Arena.Map.Movement                    -- water is blocked unless the character is
-#                                            navigating; nothing blocks a boat on land
+#   Arena.Map.CsmParser.build_tile_grid/1 -- writes the values
+#   Arena.Map.TileSemantics.class/1       -- 0 walkable, 1 solid, 2 navigable water
+#   Arena.Map.TileSemantics.enterable?/2  -- water needs a boat; nothing blocks a boat on
+#                                            land. Called by Arena.Map.Movement itself.
 #
 # columns: map_id x y tile_value class enterable_on_foot enterable_while_navigating
 """

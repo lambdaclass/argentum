@@ -246,31 +246,44 @@ pub struct Baseline {
     pub land_land_unresolved: usize,
     pub sea_sea_unresolved: usize,
     pub land_sea_unresolved: usize,
-    /// Seam evidence, from `crate::seam`. Observations about what a character could do at
-    /// every candidate land boundary — pinned so they cannot drift silently, and pinned
-    /// *only* as observations. A seam with no defects is a seam worth reviewing; promoting
-    /// it to geography is a decision, and a baseline must never make that decision by
-    /// having recorded a number.
-    pub land_seam_candidates: usize,
-    pub land_seams_without_defects: usize,
-    pub seam_tile_pairs: usize,
-    /// Exits that leave a walker standing on water. The server transfers without checking
-    /// the arrival tile, so each one strands somebody.
+    /// Seam evidence, from `crate::seam`, per class of claim.
     ///
-    /// This field was first pinned at 897 and that was wrong. It counted every boundary
-    /// where land met water, including the 452 where a boat arrives on land — which the
-    /// current server permits — and cases where no walker can reach the transition band in
-    /// the first place. Asking "could a walker get here at all?" collapsed it to 4. The
-    /// number was stable and gated the whole time; being pinned did not make it true.
-    pub seam_strandings_with_exits: usize,
-    /// Boundaries where a sailor's path arrives on dry land. Permitted today, and recorded
-    /// because whether a ship may beach itself is a content decision.
-    pub seam_beaches_boat: usize,
-    pub seam_one_tile_failures: usize,
-    pub seam_one_way_exits: usize,
+    /// Observations about what a character could do at every candidate boundary in the
+    /// world — pinned so they cannot drift, and pinned *only* as observations. A seam with
+    /// no defects is a seam worth reviewing; promoting it to geography is a decision, and a
+    /// baseline must never make that decision by having recorded a number.
+    ///
+    /// Kept per class rather than totalled. "How many defects does the world have" is not
+    /// answerable from one number: the land and the ocean are in very different states, and
+    /// a total would have hidden that twice already.
+    pub land_seams: SeamCounts,
+    pub shore_seams: SeamCounts,
+    pub sea_seams: SeamCounts,
+}
+
+/// What a class of seams looks like, tile pair by tile pair.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SeamCounts {
+    pub seams: usize,
+    /// No geometry failure, no one-way exit, and no exit that strands a walker.
+    pub without_defects: usize,
+    pub tile_pairs: usize,
+    pub crossable_on_foot: usize,
+    pub crossable_by_boat: usize,
+    pub blocked: usize,
+    /// Exits that leave a walker standing on water. The server transfers on the exit's
+    /// destination without checking the arrival tile or whether the character is navigating,
+    /// so each one strands somebody.
+    pub strandings_with_exits: usize,
+    /// Boundaries where a sailor's path arrives on dry land. Permitted today, because the
+    /// server's only navigation rule blocks water without a boat and nothing else.
+    pub beaches_boat: usize,
+    pub one_tile_failures: usize,
+    pub resolution_failures: usize,
+    pub one_way_exits: usize,
     /// Seams whose band art repeats the neighbour's edge for at least 95% of crossable
     /// pairs: the gutter hypothesis, measured.
-    pub seam_ground_continuity_95: usize,
+    pub ground_continuity_95: usize,
 }
 
 /// The corpus this baseline was measured against.
@@ -346,14 +359,48 @@ pub const BASELINE: Baseline = Baseline {
     land_land_unresolved: 0,
     sea_sea_unresolved: 34,
     land_sea_unresolved: 1,
-    land_seam_candidates: 931,
-    land_seams_without_defects: 638,
-    seam_tile_pairs: 71_528,
-    seam_strandings_with_exits: 4,
-    seam_beaches_boat: 452,
-    seam_one_tile_failures: 912,
-    seam_one_way_exits: 2_412,
-    seam_ground_continuity_95: 899,
+    land_seams: SeamCounts {
+        seams: 931,
+        without_defects: 633,
+        tile_pairs: 71528,
+        crossable_on_foot: 41560,
+        crossable_by_boat: 12176,
+        blocked: 17336,
+        strandings_with_exits: 4,
+        beaches_boat: 452,
+        one_tile_failures: 912,
+        resolution_failures: 542,
+        one_way_exits: 2412,
+        ground_continuity_95: 899,
+    },
+    shore_seams: SeamCounts {
+        seams: 439,
+        without_defects: 355,
+        tile_pairs: 33908,
+        crossable_on_foot: 2891,
+        crossable_by_boat: 28764,
+        blocked: 1844,
+        strandings_with_exits: 0,
+        beaches_boat: 409,
+        one_tile_failures: 1454,
+        resolution_failures: 2636,
+        one_way_exits: 713,
+        ground_continuity_95: 421,
+    },
+    sea_seams: SeamCounts {
+        seams: 849,
+        without_defects: 668,
+        tile_pairs: 65400,
+        crossable_on_foot: 148,
+        crossable_by_boat: 65201,
+        blocked: 47,
+        strandings_with_exits: 0,
+        beaches_boat: 4,
+        one_tile_failures: 6008,
+        resolution_failures: 10004,
+        one_way_exits: 397,
+        ground_continuity_95: 711,
+    },
 };
 
 /// How `found` differs from `expected`, field by field, or nothing if it does not.
@@ -398,26 +445,36 @@ pub fn drift(expected: &Baseline, found: &Baseline) -> Vec<String> {
     note("land-land unresolved", expected.land_land_unresolved, found.land_land_unresolved);
     note("sea-sea unresolved", expected.sea_sea_unresolved, found.sea_sea_unresolved);
     note("land-sea unresolved", expected.land_sea_unresolved, found.land_sea_unresolved);
-    note("land seam candidates", expected.land_seam_candidates, found.land_seam_candidates);
-    note(
-        "land seams without defects",
-        expected.land_seams_without_defects,
-        found.land_seams_without_defects,
-    );
-    note("seam tile pairs", expected.seam_tile_pairs, found.seam_tile_pairs);
-    note(
-        "exits stranding a walker on water",
-        expected.seam_strandings_with_exits,
-        found.seam_strandings_with_exits,
-    );
-    note("boundaries beaching a boat", expected.seam_beaches_boat, found.seam_beaches_boat);
-    note("seam one-tile failures", expected.seam_one_tile_failures, found.seam_one_tile_failures);
-    note("seam one-way exits", expected.seam_one_way_exits, found.seam_one_way_exits);
-    note(
-        "seams with 95% ground continuity",
-        expected.seam_ground_continuity_95,
-        found.seam_ground_continuity_95,
-    );
+    for (label, want, got) in [
+        ("land", &expected.land_seams, &found.land_seams),
+        ("shore", &expected.shore_seams, &found.shore_seams),
+        ("sea", &expected.sea_seams, &found.sea_seams),
+    ] {
+        note(&format!("{label} seams"), want.seams, got.seams);
+        note(&format!("{label} seams without defects"), want.without_defects, got.without_defects);
+        note(&format!("{label} tile pairs"), want.tile_pairs, got.tile_pairs);
+        note(&format!("{label} crossable on foot"), want.crossable_on_foot, got.crossable_on_foot);
+        note(&format!("{label} crossable by boat"), want.crossable_by_boat, got.crossable_by_boat);
+        note(&format!("{label} blocked"), want.blocked, got.blocked);
+        note(
+            &format!("{label} exits stranding a walker"),
+            want.strandings_with_exits,
+            got.strandings_with_exits,
+        );
+        note(&format!("{label} boundaries beaching a boat"), want.beaches_boat, got.beaches_boat);
+        note(&format!("{label} one-tile failures"), want.one_tile_failures, got.one_tile_failures);
+        note(
+            &format!("{label} ambiguous arrivals"),
+            want.resolution_failures,
+            got.resolution_failures,
+        );
+        note(&format!("{label} one-way exits"), want.one_way_exits, got.one_way_exits);
+        note(
+            &format!("{label} seams with 95% ground continuity"),
+            want.ground_continuity_95,
+            got.ground_continuity_95,
+        );
+    }
 
     lines
 }
@@ -574,20 +631,32 @@ pub fn evidence(maps: &[PackedMap]) -> Evidence {
     baseline.discrete_regions =
         spaces.iter().filter(|region| region.geometry == Geometry::Discrete).count();
 
-    // Seam evidence needs the maps placed, so it reads the regions just measured.
-    let placed: BTreeMap<u16, Origin> = spaces
-        .iter()
-        .flat_map(|region| region.origins.iter().map(|(id, origin)| (*id, *origin)))
-        .collect();
-    let (seams, _) = crate::seam::summarise(maps, &adjacencies, &placed, &surfaces(maps));
-    baseline.land_seam_candidates = seams.land_seams;
-    baseline.land_seams_without_defects = seams.without_defects;
-    baseline.seam_tile_pairs = seams.tile_pairs;
-    baseline.seam_strandings_with_exits = seams.strandings_with_exits;
-    baseline.seam_beaches_boat = seams.beaches_boat;
-    baseline.seam_one_tile_failures = seams.one_tile_failures;
-    baseline.seam_one_way_exits = seams.one_way_exits;
-    baseline.seam_ground_continuity_95 = seams.continuous_at_95;
+    // Seam evidence needs the maps placed, so it reads the regions just measured. It builds
+    // one atlas per region itself: each region's coordinates start at its own corner, so a
+    // single world-wide index would call every region an overlap of every other.
+    let (seams, _) = crate::seam::summarise(maps, &adjacencies, &spaces, &surfaces(maps));
+    let counts = |class: ClaimClass| {
+        seams
+            .get(&class)
+            .map(|found: &crate::seam::SeamSummary| SeamCounts {
+                seams: found.seams,
+                without_defects: found.without_defects,
+                tile_pairs: found.tile_pairs,
+                crossable_on_foot: found.on_foot,
+                crossable_by_boat: found.by_boat,
+                blocked: found.blocked,
+                strandings_with_exits: found.strandings_with_exits,
+                beaches_boat: found.beaches_boat,
+                one_tile_failures: found.one_tile_failures,
+                resolution_failures: found.resolution_failures,
+                one_way_exits: found.one_way_exits,
+                ground_continuity_95: found.continuous_at_95,
+            })
+            .unwrap_or_default()
+    };
+    baseline.land_seams = counts(ClaimClass::LandLand);
+    baseline.shore_seams = counts(ClaimClass::LandSea);
+    baseline.sea_seams = counts(ClaimClass::SeaSea);
 
     let classes = by_claim_class(maps, &adjacencies);
     let unresolved = |class: ClaimClass| classes.get(&class).map(|c| c.unresolved).unwrap_or(0);
@@ -1167,6 +1236,75 @@ pub fn lay_out(
     }
 
     (origins, contradictions)
+}
+
+/// How a global position resolves back to a map.
+///
+/// The distinction that matters is `Ambiguous`. Inverting `to_global` with the same origin it
+/// used is nearly tautological — it proves arithmetic, not topology. What a manifest has to
+/// guarantee is that a global position resolves to *exactly one* map, and a layout whose
+/// claims contradict each other can place two maps on the same cell while every individual
+/// conversion still round-trips perfectly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Resolved {
+    Unique {
+        map: u16,
+        x: u8,
+        y: u8,
+    },
+    /// More than one map covers this tile. The layout is not injective here, so no position
+    /// in this area means anything until the contradiction has a disposition.
+    Ambiguous(Vec<u16>),
+    /// No map covers it.
+    Outside,
+}
+
+/// A lookup from global position to the map that owns it, within one region.
+///
+/// Origins inside a region are always whole multiples of the pitch, because every constraint
+/// that placed them was a pitch step, so a global tile belongs to exactly one grid cell and
+/// the index is exact rather than a search.
+#[derive(Debug, Clone, Default)]
+pub struct Atlas {
+    geometry: Geometry,
+    cells: BTreeMap<(i64, i64), Vec<u16>>,
+}
+
+impl Atlas {
+    pub fn new(origins: &BTreeMap<u16, Origin>, geometry: Geometry) -> Atlas {
+        let mut cells: BTreeMap<(i64, i64), Vec<u16>> = BTreeMap::new();
+        for (map, origin) in origins {
+            let reduced = geometry.reduce((origin.x, origin.y));
+            let cell = (reduced.0.div_euclid(PITCH_X), reduced.1.div_euclid(PITCH_Y));
+            cells.entry(cell).or_default().push(*map);
+        }
+        Atlas { geometry, cells }
+    }
+
+    pub fn of(region: &Region) -> Atlas {
+        Atlas::new(&region.origins, region.geometry)
+    }
+
+    /// Which map owns a global tile, and where it sits on it.
+    pub fn resolve(&self, global: (i64, i64)) -> Resolved {
+        let reduced = self.geometry.reduce(global);
+        let cell = (reduced.0.div_euclid(PITCH_X), reduced.1.div_euclid(PITCH_Y));
+        match self.cells.get(&cell) {
+            None => Resolved::Outside,
+            Some(maps) if maps.len() > 1 => Resolved::Ambiguous(maps.clone()),
+            Some(maps) => {
+                let x = CORE_X.0 + reduced.0.rem_euclid(PITCH_X) as u8;
+                let y = CORE_Y.0 + reduced.1.rem_euclid(PITCH_Y) as u8;
+                Resolved::Unique { map: maps[0], x, y }
+            }
+        }
+    }
+
+    /// Tiles covered by more than one map, which is the failure a per-tile round trip cannot
+    /// see.
+    pub fn ambiguous_cells(&self) -> usize {
+        self.cells.values().filter(|maps| maps.len() > 1).count()
+    }
 }
 
 /// A map with at least this share of navigable water is sea rather than shore.

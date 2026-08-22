@@ -25,7 +25,8 @@
 
 use crate::mappack::{PackedMap, Tile};
 use crate::topology::{
-    to_global, Adjacency, Origin, Side, Surface, BAND_X, BAND_Y, CORE_X, CORE_Y,
+    to_global, Adjacency, Atlas, ClaimClass, Origin, Resolved, Side, Surface, BAND_X, BAND_Y,
+    CORE_X, CORE_Y,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -97,8 +98,10 @@ pub struct TilePair {
     pub exit_back: bool,
     /// Global positions differ by exactly one tile in the seam's direction.
     pub one_tile: bool,
-    /// Global position converts back to this exact map and local tile.
-    pub round_trip: bool,
+    /// The arrival's global position resolves, through the region's atlas, to exactly this
+    /// map and this tile. Not an inversion of the same origin that produced it — that proves
+    /// arithmetic. This proves the position is unambiguous in the whole region.
+    pub resolves_uniquely: bool,
     /// The band's ground art repeats the neighbour's edge art: the gutter hypothesis.
     pub band_matches_neighbour: bool,
     /// The two core edge tiles carry the same ground art, which would be duplication
@@ -137,9 +140,9 @@ impl SeamEvidence {
             ));
         }
 
-        let lost: Vec<&TilePair> = self.pairs.iter().filter(|pair| !pair.round_trip).collect();
-        if !lost.is_empty() {
-            defects.push(format!("{} tile pairs do not round-trip", lost.len()));
+        let lost = self.pairs.iter().filter(|pair| !pair.resolves_uniquely).count();
+        if lost > 0 {
+            defects.push(format!("{lost} arrivals do not resolve to exactly one map"));
         }
 
         // A stranding matters where an exit actually sends somebody across it.
@@ -160,21 +163,41 @@ impl SeamEvidence {
         defects
     }
 
-    /// How much of the ground art is continuous across the boundary, as a percentage of the
-    /// pairs where a crossing is possible at all.
+    /// How much of the band's ground art repeats the neighbour's edge art, as a percentage
+    /// of the pairs whose path contains no solid tile.
     ///
-    /// A review signal and nothing more. `W-0097` puts the thresholds at 95% automatic, 85%
-    /// to 95% review and below that correct-or-classify, and this reports the number rather
-    /// than applying them, because art continuity is the weakest of the checks here: it was
-    /// silent about a three-state field being read as two.
-    pub fn ground_continuity(&self) -> Option<usize> {
-        let relevant: Vec<&TilePair> =
-            self.pairs.iter().filter(|pair| pair.crossing != Crossing::Blocked).collect();
-        if relevant.is_empty() {
+    /// Named for its denominator on purpose. It is not "crossable pairs": the pairs counted
+    /// here include the ones that strand a walker and the ones that beach a boat, because
+    /// those have continuous art too — that is exactly why art is the weakest signal
+    /// available and why it was silent while a three-state field was read as two.
+    ///
+    /// A review signal and nothing more. `W-0097` puts thresholds at 95% automatic, 85-95%
+    /// review and below that correct-or-classify, and this reports the number rather than
+    /// applying them. Nothing may be activated on tile-graphic identity alone.
+    pub fn gutter_continuity_over_non_solid(&self) -> Option<usize> {
+        let relevant = self.pairs.iter().filter(|pair| pair.crossing != Crossing::Blocked).count();
+        if relevant == 0 {
             return None;
         }
-        let matching = relevant.iter().filter(|pair| pair.band_matches_neighbour).count();
-        Some(matching * 100 / relevant.len())
+        let matching = self
+            .pairs
+            .iter()
+            .filter(|pair| pair.crossing != Crossing::Blocked && pair.band_matches_neighbour)
+            .count();
+        Some(matching * 100 / relevant)
+    }
+
+    /// Every pair falls in exactly one class, and the classes sum to the pairs.
+    ///
+    /// Asserted rather than assumed: an accounting that does not close is how a category gets
+    /// double-counted, which is precisely what turned four strandings into 897.
+    pub fn accounting_closes(&self) -> bool {
+        let classified = self.count(Crossing::OnFoot)
+            + self.count(Crossing::ByBoat)
+            + self.count(Crossing::Blocked)
+            + self.count(Crossing::StrandsWalker)
+            + self.count(Crossing::BeachesBoat);
+        classified == self.pairs.len()
     }
 }
 
@@ -217,6 +240,7 @@ pub fn evidence(
     side: Side,
     origin: Origin,
     neighbour_origin: Origin,
+    atlas: &Atlas,
 ) -> SeamEvidence {
     let from_art = ground_art(from);
     let to_art = ground_art(to);
@@ -254,12 +278,14 @@ pub fn evidence(
                 }
                 _ => false,
             };
-            // The inverse must land back on this exact map and tile. A layout that places two
-            // maps on the same cell can still satisfy `one_tile` while making the position
-            // ambiguous, and an ambiguous global position is worse than a wrong one.
-            let round_trip = there
-                .and_then(|there| to_local(neighbour_origin, there))
-                .map(|local| local == arrival)
+            // The arrival must resolve, through the whole region's atlas, to this map and no
+            // other. A layout that places two maps on one cell can satisfy `one_tile` and
+            // invert its own arithmetic perfectly while the position means two things.
+            let resolves_uniquely = there
+                .map(|there| {
+                    atlas.resolve(there)
+                        == Resolved::Unique { map: to.map_id, x: arrival.0, y: arrival.1 }
+                })
                 .unwrap_or(false);
 
             // The reciprocal exit leaves the *other* map's band and arrives at this map's
@@ -279,7 +305,7 @@ pub fn evidence(
                     back_arrival.1,
                 )),
                 one_tile,
-                round_trip,
+                resolves_uniquely,
                 band_matches_neighbour: from_art.get(&band) == to_art.get(&arrival)
                     && from_art.contains_key(&band),
                 edges_identical: from_art.get(&departure) == to_art.get(&arrival)
@@ -353,13 +379,13 @@ pub fn corner_evidence(
     }
 }
 
-/// What the whole corpus's candidate land seams look like.
+/// What one class of the corpus's candidate seams looks like.
 ///
 /// An observation, pinned so it cannot drift. Not a promotion: a seam with no defects is a
 /// seam worth reviewing, and `W-0101` decides which are activated.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SeamSummary {
-    pub land_seams: usize,
+    pub seams: usize,
     /// Seams with no geometry failure, no one-way exit and no exit across a medium change.
     pub without_defects: usize,
     pub tile_pairs: usize,
@@ -371,7 +397,7 @@ pub struct SeamSummary {
     /// Strandings an exit actually sends a character across.
     pub strandings_with_exits: usize,
     pub one_tile_failures: usize,
-    pub round_trip_failures: usize,
+    pub resolution_failures: usize,
     pub one_way_exits: usize,
     /// Seams whose band art repeats the neighbour's edge for at least 95% of crossable
     /// pairs, and for at least 85%.
@@ -379,23 +405,45 @@ pub struct SeamSummary {
     pub continuous_at_85: usize,
 }
 
-/// Measure every candidate land seam in a set of placed regions.
+/// Measure every candidate seam in the world, grouped by what it joins.
+///
+/// Every class, not just the land: "how many defects does the world have" cannot be answered
+/// from a subset, and the ocean carries most of the corpus's remaining trouble. Grouped
+/// rather than totalled because a single number would hide which part of the world is at
+/// fault, which is the mistake this analysis has already made twice.
 pub fn summarise(
     maps: &[PackedMap],
     seams: &BTreeSet<Adjacency>,
-    origins: &BTreeMap<u16, Origin>,
+    regions: &[crate::topology::Region],
     surfaces: &BTreeMap<u16, Surface>,
-) -> (SeamSummary, Vec<SeamEvidence>) {
+) -> (BTreeMap<ClaimClass, SeamSummary>, Vec<SeamEvidence>) {
     let by_id: BTreeMap<u16, &PackedMap> = maps.iter().map(|map| (map.map_id, map)).collect();
-    let mut summary = SeamSummary::default();
+
+    // One atlas per region, not one for the world. Each region has its own coordinate space
+    // starting at its own north-west corner, so a single global index would report every
+    // region as overlapping every other at the origin — which is exactly what it did.
+    let atlases: BTreeMap<u16, Atlas> =
+        regions.iter().map(|region| (region.id, Atlas::of(region))).collect();
+    let mut home: BTreeMap<u16, u16> = BTreeMap::new();
+    let mut origins: BTreeMap<u16, Origin> = BTreeMap::new();
+    for region in regions {
+        for (map, origin) in &region.origins {
+            home.insert(*map, region.id);
+            origins.insert(*map, *origin);
+        }
+    }
+    let mut by_class: BTreeMap<ClaimClass, SeamSummary> = BTreeMap::new();
     let mut all = Vec::new();
 
     for seam in seams {
-        let land = surfaces.get(&seam.from_map) == Some(&Surface::Land)
-            && surfaces.get(&seam.to_map) == Some(&Surface::Land);
-        if !land {
-            continue;
-        }
+        let class = match (surfaces.get(&seam.from_map), surfaces.get(&seam.to_map)) {
+            (Some(Surface::Land), Some(Surface::Land)) => ClaimClass::LandLand,
+            (Some(Surface::Sea), Some(Surface::Sea)) => ClaimClass::SeaSea,
+            (Some(_), Some(_)) => ClaimClass::LandSea,
+            _ => continue,
+        };
+        let summary = by_class.entry(class).or_default();
+
         let (Some(from), Some(to)) = (by_id.get(&seam.from_map), by_id.get(&seam.to_map)) else {
             continue;
         };
@@ -404,9 +452,18 @@ pub fn summarise(
         else {
             continue;
         };
+        // Both ends are in the same region by construction: regions *are* the components of
+        // this seam graph. Anything else is a bug worth skipping loudly rather than averaging.
+        let (Some(region), Some(other)) = (home.get(&seam.from_map), home.get(&seam.to_map)) else {
+            continue;
+        };
+        if region != other {
+            continue;
+        }
+        let Some(atlas) = atlases.get(region) else { continue };
 
-        let found = evidence(from, to, seam.side, *origin, *neighbour);
-        summary.land_seams += 1;
+        let found = evidence(from, to, seam.side, *origin, *neighbour, atlas);
+        summary.seams += 1;
         summary.tile_pairs += found.pairs.len();
         summary.on_foot += found.count(Crossing::OnFoot);
         summary.by_boat += found.count(Crossing::ByBoat);
@@ -419,13 +476,14 @@ pub fn summarise(
             .filter(|pair| pair.crossing == Crossing::StrandsWalker && pair.exit_out)
             .count();
         summary.one_tile_failures += found.pairs.iter().filter(|pair| !pair.one_tile).count();
-        summary.round_trip_failures += found.pairs.iter().filter(|pair| !pair.round_trip).count();
+        summary.resolution_failures +=
+            found.pairs.iter().filter(|pair| !pair.resolves_uniquely).count();
         summary.one_way_exits +=
             found.pairs.iter().filter(|pair| pair.exit_out && !pair.exit_back).count();
         if found.defects().is_empty() {
             summary.without_defects += 1;
         }
-        match found.ground_continuity() {
+        match found.gutter_continuity_over_non_solid() {
             Some(percent) if percent >= 95 => {
                 summary.continuous_at_95 += 1;
                 summary.continuous_at_85 += 1;
@@ -437,7 +495,7 @@ pub fn summarise(
         all.push(found);
     }
 
-    (summary, all)
+    (by_class, all)
 }
 
 #[cfg(test)]
@@ -467,16 +525,33 @@ mod tests {
         map.tiles[index] = value;
     }
 
+    /// An atlas over exactly the maps a test places, so unique resolution is checked against
+    /// a real layout rather than against the origin that produced the position.
+    fn atlas_of(origins: &[(u16, Origin)]) -> Atlas {
+        Atlas::new(&origins.iter().copied().collect(), crate::topology::Geometry::Plane)
+    }
+
+    fn side_by_side() -> Atlas {
+        atlas_of(&[(1, Origin { x: 0, y: 0 }), (2, Origin { x: PITCH_X, y: 0 })])
+    }
+
     #[test]
     fn a_clean_east_seam_is_one_tile_wide_everywhere() {
         let west = blank(1);
         let east = blank(2);
-        let found =
-            evidence(&west, &east, Side::East, Origin { x: 0, y: 0 }, Origin { x: PITCH_X, y: 0 });
+        let found = evidence(
+            &west,
+            &east,
+            Side::East,
+            Origin { x: 0, y: 0 },
+            Origin { x: PITCH_X, y: 0 },
+            &atlas_of(&[(1, Origin { x: 0, y: 0 }), (2, Origin { x: PITCH_X, y: 0 })]),
+        );
 
         assert_eq!(found.pairs.len(), 80, "one pair per core row");
         assert!(found.pairs.iter().all(|pair| pair.one_tile));
-        assert!(found.pairs.iter().all(|pair| pair.round_trip));
+        assert!(found.pairs.iter().all(|pair| pair.resolves_uniquely));
+        assert!(found.accounting_closes());
         assert_eq!(found.count(Crossing::OnFoot), 80);
         assert_eq!(found.defects(), Vec::<String>::new());
     }
@@ -494,6 +569,10 @@ mod tests {
             Side::East,
             Origin { x: 0, y: 0 },
             Origin { x: STORAGE as i64, y: 0 },
+            &atlas_of(&[
+                (west.map_id, Origin { x: 0, y: 0 }),
+                (east.map_id, Origin { x: STORAGE as i64, y: 0 }),
+            ]),
         );
 
         assert!(found.pairs.iter().all(|pair| !pair.one_tile));
@@ -520,8 +599,14 @@ mod tests {
             target_y: 50,
         });
 
-        let found =
-            evidence(&land, &sea, Side::East, Origin { x: 0, y: 0 }, Origin { x: PITCH_X, y: 0 });
+        let found = evidence(
+            &land,
+            &sea,
+            Side::East,
+            Origin { x: 0, y: 0 },
+            Origin { x: PITCH_X, y: 0 },
+            &side_by_side(),
+        );
 
         let pair = found.pairs.iter().find(|pair| pair.departure.1 == 50).expect("row 50");
         assert_eq!(pair.crossing, Crossing::StrandsWalker);
@@ -540,8 +625,14 @@ mod tests {
             set_tile(&mut east, CORE_X.0, y, 2);
         }
 
-        let found =
-            evidence(&west, &east, Side::East, Origin { x: 0, y: 0 }, Origin { x: PITCH_X, y: 0 });
+        let found = evidence(
+            &west,
+            &east,
+            Side::East,
+            Origin { x: 0, y: 0 },
+            Origin { x: PITCH_X, y: 0 },
+            &atlas_of(&[(1, Origin { x: 0, y: 0 }), (2, Origin { x: PITCH_X, y: 0 })]),
+        );
         assert_eq!(found.count(Crossing::ByBoat), 80);
         assert_eq!(found.count(Crossing::StrandsWalker), 0);
         assert_eq!(found.count(Crossing::BeachesBoat), 0);
@@ -556,12 +647,18 @@ mod tests {
             set_tile(&mut west, CORE_X.1, y, 1);
         }
 
-        let found =
-            evidence(&west, &east, Side::East, Origin { x: 0, y: 0 }, Origin { x: PITCH_X, y: 0 });
+        let found = evidence(
+            &west,
+            &east,
+            Side::East,
+            Origin { x: 0, y: 0 },
+            Origin { x: PITCH_X, y: 0 },
+            &atlas_of(&[(1, Origin { x: 0, y: 0 }), (2, Origin { x: PITCH_X, y: 0 })]),
+        );
         assert_eq!(found.count(Crossing::Blocked), 80);
         assert_eq!(found.passable(), 0);
         assert_eq!(found.defects(), Vec::<String>::new(), "a cliff is not a defect");
-        assert_eq!(found.ground_continuity(), None, "nothing crossable to judge");
+        assert_eq!(found.gutter_continuity_over_non_solid(), None, "nothing crossable to judge");
     }
 
     #[test]
@@ -576,8 +673,14 @@ mod tests {
             target_y: 40,
         });
 
-        let found =
-            evidence(&west, &east, Side::East, Origin { x: 0, y: 0 }, Origin { x: PITCH_X, y: 0 });
+        let found = evidence(
+            &west,
+            &east,
+            Side::East,
+            Origin { x: 0, y: 0 },
+            Origin { x: PITCH_X, y: 0 },
+            &atlas_of(&[(1, Origin { x: 0, y: 0 }), (2, Origin { x: PITCH_X, y: 0 })]),
+        );
         assert!(found.defects().iter().any(|note| note.contains("not returned")));
     }
 
@@ -602,6 +705,42 @@ mod tests {
             (4u16, Origin { x: PITCH_X + 1, y: PITCH_Y }),
         );
         assert!(!nudged.contiguous);
+    }
+
+    #[test]
+    fn an_arrival_two_maps_claim_does_not_resolve_even_though_it_round_trips() {
+        // The gap the old check could not see. Inverting `to_global` with the same origin it
+        // used proves arithmetic; it says nothing about whether the position means one place.
+        // Here maps 2 and 3 are placed on the same cell, so every conversion inverts
+        // perfectly and the arrival is still ambiguous.
+        let west = blank(1);
+        let east = blank(2);
+        let overlapping = atlas_of(&[
+            (1, Origin { x: 0, y: 0 }),
+            (2, Origin { x: PITCH_X, y: 0 }),
+            (3, Origin { x: PITCH_X, y: 0 }),
+        ]);
+
+        let found = evidence(
+            &west,
+            &east,
+            Side::East,
+            Origin { x: 0, y: 0 },
+            Origin { x: PITCH_X, y: 0 },
+            &overlapping,
+        );
+
+        assert!(found.pairs.iter().all(|pair| pair.one_tile), "the arithmetic is fine");
+        assert!(
+            found.pairs.iter().all(|pair| !pair.resolves_uniquely),
+            "and the position still means two places"
+        );
+        assert!(found.defects().iter().any(|note| note.contains("exactly one map")));
+        assert_eq!(overlapping.ambiguous_cells(), 1);
+
+        // Local inversion, by contrast, is perfectly happy.
+        let arrival = to_global(Origin { x: PITCH_X, y: 0 }, CORE_X.0, 50).unwrap();
+        assert_eq!(to_local(Origin { x: PITCH_X, y: 0 }, arrival), Some((CORE_X.0, 50)));
     }
 
     #[test]

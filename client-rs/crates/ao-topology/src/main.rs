@@ -168,21 +168,110 @@ fn main() {
         .iter()
         .flat_map(|region| region.origins.iter().map(|(id, origin)| (*id, *origin)))
         .collect();
-    let (seams, per_seam) = ao_core::seam::summarise(&maps, &found.adjacencies, &placed, &surfaces);
-    println!("  candidate land seams      {}", seams.land_seams);
-    println!("    without defects         {}", seams.without_defects);
-    println!("    tile pairs              {}", seams.tile_pairs);
-    println!("      crossable on foot     {}", seams.on_foot);
-    println!("      crossable by boat     {}", seams.by_boat);
-    println!("      blocked               {}", seams.blocked);
-    println!("      strands a walker      {}", seams.strands_walker);
-    println!("        with an exit        {}", seams.strandings_with_exits);
-    println!("      beaches a boat        {}", seams.beaches_boat);
-    println!("    not one tile apart      {}", seams.one_tile_failures);
-    println!("    round-trip failures     {}", seams.round_trip_failures);
-    println!("    one-way exits           {}", seams.one_way_exits);
-    println!("    ground continuity >=95% {} seams", seams.continuous_at_95);
-    println!("    ground continuity >=85% {} seams", seams.continuous_at_85);
+    // One atlas per region: each region's coordinates start at its own corner, so a single
+    // world-wide index would call every region an overlap of every other.
+    let atlases: std::collections::BTreeMap<u16, topology::Atlas> =
+        found.regions.iter().map(|region| (region.id, topology::Atlas::of(region))).collect();
+    let region_of: std::collections::BTreeMap<u16, u16> = found
+        .regions
+        .iter()
+        .flat_map(|region| region.origins.keys().map(|map| (*map, region.id)))
+        .collect();
+    let overlapping: usize = atlases.values().map(|atlas| atlas.ambiguous_cells()).sum();
+    println!("  cells claimed by two maps {overlapping}");
+    let (by_class, per_seam) =
+        ao_core::seam::summarise(&maps, &found.adjacencies, &found.regions, &surfaces);
+
+    println!("  seam evidence, by what the boundary joins:");
+    println!(
+        "    {:<7} {:>6} {:>9} {:>8} {:>7} {:>8} {:>6} {:>8} {:>7}",
+        "class", "seams", "no defect", "pairs", "foot", "boat", "wall", "1-tile!", "1-way!"
+    );
+    let mut totals = ao_core::seam::SeamSummary::default();
+    for (class, found) in &by_class {
+        println!(
+            "    {:<7} {:>6} {:>9} {:>8} {:>7} {:>8} {:>6} {:>8} {:>7}",
+            match class {
+                ao_core::topology::ClaimClass::LandLand => "land",
+                ao_core::topology::ClaimClass::SeaSea => "sea",
+                ao_core::topology::ClaimClass::LandSea => "shore",
+            },
+            found.seams,
+            found.without_defects,
+            found.tile_pairs,
+            found.on_foot,
+            found.by_boat,
+            found.blocked,
+            found.one_tile_failures,
+            found.one_way_exits,
+        );
+        totals.seams += found.seams;
+        totals.without_defects += found.without_defects;
+        totals.tile_pairs += found.tile_pairs;
+        totals.on_foot += found.on_foot;
+        totals.by_boat += found.by_boat;
+        totals.blocked += found.blocked;
+        totals.strands_walker += found.strands_walker;
+        totals.beaches_boat += found.beaches_boat;
+        totals.strandings_with_exits += found.strandings_with_exits;
+        totals.one_tile_failures += found.one_tile_failures;
+        totals.resolution_failures += found.resolution_failures;
+        totals.one_way_exits += found.one_way_exits;
+        totals.continuous_at_95 += found.continuous_at_95;
+    }
+
+    // The whole-world ledger. Everything that is wrong with the map, in one place, so the
+    // question "is the map good" has an answer rather than an anecdote.
+    println!("\n  DEFECT LEDGER for the whole world");
+    println!("    seams measured           {}", totals.seams);
+    println!("      with no defect at all  {}", totals.without_defects);
+    println!("    tile pairs measured      {}", totals.tile_pairs);
+    println!("    -- geometry --");
+    println!("    placement claims that cannot hold   {}", b.unresolved_seams);
+    println!(
+        "      of which land-land / shore / sea  {} / {} / {}",
+        b.land_land_unresolved, b.land_sea_unresolved, b.sea_sea_unresolved
+    );
+    println!("    tile pairs not one tile apart       {}", totals.one_tile_failures);
+    println!("    arrivals resolving to two maps      {}", totals.resolution_failures);
+    println!("    -- traversal --");
+    println!("    exits stranding a walker on water   {}", totals.strandings_with_exits);
+    println!("    exits the other map does not return {}", totals.one_way_exits);
+    println!("    boundaries beaching a boat          {} (permitted today)", totals.beaches_boat);
+    println!("    -- exits --");
+    println!("    exits pointing at no map            {}", b.missing_destination);
+    println!("    exits targeting their own map       {}", b.same_map);
+    println!("    sides claiming two neighbours       {}", b.contested_sides);
+
+    let stranding_sites: Vec<String> = per_seam
+        .iter()
+        .flat_map(|found| {
+            found
+                .pairs
+                .iter()
+                .filter(|pair| {
+                    pair.crossing == ao_core::seam::Crossing::StrandsWalker && pair.exit_out
+                })
+                .map(|pair| {
+                    format!(
+                        "map {} band ({}, {}) -> map {} ({}, {})",
+                        found.seam.from_map,
+                        pair.band.0,
+                        pair.band.1,
+                        found.seam.to_map,
+                        pair.arrival.0,
+                        pair.arrival.1
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    if !stranding_sites.is_empty() {
+        println!("  exits that leave a walker on water, named:");
+        for site in &stranding_sites {
+            println!("    {site}");
+        }
+    }
 
     let mut worst: Vec<&ao_core::seam::SeamEvidence> =
         per_seam.iter().filter(|found| !found.defects().is_empty()).collect();
@@ -264,9 +353,9 @@ fn main() {
     }
 
     // One quad, end to end: the acceptance artifact. Every check this compiler can make,
-    // reported for four real maps, so a person can decide whether to activate them. The
-    // aggregate says 638 seams have no defect; this says what that means for a specific
-    // four, which is what an activation decision actually needs.
+    // for four real maps, in *both* directions across each physical seam -- eight directed
+    // crossings, not four. A seam that works one way and not the other is a seam that works
+    // until a player walks back.
     if let Some(quad) = quads.iter().find(|quad| {
         [quad.north_west, quad.north_east, quad.south_west, quad.south_east]
             .iter()
@@ -279,27 +368,45 @@ fn main() {
         let by_id: std::collections::BTreeMap<u16, &ao_core::mappack::PackedMap> =
             maps.iter().map(|map| (map.map_id, map)).collect();
 
-        for (from, side, to) in [
+        let physical = [
             (quad.north_west, topology::Side::East, quad.north_east),
             (quad.south_west, topology::Side::East, quad.south_east),
             (quad.north_west, topology::Side::South, quad.south_west),
             (quad.north_east, topology::Side::South, quad.south_east),
-        ] {
-            let evidence =
-                ao_core::seam::evidence(by_id[&from], by_id[&to], side, placed[&from], placed[&to]);
+        ];
+        let mut directed = Vec::new();
+        for (from, side, to) in physical {
+            directed.push((from, side, to));
+            directed.push((to, side.opposite(), from));
+        }
+
+        let mut all_clean = true;
+        for (from, side, to) in &directed {
+            let evidence = ao_core::seam::evidence(
+                by_id[from],
+                by_id[to],
+                *side,
+                placed[from],
+                placed[to],
+                &atlases[&region_of[from]],
+            );
             let defects = evidence.defects();
+            all_clean &= defects.is_empty() && evidence.accounting_closes();
             println!(
-                "    {from} {side:?} {to}: {} pairs, {} on foot, {} by boat, {} blocked, \
-                 continuity {}%, {}",
+                "    {from} {side:?} {to}: {} pairs = {} foot + {} boat + {} wall + {} strand \
+                 + {} beach, gutter {}%, {}{}",
                 evidence.pairs.len(),
                 evidence.count(ao_core::seam::Crossing::OnFoot),
                 evidence.count(ao_core::seam::Crossing::ByBoat),
                 evidence.count(ao_core::seam::Crossing::Blocked),
+                evidence.count(ao_core::seam::Crossing::StrandsWalker),
+                evidence.count(ao_core::seam::Crossing::BeachesBoat),
                 evidence
-                    .ground_continuity()
+                    .gutter_continuity_over_non_solid()
                     .map(|percent| percent.to_string())
                     .unwrap_or_else(|| "n/a".to_string()),
                 if defects.is_empty() { "no defects".to_string() } else { defects.join("; ") },
+                if evidence.accounting_closes() { "" } else { ", ACCOUNTING DOES NOT CLOSE" },
             );
         }
 
@@ -314,17 +421,48 @@ fn main() {
             corner.tiles, corner.contiguous, corner.distinct
         );
 
-        // The four cardinal walks, each one tile, checked as integers rather than asserted.
+        // One walk, one tile, in all four cardinal directions, each resolved through the
+        // atlas rather than by inverting the origin that produced it.
         let centre = placed[&quad.north_west];
-        let east = placed[&quad.north_east];
-        let south = placed[&quad.south_west];
-        println!(
-            "    one walk one tile: east {} south {}",
-            ao_core::seam::to_local(east, (centre.x + topology::PITCH_X, centre.y + 40))
-                == Some((topology::CORE_X.0, topology::CORE_Y.0 + 40)),
-            ao_core::seam::to_local(south, (centre.x + 40, centre.y + topology::PITCH_Y))
-                == Some((topology::CORE_X.0 + 40, topology::CORE_Y.0)),
-        );
+        let mid_row = topology::CORE_Y.0 + 40;
+        let mid_col = topology::CORE_X.0 + 40;
+        let walks = [
+            (
+                "east",
+                (centre.x + topology::PITCH_X, centre.y + 40),
+                quad.north_east,
+                (topology::CORE_X.0, mid_row),
+            ),
+            ("west", (centre.x - 1, centre.y + 40), quad.north_west, (topology::CORE_X.1, mid_row)),
+            (
+                "south",
+                (centre.x + 40, centre.y + topology::PITCH_Y),
+                quad.south_west,
+                (mid_col, topology::CORE_Y.0),
+            ),
+            (
+                "north",
+                (centre.x + 40, centre.y - 1),
+                quad.north_west,
+                (mid_col, topology::CORE_Y.1),
+            ),
+        ];
+        for (name, global, expected_map, expected_local) in walks {
+            let resolved = atlases[&region_of[&quad.north_west]].resolve(global);
+            let want = topology::Resolved::Unique {
+                map: expected_map,
+                x: expected_local.0,
+                y: expected_local.1,
+            };
+            // West and north leave the quad, so they land on whatever the wider world has
+            // there; what matters is that the answer is unique, and that it is the expected
+            // map wherever the quad itself supplies the neighbour.
+            println!(
+                "    one walk {name:<5} -> {resolved:?}{}",
+                if resolved == want { "  [as expected]" } else { "" }
+            );
+        }
+        println!("    all eight directed crossings clean: {all_clean}");
     }
 
     // The review unit: clusters, with the loops that prove them, smallest first — a

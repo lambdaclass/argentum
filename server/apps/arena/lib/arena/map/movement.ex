@@ -115,9 +115,11 @@ defmodule Arena.Map.Movement do
 
               case TileGrid.move_entity(state.map_id, entity.x, entity.y, direction) do
                 {:ok, %TileGrid.Position{x: nx, y: ny}} ->
-                  # VB6: water tiles (value 2) require boat
+                  # VB6: water tiles (value 2) require boat. The rule itself lives in
+                  # Arena.Map.TileSemantics, which is also what generates the cross-language
+                  # fixture the Rust client is held to -- one rule, called from both places.
                   tile_val = TileGrid.get_tile(state.map_id, nx, ny)
-                  water_blocked = tile_val == 2 and not entity.navigating
+                  water_blocked = Arena.Map.TileSemantics.requires_boat?(tile_val, entity.navigating)
 
                   cond do
                     water_blocked ->
