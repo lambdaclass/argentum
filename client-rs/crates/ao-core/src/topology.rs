@@ -343,6 +343,13 @@ pub struct Baseline {
     /// Kept per class rather than totalled. "How many defects does the world have" is not
     /// answerable from one number: the land and the ocean are in very different states, and
     /// a total would have hidden that twice already.
+    /// Tile masks: which core tiles are really part of the world.
+    pub mask: crate::mask::Mask,
+    pub maps_fully_drawn: usize,
+    /// Maps where the bounding rectangle makes a void tile look walkable.
+    pub maps_with_lying_rectangle: usize,
+    /// Exits arriving on a tile the destination map does not draw.
+    pub arrivals_in_void: usize,
     /// Every exit by measured shape. The four content classes `W-0097` names -- door,
     /// portal, teleport, instance entrance -- are deliberately absent: nothing in a map file
     /// distinguishes them, and a compiler that assigned them would be inventing content.
@@ -453,13 +460,23 @@ pub const BASELINE: Baseline = Baseline {
     land_land_unresolved: 0,
     sea_sea_unresolved: 34,
     land_sea_unresolved: 1,
+    mask: crate::mask::Mask {
+        simulated: 4_840_960,
+        void: 143_680,
+        void_walkable: 2_444,
+        void_solid: 141_236,
+        void_water: 0,
+    },
+    maps_fully_drawn: 748,
+    maps_with_lying_rectangle: 47,
+    arrivals_in_void: 48,
     offset_seams: 0,
     into_band: 0,
     band_to_interior: 19,
     interior: 1_201,
     land_seams: SeamCounts {
         seams: 931,
-        without_defects: 633,
+        without_defects: 615,
         tile_pairs: 71528,
         crossable_on_foot: 41560,
         crossable_by_boat: 12176,
@@ -543,6 +560,18 @@ pub fn drift(expected: &Baseline, found: &Baseline) -> Vec<String> {
     note("land-land unresolved", expected.land_land_unresolved, found.land_land_unresolved);
     note("sea-sea unresolved", expected.sea_sea_unresolved, found.sea_sea_unresolved);
     note("land-sea unresolved", expected.land_sea_unresolved, found.land_sea_unresolved);
+    note("simulated core tiles", expected.mask.simulated, found.mask.simulated);
+    note("void core tiles", expected.mask.void, found.mask.void);
+    note("void tiles reading as walkable", expected.mask.void_walkable, found.mask.void_walkable);
+    note("void tiles already blocked", expected.mask.void_solid, found.mask.void_solid);
+    note("void tiles marked water", expected.mask.void_water, found.mask.void_water);
+    note("maps fully drawn", expected.maps_fully_drawn, found.maps_fully_drawn);
+    note(
+        "maps whose rectangle lies",
+        expected.maps_with_lying_rectangle,
+        found.maps_with_lying_rectangle,
+    );
+    note("exits arriving on no ground", expected.arrivals_in_void, found.arrivals_in_void);
     note("offset seams", expected.offset_seams, found.offset_seams);
     note("exits into a band", expected.into_band, found.into_band);
     note("band-to-interior exits", expected.band_to_interior, found.band_to_interior);
@@ -784,6 +813,12 @@ pub fn evidence(maps: &[PackedMap]) -> Evidence {
     baseline.land_seams = counts(ClaimClass::LandLand);
     baseline.shore_seams = counts(ClaimClass::LandSea);
     baseline.sea_seams = counts(ClaimClass::SeaSea);
+
+    let mask = crate::mask::coverage(maps);
+    baseline.mask = mask.total;
+    baseline.maps_fully_drawn = mask.fully_drawn;
+    baseline.maps_with_lying_rectangle = mask.lying_rectangles.len();
+    baseline.arrivals_in_void = seams.values().map(|found| found.arrivals_in_void).sum();
 
     let classes = by_claim_class(maps, &adjacencies);
     let unresolved = |class: ClaimClass| classes.get(&class).map(|c| c.unresolved).unwrap_or(0);

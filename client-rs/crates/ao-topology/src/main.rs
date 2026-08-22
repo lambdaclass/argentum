@@ -65,6 +65,21 @@ fn main() {
         found.constraint_conflicts.len()
     );
 
+    // Which tiles are actually part of the world. A bounding rectangle must never make a
+    // void tile walkable; this says whether it does.
+    let coverage = ao_core::mask::coverage(&maps);
+    println!("  simulated core tiles     {}", coverage.total.simulated);
+    println!("    void (no ground)       {}", coverage.total.void);
+    println!("      reads as walkable    {}", coverage.total.void_walkable);
+    println!("      already blocked      {}", coverage.total.void_solid);
+    println!("      marked as water      {}", coverage.total.void_water);
+    println!("  maps fully drawn         {} of {}", coverage.fully_drawn, maps.len());
+    println!("  maps whose rectangle lies {}", coverage.lying_rectangles.len());
+    for (map, count) in coverage.lying_rectangles.iter().take(6) {
+        let name = maps.iter().find(|m| m.map_id == *map).map(|m| m.name.as_str()).unwrap_or("");
+        println!("    map {map:<5} {count:>5} void tiles read as walkable  \"{name}\"");
+    }
+
     // The world's actual shape, region by region. The counts above measure a plane; these
     // measure what the corpus is, which is not the same thing and is the more useful
     // document: a region is what gets a coordinate space, a manifest entry and an origin.

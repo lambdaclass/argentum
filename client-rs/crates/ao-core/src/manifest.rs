@@ -38,7 +38,7 @@ pub const FORMAT: u32 = 1;
 /// either is encoded fails the build until somebody says which of those they meant. This is
 /// the determinism proof with teeth: a test can show two runs agree with each other, and only
 /// a pinned value shows they agree with what was reviewed.
-pub const CONTENT_HASH: &str = "62e5f93a530bf656";
+pub const CONTENT_HASH: &str = "99388d0bed800e4f";
 
 /// The hand-recorded dispositions, compiled in.
 ///

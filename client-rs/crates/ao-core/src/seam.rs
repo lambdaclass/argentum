@@ -107,6 +107,10 @@ pub struct TilePair {
     /// The two core edge tiles carry the same ground art, which would be duplication
     /// rather than continuity.
     pub edges_identical: bool,
+    /// The arrival tile has no ground drawn on it at all. Walking across lands the character
+    /// in a tile that is not part of the map -- and 2,444 such tiles in this corpus read as
+    /// walkable, so nothing would stop them.
+    pub arrival_is_void: bool,
 }
 
 /// Everything measured about one candidate seam.
@@ -153,6 +157,14 @@ impl SeamEvidence {
             .count();
         if stranded > 0 {
             defects.push(format!("{stranded} exits leave a walker standing on water"));
+        }
+
+        // Walking into a tile the map does not draw. Counted only where an exit sends
+        // somebody there, for the same reason a stranding is.
+        let nowhere =
+            self.pairs.iter().filter(|pair| pair.exit_out && pair.arrival_is_void).count();
+        if nowhere > 0 {
+            defects.push(format!("{nowhere} exits arrive on a tile with no ground"));
         }
 
         let one_way = self.pairs.iter().filter(|pair| pair.exit_out && !pair.exit_back).count();
@@ -244,6 +256,7 @@ pub fn evidence(
 ) -> SeamEvidence {
     let from_art = ground_art(from);
     let to_art = ground_art(to);
+    let to_simulated = crate::mask::simulated_tiles(to);
     let (step_x, step_y) = side.step();
 
     let exits_out: BTreeSet<(u8, u8, u8, u8)> = from
@@ -306,6 +319,7 @@ pub fn evidence(
                 )),
                 one_tile,
                 resolves_uniquely,
+                arrival_is_void: !to_simulated.contains(&arrival),
                 band_matches_neighbour: from_art.get(&band) == to_art.get(&arrival)
                     && from_art.contains_key(&band),
                 edges_identical: from_art.get(&departure) == to_art.get(&arrival)
@@ -399,6 +413,8 @@ pub struct SeamSummary {
     pub one_tile_failures: usize,
     pub resolution_failures: usize,
     pub one_way_exits: usize,
+    /// Exits arriving on a tile the destination does not draw.
+    pub arrivals_in_void: usize,
     /// Seams whose band art repeats the neighbour's edge for at least 95% of crossable
     /// pairs, and for at least 85%.
     pub continuous_at_95: usize,
@@ -480,6 +496,8 @@ pub fn summarise(
             found.pairs.iter().filter(|pair| !pair.resolves_uniquely).count();
         summary.one_way_exits +=
             found.pairs.iter().filter(|pair| pair.exit_out && !pair.exit_back).count();
+        summary.arrivals_in_void +=
+            found.pairs.iter().filter(|pair| pair.exit_out && pair.arrival_is_void).count();
         if found.defects().is_empty() {
             summary.without_defects += 1;
         }
