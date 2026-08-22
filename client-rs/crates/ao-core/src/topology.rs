@@ -22,7 +22,7 @@
 //! door, a portal, a teleport — but it is not evidence of adjacency, and treating it as
 //! such is how a compiler invents geography that does not exist.
 
-use crate::mappack::{MapExit, PackedMap};
+use crate::mappack::{MapExit, PackedMap, Tile};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Storage size of every map in this corpus.
@@ -229,6 +229,23 @@ pub struct Baseline {
     /// Squares of four maps with all four internal seams reciprocal and no contradiction
     /// anywhere in their component. What the seamless-world MVP can be built on today.
     pub conflict_free_quads: usize,
+    /// Coordinate spaces over every standard seam, shore-to-sea claims included. Every map
+    /// belongs to exactly one, including the maps with no seams at all.
+    pub regions: usize,
+    /// Regions whose own claims say they wrap: a cylinder or a torus rather than a plane.
+    pub wrapping_regions: usize,
+    /// Claims that cannot hold even in their region's measured geometry. Each needs a
+    /// reviewed disposition; none may be dropped to make the arithmetic close.
+    pub unresolved_seams: usize,
+    /// Maps that are at least half navigable water.
+    pub sea_maps: usize,
+    /// Regions no seam reaches: reached by door, portal or teleport only.
+    pub discrete_regions: usize,
+    /// The same measurement taken of each class of claim alone, because an aggregate cannot
+    /// tell "the land is a plane" from "the ocean is a plane" from "the shore joins them".
+    pub land_land_unresolved: usize,
+    pub sea_sea_unresolved: usize,
+    pub land_sea_unresolved: usize,
 }
 
 /// The corpus this baseline was measured against.
@@ -259,6 +276,22 @@ pub const CORPUS: &str = "17afc00c9c7e0b4c";
 /// signed relationship that disagrees with the offsets already established for its pair,
 /// found in sorted order and therefore the same every time.
 ///
+/// `cycle_witnesses` moved from 50 to 56 when the spanning forest stopped keying tree edges
+/// by map *pair*. Two maps can be joined by two contradictory claims — 37 says 168 is to its
+/// West and also to its East — and the second was being mistaken for the tree edge and
+/// skipped, so a contradiction with no third map in it produced no witness. 56 is also the
+/// figure the original audit recorded, which is corroboration rather than coincidence.
+///
+/// The region counts describe what the corpus *is*, as opposed to what a plane would force
+/// on it, and they are measured over every standard seam including shore-to-sea claims. The
+/// three per-class numbers are the ones that matter, because an aggregate cannot say which
+/// part of the world disagrees: **the 931 land-land claims are entirely consistent, the 439
+/// shore claims have one exception, and all 34 remaining contradictions are sea-to-sea.**
+/// Sailing is movement through the world — `Arena.Map.Movement` crosses a water tile when
+/// the character is `navigating` — so a shore seam is geography and the ocean is where the
+/// curation is owed. Combined, those 34 propagate to 99 unresolved claims in the single
+/// 424-map region, which is why the per-class split is pinned beside the total.
+///
 /// The roadmap's original 1,091 / 58 / 237 are superseded by these, dated in both
 /// roadmaps. Reproduce them all with `ao-topology --check`.
 pub const BASELINE: Baseline = Baseline {
@@ -276,10 +309,18 @@ pub const BASELINE: Baseline = Baseline {
     weak_components: 226,
     reciprocal_components: 232,
     inconsistent_components: 2,
-    cycle_witnesses: 50,
+    cycle_witnesses: 56,
     conflict_clusters: 2,
     inconsistent_maps: 428,
     conflict_free_quads: 87,
+    regions: 226,
+    wrapping_regions: 1,
+    unresolved_seams: 99,
+    sea_maps: 287,
+    discrete_regions: 199,
+    land_land_unresolved: 0,
+    sea_sea_unresolved: 34,
+    land_sea_unresolved: 1,
 };
 
 /// How `found` differs from `expected`, field by field, or nothing if it does not.
@@ -316,6 +357,14 @@ pub fn drift(expected: &Baseline, found: &Baseline) -> Vec<String> {
     note("conflict clusters", expected.conflict_clusters, found.conflict_clusters);
     note("inconsistent maps", expected.inconsistent_maps, found.inconsistent_maps);
     note("conflict-free quads", expected.conflict_free_quads, found.conflict_free_quads);
+    note("regions", expected.regions, found.regions);
+    note("wrapping regions", expected.wrapping_regions, found.wrapping_regions);
+    note("unresolved seams", expected.unresolved_seams, found.unresolved_seams);
+    note("sea maps", expected.sea_maps, found.sea_maps);
+    note("discrete regions", expected.discrete_regions, found.discrete_regions);
+    note("land-land unresolved", expected.land_land_unresolved, found.land_land_unresolved);
+    note("sea-sea unresolved", expected.sea_sea_unresolved, found.sea_sea_unresolved);
+    note("land-sea unresolved", expected.land_sea_unresolved, found.land_sea_unresolved);
 
     lines
 }
@@ -347,6 +396,13 @@ pub struct Evidence {
     /// Maps in components that cannot be laid out. A component with none of these can be
     /// promoted to geography; one with any cannot, until the conflict has a disposition.
     pub inconsistent: BTreeSet<u16>,
+    /// The coordinate spaces the corpus actually describes, each with its measured shape.
+    ///
+    /// Not the same partition as `inconsistent`, and that is the point: the maps a planar
+    /// model calls inconsistent include a dungeon that simply wraps and a continent joined
+    /// to the open sea, both of which are consistent once the world is allowed the shape it
+    /// has.
+    pub regions: Vec<Region>,
 }
 
 /// Read the corpus.
@@ -455,6 +511,22 @@ pub fn evidence(maps: &[PackedMap]) -> Evidence {
     baseline.inconsistent_maps = tainted.len();
     baseline.inconsistent_components = inconsistent_components.len();
 
+    // The shape of the world, as opposed to the shape a plane would force on it. Measured
+    // last because it reads the adjacencies the classification above produced.
+    let spaces = regions(maps, &adjacencies);
+    baseline.regions = spaces.len();
+    baseline.wrapping_regions = spaces.iter().filter(|region| region.geometry.wraps()).count();
+    baseline.unresolved_seams = spaces.iter().map(|region| region.unresolved.len()).sum();
+    baseline.sea_maps = surfaces(maps).values().filter(|s| **s == Surface::Sea).count();
+    baseline.discrete_regions =
+        spaces.iter().filter(|region| region.geometry == Geometry::Discrete).count();
+
+    let classes = by_claim_class(maps, &adjacencies);
+    let unresolved = |class: ClaimClass| classes.get(&class).map(|c| c.unresolved).unwrap_or(0);
+    baseline.land_land_unresolved = unresolved(ClaimClass::LandLand);
+    baseline.sea_sea_unresolved = unresolved(ClaimClass::SeaSea);
+    baseline.land_sea_unresolved = unresolved(ClaimClass::LandSea);
+
     let evidence = Evidence {
         baseline,
         adjacencies,
@@ -462,6 +534,7 @@ pub fn evidence(maps: &[PackedMap]) -> Evidence {
         constraint_conflicts,
         witnesses,
         inconsistent: tainted,
+        regions: spaces,
     };
 
     let quads = conflict_free_quads(&evidence).len();
@@ -529,6 +602,13 @@ pub struct ConstraintConflict {
 /// the *constraint* that is reported — not a map, and not a traversal target.
 #[derive(Debug, Default)]
 struct Offsets {
+    /// The shape the offsets are accumulated in.
+    ///
+    /// `Geometry::Plane` reduces to exact arithmetic, which is why every planar count in
+    /// `BASELINE` is unaffected by this being general: there is one union-find for every
+    /// geometry, so a wrapping region and a flat one cannot disagree about what a
+    /// contradiction is.
+    geometry: Geometry,
     parent: BTreeMap<u16, u16>,
     /// Offset from this map to its parent.
     delta: BTreeMap<u16, (i64, i64)>,
@@ -544,7 +624,7 @@ impl Offsets {
 
         let (root, up) = self.find(parent);
         let mine = self.delta.get(&map).copied().unwrap_or((0, 0));
-        let total = (mine.0 + up.0, mine.1 + up.1);
+        let total = self.geometry.reduce((mine.0 + up.0, mine.1 + up.1));
 
         // Path compression, so a long chain is walked once rather than once per query.
         self.parent.insert(map, root);
@@ -556,13 +636,16 @@ impl Offsets {
     fn constrain(&mut self, from: u16, to: u16, delta: (i64, i64)) -> Option<ConstraintConflict> {
         let (from_root, from_off) = self.find(from);
         let (to_root, to_off) = self.find(to);
+        let delta = self.geometry.reduce(delta);
 
         if from_root == to_root {
             // Both already placed relative to the same root, so the answer is already
             // known: either this constraint agrees with it or the corpus contradicts
-            // itself here.
+            // itself here. "Agrees" means the difference is zero *in this geometry* — on a
+            // torus a whole period is no distance at all.
             let established = (to_off.0 - from_off.0, to_off.1 - from_off.1);
-            if established == delta {
+            let residual = self.geometry.reduce((established.0 - delta.0, established.1 - delta.1));
+            if residual == (0, 0) {
                 return None;
             }
             let (pair, established, claimed) = if from < to {
@@ -575,7 +658,9 @@ impl Offsets {
 
         // Different groups: join them. `to_root` hangs off `from_root` at whatever offset
         // makes this constraint true.
-        let root_delta = (from_off.0 + delta.0 - to_off.0, from_off.1 + delta.1 - to_off.1);
+        let root_delta = self
+            .geometry
+            .reduce((from_off.0 + delta.0 - to_off.0, from_off.1 + delta.1 - to_off.1));
         self.parent.insert(to_root, from_root);
         self.delta.insert(to_root, root_delta);
         None
@@ -680,7 +765,20 @@ pub fn cycle_witnesses(adjacencies: &BTreeSet<Adjacency>) -> Vec<CycleWitness> {
     // Spanning forest, built in sorted order so the tree is the same every run.
     let mut parent: BTreeMap<u16, (u16, (i64, i64))> = BTreeMap::new();
     let mut root_of: BTreeMap<u16, u16> = BTreeMap::new();
-    let mut tree_edges: BTreeSet<(u16, u16)> = BTreeSet::new();
+    // A tree edge is a *claim*, not a pair of maps. Two maps can be joined by more than
+    // one claim — 37 says 168 is to its West and also to its East — and keying the forest
+    // by the pair alone swallowed the second one, so a direct contradiction between two
+    // maps produced no witness at all. Keyed by the signed constraint, canonicalised so a
+    // claim and its reciprocal are one key.
+    let mut tree_edges: BTreeSet<((u16, u16), (i64, i64))> = BTreeSet::new();
+
+    fn signed(a: u16, b: u16, delta: (i64, i64)) -> ((u16, u16), (i64, i64)) {
+        if a <= b {
+            ((a, b), delta)
+        } else {
+            ((b, a), (-delta.0, -delta.1))
+        }
+    }
 
     let mut neighbours: BTreeMap<u16, Vec<(u16, (i64, i64))>> = BTreeMap::new();
     for edge in adjacencies {
@@ -709,7 +807,7 @@ pub fn cycle_witnesses(adjacencies: &BTreeSet<Adjacency>) -> Vec<CycleWitness> {
                     .unwrap_or((0, 0));
                 parent.insert(next, (map, delta));
                 root_of.insert(next, start);
-                tree_edges.insert((map.min(next), map.max(next)));
+                tree_edges.insert(signed(map, next, delta));
                 queue.push_back(next);
             }
         }
@@ -746,13 +844,12 @@ pub fn cycle_witnesses(adjacencies: &BTreeSet<Adjacency>) -> Vec<CycleWitness> {
     let mut witnesses: BTreeSet<CycleWitness> = BTreeSet::new();
 
     for edge in adjacencies {
-        let key = (edge.from_map.min(edge.to_map), edge.from_map.max(edge.to_map));
-        if tree_edges.contains(&key) {
-            continue;
-        }
-
         let (dx, dy) = edge.side.step();
         let delta = (dx as i64 * PITCH_X, dy as i64 * PITCH_Y);
+
+        if tree_edges.contains(&signed(edge.from_map, edge.to_map, delta)) {
+            continue;
+        }
 
         let from = offset_to_root(edge.from_map);
         let to = offset_to_root(edge.to_map);
@@ -1004,6 +1101,339 @@ pub fn lay_out(
     (origins, contradictions)
 }
 
+/// A map with at least this share of navigable water is sea rather than shore.
+///
+/// A descriptor, not a verdict. An earlier version of this rule counted every non-walkable
+/// tile and called 278 maps "open water", which put nine dry caves and pyramids in the
+/// ocean — `Interconexion Catacumbas` is 95% solid rock and 0% water — and then used that
+/// bad label to argue the sea was not a place. Water is navigable space: 2,232,228 tiles of
+/// it, crossed by boat, and no map in this corpus lacks walkable ground entirely.
+pub const SEA_WATER_PERCENT: usize = 50;
+
+/// The share of a map that is walkable, solid and navigable water, in that order.
+pub fn composition(map: &PackedMap) -> (usize, usize, usize) {
+    let total = map.tiles.len().max(1);
+    let count = |kind: Tile| {
+        map.tiles.iter().filter(|value| Tile::of(**value) == kind).count() * 100 / total
+    };
+    (count(Tile::Walkable), count(Tile::Solid), count(Tile::Water))
+}
+
+/// What a map is mostly made of.
+///
+/// Descriptive only. Whether a shore-to-sea claim is a seam, a boat route or a portal is a
+/// reviewed disposition, not something this label decides — sailing across the ocean is
+/// movement through the world, so a sea seam losing continuity would be a real defect
+/// rather than a tidy simplification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Surface {
+    Land,
+    Sea,
+}
+
+/// Which surfaces a claim joins, so land, sea and shore can be measured apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ClaimClass {
+    LandLand,
+    SeaSea,
+    /// A shore claiming the open sea, or the reverse. The class whose geometry is unknown.
+    LandSea,
+}
+
+/// How one class of claim behaves on its own.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ClassEvidence {
+    pub claims: usize,
+    pub components: usize,
+    pub wrapping: usize,
+    pub unresolved: usize,
+}
+
+/// The shape a region's own claims say it is.
+///
+/// Named explicitly rather than inferred from a pair of periods, because this is what the
+/// manifest publishes and what Elixir and Rust have to agree on: a reader should not have
+/// to know that "period 0" means "does not wrap". The legacy world intentionally contains
+/// more than one of these, and the compiler's job is to model them, not to flatten them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Geometry {
+    /// Unbounded in both directions. Most of the world.
+    #[default]
+    Plane,
+    /// Wraps on one axis. Walking far enough one way returns you to where you started.
+    Cylinder { axis: Axis, period: i64 },
+    /// Wraps on both. The four Newbie Dungeon maps are one, 148 x 160 tiles.
+    Torus { width: i64, height: i64 },
+    /// A space its maps reach only by transition: no seam joins them to anything. 199 maps
+    /// of this corpus are their own such space, reached by door or teleport, and saying so
+    /// is more honest than inventing a neighbour for them.
+    Discrete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Axis {
+    X,
+    Y,
+}
+
+impl Geometry {
+    fn from_periods(x: i64, y: i64) -> Geometry {
+        match (x, y) {
+            (0, 0) => Geometry::Plane,
+            (x, 0) => Geometry::Cylinder { axis: Axis::X, period: x },
+            (0, y) => Geometry::Cylinder { axis: Axis::Y, period: y },
+            (width, height) => Geometry::Torus { width, height },
+        }
+    }
+
+    /// The wrap period on each axis, `0` where the space does not wrap.
+    pub fn periods(&self) -> (i64, i64) {
+        match self {
+            Geometry::Plane | Geometry::Discrete => (0, 0),
+            Geometry::Cylinder { axis: Axis::X, period } => (*period, 0),
+            Geometry::Cylinder { axis: Axis::Y, period } => (0, *period),
+            Geometry::Torus { width, height } => (*width, *height),
+        }
+    }
+
+    pub fn wraps(&self) -> bool {
+        self.periods() != (0, 0)
+    }
+
+    /// Bring an offset into this geometry's canonical range.
+    pub fn reduce(&self, offset: (i64, i64)) -> (i64, i64) {
+        let (px, py) = self.periods();
+        let axis =
+            |value: i64, period: i64| if period == 0 { value } else { value.rem_euclid(period) };
+        (axis(offset.0, px), axis(offset.1, py))
+    }
+}
+
+/// One coordinate space: a set of maps, the shape they agree on, and where each one sits.
+///
+/// Named by its smallest map so the name is a fact about the group rather than about the
+/// order it was discovered in. Every map in the corpus belongs to exactly one region, and a
+/// map with no seams at all is a region of one — 199 of them are, which is honest: they are
+/// reached by door or teleport, and pretending otherwise would invent geography.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Region {
+    pub id: u16,
+    /// How many of its maps are mostly sea. A region may be all land, all sea, or a coast
+    /// that is both, and splitting it by surface would be a decision rather than a reading.
+    pub sea_maps: usize,
+    pub geometry: Geometry,
+    /// Where each map's core sits, in the region's own coordinates.
+    pub origins: BTreeMap<u16, Origin>,
+    /// Claims that cannot hold even in this geometry. Every one needs a reviewed
+    /// disposition; none may be silently dropped.
+    pub unresolved: Vec<Adjacency>,
+}
+
+/// Lay a group out in one geometry, reporting the claims that cannot hold in it.
+fn place(geometry: Geometry, edges: &[Adjacency]) -> (Offsets, Vec<Adjacency>) {
+    let mut offsets = Offsets { geometry, ..Offsets::default() };
+    let mut unresolved = Vec::new();
+    for edge in edges {
+        let (dx, dy) = edge.side.step();
+        let delta = (dx as i64 * PITCH_X, dy as i64 * PITCH_Y);
+        if offsets.constrain(edge.from_map, edge.to_map, delta).is_some() {
+            unresolved.push(*edge);
+        }
+    }
+    (offsets, unresolved)
+}
+
+/// How many maps end up sharing a cell with another one.
+///
+/// A wrap that is real also *fits*. Without this test the smallest period always wins by
+/// folding the world onto itself: a 2-map wrap "explains" 424 maps in 44 cells, which is
+/// exactly the wrong answer this analysis produced before the test existed.
+fn overlapping(offsets: &mut Offsets, members: &BTreeSet<u16>) -> usize {
+    let mut cells: BTreeMap<(i64, i64), usize> = BTreeMap::new();
+    for map in members {
+        let (_, offset) = offsets.find(*map);
+        let cell = (offset.0.div_euclid(PITCH_X), offset.1.div_euclid(PITCH_Y));
+        *cells.entry(cell).or_default() += 1;
+    }
+    cells.values().filter(|count| **count > 1).copied().sum()
+}
+
+/// The shape a group of maps is, measured from its own claims.
+///
+/// The plane is tried first and kept unless something better fits, so a consistent group is
+/// never described as wrapping. Candidate periods come from the magnitudes of the group's
+/// own failing loops — the corpus names its own candidates rather than being tested against
+/// a guess — and a candidate is admissible only if it leaves no two maps in one cell.
+pub fn measure_geometry(
+    edges: &[Adjacency],
+    members: &BTreeSet<u16>,
+) -> (Geometry, Vec<Adjacency>) {
+    let (_, planar) = place(Geometry::Plane, edges);
+    if planar.is_empty() {
+        return (Geometry::Plane, planar);
+    }
+
+    // The periods worth testing are the distances the group's own loops fail to close by.
+    let mut offsets = Offsets::default();
+    let mut candidates: BTreeSet<Geometry> = BTreeSet::new();
+    let mut xs: BTreeSet<i64> = BTreeSet::new();
+    let mut ys: BTreeSet<i64> = BTreeSet::new();
+    for edge in edges {
+        let (dx, dy) = edge.side.step();
+        let delta = (dx as i64 * PITCH_X, dy as i64 * PITCH_Y);
+        if let Some(conflict) = offsets.constrain(edge.from_map, edge.to_map, delta) {
+            let residual = (
+                conflict.established.0 - conflict.claimed.0,
+                conflict.established.1 - conflict.claimed.1,
+            );
+            if residual.0 != 0 {
+                xs.insert(residual.0.abs());
+            }
+            if residual.1 != 0 {
+                ys.insert(residual.1.abs());
+            }
+        }
+    }
+    for x in std::iter::once(0).chain(xs) {
+        for y in std::iter::once(0).chain(ys.iter().copied()) {
+            candidates.insert(Geometry::from_periods(x, y));
+        }
+    }
+
+    let mut best = (Geometry::Plane, planar);
+    for candidate in candidates {
+        if !candidate.wraps() {
+            continue;
+        }
+        let (mut offsets, unresolved) = place(candidate, edges);
+        if overlapping(&mut offsets, members) == 0 && unresolved.len() < best.1.len() {
+            best = (candidate, unresolved);
+        }
+    }
+    best
+}
+
+/// What each map is mostly made of, measured from its tiles.
+pub fn surfaces(maps: &[PackedMap]) -> BTreeMap<u16, Surface> {
+    maps.iter()
+        .map(|map| {
+            let (_, _, water) = composition(map);
+            let surface = if water >= SEA_WATER_PERCENT { Surface::Sea } else { Surface::Land };
+            (map.map_id, surface)
+        })
+        .collect()
+}
+
+/// Which surfaces each claim joins.
+pub fn class_of(edge: &Adjacency, surfaces: &BTreeMap<u16, Surface>) -> ClaimClass {
+    match (surfaces.get(&edge.from_map), surfaces.get(&edge.to_map)) {
+        (Some(Surface::Sea), Some(Surface::Sea)) => ClaimClass::SeaSea,
+        (Some(Surface::Land), Some(Surface::Land)) => ClaimClass::LandLand,
+        _ => ClaimClass::LandSea,
+    }
+}
+
+/// How each class of claim behaves when it is the only evidence.
+///
+/// The question the corpus has to answer before anything is promoted or discarded: the land
+/// may be a plane while the ocean is a cylinder while the shore claims join them
+/// inconsistently, and one aggregate number cannot tell those apart. Measured per class and
+/// pinned, so a later change to the ocean's shape is a visible decision rather than a drift
+/// in a total.
+pub fn by_claim_class(
+    maps: &[PackedMap],
+    adjacencies: &BTreeSet<Adjacency>,
+) -> BTreeMap<ClaimClass, ClassEvidence> {
+    let surfaces = surfaces(maps);
+    let mut report = BTreeMap::new();
+
+    for class in [ClaimClass::LandLand, ClaimClass::SeaSea, ClaimClass::LandSea] {
+        let only: BTreeSet<Adjacency> =
+            adjacencies.iter().copied().filter(|edge| class_of(edge, &surfaces) == class).collect();
+        let members: BTreeSet<u16> = only.iter().flat_map(|e| [e.from_map, e.to_map]).collect();
+        let regions = regions_of(&members, &only, &surfaces);
+
+        report.insert(
+            class,
+            ClassEvidence {
+                claims: only.len(),
+                components: regions.len(),
+                wrapping: regions.iter().filter(|region| region.geometry.wraps()).count(),
+                unresolved: regions.iter().map(|region| region.unresolved.len()).sum(),
+            },
+        );
+    }
+
+    report
+}
+
+/// Every coordinate space in the corpus, with its shape measured rather than assumed.
+///
+/// Every standard seam is evidence here, including shore-to-sea claims. Splitting the world
+/// by surface would decide the very thing under review: the sea is navigable space, so a
+/// claim across a coastline may be exactly as geographic as one inland, and dropping it to
+/// make the arithmetic close would be inventing geography by subtraction.
+pub fn regions(maps: &[PackedMap], adjacencies: &BTreeSet<Adjacency>) -> Vec<Region> {
+    let surface = surfaces(maps);
+    let known: BTreeSet<u16> = surface.keys().copied().collect();
+    regions_of(&known, adjacencies, &surface)
+}
+
+fn regions_of(
+    known: &BTreeSet<u16>,
+    seams: &BTreeSet<Adjacency>,
+    surface: &BTreeMap<u16, Surface>,
+) -> Vec<Region> {
+    let of_component = component_of(known, seams);
+
+    let mut grouped: BTreeMap<u16, (Vec<Adjacency>, BTreeSet<u16>)> = BTreeMap::new();
+    for map in known {
+        grouped.entry(of_component[map]).or_default().1.insert(*map);
+    }
+    for edge in seams {
+        if let Some(group) = grouped.get_mut(&of_component[&edge.from_map]) {
+            group.0.push(*edge);
+        }
+    }
+
+    grouped
+        .into_iter()
+        .map(|(id, (edges, members))| {
+            let (geometry, unresolved) = if edges.is_empty() {
+                (Geometry::Discrete, Vec::new())
+            } else {
+                measure_geometry(&edges, &members)
+            };
+            let (mut offsets, _) = place(geometry, &edges);
+
+            let mut origins: BTreeMap<u16, Origin> = members
+                .iter()
+                .map(|map| {
+                    let (_, offset) = offsets.find(*map);
+                    (*map, Origin { x: offset.0, y: offset.1 })
+                })
+                .collect();
+
+            // An unwrapped axis has no natural zero, so it gets one: the region's own edge.
+            // A wrapped axis is already in `[0, period)` and moving it would be a lie.
+            let (period_x, period_y) = geometry.periods();
+            if period_x == 0 {
+                let least = origins.values().map(|o| o.x).min().unwrap_or(0);
+                origins.values_mut().for_each(|o| o.x -= least);
+            }
+            if period_y == 0 {
+                let least = origins.values().map(|o| o.y).min().unwrap_or(0);
+                origins.values_mut().for_each(|o| o.y -= least);
+            }
+
+            let sea_maps =
+                members.iter().filter(|map| surface.get(map) == Some(&Surface::Sea)).count();
+
+            Region { id, sea_maps, geometry, origins, unresolved }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1026,6 +1456,178 @@ mod tests {
             objects: Vec::new(),
             exits,
         }
+    }
+
+    /// A sea map: navigable water, which is 2 and not 1. Using 1 here would make the
+    /// fixture a solid rock cube that the old classifier happily called an ocean.
+    fn sea(map_id: u16) -> PackedMap {
+        PackedMap { tiles: vec![2; STORAGE as usize * STORAGE as usize], ..map(map_id, Vec::new()) }
+    }
+
+    fn joined(from_map: u16, side: Side, to_map: u16) -> Adjacency {
+        Adjacency { from_map, side, to_map }
+    }
+
+    /// Both directions of one adjacency, which is what a reciprocal seam looks like.
+    fn both(a: u16, side: Side, b: u16) -> Vec<Adjacency> {
+        vec![joined(a, side, b), joined(b, side.opposite(), a)]
+    }
+
+    #[test]
+    fn a_square_that_agrees_is_a_plane_on_core_centres() {
+        // 1 2
+        // 3 4
+        let mut edges = Vec::new();
+        edges.extend(both(1, Side::East, 2));
+        edges.extend(both(3, Side::East, 4));
+        edges.extend(both(1, Side::South, 3));
+        edges.extend(both(2, Side::South, 4));
+        let maps: Vec<PackedMap> = (1..=4).map(|id| map(id, Vec::new())).collect();
+
+        let spaces = regions(&maps, &edges.into_iter().collect());
+        assert_eq!(spaces.len(), 1);
+        let region = &spaces[0];
+        assert_eq!(region.id, 1);
+        assert_eq!(region.geometry, Geometry::Plane);
+        assert_eq!(region.unresolved, Vec::new());
+        assert_eq!(region.sea_maps, 0);
+        // 74 and 80, not 100: the pitch is the core, so one step across a seam is one tile.
+        assert_eq!(region.origins[&1], Origin { x: 0, y: 0 });
+        assert_eq!(region.origins[&2], Origin { x: PITCH_X, y: 0 });
+        assert_eq!(region.origins[&3], Origin { x: 0, y: PITCH_Y });
+        assert_eq!(region.origins[&4], Origin { x: PITCH_X, y: PITCH_Y });
+    }
+
+    #[test]
+    fn a_pair_claiming_both_of_its_opposite_sides_is_a_world_that_wraps() {
+        // The four Newbie Dungeon maps, in miniature: each pair claims the other to its
+        // West *and* its East. Read as a plane that is a contradiction out by two map
+        // widths. Read as a shape it is a 2x2 world that loops, and it closes exactly.
+        let mut edges = Vec::new();
+        for side in [Side::East, Side::West] {
+            edges.extend(both(1, side, 2));
+            edges.extend(both(3, side, 4));
+        }
+        for side in [Side::North, Side::South] {
+            edges.extend(both(1, side, 3));
+            edges.extend(both(2, side, 4));
+        }
+        let maps: Vec<PackedMap> = (1..=4).map(|id| map(id, Vec::new())).collect();
+
+        let spaces = regions(&maps, &edges.into_iter().collect());
+        assert_eq!(spaces.len(), 1);
+        assert_eq!(spaces[0].geometry, Geometry::Torus { width: 2 * PITCH_X, height: 2 * PITCH_Y });
+        assert_eq!(spaces[0].unresolved, Vec::new());
+        // Every map still has its own cell; a wrap that folds maps onto each other is not
+        // a wrap, it is a smaller lie.
+        let cells: BTreeSet<(i64, i64)> = spaces[0].origins.values().map(|o| (o.x, o.y)).collect();
+        assert_eq!(cells.len(), 4);
+    }
+
+    #[test]
+    fn a_period_that_does_not_fit_is_rejected_and_the_claim_stays_unresolved() {
+        // An agreeing square, plus one claim too many: 4 is already east of 3, and this also
+        // puts it south of 3. The loop fails to close by (74, -80), so 74 and 80 both look
+        // like periods — and either one folds maps onto each other. This is the test that
+        // was missing when a 2-map wrap "explained" 424 maps in 44 cells.
+        let mut edges = Vec::new();
+        edges.extend(both(1, Side::East, 2));
+        edges.extend(both(3, Side::East, 4));
+        edges.extend(both(1, Side::South, 3));
+        edges.extend(both(2, Side::South, 4));
+        edges.push(joined(3, Side::South, 4));
+        let maps: Vec<PackedMap> = (1..=4).map(|id| map(id, Vec::new())).collect();
+
+        let spaces = regions(&maps, &edges.into_iter().collect());
+        assert_eq!(spaces[0].geometry, Geometry::Plane);
+        assert_eq!(spaces[0].unresolved, vec![joined(3, Side::South, 4)]);
+        let cells: BTreeSet<(i64, i64)> = spaces[0].origins.values().map(|o| (o.x, o.y)).collect();
+        assert_eq!(cells.len(), 4);
+    }
+
+    #[test]
+    fn two_maps_claiming_each_other_twice_produce_a_witness() {
+        // The defect this test pins: the spanning forest keyed tree edges by map pair, so a
+        // second claim between the *same two maps* was mistaken for the tree edge and
+        // skipped. A pair that says "you are to my west" and "you are to my east" is a
+        // contradiction with no third map in it, and it was reported as no contradiction.
+        let edges: BTreeSet<Adjacency> =
+            BTreeSet::from([joined(1, Side::East, 2), joined(1, Side::West, 2)]);
+
+        let witnesses = cycle_witnesses(&edges);
+        assert_eq!(witnesses.len(), 1, "a two-map contradiction is still a contradiction");
+        // Two core widths apart: the West claim became the tree edge, so the East claim
+        // asks for the opposite side of a map that is already placed.
+        assert_eq!(witnesses[0].residual, (-2 * PITCH_X, 0));
+        assert_eq!(witnesses[0].loop_maps, vec![1, 2, 1]);
+    }
+
+    #[test]
+    fn a_solid_cave_is_not_an_ocean() {
+        // The classifier bug this test exists to prevent: reading the blocked layer as a
+        // boolean made 278 maps "open water", nine of which are dry rock. Water is the
+        // tile value 2, and nothing else is.
+        let cave = PackedMap {
+            tiles: vec![1; STORAGE as usize * STORAGE as usize],
+            ..map(41, Vec::new())
+        };
+        assert_eq!(composition(&cave), (0, 100, 0));
+        assert_eq!(surfaces(&[cave])[&41], Surface::Land);
+
+        let ocean = sea(495);
+        assert_eq!(composition(&ocean), (0, 0, 100));
+        assert_eq!(surfaces(&[ocean])[&495], Surface::Sea);
+
+        assert_eq!(Tile::of(0), Tile::Walkable);
+        assert_eq!(Tile::of(1), Tile::Solid);
+        assert_eq!(Tile::of(2), Tile::Water);
+        assert!(Tile::of(0).walkable());
+        assert!(!Tile::of(2).walkable());
+    }
+
+    #[test]
+    fn a_shore_to_sea_claim_stays_a_seam_and_is_measured_apart() {
+        // Sailing is movement through the world, so a coast claiming the sea to its east is
+        // evidence like any other. It is classified so its geometry can be judged on its
+        // own, never dropped to make the land's arithmetic close.
+        let maps = vec![map(1, Vec::new()), sea(2), sea(3)];
+        let edges: BTreeSet<Adjacency> =
+            both(1, Side::East, 2).into_iter().chain(both(2, Side::East, 3)).collect();
+
+        let spaces = regions(&maps, &edges);
+        assert_eq!(spaces.len(), 1, "every seam is evidence, so this is one region");
+        assert_eq!(spaces[0].origins.len(), 3);
+        assert_eq!(spaces[0].sea_maps, 2);
+        assert_eq!(spaces[0].unresolved, Vec::new());
+
+        let classes = by_claim_class(&maps, &edges);
+        assert_eq!(classes[&ClaimClass::LandSea].claims, 2);
+        assert_eq!(classes[&ClaimClass::SeaSea].claims, 2);
+        assert_eq!(classes[&ClaimClass::LandLand].claims, 0);
+        assert_eq!(classes[&ClaimClass::LandSea].unresolved, 0);
+    }
+
+    #[test]
+    fn a_map_with_no_seams_is_a_region_of_one() {
+        // 199 maps in the corpus are reached only by door or teleport. Leaving them out of
+        // the region list would lose them; inventing a neighbour for them would be worse.
+        let maps = vec![map(1, Vec::new()), map(2, Vec::new())];
+        let spaces = regions(&maps, &BTreeSet::new());
+        assert_eq!(spaces.len(), 2);
+        assert!(spaces.iter().all(|region| region.origins.len() == 1));
+        assert!(spaces.iter().all(|region| region.geometry == Geometry::Discrete));
+        assert_eq!(spaces[0].origins[&1], Origin { x: 0, y: 0 });
+    }
+
+    #[test]
+    fn a_whole_period_is_no_distance_on_a_torus() {
+        let torus = Geometry::Torus { width: 148, height: 160 };
+        assert_eq!(torus.reduce((148, 160)), (0, 0));
+        assert_eq!(torus.reduce((-74, -80)), (74, 80));
+        // A plane keeps every tile it is given, including negative ones.
+        assert_eq!(Geometry::Plane.reduce((-1406, 74)), (-1406, 74));
+        assert!(!Geometry::Plane.wraps());
+        assert!(torus.wraps());
     }
 
     #[test]

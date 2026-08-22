@@ -1,9 +1,14 @@
 //! Draw the world's tiles, so a placement can be judged by looking at it.
 //!
 //! Counts say a seam is standard; only the ground says whether two maps belong side by
-//! side. One pixel per tile: pale where a character can walk, dark where the map blocks,
-//! near-black where the map has no ground at all, and a line on every map's edge so seams
-//! are visible rather than guessed.
+//! side. One pixel per tile, in the four states the blocked layer actually has: pale where a
+//! character can walk, blue where the tile is navigable water crossed by boat, dark where it
+//! is solid, near-black where the map has no ground at all. A line on every map edge so
+//! seams are visible rather than guessed.
+//!
+//! Water is drawn as water because it is not a wall. An earlier version of this render drew
+//! every non-walkable tile the same dark colour, which made a 62%-sailable ocean look like a
+//! rock face and made "the sea is not a place" seem obvious when it is false.
 //!
 //! Five pictures, each answering a question that a number cannot:
 //!
@@ -15,21 +20,19 @@
 //! - `dungeon-torus.png` — the four Newbie Dungeon maps, whose claims are each doubled with
 //!   their opposite: 37 has 168 to its West *and* East. That is a 2x2 world that loops, and
 //!   `wrap.rs` confirms it closes exactly as a 148 x 160 torus.
-//! - `bridge-*.png` — a coastline map beside the open-sea map it claims as a neighbour. The
-//!   sea is a single blocked expanse authored as its own strip, which is why no plane holds
-//!   both it and the coast it is bolted onto.
+//! - `bridge-*.png` — a coastline map beside the sea map it claims as a neighbour. Shore
+//!   claims are almost entirely consistent — 439 of them with one exception — so these are
+//!   geography, and the water runs across the seam like any other terrain.
 //!
 //! Usage: `cargo run -p ao-topology --example render -- <pack> <out-dir>`
 
-use ao_core::mappack::PackedMap;
+use ao_core::mappack::{PackedMap, Tile};
 use ao_core::topology::{self, Adjacency, Origin, CORE_X, CORE_Y, PITCH_X, PITCH_Y};
 use image::{Rgb, RgbImage};
 use std::collections::{BTreeMap, BTreeSet};
 
-/// Matches `wrap.rs`: a map this blocked has no land to walk on, so it is open water.
-const WATER_BLOCKED_PERCENT: usize = 95;
-
 const WALKABLE: Rgb<u8> = Rgb([214, 205, 178]);
+const WATER: Rgb<u8> = Rgb([48, 82, 116]);
 const BLOCKED: Rgb<u8> = Rgb([44, 38, 30]);
 const VOID: Rgb<u8> = Rgb([12, 12, 16]);
 const EDGE: Rgb<u8> = Rgb([120, 96, 48]);
@@ -58,10 +61,12 @@ fn draw_map(
 
             let base = if !ground.contains(&(x, y)) {
                 VOID
-            } else if map.tile_at(x as i32, y as i32) != 0 {
-                BLOCKED
             } else {
-                WALKABLE
+                match Tile::of(map.tile_at(x as i32, y as i32)) {
+                    Tile::Walkable => WALKABLE,
+                    Tile::Water => WATER,
+                    Tile::Solid => BLOCKED,
+                }
             };
             let colour = match tint {
                 // Tinted, not replaced: the map's own shape stays readable, because it is
@@ -112,47 +117,29 @@ fn main() {
     let maps: BTreeMap<u16, &PackedMap> = decoded.iter().map(|m| (m.map_id, m)).collect();
     let found = topology::evidence(&decoded);
 
-    let water: BTreeSet<u16> = decoded
+    // The largest region, laid out by the production model: every standard seam is
+    // evidence, shore-to-sea included. If the picture is coherent, the pitch and the seam
+    // rule are right; if it is not, no count can save them.
+    let largest = found
+        .regions
         .iter()
-        .filter(|map| {
-            map.tiles.iter().filter(|t| **t != 0).count() * 100 / map.tiles.len().max(1)
-                >= WATER_BLOCKED_PERCENT
-        })
-        .map(|map| map.map_id)
-        .collect();
-
-    // The land, with the open sea set aside. `wrap.rs` measures every piece of this as
-    // internally consistent, so laying it out should produce a coherent picture — and if it
-    // does not, the seam model is wrong no matter what the counts say.
-    let dry: BTreeSet<Adjacency> = found
-        .adjacencies
-        .iter()
-        .copied()
-        .filter(|e| !water.contains(&e.from_map) && !water.contains(&e.to_map))
-        .collect();
-    let dry_ids: BTreeSet<u16> = dry.iter().flat_map(|e| [e.from_map, e.to_map]).collect();
-    let component = topology::component_of(&dry_ids, &dry);
-    let mut sizes: BTreeMap<u16, usize> = BTreeMap::new();
-    for name in component.values() {
-        *sizes.entry(*name).or_default() += 1;
-    }
-    let largest = sizes.iter().max_by_key(|(_, size)| **size).map(|(name, _)| *name).unwrap_or(1);
-
-    let (origins, contradictions) = topology::lay_out(largest, &dry);
+        .max_by_key(|region| region.origins.len())
+        .expect("the corpus has regions");
     println!(
-        "continent from map {largest}: {} maps placed, {} contradicting seams",
-        origins.len(),
-        contradictions.len()
+        "region {}: {} maps ({} sea), {:?}, {} unresolved claims",
+        largest.id,
+        largest.origins.len(),
+        largest.sea_maps,
+        largest.geometry,
+        largest.unresolved.len()
     );
     let placements: Vec<(u16, Origin, Option<Rgb<u8>>)> =
-        origins.iter().map(|(id, origin)| (*id, *origin, None)).collect();
-    render(&format!("{out}/continent.png"), &maps, &placements);
+        largest.origins.iter().map(|(id, origin)| (*id, *origin, None)).collect();
+    render(&format!("{out}/region-{}.png", largest.id), &maps, &placements);
 
     // A 2x2 of the same layout, big enough on screen to see a seam not interrupting the
     // ground.
-    if let Some(quad) = topology::conflict_free_quads(&found).into_iter().find(|q| {
-        [q.north_west, q.north_east, q.south_west, q.south_east].iter().all(|m| !water.contains(m))
-    }) {
+    if let Some(quad) = topology::conflict_free_quads(&found).into_iter().next() {
         println!(
             "clean square {} {} / {} {}",
             quad.north_west, quad.north_east, quad.south_west, quad.south_east

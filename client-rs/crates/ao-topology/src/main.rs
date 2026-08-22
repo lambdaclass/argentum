@@ -60,6 +60,81 @@ fn main() {
         found.constraint_conflicts.len()
     );
 
+    // The world's actual shape, region by region. The counts above measure a plane; these
+    // measure what the corpus is, which is not the same thing and is the more useful
+    // document: a region is what gets a coordinate space, a manifest entry and an origin.
+    println!("  regions                  {}", b.regions);
+    println!("    that wrap              {}", b.wrapping_regions);
+    println!("    unresolved seams       {}", b.unresolved_seams);
+    println!("  sea maps (>=50% water)   {}", b.sea_maps);
+
+    // Each class of claim on its own, because "the world is inconsistent" cannot say
+    // whether the land, the ocean or the shore between them is the part that disagrees.
+    println!("  by claim class:");
+    for (class, evidence) in ao_core::topology::by_claim_class(&maps, &found.adjacencies) {
+        println!(
+            "    {:<10} {:>6} claims  {:>3} regions  {:>2} wrapping  {:>3} unresolved",
+            match class {
+                ao_core::topology::ClaimClass::LandLand => "land-land",
+                ao_core::topology::ClaimClass::SeaSea => "sea-sea",
+                ao_core::topology::ClaimClass::LandSea => "shore",
+            },
+            evidence.claims,
+            evidence.components,
+            evidence.wrapping,
+            evidence.unresolved,
+        );
+    }
+
+    let mut ranked: Vec<&topology::Region> = found.regions.iter().collect();
+    ranked.sort_by_key(|region| std::cmp::Reverse(region.origins.len()));
+    println!("  largest regions:");
+    for region in ranked.iter().take(8) {
+        let span_x = region.origins.values().map(|o| o.x).max().unwrap_or(0) / topology::PITCH_X;
+        let span_y = region.origins.values().map(|o| o.y).max().unwrap_or(0) / topology::PITCH_Y;
+        println!(
+            "    region {:<5} {:>3} maps  {:<10} {:<28} {} x {} maps{}",
+            region.id,
+            region.origins.len(),
+            format!("{} sea", region.sea_maps),
+            match region.geometry {
+                topology::Geometry::Plane => "plane".to_string(),
+                topology::Geometry::Discrete => "reached only by transition".to_string(),
+                topology::Geometry::Cylinder { axis, period } => {
+                    format!("cylinder, {period} tiles on {axis:?}")
+                }
+                topology::Geometry::Torus { width, height } => {
+                    format!("torus, {width} x {height} tiles")
+                }
+            },
+            span_x + 1,
+            span_y + 1,
+            if region.unresolved.is_empty() {
+                String::new()
+            } else {
+                format!("  [{} unresolved]", region.unresolved.len())
+            },
+        );
+    }
+
+    // Every region that still cannot be laid out, because each one needs a disposition and
+    // none may be silently dropped.
+    let unresolved: Vec<&topology::Region> =
+        found.regions.iter().filter(|region| !region.unresolved.is_empty()).collect();
+    if !unresolved.is_empty() {
+        println!("  regions with unresolved seams:");
+        for region in &unresolved {
+            println!(
+                "    region {:<5} {:>3} maps  {:<10} {} unresolved, first {:?}",
+                region.id,
+                region.origins.len(),
+                format!("{} sea", region.sea_maps),
+                region.unresolved.len(),
+                region.unresolved.first().map(|edge| (edge.from_map, edge.side, edge.to_map)),
+            );
+        }
+    }
+
     // The largest components, because that is what a first seamless region is chosen from.
     let mut sizes: BTreeMap<u16, usize> = BTreeMap::new();
     let mut seen = std::collections::BTreeSet::new();

@@ -45,6 +45,42 @@ impl core::fmt::Display for PackError {
     }
 }
 
+/// What a byte in the blocked layer means.
+///
+/// The layer is not a boolean, and reading it as one is a category error with consequences.
+/// `Arena.Map.CsmParser` writes `0` for walkable, `2` for navigable water — derived from
+/// layer-1 GRH ranges, cancelled where layer 2 puts a bridge over it — and `1` for solid,
+/// applied last so it wins wherever both apply. `Arena.Map.Movement` then lets a character
+/// enter a `2` only while `navigating`, which is to say in a boat.
+///
+/// So water is space the world is played in, not absence of world: 2,232,228 tiles of this
+/// corpus are navigable. Counting every nonzero byte as "blocked" makes `Alta Mar`, which is
+/// 62% sailable sea, indistinguishable from `Interconexion Catacumbas`, which is 95% rock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Tile {
+    Walkable,
+    Solid,
+    /// Crossed by boat. Impassable on foot, and not a wall.
+    Water,
+}
+
+impl Tile {
+    pub fn of(value: u8) -> Tile {
+        match value {
+            0 => Tile::Walkable,
+            2 => Tile::Water,
+            // Anything else is solid. The parser normalises to 1, and an unknown value is
+            // safer treated as a wall than as open ground.
+            _ => Tile::Solid,
+        }
+    }
+
+    /// Whether a character on foot may stand here.
+    pub fn walkable(self) -> bool {
+        self == Tile::Walkable
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LayerTile {
     pub x: u8,
