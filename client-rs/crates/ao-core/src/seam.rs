@@ -617,3 +617,53 @@ mod tests {
         assert_eq!(to_local(origin, (origin.x - 1, origin.y)), None);
     }
 }
+
+#[cfg(test)]
+mod cross_language {
+    use crate::mappack::{tile_semantics_fixture, Tile};
+
+    #[test]
+    fn rust_agrees_with_the_elixir_server_about_what_every_tile_means() {
+        let fixture = tile_semantics_fixture();
+        assert!(fixture.len() >= 100, "the fixture should cover a real spread of positions");
+
+        for row in &fixture {
+            let tile = Tile::of(row.value);
+            assert_eq!(
+                tile.enterable(false),
+                row.on_foot,
+                "map {} ({}, {}) value {}: Elixir says on foot {}, Rust says {}",
+                row.map_id,
+                row.x,
+                row.y,
+                row.value,
+                row.on_foot,
+                tile.enterable(false)
+            );
+            assert_eq!(
+                tile.enterable(true),
+                row.navigating,
+                "map {} ({}, {}) value {}: Elixir says navigating {}, Rust says {}",
+                row.map_id,
+                row.x,
+                row.y,
+                row.value,
+                row.navigating,
+                tile.enterable(true)
+            );
+        }
+    }
+
+    #[test]
+    fn the_fixture_covers_all_three_tile_classes() {
+        // A fixture of walkable tiles only would have agreed with reading the layer as a
+        // boolean, which is the error it exists to prevent.
+        let fixture = tile_semantics_fixture();
+        for expected in [Tile::Walkable, Tile::Solid, Tile::Water] {
+            assert!(
+                fixture.iter().any(|row| Tile::of(row.value) == expected),
+                "no {expected:?} tile in the fixture"
+            );
+        }
+    }
+}

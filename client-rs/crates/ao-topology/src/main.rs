@@ -135,6 +135,31 @@ fn main() {
         }
     }
 
+    // The other half of the cross-language contract. The unit tests assert that Rust and
+    // Elixir agree on what a tile *value* means; only here, with the corpus present, can we
+    // check that both are reading the same values out of the same maps.
+    let semantics = ao_core::mappack::tile_semantics_fixture();
+    let mut disagreements = Vec::new();
+    for row in &semantics {
+        if let Some(map) = maps.iter().find(|map| map.map_id == row.map_id) {
+            let found = map.tile_at(row.x as i32, row.y as i32);
+            if found != row.value {
+                disagreements.push(format!(
+                    "map {} ({}, {}): Elixir wrote {}, Rust reads {}",
+                    row.map_id, row.x, row.y, row.value, found
+                ));
+            }
+        }
+    }
+    println!(
+        "  tile semantics fixture    {} rows, {} disagreements",
+        semantics.len(),
+        disagreements.len()
+    );
+    for line in disagreements.iter().take(5) {
+        println!("    {line}");
+    }
+
     // Seam evidence: what a character could actually do at every candidate land boundary.
     // Reported as observation, deliberately separate from any promotion decision.
     let surfaces = topology::surfaces(&maps);
@@ -211,7 +236,8 @@ fn main() {
         // changed" is not actionable and "standard seams: expected 156084, found 156080"
         // is — that exact line is what found the four corner seams this compiler had been
         // throwing away.
-        let differences = topology::drift(&topology::BASELINE, b);
+        let mut differences = topology::drift(&topology::BASELINE, b);
+        differences.extend(disagreements.iter().cloned());
         if differences.is_empty() {
             println!("  baseline: matches the pinned corpus {}", topology::CORPUS);
         } else {

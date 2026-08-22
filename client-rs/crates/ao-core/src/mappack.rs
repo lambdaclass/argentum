@@ -79,6 +79,61 @@ impl Tile {
     pub fn walkable(self) -> bool {
         self == Tile::Walkable
     }
+
+    /// Whether a character may enter this tile, given whether they are in a boat.
+    ///
+    /// The server's rule, and only the server's rule: `Arena.Map.Movement` has exactly one
+    /// line about it — `tile_val == 2 and not entity.navigating` — so water needs a boat and
+    /// *nothing* blocks a boat on dry land. That asymmetry is almost certainly not what the
+    /// original game intended, and it is reproduced faithfully here anyway. A client that
+    /// guesses a stricter rule than the server enforces predicts moves the server will
+    /// allow, which desynchronises them; the place to change this is the server, in a change
+    /// that also updates `fixtures/tile_semantics.txt`.
+    pub fn enterable(self, navigating: bool) -> bool {
+        match self {
+            Tile::Walkable => true,
+            Tile::Water => navigating,
+            Tile::Solid => false,
+        }
+    }
+}
+
+/// One row of `fixtures/tile_semantics.txt`: what Elixir says a tile means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TileSemantics {
+    pub map_id: u16,
+    pub x: u8,
+    pub y: u8,
+    pub value: u8,
+    pub on_foot: bool,
+    pub navigating: bool,
+}
+
+/// The cross-language contract, parsed.
+///
+/// A byte in the blocked layer means something only because the Elixir parser gave it a
+/// meaning and Elixir movement code acts on it; the pack format says nothing. That gap
+/// produced a week-long error once — three states read as two, every downstream count stable
+/// and wrong — and a drift gate could not see it, because nothing drifted. So the meaning is
+/// written down on the Elixir side and asserted here. Regenerate with
+/// `mix run --no-start apps/arena/test/generate_tile_semantics_fixture.exs`; a divergence
+/// then shows up as a diff in review rather than as agreement between two different beliefs.
+pub fn tile_semantics_fixture() -> Vec<TileSemantics> {
+    include_str!("../fixtures/tile_semantics.txt")
+        .lines()
+        .filter(|line| !line.starts_with('#') && !line.trim().is_empty())
+        .map(|line| {
+            let field: Vec<&str> = line.split_whitespace().collect();
+            TileSemantics {
+                map_id: field[0].parse().expect("map id"),
+                x: field[1].parse().expect("x"),
+                y: field[2].parse().expect("y"),
+                value: field[3].parse().expect("tile value"),
+                on_foot: field[5] == "true",
+                navigating: field[6] == "true",
+            }
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
