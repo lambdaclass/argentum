@@ -1,0 +1,40 @@
+# Arrival classification for every exit of map 563.
+# version 17afc00c9c7e0b4c
+# Generated: ao-topology <pack> --exit-annotations <dir>
+# An exit absent from this file has no annotation, and the server refuses it.
+# columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>
+69 10 568 69 90 walkable drawn
+70 10 568 70 90 walkable drawn
+71 10 568 71 90 walkable drawn
+72 10 568 72 90 walkable drawn
+73 10 568 73 90 walkable drawn
+74 10 568 74 90 walkable drawn
+75 10 568 75 90 walkable drawn
+77 10 568 77 90 walkable drawn
+78 10 568 78 90 walkable drawn
+79 10 568 79 90 walkable drawn
+80 10 568 80 90 walkable drawn
+81 10 568 81 90 walkable drawn
+82 10 568 82 90 walkable drawn
+83 10 568 83 90 walkable drawn
+85 10 568 85 90 walkable drawn
+86 10 568 86 90 walkable drawn
+87 10 568 87 90 walkable drawn
+88 21 564 14 21 walkable drawn
+88 22 564 14 22 walkable drawn
+88 31 564 14 31 walkable drawn
+88 32 564 14 32 walkable drawn
+88 33 564 14 33 walkable drawn
+88 37 564 14 37 walkable drawn
+88 38 564 14 38 walkable drawn
+88 47 564 14 47 walkable drawn
+88 48 564 14 48 walkable drawn
+88 74 564 14 74 walkable drawn
+88 75 564 14 75 walkable drawn
+88 76 564 14 76 walkable drawn
+88 80 564 14 80 walkable drawn
+88 81 564 14 81 walkable drawn
+88 82 564 14 82 walkable drawn
+88 86 564 14 86 walkable drawn
+88 87 564 14 87 walkable drawn
+88 88 564 14 88 walkable drawn

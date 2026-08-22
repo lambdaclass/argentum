@@ -546,6 +546,84 @@ fn main() {
         }
     }
 
+    // Per-map exit annotations: for every exit, what the destination tile is. The server
+    // needs this to judge an arrival *before* it releases a character, and it has no other
+    // way to know — a MapServer holds its own map's tiles and nobody else's. Compiled in
+    // here, one file per map, so the runtime does no cross-map lookup and no shared table.
+    if let Some(index) = args.iter().position(|arg| arg == "--exit-annotations") {
+        let Some(dir) = args.get(index + 1) else {
+            eprintln!("--exit-annotations needs a directory");
+            std::process::exit(2);
+        };
+        if let Err(error) = std::fs::create_dir_all(dir) {
+            eprintln!("{dir}: {error}");
+            std::process::exit(1);
+        }
+
+        let by_id: std::collections::BTreeMap<u16, &ao_core::mappack::PackedMap> =
+            maps.iter().map(|map| (map.map_id, map)).collect();
+        let mut written = 0usize;
+        let mut annotated = 0usize;
+        let mut unresolvable = 0usize;
+
+        for map in &maps {
+            let mut lines: Vec<String> = Vec::new();
+            for exit in &map.exits {
+                // An exit whose destination map does not exist cannot be annotated, and is
+                // deliberately left out: the server fails closed on an unannotated exit,
+                // which is the right answer for one that points at nothing.
+                let Some(destination) = by_id.get(&exit.target_map) else {
+                    unresolvable += 1;
+                    continue;
+                };
+
+                let class = match ao_core::mappack::Tile::of(
+                    destination.tile_at(exit.target_x as i32, exit.target_y as i32),
+                ) {
+                    ao_core::mappack::Tile::Walkable => "walkable",
+                    ao_core::mappack::Tile::Solid => "solid",
+                    ao_core::mappack::Tile::Water => "water",
+                };
+                let drawn = ao_core::mask::simulated_tiles(destination)
+                    .contains(&(exit.target_x, exit.target_y));
+
+                lines.push(format!(
+                    "{} {} {} {} {} {class} {}",
+                    exit.x,
+                    exit.y,
+                    exit.target_map,
+                    exit.target_x,
+                    exit.target_y,
+                    if drawn { "drawn" } else { "undrawn" }
+                ));
+                annotated += 1;
+            }
+
+            lines.sort();
+            let body = format!(
+                "# Arrival classification for every exit of map {}.\n\
+                 # version {}\n\
+                 # Generated: ao-topology <pack> --exit-annotations <dir>\n\
+                 # An exit absent from this file has no annotation, and the server refuses it.\n\
+                 # columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>\n{}\n",
+                map.map_id,
+                topology::CORPUS,
+                lines.join("\n")
+            );
+            let path = format!("{dir}/map-{}.txt", map.map_id);
+            if let Err(error) = std::fs::write(&path, body) {
+                eprintln!("{path}: {error}");
+                std::process::exit(1);
+            }
+            written += 1;
+        }
+
+        println!(
+            "\n  wrote {written} exit-annotation files to {dir}: {annotated} exits annotated, \
+             {unresolvable} left unannotated because their destination map does not exist"
+        );
+    }
+
     // The manifest: measured evidence plus hand-recorded review, and the only place that
     // says what is allowed to be geography.
     let reviews = ao_core::manifest::reviews();

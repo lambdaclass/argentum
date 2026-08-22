@@ -1,0 +1,36 @@
+# Arrival classification for every exit of map 332.
+# version 17afc00c9c7e0b4c
+# Generated: ao-topology <pack> --exit-annotations <dir>
+# An exit absent from this file has no annotation, and the server refuses it.
+# columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>
+14 50 177 86 20 walkable drawn
+14 51 177 86 21 walkable drawn
+14 52 177 86 22 walkable drawn
+14 53 177 86 23 walkable drawn
+14 54 177 86 24 walkable drawn
+14 55 177 86 25 walkable drawn
+49 10 333 49 90 walkable drawn
+50 10 333 50 90 walkable drawn
+53 91 331 53 11 walkable drawn
+54 91 331 54 11 walkable drawn
+72 10 333 72 90 walkable drawn
+73 10 333 73 90 walkable drawn
+88 28 328 14 28 walkable drawn
+88 29 328 14 29 walkable drawn
+88 30 328 14 30 walkable drawn
+88 31 328 14 31 walkable drawn
+88 45 328 14 45 walkable drawn
+88 46 328 14 46 walkable drawn
+88 47 328 14 47 walkable drawn
+88 48 328 14 48 walkable drawn
+88 49 328 14 49 walkable undrawn
+88 51 328 14 51 walkable drawn
+88 52 328 14 52 walkable drawn
+88 53 328 14 53 walkable drawn
+88 54 328 14 54 solid drawn
+88 55 328 14 55 solid drawn
+88 56 328 14 56 walkable drawn
+88 57 328 14 57 walkable drawn
+88 58 328 14 58 walkable drawn
+88 59 328 14 59 walkable drawn
+88 60 328 14 60 walkable drawn

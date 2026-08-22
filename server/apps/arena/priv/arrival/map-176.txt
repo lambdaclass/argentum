@@ -1,0 +1,20 @@
+# Arrival classification for every exit of map 176.
+# version 17afc00c9c7e0b4c
+# Generated: ao-topology <pack> --exit-annotations <dir>
+# An exit absent from this file has no annotation, and the server refuses it.
+# columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>
+13 52 175 87 52 walkable drawn
+13 53 175 87 53 walkable drawn
+13 54 175 87 54 walkable drawn
+13 55 175 87 55 walkable drawn
+13 56 175 87 56 walkable drawn
+13 57 175 87 57 walkable drawn
+13 58 175 87 58 walkable undrawn
+79 10 174 79 90 walkable drawn
+80 10 174 80 90 walkable drawn
+81 10 174 81 90 walkable drawn
+82 10 174 82 90 walkable drawn
+83 10 174 83 90 walkable drawn
+84 10 174 84 90 walkable drawn
+85 10 174 85 90 walkable drawn
+86 10 174 86 90 walkable drawn

@@ -1,0 +1,10 @@
+# Arrival classification for every exit of map 313.
+# version 17afc00c9c7e0b4c
+# Generated: ao-topology <pack> --exit-annotations <dir>
+# An exit absent from this file has no annotation, and the server refuses it.
+# columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>
+88 11 311 14 11 walkable drawn
+88 12 311 14 12 walkable drawn
+88 13 311 14 13 walkable drawn
+88 14 311 14 14 walkable drawn
+88 15 311 14 15 walkable drawn

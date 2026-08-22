@@ -1,0 +1,28 @@
+# Arrival classification for every exit of map 370.
+# version 17afc00c9c7e0b4c
+# Generated: ao-topology <pack> --exit-annotations <dir>
+# An exit absent from this file has no annotation, and the server refuses it.
+# columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>
+19 91 369 19 11 walkable drawn
+20 91 369 20 11 walkable drawn
+21 91 369 21 11 walkable drawn
+22 91 369 22 11 walkable drawn
+23 91 369 23 11 walkable drawn
+24 91 369 24 11 walkable drawn
+42 91 369 42 11 walkable drawn
+43 10 371 43 90 walkable drawn
+43 91 369 43 11 walkable drawn
+44 10 371 44 90 walkable drawn
+44 91 369 44 11 walkable drawn
+45 10 371 45 90 walkable drawn
+45 91 369 45 11 walkable drawn
+46 10 371 46 90 walkable drawn
+46 91 369 46 11 walkable drawn
+47 10 371 47 90 walkable drawn
+47 91 369 47 11 walkable drawn
+48 10 371 48 90 walkable drawn
+48 91 369 48 11 walkable drawn
+49 10 371 49 90 walkable drawn
+50 10 371 50 90 walkable drawn
+51 10 371 51 90 walkable drawn
+52 10 371 52 90 walkable drawn

@@ -1,0 +1,46 @@
+# Arrival classification for every exit of map 384.
+# version 17afc00c9c7e0b4c
+# Generated: ao-topology <pack> --exit-annotations <dir>
+# An exit absent from this file has no annotation, and the server refuses it.
+# columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>
+23 91 388 23 11 walkable drawn
+24 91 388 24 11 walkable drawn
+25 91 388 25 11 solid drawn
+26 91 388 26 11 solid drawn
+27 91 388 27 11 walkable drawn
+28 91 388 28 11 walkable drawn
+29 91 388 29 11 solid drawn
+30 91 388 30 11 solid drawn
+31 91 388 31 11 walkable drawn
+32 91 388 32 11 walkable drawn
+43 91 388 43 11 walkable drawn
+44 91 388 44 11 walkable drawn
+45 91 388 45 11 solid drawn
+46 91 388 46 11 solid drawn
+47 91 388 47 11 walkable drawn
+48 91 388 48 11 walkable drawn
+49 91 388 49 11 solid drawn
+50 91 388 50 11 solid drawn
+51 91 388 51 11 walkable drawn
+52 91 388 52 11 walkable drawn
+63 91 388 63 11 walkable drawn
+64 91 388 64 11 walkable drawn
+65 91 388 65 11 solid drawn
+66 91 388 66 11 solid drawn
+67 91 388 67 11 walkable drawn
+68 91 388 68 11 walkable drawn
+69 91 388 69 11 solid drawn
+70 91 388 70 11 solid drawn
+71 91 388 71 11 walkable drawn
+72 91 388 72 11 walkable drawn
+88 14 382 14 14 walkable drawn
+88 15 382 14 15 walkable drawn
+88 16 382 14 16 walkable undrawn
+88 18 382 14 18 walkable drawn
+88 19 382 14 19 walkable drawn
+88 20 382 14 20 walkable drawn
+88 21 382 14 21 solid drawn
+88 22 382 14 22 solid drawn
+88 23 382 14 23 walkable drawn
+88 24 382 14 24 walkable drawn
+88 25 382 14 25 walkable drawn

@@ -1,0 +1,9 @@
+# Arrival classification for every exit of map 279.
+# version 17afc00c9c7e0b4c
+# Generated: ao-topology <pack> --exit-annotations <dir>
+# An exit absent from this file has no annotation, and the server refuses it.
+# columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>
+31 61 280 17 48 walkable drawn
+32 61 280 18 48 solid drawn
+69 65 280 82 52 solid drawn
+70 65 280 83 52 solid drawn

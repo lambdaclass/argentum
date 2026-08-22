@@ -309,7 +309,14 @@ defmodule Arena.MovementCollisionDriftTest do
           sessions: %{1 => sess1, 2 => sess2},
           occupancy: %{{50, 50} => {:player, 1}, {52, 50} => {:player, 2}},
           visibility_mode: :global,
-          meta: %{tile_exit_map: %{{51, 50} => %{dest_map: 5, dest_x: 30, dest_y: 40}}}
+          meta: %{tile_exit_map: %{
+              {51, 50} =>
+                Arena.World.ExitAnnotations.synthetic(
+                  %{dest_map: 5, dest_x: 30, dest_y: 40},
+                  :walkable,
+                  true
+                )
+            }}
         )
 
       {:reply, {:ok, {51, 50}}, _state} = Movement.handle_move(state, 1, :east)

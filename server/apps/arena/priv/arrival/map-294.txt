@@ -1,0 +1,11 @@
+# Arrival classification for every exit of map 294.
+# version 17afc00c9c7e0b4c
+# Generated: ao-topology <pack> --exit-annotations <dir>
+# An exit absent from this file has no annotation, and the server refuses it.
+# columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>
+44 73 60 51 23 walkable drawn
+44 88 60 51 12 walkable drawn
+45 73 60 52 23 walkable drawn
+45 88 60 52 12 walkable drawn
+46 73 60 53 23 walkable drawn
+46 88 60 53 12 walkable drawn

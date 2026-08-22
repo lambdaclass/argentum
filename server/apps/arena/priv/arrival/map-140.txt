@@ -1,0 +1,19 @@
+# Arrival classification for every exit of map 140.
+# version 17afc00c9c7e0b4c
+# Generated: ao-topology <pack> --exit-annotations <dir>
+# An exit absent from this file has no annotation, and the server refuses it.
+# columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>
+47 10 141 47 90 walkable drawn
+48 10 141 48 90 walkable drawn
+49 10 141 49 90 walkable drawn
+50 10 141 50 90 walkable drawn
+51 10 141 51 90 walkable drawn
+51 88 453 52 55 solid drawn
+52 10 141 52 90 walkable drawn
+52 88 453 53 55 walkable drawn
+53 10 141 53 90 walkable drawn
+53 88 453 54 55 solid drawn
+54 10 141 54 90 walkable drawn
+55 10 141 55 90 walkable drawn
+56 10 141 56 90 walkable drawn
+57 10 141 57 90 walkable drawn

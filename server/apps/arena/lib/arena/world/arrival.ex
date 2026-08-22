@@ -27,7 +27,7 @@ defmodule Arena.World.Arrival do
 
   alias Arena.Map.TileSemantics
 
-  @type reason :: :arrival_solid | :arrival_void | :arrival_requires_boat
+  @type reason :: :arrival_solid | :arrival_void | :arrival_requires_boat | :arrival_unknown
   @type verdict :: :ok | {:error, reason()}
 
   @doc """
@@ -73,4 +73,8 @@ defmodule Arena.World.Arrival do
   def reason_name(:arrival_solid), do: "arrival_solid"
   def reason_name(:arrival_void), do: "arrival_void"
   def reason_name(:arrival_requires_boat), do: "arrival_requires_boat"
+
+  # Raised by the movement path, not by `validate/3`: an exit with no annotation, or one from
+  # another world version. Named like the others because a client is told the same way.
+  def reason_name(:arrival_unknown), do: "arrival_unknown"
 end

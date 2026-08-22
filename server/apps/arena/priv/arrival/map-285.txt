@@ -1,0 +1,33 @@
+# Arrival classification for every exit of map 285.
+# version 17afc00c9c7e0b4c
+# Generated: ao-topology <pack> --exit-annotations <dir>
+# An exit absent from this file has no annotation, and the server refuses it.
+# columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>
+38 91 284 38 11 water drawn
+39 91 284 39 11 water drawn
+40 91 284 40 11 water drawn
+41 91 284 41 11 water drawn
+42 91 284 42 11 water drawn
+43 91 284 43 11 water drawn
+44 91 284 44 11 water drawn
+45 91 284 45 11 water drawn
+46 91 284 46 11 water drawn
+47 91 284 47 11 water drawn
+48 91 284 48 11 water drawn
+49 91 284 49 11 water drawn
+50 91 284 50 11 water drawn
+51 91 284 51 11 water drawn
+52 91 284 52 11 water drawn
+53 91 284 53 11 water drawn
+54 91 284 54 11 water drawn
+55 91 284 55 11 water drawn
+56 91 284 56 11 water drawn
+57 91 284 57 11 water drawn
+58 91 284 58 11 water drawn
+59 91 284 59 11 water drawn
+60 91 284 60 11 water drawn
+61 91 284 61 11 water drawn
+62 91 284 62 11 water drawn
+63 91 284 63 11 water drawn
+64 91 284 64 11 water drawn
+65 91 284 65 11 water drawn

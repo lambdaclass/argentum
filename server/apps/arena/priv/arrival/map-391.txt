@@ -1,0 +1,36 @@
+# Arrival classification for every exit of map 391.
+# version 17afc00c9c7e0b4c
+# Generated: ao-topology <pack> --exit-annotations <dir>
+# An exit absent from this file has no annotation, and the server refuses it.
+# columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>
+15 86 24 70 30 walkable drawn
+18 15 53 50 50 walkable drawn
+23 10 377 23 90 walkable drawn
+24 10 377 24 90 walkable drawn
+25 10 377 25 90 walkable drawn
+26 10 377 26 90 walkable drawn
+27 10 377 27 90 walkable drawn
+33 16 377 25 25 walkable drawn
+34 16 377 17 44 walkable drawn
+35 16 377 18 66 walkable drawn
+36 16 377 20 72 walkable drawn
+42 10 377 42 90 walkable drawn
+43 10 377 43 90 walkable drawn
+44 10 377 44 90 walkable drawn
+45 10 377 45 90 walkable drawn
+46 10 377 46 90 walkable drawn
+54 10 377 54 90 walkable drawn
+55 10 377 55 90 walkable drawn
+56 10 377 56 90 walkable drawn
+57 10 377 57 90 walkable drawn
+58 10 377 58 90 walkable drawn
+64 16 377 77 77 walkable drawn
+65 16 377 82 59 walkable drawn
+66 16 377 79 38 walkable drawn
+67 16 377 70 22 walkable drawn
+73 10 377 73 90 walkable drawn
+74 10 377 74 90 walkable drawn
+75 10 377 75 90 walkable drawn
+76 10 377 76 90 walkable drawn
+77 10 377 77 90 walkable drawn
+82 84 391 50 50 walkable drawn

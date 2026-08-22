@@ -1,0 +1,45 @@
+# Arrival classification for every exit of map 561.
+# version 17afc00c9c7e0b4c
+# Generated: ao-topology <pack> --exit-annotations <dir>
+# An exit absent from this file has no annotation, and the server refuses it.
+# columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>
+16 10 558 16 90 walkable drawn
+17 10 558 17 90 walkable drawn
+18 10 558 18 90 walkable drawn
+19 10 558 19 90 walkable drawn
+24 10 558 24 90 walkable drawn
+25 10 558 25 90 walkable drawn
+26 10 558 26 90 walkable drawn
+27 10 558 27 90 walkable drawn
+28 10 558 28 90 walkable drawn
+29 10 558 29 90 walkable drawn
+30 10 558 30 90 walkable drawn
+31 10 558 31 90 walkable drawn
+32 10 558 32 90 walkable drawn
+33 10 558 33 90 walkable drawn
+33 20 614 24 32 walkable drawn
+34 10 558 34 90 walkable drawn
+34 20 614 25 32 walkable drawn
+35 10 558 35 90 walkable drawn
+36 10 558 36 90 walkable drawn
+37 10 558 37 90 walkable drawn
+38 10 558 38 90 walkable drawn
+39 10 558 39 90 walkable drawn
+40 10 558 40 90 walkable drawn
+41 10 558 41 90 walkable drawn
+42 10 558 42 90 walkable drawn
+43 10 558 43 90 walkable drawn
+88 53 560 14 53 walkable drawn
+88 54 560 14 54 walkable drawn
+88 55 560 14 55 walkable drawn
+88 56 560 14 56 walkable drawn
+88 57 560 14 57 walkable drawn
+88 58 560 14 58 walkable drawn
+88 59 560 14 59 walkable drawn
+88 60 560 14 60 walkable drawn
+88 61 560 14 61 walkable drawn
+88 62 560 14 62 walkable drawn
+88 64 560 14 64 solid drawn
+88 65 560 14 65 walkable drawn
+88 66 560 14 66 walkable drawn
+88 67 560 14 67 walkable drawn

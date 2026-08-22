@@ -1,0 +1,62 @@
+# Arrival classification for every exit of map 336.
+# version 17afc00c9c7e0b4c
+# Generated: ao-topology <pack> --exit-annotations <dir>
+# An exit absent from this file has no annotation, and the server refuses it.
+# columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>
+65 10 337 65 90 walkable drawn
+66 10 337 66 90 walkable drawn
+67 10 337 67 90 walkable drawn
+68 10 337 68 90 solid drawn
+69 10 337 69 90 solid drawn
+70 10 337 70 90 walkable drawn
+71 10 337 71 90 walkable drawn
+72 10 337 72 90 walkable drawn
+73 10 337 73 90 walkable drawn
+74 10 337 74 90 walkable drawn
+75 10 337 75 90 walkable drawn
+76 10 337 76 90 walkable drawn
+77 10 337 77 90 walkable drawn
+78 10 337 78 90 walkable drawn
+79 10 337 79 90 walkable drawn
+80 10 337 80 90 walkable drawn
+81 10 337 81 90 walkable drawn
+82 10 337 82 90 walkable drawn
+83 10 337 83 90 solid drawn
+84 10 337 84 90 solid drawn
+85 10 337 85 90 walkable drawn
+88 16 335 14 16 walkable drawn
+88 17 335 14 17 walkable drawn
+88 18 335 14 18 walkable drawn
+88 19 335 14 19 walkable drawn
+88 20 335 14 20 walkable drawn
+88 21 335 14 21 walkable drawn
+88 22 335 14 22 walkable drawn
+88 23 335 14 23 walkable drawn
+88 24 335 14 24 walkable drawn
+88 25 335 14 25 walkable drawn
+88 26 335 14 26 walkable drawn
+88 27 335 14 27 walkable drawn
+88 28 335 14 28 walkable drawn
+88 29 335 14 29 walkable drawn
+88 30 335 14 30 walkable drawn
+88 31 335 14 31 walkable drawn
+88 32 335 14 32 walkable drawn
+88 33 335 14 33 walkable drawn
+88 34 335 14 34 walkable drawn
+88 35 335 14 35 walkable drawn
+88 36 335 14 36 walkable drawn
+88 37 335 14 37 walkable drawn
+88 38 335 14 38 walkable drawn
+88 39 335 14 39 walkable drawn
+88 40 335 14 40 walkable drawn
+88 64 335 14 64 walkable drawn
+88 65 335 14 65 walkable drawn
+88 66 335 14 66 walkable undrawn
+88 68 335 14 68 walkable drawn
+88 69 335 14 69 walkable drawn
+88 70 335 14 70 walkable drawn
+88 71 335 14 71 solid drawn
+88 72 335 14 72 solid drawn
+88 73 335 14 73 walkable drawn
+88 74 335 14 74 walkable drawn
+88 75 335 14 75 walkable drawn

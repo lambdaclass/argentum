@@ -1281,11 +1281,24 @@ replace one loaded MapServer per legacy map with a global bottleneck.
 
 `Arena.Map.Movement.check_tile_exit/5` transfers a character to whatever tile an exit
 names, without consulting the arrival tile, the character's locomotion or whether the
-destination is part of the map at all. `W-0097` measured what that produces across the
-corpus: **169 exits transfer a character into solid ground, 48 onto a tile with no
-ground drawn, and 4 leave a walker standing on water**, and 2,444 void tiles across 47
-maps read as walkable floor because the blocked layer says nothing about whether a tile
-exists.
+destination is part of the map at all. `W-0097` measured what that admits, and the count
+depends on which question is asked — both are recorded because both matter:
+
+- **classified by destination**, every exit in the corpus: **2,877 point at solid ground,
+  48 at a tile the destination does not draw, 4 put a walker on water**;
+- **reachable today**, the subset a character can actually get to because the way out is
+  open: **168 solid, 24 void, 4 water**. The 169th reachable solid arrival is also undrawn,
+  so it is counted once, as void.
+
+The rule refuses all of them: an arrival is not valid for being unreachable, and a rule
+scoped to the reachable ones would pass its gate and admit the rest the moment a wall
+moved. 2,444 void tiles across 47 maps read as walkable floor, because the blocked layer
+says nothing about whether a tile exists.
+
+Boat beaching has two units and they are not the same number: **865 boundary *pairs* where
+a sailor's path arrives on dry land, of which 856 carry an exit**. The first counts
+opportunities in the tile geometry, the second counts exits that actually do it, and both
+are pinned so a change to either is visible.
 
 This is a defect, not a decision. Nobody has to judge whether a player should end up
 inside rock, so it is engineering work: validate the destination on the server, decide

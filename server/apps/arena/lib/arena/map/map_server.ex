@@ -361,7 +361,18 @@ defmodule Arena.Map.MapServer do
             spawn_npcs(map_data.npcs, map_id, occupancy)
 
           # Build O(1) tile exit map from list
-          tile_exit_map = Map.new(map_data.tile_exits, fn ex -> {{ex.x, ex.y}, ex} end)
+          # Each exit carries what its destination tile is, resolved once by the topology
+          # compiler. Annotating here, after the tile grid loaded, means the source can judge
+          # an arrival without asking anybody: an unannotated exit is refused rather than
+          # guessed.
+          annotated_exits =
+            Arena.World.ExitAnnotations.annotate(
+              map_data.tile_exits,
+              map_id,
+              Arena.World.ExitAnnotations.expected_version()
+            )
+
+          tile_exit_map = Map.new(annotated_exits, fn ex -> {{ex.x, ex.y}, ex} end)
           # Build O(1) trigger map for crafting resource detection
           trigger_map = Map.new(map_data.triggers, fn t -> {{t.x, t.y}, t.trigger} end)
 
@@ -1646,7 +1657,13 @@ defmodule Arena.Map.MapServer do
       npcs: [],
       objects: [],
       tile_exits: [
-        %{x: 50, y: 50, dest_map: paired_map_id, dest_x: 51, dest_y: 50}
+        # Synthetic maps know their own tiles here, so they say so rather than being refused
+        # for having no compiled annotation file. Every tile of a test map is walkable.
+        Arena.World.ExitAnnotations.synthetic(
+          %{x: 50, y: 50, dest_map: paired_map_id, dest_x: 51, dest_y: 50},
+          :walkable,
+          true
+        )
       ],
       tiles: List.duplicate(0, Helpers.map_width() * Helpers.map_height())
     }

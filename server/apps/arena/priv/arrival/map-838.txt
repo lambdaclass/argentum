@@ -1,0 +1,66 @@
+# Arrival classification for every exit of map 838.
+# version 17afc00c9c7e0b4c
+# Generated: ao-topology <pack> --exit-annotations <dir>
+# An exit absent from this file has no annotation, and the server refuses it.
+# columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>
+13 16 839 87 16 walkable drawn
+13 17 839 87 17 walkable drawn
+13 18 839 87 18 walkable drawn
+13 19 839 87 19 walkable drawn
+13 20 839 87 20 walkable drawn
+13 21 839 87 21 walkable drawn
+13 22 839 87 22 walkable drawn
+14 10 837 14 90 walkable drawn
+15 10 837 15 90 walkable drawn
+16 10 837 16 90 walkable drawn
+17 10 837 17 90 walkable drawn
+18 10 837 18 90 walkable drawn
+19 10 837 19 90 walkable drawn
+20 10 837 20 90 walkable drawn
+21 10 837 21 90 walkable drawn
+22 10 837 22 90 walkable drawn
+23 10 837 23 90 walkable drawn
+24 10 837 24 90 walkable drawn
+25 10 837 25 90 walkable drawn
+26 10 837 26 90 walkable drawn
+27 10 837 27 90 walkable drawn
+28 10 837 28 90 walkable drawn
+29 10 837 29 90 walkable drawn
+29 19 826 45 33 walkable drawn
+30 10 837 30 90 walkable drawn
+30 19 826 46 33 walkable drawn
+31 10 837 31 90 walkable drawn
+31 19 826 47 33 walkable drawn
+32 10 837 32 90 walkable drawn
+33 10 837 33 90 walkable drawn
+34 10 837 34 90 walkable drawn
+35 10 837 35 90 walkable drawn
+36 10 837 36 90 walkable drawn
+37 10 837 37 90 walkable drawn
+38 10 837 38 90 walkable drawn
+39 10 837 39 90 walkable drawn
+40 10 837 40 90 walkable drawn
+41 10 837 41 90 walkable drawn
+42 10 837 42 90 walkable drawn
+43 10 837 43 90 walkable drawn
+44 10 837 44 90 walkable drawn
+45 10 837 45 90 walkable drawn
+46 10 837 46 90 walkable drawn
+47 10 837 47 90 walkable drawn
+48 10 837 48 90 walkable drawn
+49 10 837 49 90 walkable drawn
+50 10 837 50 90 walkable drawn
+51 10 837 51 90 walkable drawn
+52 10 837 52 90 walkable drawn
+53 10 837 53 90 walkable drawn
+54 10 837 54 90 walkable drawn
+55 10 837 55 90 walkable drawn
+56 10 837 56 90 walkable drawn
+57 10 837 57 90 walkable drawn
+58 10 837 58 90 walkable drawn
+59 10 837 59 90 walkable drawn
+60 10 837 60 90 walkable drawn
+61 10 837 61 90 walkable drawn
+62 10 837 62 90 walkable drawn
+63 10 837 63 90 walkable drawn
+64 10 837 64 90 walkable drawn

@@ -121,9 +121,19 @@ defmodule Arena.Map.Movement do
                   tile_val = TileGrid.get_tile(state.map_id, nx, ny)
                   water_blocked = Arena.Map.TileSemantics.requires_boat?(tile_val, entity.navigating)
 
+                  # If this tile carries an exit, judge where it would put the character
+                  # *before* they step onto it. Refusing the step is what keeps a rejection
+                  # free: they never leave the source map, so their position and their owner
+                  # are untouched and there is no half-finished handoff to unwind.
+                  arrival = arrival_verdict(state, entity, nx, ny)
+
                   cond do
                     water_blocked ->
                       {:ok, state, {:error, :blocked}, []}
+
+                    match?({:error, _}, arrival) ->
+                      {:error, reason} = arrival
+                      {:ok, state, {:error, {:arrival_blocked, reason}}, []}
 
                     Helpers.get_occupancy(state.occupancy, nx, ny) == nil ->
                       # Normal move into empty tile
@@ -360,10 +370,56 @@ defmodule Arena.Map.Movement do
       nil ->
         {state, false, []}
 
-      %{dest_map: dest_map, dest_x: dest_x, dest_y: dest_y} ->
-        {state, true, [Effects.transfer(char_id, dest_map, dest_x, dest_y, entity)]}
+      %{dest_map: dest_map, dest_x: dest_x, dest_y: dest_y} = exit ->
+        # Belt and braces. The movement path already refused the step onto this tile if the
+        # arrival is invalid, so reaching here with a bad exit means the character arrived on
+        # the band some other way. Standing on a transition band is wrong; being inside rock
+        # is worse, so no transfer is emitted.
+        case verdict_for(exit, entity) do
+          :ok ->
+            {state, true, [Effects.transfer(char_id, dest_map, dest_x, dest_y, entity)]}
+
+          {:error, reason} ->
+            Logger.warning(
+              "Refusing exit #{state.map_id} (#{x},#{y}) -> #{dest_map} " <>
+                "(#{dest_x},#{dest_y}): #{Arena.World.Arrival.reason_name(reason)}"
+            )
+
+            {state, false, []}
+        end
     end
   end
+
+  @doc """
+  What `Arena.World.Arrival` says about the exit on this tile, if there is one.
+
+  `:ok` when the tile carries no exit at all: this asks about arrivals, and a tile without an
+  exit has none.
+
+  A destination map that has never been recorded is reported as drawn rather than refused. A
+  lazy boot would otherwise turn every exit into a wall, and refusing on absent information is
+  a different failure from refusing on bad information.
+  """
+  @spec arrival_verdict(map(), map(), integer(), integer()) :: :ok | {:error, atom()}
+  def arrival_verdict(state, entity, x, y) do
+    case Map.get(state.meta.tile_exit_map, {x, y}) do
+      nil -> :ok
+      exit -> verdict_for(exit, entity)
+    end
+  end
+
+  # The annotation the topology compiler resolved for this exit, merged into the map's own
+  # exits at load. No lookup, no shared table, no call to the destination: the source has the
+  # fact in hand before it releases anybody.
+  #
+  # An exit without an annotation is refused. Failing open here would make the promise --
+  # the source validates the destination before releasing authority -- false in precisely the
+  # case where it matters, and 1,196 exits in this corpus point at a map that does not exist.
+  defp verdict_for(%{arrival: %{class: class, drawn?: drawn?}}, entity) do
+    Arena.World.Arrival.validate(class, drawn?, entity.navigating)
+  end
+
+  defp verdict_for(_exit_without_annotation, _entity), do: {:error, :arrival_unknown}
 
   # VB6: certain classes can remain oculto while moving, provided their
   # hiding skill meets the threshold.

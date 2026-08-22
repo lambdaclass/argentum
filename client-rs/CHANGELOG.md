@@ -89,9 +89,10 @@ semantics fixture and the walking routes all verified against the corpus;
 Deliberately not done, and recorded rather than assumed. Two of these need human
 judgment and one does not:
 
-- **Engineering, not judgment:** the destination check. 169 arrivals into solid tiles,
-  48 into undrawn void, 4 walkers stranded on water, and 2,444 void tiles reading as
-  floor. `Arena.Map.Movement.check_tile_exit/5` validates nothing about where it sends a
+- **Engineering, not judgment:** the destination check. Classified by destination,
+  2,877 exits point at solid tiles, 48 at undrawn void and 4 strand a walker on water;
+  reachable today, 168 / 24 / 4, with one arrival both solid and undrawn counted as void.
+  Plus 2,444 void tiles reading as floor. `Arena.Map.Movement.check_tile_exit/5` validates nothing about where it sends a
   character, and that is a defect needing a server implementation and tests, tracked as
   `W-0105`. Calling it a decision for somebody else was wrong: nobody has to decide
   whether a player should end up inside rock.

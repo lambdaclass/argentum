@@ -1,0 +1,36 @@
+# Arrival classification for every exit of map 305.
+# version 17afc00c9c7e0b4c
+# Generated: ao-topology <pack> --exit-annotations <dir>
+# An exit absent from this file has no annotation, and the server refuses it.
+# columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>
+13 33 208 87 33 walkable drawn
+13 34 208 87 34 walkable drawn
+13 35 208 87 35 walkable drawn
+13 36 208 87 36 walkable drawn
+13 37 208 87 37 walkable drawn
+13 38 208 87 38 walkable drawn
+13 39 208 87 39 walkable drawn
+13 70 208 87 70 walkable drawn
+13 71 208 87 71 walkable drawn
+13 72 208 87 72 walkable drawn
+13 73 208 87 73 walkable drawn
+13 74 208 87 74 walkable drawn
+13 75 208 87 75 walkable drawn
+49 91 304 49 11 walkable drawn
+50 91 304 50 11 walkable drawn
+51 91 304 51 11 walkable drawn
+52 91 304 52 11 walkable drawn
+53 91 304 53 11 walkable drawn
+54 91 304 54 11 walkable drawn
+55 91 304 55 11 walkable drawn
+56 91 304 56 11 walkable drawn
+57 91 304 57 11 walkable drawn
+58 91 304 58 11 walkable drawn
+59 91 304 59 11 walkable drawn
+60 91 304 60 11 walkable drawn
+61 91 304 61 11 walkable drawn
+62 91 304 62 11 walkable drawn
+63 91 304 63 11 walkable drawn
+64 91 304 64 11 walkable drawn
+65 91 304 65 11 walkable drawn
+66 91 304 66 11 walkable drawn

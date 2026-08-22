@@ -1,0 +1,22 @@
+# Arrival classification for every exit of map 366.
+# version 17afc00c9c7e0b4c
+# Generated: ao-topology <pack> --exit-annotations <dir>
+# An exit absent from this file has no annotation, and the server refuses it.
+# columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>
+44 91 365 44 11 walkable drawn
+45 91 365 45 11 walkable drawn
+46 91 365 46 11 walkable drawn
+47 91 365 47 11 walkable drawn
+48 91 365 48 11 walkable drawn
+49 91 365 49 11 walkable drawn
+50 91 365 50 11 walkable drawn
+51 91 365 51 11 walkable drawn
+52 91 365 52 11 walkable drawn
+53 91 365 53 11 walkable drawn
+54 91 365 54 11 walkable drawn
+55 91 365 55 11 walkable drawn
+56 91 365 56 11 walkable drawn
+57 91 365 57 11 walkable drawn
+83 52 367 25 52 walkable drawn
+83 53 367 25 52 walkable drawn
+83 54 367 25 52 walkable drawn

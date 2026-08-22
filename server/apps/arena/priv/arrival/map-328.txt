@@ -1,0 +1,45 @@
+# Arrival classification for every exit of map 328.
+# version 17afc00c9c7e0b4c
+# Generated: ao-topology <pack> --exit-annotations <dir>
+# An exit absent from this file has no annotation, and the server refuses it.
+# columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>
+13 28 332 87 28 walkable drawn
+13 29 332 87 29 walkable drawn
+13 30 332 87 30 solid drawn
+13 31 332 87 31 solid drawn
+13 45 332 87 45 walkable drawn
+13 46 332 87 46 walkable drawn
+13 47 332 87 47 walkable drawn
+13 48 332 87 48 walkable drawn
+13 49 332 87 49 walkable undrawn
+13 51 332 87 51 walkable drawn
+13 52 332 87 52 walkable drawn
+13 53 332 87 53 walkable drawn
+13 54 332 87 54 solid drawn
+13 55 332 87 55 solid drawn
+13 56 332 87 56 walkable drawn
+13 57 332 87 57 walkable drawn
+13 58 332 87 58 walkable drawn
+13 59 332 87 59 walkable drawn
+13 60 332 87 60 walkable drawn
+46 10 329 46 90 walkable drawn
+47 10 329 47 90 walkable drawn
+58 91 327 58 11 walkable drawn
+59 91 327 59 11 walkable drawn
+60 91 327 60 11 walkable drawn
+61 91 327 61 11 walkable drawn
+62 91 327 62 11 solid drawn
+63 10 329 63 90 solid drawn
+63 91 327 63 11 solid drawn
+64 10 329 64 90 walkable drawn
+64 91 327 64 11 walkable drawn
+65 10 329 65 90 walkable drawn
+65 91 327 65 11 walkable drawn
+66 10 329 66 90 solid drawn
+66 91 327 66 11 walkable drawn
+67 91 327 67 11 solid drawn
+68 91 327 68 11 solid drawn
+69 91 327 69 11 walkable drawn
+70 91 327 70 11 walkable drawn
+71 91 327 71 11 walkable drawn
+72 91 327 72 11 walkable drawn

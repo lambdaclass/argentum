@@ -1,0 +1,12 @@
+# Arrival classification for every exit of map 571.
+# version 17afc00c9c7e0b4c
+# Generated: ao-topology <pack> --exit-annotations <dir>
+# An exit absent from this file has no annotation, and the server refuses it.
+# columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>
+26 91 560 26 11 solid drawn
+27 91 560 27 11 walkable drawn
+28 91 560 28 11 walkable drawn
+29 91 560 29 11 walkable drawn
+30 91 560 30 11 walkable drawn
+31 91 560 31 11 walkable drawn
+32 91 560 32 11 solid drawn

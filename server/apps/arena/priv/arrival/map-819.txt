@@ -1,0 +1,13 @@
+# Arrival classification for every exit of map 819.
+# version 17afc00c9c7e0b4c
+# Generated: ao-topology <pack> --exit-annotations <dir>
+# An exit absent from this file has no annotation, and the server refuses it.
+# columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>
+46 91 818 46 11 walkable drawn
+47 91 818 47 11 walkable drawn
+48 91 818 48 11 walkable drawn
+49 91 818 49 11 walkable drawn
+50 91 818 50 11 walkable drawn
+51 91 818 51 11 walkable drawn
+52 91 818 52 11 walkable drawn
+53 91 818 53 11 walkable drawn

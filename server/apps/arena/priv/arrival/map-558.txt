@@ -1,0 +1,65 @@
+# Arrival classification for every exit of map 558.
+# version 17afc00c9c7e0b4c
+# Generated: ao-topology <pack> --exit-annotations <dir>
+# An exit absent from this file has no annotation, and the server refuses it.
+# columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>
+16 91 561 16 11 walkable drawn
+17 91 561 17 11 walkable drawn
+18 87 604 24 32 walkable drawn
+18 91 561 18 11 walkable drawn
+19 17 622 24 32 walkable drawn
+19 31 618 24 32 walkable drawn
+19 45 612 24 32 walkable drawn
+19 59 607 24 32 walkable drawn
+19 73 605 24 32 walkable drawn
+19 87 604 25 32 walkable drawn
+19 91 561 19 11 walkable drawn
+20 17 622 25 32 walkable drawn
+20 31 618 25 32 walkable drawn
+20 45 612 25 32 walkable drawn
+20 59 607 25 32 walkable drawn
+20 73 605 25 32 walkable drawn
+24 91 561 24 11 walkable drawn
+25 91 561 25 11 walkable drawn
+26 91 561 26 11 walkable drawn
+27 91 561 27 11 walkable drawn
+28 91 561 28 11 walkable drawn
+29 91 561 29 11 walkable drawn
+30 91 561 30 11 walkable drawn
+31 91 561 31 11 walkable drawn
+32 17 621 24 32 walkable drawn
+32 31 617 24 32 walkable drawn
+32 45 611 24 32 walkable drawn
+32 91 561 32 11 walkable drawn
+33 17 621 25 32 walkable drawn
+33 31 617 25 32 walkable drawn
+33 45 611 25 32 walkable drawn
+33 91 561 33 11 walkable drawn
+34 91 561 34 11 walkable drawn
+35 91 561 35 11 walkable drawn
+36 91 561 36 11 walkable drawn
+37 91 561 37 11 walkable drawn
+38 91 561 38 11 walkable drawn
+39 91 561 39 11 walkable drawn
+40 91 561 40 11 walkable drawn
+41 91 561 41 11 walkable drawn
+42 91 561 42 11 walkable drawn
+43 91 561 43 11 walkable drawn
+45 17 620 24 32 walkable drawn
+45 31 616 24 32 walkable drawn
+45 45 610 24 32 walkable drawn
+46 17 620 25 32 walkable drawn
+46 31 616 25 32 walkable drawn
+46 45 610 25 32 walkable drawn
+58 17 619 24 32 walkable drawn
+58 31 615 24 32 walkable drawn
+58 45 609 24 32 walkable drawn
+59 17 619 25 32 walkable drawn
+59 31 615 25 32 walkable drawn
+59 45 609 25 32 walkable drawn
+71 31 613 24 32 walkable drawn
+71 45 608 24 32 walkable drawn
+72 31 613 25 32 walkable drawn
+72 45 608 25 32 walkable drawn
+76 59 606 24 32 walkable drawn
+77 59 606 25 32 walkable drawn

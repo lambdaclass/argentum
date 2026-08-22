@@ -1,0 +1,65 @@
+# Arrival classification for every exit of map 388.
+# version 17afc00c9c7e0b4c
+# Generated: ao-topology <pack> --exit-annotations <dir>
+# An exit absent from this file has no annotation, and the server refuses it.
+# columns: <band-x> <band-y> <dest-map> <dest-x> <dest-y> <class> <drawn|undrawn>
+23 10 384 23 90 walkable drawn
+24 10 384 24 90 walkable drawn
+25 10 384 25 90 solid drawn
+26 10 384 26 90 solid drawn
+27 10 384 27 90 walkable drawn
+28 10 384 28 90 walkable drawn
+29 10 384 29 90 solid drawn
+30 10 384 30 90 solid drawn
+31 10 384 31 90 walkable drawn
+32 10 384 32 90 walkable drawn
+35 91 321 35 11 walkable drawn
+36 91 321 36 11 walkable drawn
+43 10 384 43 90 walkable drawn
+44 10 384 44 90 walkable drawn
+45 10 384 45 90 solid undrawn
+46 10 384 46 90 solid drawn
+47 10 384 47 90 walkable drawn
+48 10 384 48 90 walkable drawn
+49 10 384 49 90 solid drawn
+50 10 384 50 90 solid undrawn
+50 91 321 50 11 walkable drawn
+51 10 384 51 90 walkable drawn
+51 91 321 51 11 walkable drawn
+52 10 384 52 90 walkable drawn
+63 10 384 63 90 walkable drawn
+64 10 384 64 90 walkable drawn
+65 10 384 65 90 solid drawn
+66 10 384 66 90 solid drawn
+67 10 384 67 90 walkable drawn
+67 91 321 67 11 solid drawn
+68 10 384 68 90 walkable drawn
+69 10 384 69 90 solid drawn
+70 10 384 70 90 solid drawn
+71 10 384 71 90 walkable drawn
+72 10 384 72 90 walkable drawn
+81 91 321 81 11 walkable drawn
+82 91 321 82 11 walkable drawn
+88 23 376 14 23 walkable drawn
+88 24 376 14 24 walkable drawn
+88 25 376 14 25 solid undrawn
+88 27 376 14 27 walkable drawn
+88 28 376 14 28 walkable drawn
+88 29 376 14 29 walkable drawn
+88 30 376 14 30 solid drawn
+88 31 376 14 31 solid drawn
+88 32 376 14 32 walkable drawn
+88 33 376 14 33 walkable drawn
+88 34 376 14 34 walkable drawn
+88 55 376 14 55 walkable drawn
+88 56 376 14 56 walkable drawn
+88 57 376 14 57 solid drawn
+88 59 376 14 59 walkable drawn
+88 60 376 14 60 walkable drawn
+88 61 376 14 61 walkable drawn
+88 62 376 14 62 solid drawn
+88 63 376 14 63 solid drawn
+88 64 376 14 64 walkable drawn
+88 65 376 14 65 walkable drawn
+88 66 376 14 66 walkable drawn
+88 67 376 14 67 walkable drawn

@@ -62,20 +62,23 @@ defmodule Arena.Map.TileSemanticsTest do
     end
   end
 
-  describe "the transfer path does not check where it puts you" do
-    test "an exit transfers a walker onto a water tile" do
-      # The defect `ao_core::seam` counts four of in the corpus, proved through the code that
-      # produces it rather than inferred from the map data. `check_tile_exit/5` looks up the
-      # band tile the character stepped onto and emits a transfer to whatever the exit names.
-      # It consults neither the destination tile nor `navigating`.
+  describe "the transfer path now checks where it puts you" do
+    test "an unannotated exit is refused rather than followed" do
+      # This test used to prove the defect: `check_tile_exit/5` emitted a transfer to whatever
+      # an exit named, consulting neither the destination tile nor `navigating`, which is how
+      # 169 reachable exits led into rock and 4 onto open water.
+      #
+      # Now an exit carries what its destination is, resolved by the topology compiler, and
+      # one without that annotation is refused. Failing open on missing data would make the
+      # promise -- the source validates before it releases -- false exactly where it counts.
       exit_record = %{x: 88, y: 50, dest_map: 495, dest_x: 14, dest_y: 50}
-      state = %{meta: %{tile_exit_map: %{{88, 50} => exit_record}}}
+      state = %{map_id: 1, meta: %{tile_exit_map: %{{88, 50} => exit_record}}}
       entity = %{navigating: false}
 
-      assert {^state, true, [{:transfer, 7, 495, 14, 50, ^entity}]} =
-               Movement.check_tile_exit(state, 7, entity, 88, 50)
+      assert {^state, false, []} = Movement.check_tile_exit(state, 7, entity, 88, 50)
+      assert Movement.arrival_verdict(state, entity, 88, 50) == {:error, :arrival_unknown}
 
-      # And the tile it hands them to is one they could never have walked onto.
+      # And the rule that refuses it once the destination is known.
       refute TileSemantics.enterable?(2, entity.navigating)
     end
 
