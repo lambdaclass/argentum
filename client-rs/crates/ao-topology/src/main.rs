@@ -7,6 +7,8 @@
 //!
 //! Usage: `cargo run -p ao-topology -- <pack>`
 
+mod pixels;
+
 use ao_core::topology;
 use std::collections::BTreeMap;
 
@@ -359,6 +361,83 @@ fn main() {
         println!("    from map {root:<5} {size} maps");
     }
 
+    // Rendered-pixel agreement across the acceptance quad's seams. Needs the real sheets, so
+    // it runs only when told where they are; everything else in this report works without
+    // them.
+    if let Some(index_at) = args.iter().position(|arg| arg == "--pixels") {
+        match (args.get(index_at + 1), args.get(index_at + 2)) {
+            (Some(sheet_dir), Some(index_path)) => {
+                let json = std::fs::read_to_string(index_path).unwrap_or_default();
+                let index = ao_core::grh::Index::parse(&json);
+                let mut sheets = pixels::Sheets::new(sheet_dir);
+                println!("\n  rendered-pixel agreement ({} regions indexed)", index.regions.len());
+
+                let by_id: std::collections::BTreeMap<u16, &ao_core::mappack::PackedMap> =
+                    maps.iter().map(|map| (map.map_id, map)).collect();
+                let quad = topology::conflict_free_quads(&found);
+                let Some(quad) = quad.first() else { return };
+
+                for (from, side, to) in [
+                    (quad.north_west, topology::Side::East, quad.north_east),
+                    (quad.north_east, topology::Side::West, quad.north_west),
+                    (quad.south_west, topology::Side::East, quad.south_east),
+                    (quad.north_west, topology::Side::South, quad.south_west),
+                ] {
+                    let (Some(a), Some(b)) = (by_id.get(&from), by_id.get(&to)) else { continue };
+                    let evidence = ao_core::seam::evidence(
+                        a,
+                        b,
+                        side,
+                        placed[&from],
+                        placed[&to],
+                        &atlases[&region_of[&from]],
+                    );
+
+                    // Band art against the neighbour's core edge: the gutter hypothesis, now
+                    // judged on what is drawn rather than on which id is named.
+                    let ground = |map: &ao_core::mappack::PackedMap, at: (u8, u8)| {
+                        map.layers[0]
+                            .iter()
+                            .find(|tile| (tile.x, tile.y) == at)
+                            .map(|tile| tile.grh)
+                    };
+
+                    let mut agreement = pixels::Agreement::default();
+                    let mut same_id = 0usize;
+                    for pair in &evidence.pairs {
+                        let (Some(band), Some(arrival)) =
+                            (ground(a, pair.band), ground(b, pair.arrival))
+                        else {
+                            continue;
+                        };
+                        if band == arrival {
+                            same_id += 1;
+                        }
+                        agreement.add(&mut sheets, &index, band, arrival);
+                    }
+
+                    println!(
+                        "    {from} {side:?} {to}: {} of {} tiles pixel-identical, {}% of pixels \
+                         match, {} named the same graphic, {} undecodable",
+                        agreement.identical,
+                        agreement.compared(),
+                        agreement.pixel_percent().map(|p| p.to_string()).unwrap_or("n/a".into()),
+                        same_id,
+                        agreement.unknown,
+                    );
+                }
+
+                if !sheets.missing.is_empty() {
+                    println!("    sheets that could not be read: {:?}", sheets.missing.keys());
+                }
+            }
+            _ => {
+                eprintln!("--pixels needs a sheet directory and an index path");
+                std::process::exit(2);
+            }
+        }
+    }
+
     // The manifest: measured evidence plus hand-recorded review, and the only place that
     // says what is allowed to be geography.
     let reviews = ao_core::manifest::reviews();
@@ -524,14 +603,68 @@ fn main() {
         );
     }
 
+    // Which squares are clean in *all eight* directed crossings, which is the only
+    // standard that matters for a seamless region: a player walks both ways. The first
+    // acceptance quad passes four directions and fails one of the other four, which is
+    // exactly why four crossings were never four seams' worth of evidence.
+    let eight_way: Vec<&topology::Quad> = quads
+        .iter()
+        .filter(|quad| {
+            let corners = [quad.north_west, quad.north_east, quad.south_west, quad.south_east];
+            if !corners.iter().all(|map| placed.contains_key(map)) {
+                return false;
+            }
+            let by_id: std::collections::BTreeMap<u16, &ao_core::mappack::PackedMap> =
+                maps.iter().map(|map| (map.map_id, map)).collect();
+            [
+                (quad.north_west, topology::Side::East, quad.north_east),
+                (quad.south_west, topology::Side::East, quad.south_east),
+                (quad.north_west, topology::Side::South, quad.south_west),
+                (quad.north_east, topology::Side::South, quad.south_east),
+            ]
+            .iter()
+            .all(|(from, side, to)| {
+                [(from, side, to, false), (to, side, from, true)].iter().all(
+                    |(a, side, b, flipped)| {
+                        let side = if *flipped { side.opposite() } else { **side };
+                        let (Some(one), Some(two)) = (by_id.get(a), by_id.get(b)) else {
+                            return false;
+                        };
+                        let evidence = ao_core::seam::evidence(
+                            one,
+                            two,
+                            side,
+                            placed[a],
+                            placed[b],
+                            &atlases[&region_of[a]],
+                        );
+                        evidence.defects().is_empty() && evidence.accounting_closes()
+                    },
+                )
+            })
+        })
+        .collect();
+    println!("  squares clean in all eight directions: {} of {}", eight_way.len(), quads.len());
+    for quad in eight_way.iter().take(6) {
+        println!(
+            "    {} {} / {} {}",
+            quad.north_west, quad.north_east, quad.south_west, quad.south_east
+        );
+    }
+
     // One quad, end to end: the acceptance artifact. Every check this compiler can make,
     // for four real maps, in *both* directions across each physical seam -- eight directed
     // crossings, not four. A seam that works one way and not the other is a seam that works
     // until a player walks back.
-    if let Some(quad) = quads.iter().find(|quad| {
-        [quad.north_west, quad.north_east, quad.south_west, quad.south_east]
-            .iter()
-            .all(|map| placed.contains_key(map))
+    // Reported for a square that passes in every direction, not merely the first square
+    // with reciprocal seams. `199 274 / 573 570` is the latter: four directions clean, and
+    // `573 North 199` transfers two characters into solid rock.
+    if let Some(quad) = eight_way.first().copied().or_else(|| {
+        quads.iter().find(|quad| {
+            [quad.north_west, quad.north_east, quad.south_west, quad.south_east]
+                .iter()
+                .all(|map| placed.contains_key(map))
+        })
     }) {
         println!(
             "\n  acceptance quad {} {} / {} {}",

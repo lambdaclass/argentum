@@ -27,7 +27,7 @@
 
 use crate::mappack::PackedMap;
 use crate::seam::{self, Crossing, SeamEvidence};
-use crate::topology::{Adjacency, Atlas, Evidence, Geometry, Origin, Region, Side, Surface};
+use crate::topology::{Adjacency, Atlas, Evidence, Geometry, Origin, Side};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const FORMAT: u32 = 1;

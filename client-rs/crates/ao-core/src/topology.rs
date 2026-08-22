@@ -343,6 +343,11 @@ pub struct Baseline {
     /// Kept per class rather than totalled. "How many defects does the world have" is not
     /// answerable from one number: the land and the ocean are in very different states, and
     /// a total would have hidden that twice already.
+    /// Squares of four maps whose *eight* directed crossings are all defect-free. The
+    /// number that matters for a seamless region, because a player walks both ways: 87
+    /// squares have reciprocal seams and no contradiction, and only some of those survive
+    /// being walked in every direction.
+    pub quads_clean_in_all_directions: usize,
     /// Tile masks: which core tiles are really part of the world.
     pub mask: crate::mask::Mask,
     pub maps_fully_drawn: usize,
@@ -465,6 +470,7 @@ pub const BASELINE: Baseline = Baseline {
     land_land_unresolved: 0,
     sea_sea_unresolved: 34,
     land_sea_unresolved: 1,
+    quads_clean_in_all_directions: 42,
     mask: crate::mask::Mask {
         simulated: 4_840_960,
         void: 143_680,
@@ -571,6 +577,11 @@ pub fn drift(expected: &Baseline, found: &Baseline) -> Vec<String> {
     note("land-land unresolved", expected.land_land_unresolved, found.land_land_unresolved);
     note("sea-sea unresolved", expected.sea_sea_unresolved, found.sea_sea_unresolved);
     note("land-sea unresolved", expected.land_sea_unresolved, found.land_sea_unresolved);
+    note(
+        "squares clean in all eight directions",
+        expected.quads_clean_in_all_directions,
+        found.quads_clean_in_all_directions,
+    );
     note("simulated core tiles", expected.mask.simulated, found.mask.simulated);
     note("void core tiles", expected.mask.void, found.mask.void);
     note("void tiles reading as walkable", expected.mask.void_walkable, found.mask.void_walkable);
@@ -855,8 +866,55 @@ pub fn evidence(maps: &[PackedMap]) -> Evidence {
         regions: spaces,
     };
 
-    let quads = conflict_free_quads(&evidence).len();
-    Evidence { baseline: Baseline { conflict_free_quads: quads, ..evidence.baseline }, ..evidence }
+    let squares = conflict_free_quads(&evidence);
+    let placed_by_region: BTreeMap<u16, (Origin, u16)> = evidence
+        .regions
+        .iter()
+        .flat_map(|region| {
+            region.origins.iter().map(move |(id, origin)| (*id, (*origin, region.id)))
+        })
+        .collect();
+    let atlases: BTreeMap<u16, Atlas> =
+        evidence.regions.iter().map(|region| (region.id, Atlas::of(region))).collect();
+    let by_id: BTreeMap<u16, &PackedMap> = maps.iter().map(|map| (map.map_id, map)).collect();
+
+    // Clean in all eight directed crossings, which is what a player walking both ways needs.
+    let eight_way = squares
+        .iter()
+        .filter(|quad| {
+            [
+                (quad.north_west, Side::East, quad.north_east),
+                (quad.south_west, Side::East, quad.south_east),
+                (quad.north_west, Side::South, quad.south_west),
+                (quad.north_east, Side::South, quad.south_east),
+            ]
+            .iter()
+            .all(|(from, side, to)| {
+                [(*from, *side, *to), (*to, side.opposite(), *from)].iter().all(|(a, side, b)| {
+                    let (Some((origin, region)), Some((neighbour, _))) =
+                        (placed_by_region.get(a), placed_by_region.get(b))
+                    else {
+                        return false;
+                    };
+                    let (Some(one), Some(two)) = (by_id.get(a), by_id.get(b)) else {
+                        return false;
+                    };
+                    let Some(atlas) = atlases.get(region) else { return false };
+                    let found = crate::seam::evidence(one, two, *side, *origin, *neighbour, atlas);
+                    found.defects().is_empty() && found.accounting_closes()
+                })
+            })
+        })
+        .count();
+
+    Evidence {
+        baseline: Baseline {
+            conflict_free_quads: squares.len(),
+            quads_clean_in_all_directions: eight_way,
+            ..evidence.baseline
+        },
+        ..evidence
+    }
 }
 
 /// How many groups the maps fall into, joined by standard seams alone.

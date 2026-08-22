@@ -77,33 +77,29 @@ impl GrhIndex {
     /// `base` is the asset directory the sheet names belong to, which differs
     /// between the map and character indices.
     pub fn parse(json: &str, base: &str) -> Self {
-        let mut index = GrhIndex::default();
+        // Parsed by `ao_core::grh`, which the topology compiler also uses. Two parsers over
+        // one index is how the client and the compiler come to believe different things
+        // about the same art; this crate's job is only to turn a sheet name into a URL.
+        let index = ao_core::grh::Index::parse(json);
+        let mut out = GrhIndex::default();
 
-        for object in split_objects(json) {
-            let Some(id) = number_field(object, "id").map(|v| v as i32) else {
-                continue;
-            };
-
-            if let Some(grafico) = sheet_field(object) {
-                index.statics.insert(
-                    id,
-                    Grh {
-                        sheet: format!("{base}/{grafico}.png"),
-                        x: number_field(object, "offX").unwrap_or(0.0) as f32,
-                        y: number_field(object, "offY").unwrap_or(0.0) as f32,
-                        width: number_field(object, "width").unwrap_or(32.0) as f32,
-                        height: number_field(object, "height").unwrap_or(32.0) as f32,
-                    },
-                );
-            } else if let Some(frames) = int_array_field(object, "frames") {
-                // Bodies without a stated speed fall back to the web client's
-                // default of 210ms per cycle.
-                let cycle = number_field(object, "velocidad").unwrap_or(210.0) as f32;
-                index.animations.insert(id, (frames, cycle));
-            }
+        for (id, region) in index.regions {
+            out.statics.insert(
+                id,
+                Grh {
+                    sheet: format!("{base}/{}.png", region.sheet),
+                    x: region.x as f32,
+                    y: region.y as f32,
+                    width: region.width as f32,
+                    height: region.height as f32,
+                },
+            );
+        }
+        for (id, animation) in index.animations {
+            out.animations.insert(id, (animation.frames, animation.cycle_ms));
         }
 
-        index
+        out
     }
 }
 
