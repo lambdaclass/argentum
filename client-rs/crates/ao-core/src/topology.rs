@@ -171,6 +171,93 @@ pub fn classify(from_map: u16, exit: &MapExit, known: &BTreeSet<u16>) -> ExitKin
     }
 }
 
+/// The *shape* of a transition, measured from its coordinates alone.
+///
+/// `W-0097` asks for every transition classified as `geographic_seam`, `door`, `portal`,
+/// `teleport` or `instance_entrance`. Those last four are not measurable: nothing in a map
+/// file distinguishes a doorway from a portal, and a compiler that assigned them would be
+/// inventing content. What *is* measurable is the geometry, and the two must not be confused
+/// — so this reports shape and `manifest::Disposition` records what a person decided.
+///
+/// The shapes are chosen to separate "nearly a seam" from "not a seam at all", because those
+/// need different reviews. An `OffsetSeam` leaves a band and arrives on the correct opposite
+/// core edge but on the wrong line: that is a seam somebody mis-typed, and it is a candidate
+/// for corrected data. An `Interior` arrival is a door or a teleport and no amount of
+/// correction turns it into adjacency.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Shape {
+    /// Band to the opposite core edge, same line. Evidence of adjacency.
+    StandardSeam {
+        side: Side,
+    },
+    /// Band to the opposite core edge, wrong line. Seam-shaped and displaced.
+    OffsetSeam {
+        side: Side,
+        drift: i32,
+    },
+    /// Arrives in the destination's transition band, which is not a place to stand.
+    IntoBand,
+    /// Leaves from a band tile but arrives somewhere inside the destination.
+    BandToInterior,
+    /// Leaves from inside the map: a door, a portal or a teleport, and the data cannot say
+    /// which.
+    Interior,
+    SameMap,
+    MissingDestination,
+}
+
+/// Which band lines a coordinate sits on, if any.
+fn in_band(x: u8, y: u8) -> bool {
+    x == BAND_X.0 || x == BAND_X.1 || y == BAND_Y.0 || y == BAND_Y.1
+}
+
+/// The shape of one exit.
+///
+/// Measured, never guessed. Where an exit is seam-shaped but displaced, the drift is reported
+/// so a reviewer can see whether it is off by one row or by forty.
+pub fn shape_of(from_map: u16, exit: &MapExit, known: &BTreeSet<u16>) -> Shape {
+    if exit.target_map == from_map {
+        return Shape::SameMap;
+    }
+    if !known.contains(&exit.target_map) {
+        return Shape::MissingDestination;
+    }
+
+    let sides = sides_of(exit.x, exit.y);
+    if sides.is_empty() {
+        return Shape::Interior;
+    }
+
+    if let [side] = sides_of(exit.x, exit.y)
+        .into_iter()
+        .filter(|side| arrives_as_seam(exit, *side))
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
+        return Shape::StandardSeam { side: *side };
+    }
+
+    if in_band(exit.target_x, exit.target_y) {
+        return Shape::IntoBand;
+    }
+
+    // Seam-shaped and displaced: the arrival is on the correct opposite core edge for one of
+    // the sides this tile belongs to, but on a different line.
+    for side in &sides {
+        let (arrives_on_edge, drift) = match side {
+            Side::West => (exit.target_x == CORE_X.1, exit.target_y as i32 - exit.y as i32),
+            Side::East => (exit.target_x == CORE_X.0, exit.target_y as i32 - exit.y as i32),
+            Side::North => (exit.target_y == CORE_Y.1, exit.target_x as i32 - exit.x as i32),
+            Side::South => (exit.target_y == CORE_Y.0, exit.target_x as i32 - exit.x as i32),
+        };
+        if arrives_on_edge && drift != 0 {
+            return Shape::OffsetSeam { side: *side, drift };
+        }
+    }
+
+    Shape::BandToInterior
+}
+
 /// A claimed adjacency: this map has that map on this side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Adjacency {
@@ -256,6 +343,13 @@ pub struct Baseline {
     /// Kept per class rather than totalled. "How many defects does the world have" is not
     /// answerable from one number: the land and the ocean are in very different states, and
     /// a total would have hidden that twice already.
+    /// Every exit by measured shape. The four content classes `W-0097` names -- door,
+    /// portal, teleport, instance entrance -- are deliberately absent: nothing in a map file
+    /// distinguishes them, and a compiler that assigned them would be inventing content.
+    pub offset_seams: usize,
+    pub into_band: usize,
+    pub band_to_interior: usize,
+    pub interior: usize,
     pub land_seams: SeamCounts,
     pub shore_seams: SeamCounts,
     pub sea_seams: SeamCounts,
@@ -359,6 +453,10 @@ pub const BASELINE: Baseline = Baseline {
     land_land_unresolved: 0,
     sea_sea_unresolved: 34,
     land_sea_unresolved: 1,
+    offset_seams: 0,
+    into_band: 0,
+    band_to_interior: 19,
+    interior: 1_201,
     land_seams: SeamCounts {
         seams: 931,
         without_defects: 633,
@@ -445,6 +543,11 @@ pub fn drift(expected: &Baseline, found: &Baseline) -> Vec<String> {
     note("land-land unresolved", expected.land_land_unresolved, found.land_land_unresolved);
     note("sea-sea unresolved", expected.sea_sea_unresolved, found.sea_sea_unresolved);
     note("land-sea unresolved", expected.land_sea_unresolved, found.land_sea_unresolved);
+    note("offset seams", expected.offset_seams, found.offset_seams);
+    note("exits into a band", expected.into_band, found.into_band);
+    note("band-to-interior exits", expected.band_to_interior, found.band_to_interior);
+    note("interior exits", expected.interior, found.interior);
+
     for (label, want, got) in [
         ("land", &expected.land_seams, &found.land_seams),
         ("shore", &expected.shore_seams, &found.shore_seams),
@@ -474,6 +577,23 @@ pub fn drift(expected: &Baseline, found: &Baseline) -> Vec<String> {
             want.ground_continuity_95,
             got.ground_continuity_95,
         );
+    }
+
+    // Self-consistency, independent of what was pinned: every exit has exactly one shape,
+    // so the shapes must account for all of them. A category that double-counts or drops
+    // exits is how 897 strandings happened, and this is the cheapest possible guard.
+    let accounted = found.standard_seams
+        + found.same_map
+        + found.missing_destination
+        + found.offset_seams
+        + found.into_band
+        + found.band_to_interior
+        + found.interior;
+    if accounted != found.exits {
+        lines.push(format!(
+            "exit shapes account for {accounted} of {} exits; every exit has exactly one shape",
+            found.exits
+        ));
     }
 
     lines
@@ -527,6 +647,13 @@ pub fn evidence(maps: &[PackedMap]) -> Evidence {
     for map in maps {
         for exit in &map.exits {
             baseline.exits += 1;
+            match shape_of(map.map_id, exit, &known) {
+                Shape::OffsetSeam { .. } => baseline.offset_seams += 1,
+                Shape::IntoBand => baseline.into_band += 1,
+                Shape::BandToInterior => baseline.band_to_interior += 1,
+                Shape::Interior => baseline.interior += 1,
+                Shape::StandardSeam { .. } | Shape::SameMap | Shape::MissingDestination => {}
+            }
             match classify(map.map_id, exit, &known) {
                 ExitKind::SameMap => baseline.same_map += 1,
                 ExitKind::MissingDestination => baseline.missing_destination += 1,
@@ -2135,15 +2262,23 @@ mod tests {
         // The failure message is the whole value of a drift check: "the baseline changed"
         // sends somebody to read 842 maps, and "standard seams: expected 156084, found
         // 156080" sends them to the four exits that stopped matching.
-        let found = Baseline { standard_seams: 1, weak_components: 2, ..BASELINE };
+        // Two fields that do not participate in the exit accounting, so this case measures
+        // naming alone.
+        let found = Baseline { weak_components: 2, reciprocal_pairs: 3, ..BASELINE };
         let lines = drift(&BASELINE, &found);
 
         assert_eq!(lines.len(), 2, "{lines:?}");
-        assert!(lines
-            .iter()
-            .any(|line| line.contains("standard seams") && line.contains("156084")));
-        assert!(lines.iter().any(|line| line.contains("weak components")));
+        assert!(lines.iter().any(|line| line.contains("weak components") && line.contains("226")));
+        assert!(lines.iter().any(|line| line.contains("reciprocal pairs")));
         assert!(drift(&BASELINE, &BASELINE).is_empty());
+
+        // And the self-consistency guard fires on its own, without needing a pin to compare
+        // against: 156,084 seams cannot become 1 while the same 158,549 exits still have a
+        // shape each.
+        let mangled = Baseline { standard_seams: 1, ..BASELINE };
+        assert!(drift(&BASELINE, &mangled)
+            .iter()
+            .any(|line| line.contains("exit shapes account for")));
     }
 
     #[test]
@@ -2167,5 +2302,82 @@ mod tests {
         assert!(BAND_X.1 < STORAGE && BAND_Y.1 < STORAGE);
         assert_eq!(CORE_X.1 - CORE_X.0 + 1, 74, "the audited core is 74 wide");
         assert_eq!(CORE_Y.1 - CORE_Y.0 + 1, 80, "the audited core is 80 tall");
+    }
+}
+
+#[cfg(test)]
+mod shapes {
+    use super::*;
+
+    fn exit(x: u8, y: u8, target_map: u16, target_x: u8, target_y: u8) -> MapExit {
+        MapExit { x, y, target_map, target_x, target_y }
+    }
+
+    #[test]
+    fn a_seam_shaped_exit_on_the_wrong_line_is_offset_not_interior() {
+        // The distinction that earns this type its place: an exit off by three rows is a
+        // mis-typed seam and a candidate for corrected data, while an arrival in the middle
+        // of the destination is a door and no correction makes it adjacency.
+        let known = BTreeSet::from([1, 2]);
+
+        assert_eq!(
+            shape_of(1, &exit(BAND_X.1, 50, 2, CORE_X.0, 53), &known),
+            Shape::OffsetSeam { side: Side::East, drift: 3 }
+        );
+        assert_eq!(
+            shape_of(1, &exit(50, BAND_Y.0, 2, 47, CORE_Y.1), &known),
+            Shape::OffsetSeam { side: Side::North, drift: -3 }
+        );
+        assert_eq!(
+            shape_of(1, &exit(BAND_X.1, 50, 2, CORE_X.0, 50), &known),
+            Shape::StandardSeam { side: Side::East }
+        );
+    }
+
+    #[test]
+    fn an_arrival_in_a_band_is_its_own_shape() {
+        // Arriving on a transition band means arriving somewhere a character is not meant to
+        // stand: the next step fires another exit.
+        let known = BTreeSet::from([1, 2]);
+        assert_eq!(shape_of(1, &exit(BAND_X.1, 50, 2, BAND_X.0, 50), &known), Shape::IntoBand);
+        assert_eq!(shape_of(1, &exit(BAND_X.1, 50, 2, 50, BAND_Y.1), &known), Shape::IntoBand);
+    }
+
+    #[test]
+    fn an_exit_from_inside_the_map_is_a_door_or_a_teleport_and_the_data_cannot_say_which() {
+        let known = BTreeSet::from([1, 2]);
+        assert_eq!(shape_of(1, &exit(50, 50, 2, 50, 50), &known), Shape::Interior);
+        assert_eq!(shape_of(1, &exit(BAND_X.1, 50, 2, 40, 40), &known), Shape::BandToInterior);
+    }
+
+    #[test]
+    fn the_two_shapes_that_are_not_about_geometry_come_first() {
+        let known = BTreeSet::from([1, 2]);
+        assert_eq!(shape_of(1, &exit(BAND_X.1, 50, 1, CORE_X.0, 50), &known), Shape::SameMap);
+        assert_eq!(
+            shape_of(1, &exit(BAND_X.1, 50, 999, CORE_X.0, 50), &known),
+            Shape::MissingDestination
+        );
+    }
+
+    #[test]
+    fn shape_and_classify_agree_about_what_a_seam_is() {
+        // Two functions read the same rule, so they must never disagree about the case they
+        // share. `classify` feeds the pinned seam counts; `shape_of` refines what it rejects.
+        let known = BTreeSet::from([1, 2]);
+        for candidate in [
+            exit(BAND_X.0, 50, 2, CORE_X.1, 50),
+            exit(BAND_X.1, 50, 2, CORE_X.0, 50),
+            exit(50, BAND_Y.0, 2, 50, CORE_Y.1),
+            exit(50, BAND_Y.1, 2, 50, CORE_Y.0),
+            exit(50, 50, 2, 50, 50),
+            exit(BAND_X.1, 50, 2, CORE_X.0, 53),
+        ] {
+            let seam_by_classify =
+                matches!(classify(1, &candidate, &known), ExitKind::StandardSeam { .. });
+            let seam_by_shape =
+                matches!(shape_of(1, &candidate, &known), Shape::StandardSeam { .. });
+            assert_eq!(seam_by_classify, seam_by_shape, "disagreement about {candidate:?}");
+        }
     }
 }

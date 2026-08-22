@@ -44,6 +44,11 @@ fn main() {
     println!("    standard seams         {}", b.standard_seams);
     println!("    other valid            {}", b.other_valid);
     println!("  same-map                 {}", b.same_map);
+    println!("  non-seam exits by shape:");
+    println!("    seam-shaped, wrong line {}", b.offset_seams);
+    println!("    into a transition band  {}", b.into_band);
+    println!("    band to interior        {}", b.band_to_interior);
+    println!("    from inside the map     {}", b.interior);
     println!("  missing destination      {}", b.missing_destination);
     println!("  reciprocal placements    {}", b.reciprocal_placements);
     println!("  unique reciprocal pairs  {}", b.reciprocal_pairs);
