@@ -8,6 +8,7 @@
 //! Usage: `cargo run -p ao-topology -- <pack>`
 
 mod pixels;
+mod sha256;
 
 use ao_core::topology;
 use std::collections::BTreeMap;
@@ -560,17 +561,11 @@ fn main() {
             std::process::exit(1);
         }
 
-        // Hashed from the bytes actually read, not from the pinned corpus constant. Stamping
-        // a constant would let annotations compiled from one pack claim to be from another,
-        // which is the one thing the version is there to prevent.
-        let input_hash = {
-            let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-            for byte in &bytes {
-                hash ^= *byte as u64;
-                hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-            }
-            format!("{hash:016x}")
-        };
+        // Hashed from the bytes actually read, with the identity the rest of the system
+        // already uses: `Arena.ClientMapPack` names every pack `maps.<sha256[..16]>.pack`.
+        // A first version of this used FNV-1a and gave the same bytes a second name, which
+        // is precisely what a content hash exists to prevent.
+        let input_hash = sha256::content_id(&bytes);
 
         let by_id: std::collections::BTreeMap<u16, &ao_core::mappack::PackedMap> =
             maps.iter().map(|map| (map.map_id, map)).collect();

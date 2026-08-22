@@ -1316,6 +1316,14 @@ most likely to be lost. When the server changes, `Arena.Map.TileSemantics`,
 Re-run `ao-topology --check` afterwards: the four counts are pinned in `BASELINE`, so
 the fix shows up as drift with the numbers that moved.
 
+The annotations are versioned by the **map pack's content hash** — `sha256(pack)[0..16]`,
+the identity already in every `maps.<hash>.pack` filename — and never by a second hash of
+the same bytes. It is deliberately not the topology manifest hash, which versions a
+different artefact and belongs to `W-0096`'s contract. The server compares the
+annotations' claim against the pack it actually loaded, in that order at boot: build the
+pack, check the annotations against its hash, then start the MapServers that will trust
+them.
+
 ### Task W-0101 — Production topology classification and activation
 
 - **State:** planned
@@ -1625,6 +1633,12 @@ handoff, so deferring this broader sweep cannot permit a placeholder transition.
 Close with layer-owned tests and a busy-HUD capture showing no name without a
 body, duplicated name or feedback that outlives its cause.
 
+- **`ConcurrentCombatTest` "killer gets npcs_killed increment" is flaky.** Seen once under
+  full-suite load on 2026-08-22 with the NPC at 1 hp instead of 0; passes in isolation and in
+  subsequent full runs. It touches no exit or transfer path, so it is not W-0105's, but a
+  test that fails one run in five is a test nobody trusts. Reproduce under load rather than
+  in isolation, and either find the race or make the test wait on the kill rather than on
+  timing.
 - **Refused movement sends no correction.** `Arena.Map.Movement` returns `{:error, :blocked}`
   for water without a boat and `{:error, :too_early}` for a step inside the walk interval,
   both with an empty effect list, and `SessionLogic` discards the result. A client that

@@ -5,11 +5,6 @@ defmodule Arena.Application do
 
   @impl true
   def start(_type, _args) do
-    # Fail here rather than serving a world whose every exit refuses. The annotations are a
-    # build artefact and a missing one is a setup mistake, so it gets named once, loudly,
-    # instead of appearing later as "transfers do not work".
-    Arena.World.ExitAnnotations.verify!()
-
     Arena.Metrics.setup()
 
     children = [
@@ -36,8 +31,13 @@ defmodule Arena.Application do
 
     case Supervisor.start_link(children, opts) do
       {:ok, pid} ->
-        Arena.Map.MapSupervisor.boot_maps()
+        # Order matters. Build the pack first so its content hash is known, check the exit
+        # annotations against *that* -- not against their own version.txt, which only proves
+        # the artefact agrees with itself -- and only then start the MapServers that will
+        # trust those annotations to decide where a character may be put.
         Arena.ClientMapPack.manifest()
+        Arena.World.ExitAnnotations.verify!()
+        Arena.Map.MapSupervisor.boot_maps()
         {:ok, pid}
 
       error ->

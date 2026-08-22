@@ -17,9 +17,15 @@ defmodule Arena.World.ExitAnnotations do
   1,196 exits in this corpus whose destination map does not exist are unannotated on purpose
   and are refused for the same reason.
 
-  The version is the corpus hash the annotations were compiled from. A handoff must never
-  combine two world-pack versions: the same tile has a different meaning under a different
-  release, and a stale annotation is worse than none because it looks authoritative.
+  The version is the map pack's content hash — `sha256(pack)[0..16]`, the same identity
+  `Arena.ClientMapPack` puts in every `maps.<hash>.pack` filename. One artefact, one name: an
+  earlier attempt hashed the same bytes with FNV-1a and gave the pack a second identity, which
+  is what a content hash exists to prevent. It is deliberately *not* the topology manifest
+  hash, which versions a different thing and belongs to W-0096's contract.
+
+  What the expected value is matters as much as that it is checked. It comes from the pack the
+  server actually loaded, not from the annotations' own `version.txt`: an artefact agreeing
+  with itself proves nothing about whether it describes this world.
   """
 
   require Logger
@@ -103,28 +109,45 @@ defmodule Arena.World.ExitAnnotations do
   end
 
   @doc """
-  The world version the server expects annotations to have been compiled from.
+  The content hash of the map pack this server actually loaded.
 
-  Read from `version.txt`, which the generator writes in the same run and from the same bytes
-  as the annotations themselves, so the two cannot drift apart. Configuration overrides it,
-  for a deployment that pins a version deliberately.
+  This is the value annotations must match. Configuration overrides it — `:map_pack_hash`, for
+  a deployment pinning a version deliberately — and otherwise it comes from
+  `Arena.ClientMapPack.manifest/0`, which computes `sha256(pack)[0..16]` from the bytes it
+  built.
 
-  Returns `nil` only when there is nothing to read, and `nil` is not a wildcard: `verify!/0`
-  turns it into a boot failure. An earlier version of this accepted every annotation when the
-  expected version was unset, which is the same failing-open mistake as allowing a transfer
-  when the destination could not be judged.
+  Returns `nil` only when the pack cannot be built at all, and `nil` is not a wildcard:
+  `verify!/0` turns it into a boot failure and `annotate/3` refuses every exit. An earlier
+  version accepted any annotation when the expected value was unset, which is the same
+  failing-open mistake as allowing a transfer whose destination could not be judged.
   """
   @spec expected_version() :: String.t() | nil
   def expected_version do
-    case Application.get_env(:arena, :topology_version) do
-      version when is_binary(version) ->
-        version
+    case Application.get_env(:arena, :map_pack_hash) do
+      hash when is_binary(hash) ->
+        hash
 
       _ ->
-        case File.read(Path.join(directory(), "version.txt")) do
-          {:ok, text} -> String.trim(text)
-          {:error, _} -> nil
+        try do
+          Arena.ClientMapPack.manifest().hash
+        rescue
+          error ->
+            Logger.error("Cannot determine the map pack hash: #{inspect(error)}")
+            nil
         end
+    end
+  end
+
+  @doc """
+  What the annotations claim about themselves, from `version.txt`.
+
+  Only useful next to `expected_version/0`. On its own it says the artefact agrees with itself.
+  """
+  @spec claimed_version() :: String.t() | nil
+  def claimed_version do
+    case File.read(Path.join(directory(), "version.txt")) do
+      {:ok, text} -> String.trim(text)
+      {:error, _} -> nil
     end
   end
 
@@ -136,6 +159,8 @@ defmodule Arena.World.ExitAnnotations do
   """
   def verify! do
     dir = directory()
+    expected = expected_version()
+    claimed = claimed_version()
 
     cond do
       not File.dir?(dir) ->
@@ -148,13 +173,34 @@ defmodule Arena.World.ExitAnnotations do
             cargo run --release -p ao-topology -- <pack> --exit-annotations #{dir}
         """
 
-      expected_version() == nil ->
+      expected == nil ->
         raise """
-        Exit annotations in #{dir} have no version.
+        Cannot determine which world this server is serving.
 
-        #{Path.join(dir, "version.txt")} is missing and :topology_version is not configured, so
-        nothing can tell whether these annotations describe this world. Regenerate them, or set
-        config :arena, topology_version: "<hash>" deliberately.
+        The map pack could not be built and :map_pack_hash is not configured, so there is
+        nothing to compare the exit annotations against. Every exit would be refused.
+        """
+
+      claimed == nil ->
+        raise """
+        Exit annotations in #{dir} do not say which world they describe.
+
+        #{Path.join(dir, "version.txt")} is missing. Regenerate the annotations:
+
+            cargo run --release -p ao-topology -- <pack> --exit-annotations #{dir}
+        """
+
+      claimed != expected ->
+        raise """
+        Exit annotations describe a different world than this server loaded.
+
+          map pack:    #{expected}
+          annotations: #{claimed}
+
+        A stale annotation is worse than a missing one, because the server would trust it.
+        Regenerate them from the pack this server serves:
+
+            cargo run --release -p ao-topology -- <pack> --exit-annotations #{dir}
         """
 
       true ->

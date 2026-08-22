@@ -334,5 +334,55 @@ defmodule Arena.MovementCollisionDriftTest do
       refute_receive {:receiver, :sess1,
                       {:egress, %{payload: <<^pos_id::little-signed-16, _::binary>>}}}
     end
+
+    test "a refused arrival corrects the client to the position it never left" do
+      # The other half of W-0105, tested through the handler rather than through
+      # `check_tile_exit/5`, because the correction is emitted by the movement decision above
+      # it. A client that predicts locally would otherwise keep drawing the character on the
+      # transition band while the server has them where they started.
+      sess1 = start_receiver(:sess1)
+      mover = make_player(1, %{x: 50, y: 50})
+
+      state =
+        map_state(
+          map_id: @test_map_id,
+          players: %{1 => mover},
+          sessions: %{1 => sess1},
+          occupancy: %{{50, 50} => {:player, 1}},
+          visibility_mode: :global,
+          meta: %{
+            tile_exit_map: %{
+              {51, 50} =>
+                Arena.World.ExitAnnotations.synthetic(
+                  %{dest_map: 5, dest_x: 30, dest_y: 40},
+                  :solid,
+                  true
+                )
+            }
+          }
+        )
+
+      assert {:reply, {:error, {:arrival_blocked, :arrival_solid}}, returned} =
+               Movement.handle_move(state, 1, :east)
+
+      # The character has not moved and is still owned here.
+      assert returned.players[1].x == 50
+      assert returned.players[1].y == 50
+      assert map_size(returned.players) == 1
+
+      # Exactly one authoritative position, and it names the tile they never left.
+      pos_id = AoProtocol.PacketIds.Server.pos_update()
+
+      assert_receive {:receiver, :sess1,
+                      {:egress, %{payload: <<^pos_id::little-signed-16, rest::binary>>}}}
+
+      assert <<50::little-unsigned-8, 50::little-unsigned-8, _::binary>> = rest
+
+      refute_receive {:receiver, :sess1,
+                      {:egress, %{payload: <<^pos_id::little-signed-16, _::binary>>}}}
+
+      # And no handoff was begun.
+      refute_receive {:receiver, :sess1, {:transfer, _, _, _, _}}
+    end
   end
 end

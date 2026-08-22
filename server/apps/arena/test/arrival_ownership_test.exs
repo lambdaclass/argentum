@@ -236,6 +236,57 @@ defmodule Arena.World.ArrivalOwnershipTest do
     end
   end
 
+  describe "the world identity" do
+    test "the annotations claim the same hash the pack does" do
+      # The check that matters, and the one version.txt cannot make on its own: the artefact's
+      # claim compared against the pack this server actually loaded.
+      expected = ExitAnnotations.expected_version()
+      claimed = ExitAnnotations.claimed_version()
+
+      assert is_binary(expected), "the server must know which world it serves"
+      assert claimed == expected, "annotations describe #{claimed}, pack is #{expected}"
+      assert :ok == ExitAnnotations.verify!()
+
+      # And it is the identity the rest of the system already uses: the pack's filename.
+      assert String.length(expected) == 16
+    end
+
+    test "a version mismatch is a boot failure, not a warning" do
+      in_a_temp_dir(fn dir ->
+        File.write!(Path.join(dir, "version.txt"), "some-other-world\n")
+
+        assert_raise RuntimeError, ~r/different world than this server loaded/, fn ->
+          ExitAnnotations.verify!()
+        end
+      end)
+    end
+
+    test "annotations with no version.txt are a boot failure" do
+      in_a_temp_dir(fn _dir ->
+        assert_raise RuntimeError, ~r/do not say which world they describe/, fn ->
+          ExitAnnotations.verify!()
+        end
+      end)
+    end
+
+    test "a missing annotation directory is a boot failure" do
+      previous = Application.get_env(:arena, :exit_annotations_dir)
+      Application.put_env(:arena, :exit_annotations_dir, "/nonexistent/arrival")
+
+      try do
+        assert_raise RuntimeError, ~r/Exit annotations are missing/, fn ->
+          ExitAnnotations.verify!()
+        end
+      after
+        if previous do
+          Application.put_env(:arena, :exit_annotations_dir, previous)
+        else
+          Application.delete_env(:arena, :exit_annotations_dir)
+        end
+      end
+    end
+  end
+
   describe "the compiled annotations for the real corpus" do
     test "the acceptance square's exits are annotated, and its south seam is walkable" do
       # A build artefact, so this checks it only when it is present.
