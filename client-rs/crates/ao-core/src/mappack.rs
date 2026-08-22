@@ -65,13 +65,21 @@ pub enum Tile {
 }
 
 impl Tile {
+    /// Classify a blocked-layer byte.
+    ///
+    /// Delegates to `tiles::TileKind`, which is the same decision the live client makes when
+    /// it colours a tile and when it predicts a move. Two classifiers over one byte is a
+    /// latent contradiction, and these two had one: `TileKind` treats `4` as walkable —
+    /// VB6's value for tiles that block sight and projectiles but not movement — while this
+    /// function used to call it solid. The pack cannot currently contain a `4`, because
+    /// `Arena.Map.CsmParser` normalises blocked tiles to `1`, and `ao-topology --check`
+    /// asserts that against the corpus rather than trusting it. Had that changed, the
+    /// analysis here would have counted open ground as wall while the client walked over it.
     pub fn of(value: u8) -> Tile {
-        match value {
-            0 => Tile::Walkable,
-            2 => Tile::Water,
-            // Anything else is solid. The parser normalises to 1, and an unknown value is
-            // safer treated as a wall than as open ground.
-            _ => Tile::Solid,
+        match crate::tiles::TileKind::from_value(value) {
+            crate::tiles::TileKind::Open | crate::tiles::TileKind::OpenSpecial => Tile::Walkable,
+            crate::tiles::TileKind::Water => Tile::Water,
+            crate::tiles::TileKind::Blocked => Tile::Solid,
         }
     }
 
@@ -96,6 +104,13 @@ impl Tile {
             Tile::Solid => false,
         }
     }
+
+    /// Every byte value the corpus is expected to contain.
+    ///
+    /// Named so the assertion that the corpus holds nothing else has something to compare
+    /// against, and so a new value shows up as a build failure rather than as silent
+    /// reclassification.
+    pub const EXPECTED_VALUES: [u8; 3] = [0, 1, 2];
 }
 
 /// One row of `fixtures/tile_semantics.txt`: what Elixir says a tile means.
@@ -481,5 +496,47 @@ mod tests {
         for cut in 0..full.len() {
             let _ = decode_map(&full[..cut], 7);
         }
+    }
+}
+
+#[cfg(test)]
+mod classification {
+    use super::*;
+    use crate::tiles::{is_walkable, TileFlags};
+
+    #[test]
+    fn the_two_classifiers_over_one_byte_agree_about_every_value() {
+        // The trap this closes. `tiles::TileKind` decides what the live client draws and
+        // predicts; `mappack::Tile` decides what the topology analysis counts. They read the
+        // same byte, so a disagreement means the compiler measures a world the client does
+        // not render -- and they did disagree about 4.
+        for value in 0u8..=255 {
+            let tile = Tile::of(value);
+            assert_eq!(
+                tile.enterable(false),
+                is_walkable(value, TileFlags { navigating: false }),
+                "value {value} on foot"
+            );
+            assert_eq!(
+                tile.enterable(true),
+                is_walkable(value, TileFlags { navigating: true }),
+                "value {value} in a boat"
+            );
+        }
+    }
+
+    #[test]
+    fn vb6_sight_blockers_are_walkable_ground() {
+        // 4 blocks projectiles and sight, not movement. The pack should never carry one --
+        // the parser normalises blocked tiles to 1 -- but if one appears, calling it a wall
+        // would put a wall where the client and server let a character walk.
+        assert_eq!(Tile::of(4), Tile::Walkable);
+        assert!(Tile::of(4).enterable(false));
+
+        assert_eq!(Tile::of(0), Tile::Walkable);
+        assert_eq!(Tile::of(1), Tile::Solid);
+        assert_eq!(Tile::of(2), Tile::Water);
+        assert_eq!(Tile::of(3), Tile::Solid);
+        assert_eq!(Tile::EXPECTED_VALUES, [0, 1, 2]);
     }
 }

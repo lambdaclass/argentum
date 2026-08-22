@@ -65,6 +65,22 @@ fn main() {
         found.constraint_conflicts.len()
     );
 
+    // The assumption every tile classification rests on: the pack contains 0, 1 and 2 and
+    // nothing else. Asserted against the corpus rather than trusted, because a fourth value
+    // would be reclassified silently by whichever reader saw it first.
+    let mut unexpected: std::collections::BTreeMap<u8, usize> = std::collections::BTreeMap::new();
+    for map in &maps {
+        for value in &map.tiles {
+            if !ao_core::mappack::Tile::EXPECTED_VALUES.contains(value) {
+                *unexpected.entry(*value).or_default() += 1;
+            }
+        }
+    }
+    println!("  unexpected tile values   {}", unexpected.len());
+    for (value, count) in &unexpected {
+        println!("    value {value} appears {count} times");
+    }
+
     // Which tiles are actually part of the world. A bounding rectangle must never make a
     // void tile walkable; this says whether it does.
     let coverage = ao_core::mask::coverage(&maps);
@@ -426,6 +442,14 @@ fn main() {
         // throwing away.
         let mut differences = topology::drift(&topology::BASELINE, b);
         differences.extend(disagreements.iter().cloned());
+        for (value, count) in &unexpected {
+            differences.push(format!(
+                "tile value {value} appears {count} times; only {:?} are expected, and a new \
+                 value changes what every reader thinks the ground is",
+                ao_core::mappack::Tile::EXPECTED_VALUES
+            ));
+        }
+
         let hash = manifest.content_hash();
         if hash != ao_core::manifest::CONTENT_HASH {
             differences.push(format!(
