@@ -242,6 +242,7 @@ name = "ao-topology"
 version = "0.1.0"
 dependencies = [
  "ao-core",
+ "image",
 ]
 
 [[package]]

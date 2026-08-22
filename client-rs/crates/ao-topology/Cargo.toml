@@ -7,3 +7,6 @@ description = "Reads the world corpus and reports what its exits imply about geo
 
 [dependencies]
 ao-core = { path = "../ao-core" }
+# PNG only: these renders are for a person to look at, and the topology binary has no
+# reason to carry a decoder for every format in existence.
+image = { version = "0.25", default-features = false, features = ["png"] }
