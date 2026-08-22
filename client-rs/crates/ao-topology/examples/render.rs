@@ -27,7 +27,7 @@
 //! Usage: `cargo run -p ao-topology --example render -- <pack> <out-dir>`
 
 use ao_core::mappack::{PackedMap, Tile};
-use ao_core::topology::{self, Adjacency, Origin, CORE_X, CORE_Y, PITCH_X, PITCH_Y};
+use ao_core::topology::{self, Origin, CORE_X, CORE_Y, PITCH_X, PITCH_Y};
 use image::{Rgb, RgbImage};
 use std::collections::{BTreeMap, BTreeSet};
 
