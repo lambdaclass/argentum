@@ -715,6 +715,83 @@ fn main() {
             );
         }
 
+        // One real route in each cardinal direction, named to the tile. The square is
+        // 54/80 navigable water east-west, so "the seams are sound" is not the same claim as
+        // "a person can walk through it".
+        let mut routes: Vec<ao_core::walk::Step> = Vec::new();
+        for (from, side, to) in &directed {
+            let (Some(a), Some(b)) = (by_id.get(from), by_id.get(to)) else { continue };
+            let evidence = ao_core::seam::evidence(
+                a,
+                b,
+                *side,
+                placed[from],
+                placed[to],
+                &atlases[&region_of[from]],
+            );
+            if routes.iter().any(|step| step.direction == *side) {
+                continue;
+            }
+            if let Some(step) = ao_core::walk::first_step(&evidence, placed[from], placed[to]) {
+                routes.push(step);
+            }
+        }
+        routes.sort_by_key(|step| format!("{:?}", step.direction));
+        println!("    walking routes, one per direction:");
+        for step in &routes {
+            println!("      {}", step.encode());
+        }
+        let on_foot = routes
+            .iter()
+            .filter(|step| step.locomotion == ao_core::walk::Locomotion::OnFoot)
+            .count();
+        println!(
+            "      {} of {} routes are on foot; all advance one tile: {}; all hand off: {}",
+            on_foot,
+            routes.len(),
+            routes.iter().all(|step| step.advances_one_tile()),
+            routes.iter().all(|step| step.hands_off()),
+        );
+
+        if let Some(index) = args.iter().position(|arg| arg == "--walks") {
+            match args.get(index + 1) {
+                Some(path) => {
+                    let header = format!(
+                        "# One real route across each seam of {} {} / {} {}, named to the tile.\n\
+                         # Regenerate: ao-topology <pack> --walks <path>\n\
+                         # Feet are preferred over boats: W-0099's first slice is a person walking.\n\
+                         # columns: direction locomotion from <map> <x,y> band <map> <x,y> \
+                         to <map> <x,y> global <x,y> -> <x,y> authority <map> -> <map>\n",
+                        quad.north_west, quad.north_east, quad.south_west, quad.south_east
+                    );
+                    let body: String =
+                        routes.iter().map(|step| format!("{}\n", step.encode())).collect();
+                    match std::fs::write(path, header + &body) {
+                        Ok(()) => println!("      wrote {path}"),
+                        Err(error) => {
+                            eprintln!("{path}: {error}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                None => {
+                    eprintln!("--walks needs a path");
+                    std::process::exit(2);
+                }
+            }
+        }
+
+        // The pinned routes must still be the routes the corpus produces.
+        let pinned = ao_core::walk::pinned_steps();
+        if !pinned.is_empty() && pinned != routes {
+            println!("      PINNED ROUTES DIFFER from the corpus");
+            for step in &pinned {
+                if !routes.contains(step) {
+                    println!("        pinned but not found: {}", step.encode());
+                }
+            }
+        }
+
         let corner = ao_core::seam::corner_evidence(
             (quad.north_west, placed[&quad.north_west]),
             (quad.north_east, placed[&quad.north_east]),

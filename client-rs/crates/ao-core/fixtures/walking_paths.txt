@@ -1,0 +1,8 @@
+# One real route across each seam of 330 269 / 274 287, named to the tile.
+# Regenerate: ao-topology <pack> --walks <path>
+# Feet are preferred over boats: W-0099's first slice is a person walking.
+# columns: direction locomotion from <map> <x,y> band <map> <x,y> to <map> <x,y> global <x,y> -> <x,y> authority <map> -> <map>
+east walking from 330 87,65 band 330 88,65 to 269 14,65 global 221,214 -> 222,214 authority 330 -> 269
+north walking from 274 14,11 band 274 14,10 to 330 14,90 global 148,240 -> 148,239 authority 274 -> 330
+south walking from 330 14,90 band 330 14,91 to 274 14,11 global 148,239 -> 148,240 authority 330 -> 274
+west walking from 269 14,65 band 269 13,65 to 330 87,65 global 222,214 -> 221,214 authority 269 -> 330

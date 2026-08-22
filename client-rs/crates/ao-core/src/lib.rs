@@ -21,6 +21,7 @@ pub mod seam;
 pub mod tiles;
 pub mod topology;
 pub mod view;
+pub mod walk;
 
 pub use mappack::{decode_map, PackedMap};
 pub use movement::{WalkGate, WalkGateConfig, WalkOutcome};
