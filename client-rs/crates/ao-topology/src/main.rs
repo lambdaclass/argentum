@@ -221,7 +221,7 @@ fn main() {
             found.tile_pairs,
             found.on_foot,
             found.by_boat,
-            found.blocked,
+            found.blocked + found.into_solid,
             found.one_tile_failures,
             found.one_way_exits,
         );
@@ -231,6 +231,8 @@ fn main() {
         totals.on_foot += found.on_foot;
         totals.by_boat += found.by_boat;
         totals.blocked += found.blocked;
+        totals.into_solid += found.into_solid;
+        totals.into_solid_with_exits += found.into_solid_with_exits;
         totals.strands_walker += found.strands_walker;
         totals.beaches_boat += found.beaches_boat;
         totals.strandings_with_exits += found.strandings_with_exits;
@@ -255,6 +257,7 @@ fn main() {
     println!("    tile pairs not one tile apart       {}", totals.one_tile_failures);
     println!("    arrivals resolving to two maps      {}", totals.resolution_failures);
     println!("    -- traversal --");
+    println!("    exits transferring into solid ground {}", totals.into_solid_with_exits);
     println!("    exits stranding a walker on water   {}", totals.strandings_with_exits);
     println!("    exits the other map does not return {}", totals.one_way_exits);
     println!("    boundaries beaching a boat          {} (permitted today)", totals.beaches_boat);

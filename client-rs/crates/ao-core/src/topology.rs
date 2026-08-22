@@ -372,6 +372,11 @@ pub struct SeamCounts {
     pub crossable_on_foot: usize,
     pub crossable_by_boat: usize,
     pub blocked: usize,
+    /// Boundaries where the way out is open and the arrival is solid, and the subset an exit
+    /// actually transfers somebody across. Previously counted as `blocked`, which conflated
+    /// "you cannot go this way" with "you go this way and end up inside a wall".
+    pub into_solid: usize,
+    pub into_solid_with_exits: usize,
     /// Exits that leave a walker standing on water. The server transfers on the exit's
     /// destination without checking the arrival tile or whether the character is navigating,
     /// so each one strands somebody.
@@ -476,25 +481,29 @@ pub const BASELINE: Baseline = Baseline {
     interior: 1_201,
     land_seams: SeamCounts {
         seams: 931,
-        without_defects: 615,
+        without_defects: 610,
         tile_pairs: 71528,
         crossable_on_foot: 41560,
         crossable_by_boat: 12176,
-        blocked: 17336,
+        blocked: 17229,
+        into_solid: 107,
+        into_solid_with_exits: 107,
         strandings_with_exits: 4,
         beaches_boat: 452,
         one_tile_failures: 912,
         resolution_failures: 542,
         one_way_exits: 2412,
-        ground_continuity_95: 899,
+        ground_continuity_95: 898,
     },
     shore_seams: SeamCounts {
         seams: 439,
-        without_defects: 355,
+        without_defects: 352,
         tile_pairs: 33908,
         crossable_on_foot: 2891,
         crossable_by_boat: 28764,
-        blocked: 1844,
+        blocked: 1782,
+        into_solid: 62,
+        into_solid_with_exits: 62,
         strandings_with_exits: 0,
         beaches_boat: 409,
         one_tile_failures: 1454,
@@ -509,6 +518,8 @@ pub const BASELINE: Baseline = Baseline {
         crossable_on_foot: 148,
         crossable_by_boat: 65201,
         blocked: 47,
+        into_solid: 0,
+        into_solid_with_exits: 0,
         strandings_with_exits: 0,
         beaches_boat: 4,
         one_tile_failures: 6008,
@@ -588,6 +599,12 @@ pub fn drift(expected: &Baseline, found: &Baseline) -> Vec<String> {
         note(&format!("{label} crossable on foot"), want.crossable_on_foot, got.crossable_on_foot);
         note(&format!("{label} crossable by boat"), want.crossable_by_boat, got.crossable_by_boat);
         note(&format!("{label} blocked"), want.blocked, got.blocked);
+        note(&format!("{label} arriving in solid"), want.into_solid, got.into_solid);
+        note(
+            &format!("{label} exits into solid"),
+            want.into_solid_with_exits,
+            got.into_solid_with_exits,
+        );
         note(
             &format!("{label} exits stranding a walker"),
             want.strandings_with_exits,
@@ -801,6 +818,8 @@ pub fn evidence(maps: &[PackedMap]) -> Evidence {
                 crossable_on_foot: found.on_foot,
                 crossable_by_boat: found.by_boat,
                 blocked: found.blocked,
+                into_solid: found.into_solid,
+                into_solid_with_exits: found.into_solid_with_exits,
                 strandings_with_exits: found.strandings_with_exits,
                 beaches_boat: found.beaches_boat,
                 one_tile_failures: found.one_tile_failures,

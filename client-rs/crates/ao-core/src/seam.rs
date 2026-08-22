@@ -37,9 +37,15 @@ pub enum Crossing {
     OnFoot,
     /// Navigable water on both sides: crossable while `navigating`, and only then.
     ByBoat,
-    /// Solid on at least one side. A cliff or a wall, and a perfectly ordinary thing for a
-    /// seam to contain — most of a coastline is impassable.
+    /// The way out is solid: the core edge or the transition band cannot be entered, so
+    /// nobody leaves here. A cliff or a wall, and a perfectly ordinary thing for a seam to
+    /// contain — most of a coastline is impassable.
     Blocked,
+    /// The way out is open and the arrival is solid. A character reaches the band, the exit
+    /// fires, and they are transferred into rock. This was previously counted as `Blocked`,
+    /// which is wrong in the way that matters: "you cannot go this way" and "you go this way
+    /// and end up inside a wall" are not the same thing, and only one of them is a defect.
+    IntoSolid,
     /// A walker's path arrives on water. Nothing stops them:
     /// `Arena.Map.Movement.check_tile_exit/5` transfers on the destination the exit names,
     /// without checking the arrival tile or whether the character is `navigating`. So the
@@ -66,18 +72,19 @@ impl Crossing {
     /// any other — so judging the pair without it would report a medium change where the band
     /// is water and the crossing is a perfectly ordinary bit of sailing.
     pub fn of(departure: Tile, band: Tile, arrival: Tile) -> Crossing {
-        if [departure, band, arrival].contains(&Tile::Solid) {
+        // Solid on the way out means nobody leaves, whatever is on the far side.
+        if departure == Tile::Solid || band == Tile::Solid {
             return Crossing::Blocked;
         }
 
         // Can a walker even reach the band? Only if both tiles under them are dry.
         let on_foot = departure == Tile::Walkable && band == Tile::Walkable;
         match (arrival, on_foot) {
+            (Tile::Solid, _) => Crossing::IntoSolid,
             (Tile::Walkable, true) => Crossing::OnFoot,
             (Tile::Walkable, false) => Crossing::BeachesBoat,
             (Tile::Water, true) => Crossing::StrandsWalker,
             (Tile::Water, false) => Crossing::ByBoat,
-            (Tile::Solid, _) => unreachable!("solid was handled above"),
         }
     }
 }
@@ -149,6 +156,16 @@ impl SeamEvidence {
             defects.push(format!("{lost} arrivals do not resolve to exactly one map"));
         }
 
+        // Being transferred into rock, where an exit actually does it.
+        let walled = self
+            .pairs
+            .iter()
+            .filter(|pair| pair.crossing == Crossing::IntoSolid && pair.exit_out)
+            .count();
+        if walled > 0 {
+            defects.push(format!("{walled} exits transfer a character into solid ground"));
+        }
+
         // A stranding matters where an exit actually sends somebody across it.
         let stranded = self
             .pairs
@@ -207,6 +224,7 @@ impl SeamEvidence {
         let classified = self.count(Crossing::OnFoot)
             + self.count(Crossing::ByBoat)
             + self.count(Crossing::Blocked)
+            + self.count(Crossing::IntoSolid)
             + self.count(Crossing::StrandsWalker)
             + self.count(Crossing::BeachesBoat);
         classified == self.pairs.len()
@@ -406,6 +424,8 @@ pub struct SeamSummary {
     pub on_foot: usize,
     pub by_boat: usize,
     pub blocked: usize,
+    pub into_solid: usize,
+    pub into_solid_with_exits: usize,
     pub strands_walker: usize,
     pub beaches_boat: usize,
     /// Strandings an exit actually sends a character across.
@@ -484,6 +504,12 @@ pub fn summarise(
         summary.on_foot += found.count(Crossing::OnFoot);
         summary.by_boat += found.count(Crossing::ByBoat);
         summary.blocked += found.count(Crossing::Blocked);
+        summary.into_solid += found.count(Crossing::IntoSolid);
+        summary.into_solid_with_exits += found
+            .pairs
+            .iter()
+            .filter(|pair| pair.crossing == Crossing::IntoSolid && pair.exit_out)
+            .count();
         summary.strands_walker += found.count(Crossing::StrandsWalker);
         summary.beaches_boat += found.count(Crossing::BeachesBoat);
         summary.strandings_with_exits += found
@@ -658,7 +684,36 @@ mod tests {
     }
 
     #[test]
-    fn solid_ground_on_either_side_is_blocked_not_broken() {
+    fn a_solid_way_out_is_blocked_and_a_solid_arrival_is_not_the_same_thing() {
+        // The distinction this test exists for. Solid on the way out means nobody leaves,
+        // which is most of a coastline and no defect at all. Solid on *arrival*, reached
+        // through an open band, means the exit transfers a character into rock.
+        let mut open = blank(1);
+        let mut wall = blank(2);
+        for y in CORE_Y.0..=CORE_Y.1 {
+            set_tile(&mut wall, CORE_X.0, y, 1);
+        }
+        open.exits.push(MapExit {
+            x: BAND_X.1,
+            y: 50,
+            target_map: 2,
+            target_x: CORE_X.0,
+            target_y: 50,
+        });
+
+        let into_wall = evidence(
+            &open,
+            &wall,
+            Side::East,
+            Origin { x: 0, y: 0 },
+            Origin { x: PITCH_X, y: 0 },
+            &side_by_side(),
+        );
+        assert_eq!(into_wall.count(Crossing::IntoSolid), 80);
+        assert_eq!(into_wall.count(Crossing::Blocked), 0);
+        assert!(into_wall.accounting_closes());
+        assert!(into_wall.defects().iter().any(|note| note.contains("into solid ground")));
+
         let mut west = blank(1);
         let east = blank(2);
         for y in CORE_Y.0..=CORE_Y.1 {
