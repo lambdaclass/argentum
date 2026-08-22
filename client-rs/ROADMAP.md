@@ -556,10 +556,29 @@ navigable water, a corner closing on four distinct contiguous tiles, and one wal
 advancing exactly one tile east and south. A boolean reading of the blocked layer
 would have called that waterway a wall.
 
-Still outstanding here: the content-hashed `WorldTopology` manifest and its
-determinism proof, valid/simulated tile masks, per-layer seam ownership, resource
-dependencies, transition classification, `u8`-unrepresentable shapes, and
-rendered-pixel comparison against the actual GRH artwork rather than grh identity.
+**Manifest, delivered 2026-08-22.** `ao_core::manifest` emits the topology
+deterministically with four statuses — `unresolved`, `candidate`, `reviewed`,
+`active` — and nothing may activate itself. Active requires both a hand-recorded
+`geographic` disposition in `assets/world-topology/reviews.txt` *and* agreement from
+the evidence; a review cannot activate what the measurements reject, and clean
+measurements cannot activate what nobody reviewed. Ground art is recorded beside every
+seam and is not an input to any status.
+
+Current state: hash `62e5f93a530bf656`, 3,903 lines, **0 active, 0 reviewed, 184
+candidates, 2,035 unresolved**, all 226 spaces addressable as `map_id + u8 x/y`. The
+candidate count sits far below the 1,656 seams with no local defect because a seam
+inside a space whose claims do not close is unresolved however clean it looks.
+
+The atlas found a defect class the claim check cannot see: three spaces satisfy every
+constraint and still stack two maps on one cell — `[50, 169]`, `[184, 790]`,
+`[559, 572]` — because nothing in the corpus asserts that two maps reached by different
+paths are different places. Space 1 has 23 more. Each is named in the report and each
+needs a disposition in `W-0101`.
+
+Still outstanding here: valid/simulated tile masks, per-layer seam ownership, resource
+dependencies, transition classification for the non-seam exits, and rendered-pixel
+comparison against decoded GRH artwork rather than graphic identity. Nothing may be
+promoted on graphic identity alone.
 
 ### Task W-0098 — Canonical world-position and stable-identity contract
 
