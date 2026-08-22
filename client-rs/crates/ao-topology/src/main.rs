@@ -150,8 +150,9 @@ fn main() {
     println!("      crossable on foot     {}", seams.on_foot);
     println!("      crossable by boat     {}", seams.by_boat);
     println!("      blocked               {}", seams.blocked);
-    println!("      land meets water      {}", seams.medium_changes);
-    println!("        with an exit        {}", seams.medium_changes_with_exits);
+    println!("      strands a walker      {}", seams.strands_walker);
+    println!("        with an exit        {}", seams.strandings_with_exits);
+    println!("      beaches a boat        {}", seams.beaches_boat);
     println!("    not one tile apart      {}", seams.one_tile_failures);
     println!("    round-trip failures     {}", seams.round_trip_failures);
     println!("    one-way exits           {}", seams.one_way_exits);

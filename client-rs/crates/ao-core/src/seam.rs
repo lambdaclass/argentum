@@ -39,14 +39,20 @@ pub enum Crossing {
     /// Solid on at least one side. A cliff or a wall, and a perfectly ordinary thing for a
     /// seam to contain — most of a coastline is impassable.
     Blocked,
-    /// The medium changes: walkable meets water. A character stepping across arrives in a
-    /// state their locomotion mode does not allow, and nothing stops them —
-    /// `Arena.Map.Movement.check_tile_exit/5` transfers on the destination named by the
-    /// exit, without checking the arrival tile or whether the character is `navigating`. So
-    /// this is a live defect wherever an exit crosses it, and it is precisely the case
-    /// artwork comparison cannot see: the ground can be perfectly continuous across a
-    /// boundary that puts a walker in the sea.
-    MediumChange,
+    /// A walker's path arrives on water. Nothing stops them:
+    /// `Arena.Map.Movement.check_tile_exit/5` transfers on the destination the exit names,
+    /// without checking the arrival tile or whether the character is `navigating`. So the
+    /// character ends up standing on the sea, and this is precisely the case artwork
+    /// comparison cannot see — the ground can be perfectly continuous across a boundary
+    /// that strands somebody.
+    StrandsWalker,
+    /// A sailor's path arrives on land. The current server permits it, because the only
+    /// navigation rule it has is `tile_val == 2 and not entity.navigating` — water is
+    /// blocked without a boat, and nothing blocks a boat on dry ground. Recorded as an
+    /// observation rather than corrected here: whether a ship may beach itself is a content
+    /// decision, and inventing the opposite rule inside a compiler would be exactly the
+    /// kind of assumption this module exists to avoid.
+    BeachesBoat,
 }
 
 impl Crossing {
@@ -59,17 +65,19 @@ impl Crossing {
     /// any other — so judging the pair without it would report a medium change where the band
     /// is water and the crossing is a perfectly ordinary bit of sailing.
     pub fn of(departure: Tile, band: Tile, arrival: Tile) -> Crossing {
-        let path = [departure, band, arrival];
-        if path.contains(&Tile::Solid) {
+        if [departure, band, arrival].contains(&Tile::Solid) {
             return Crossing::Blocked;
         }
-        if path.iter().all(|tile| *tile == Tile::Walkable) {
-            return Crossing::OnFoot;
+
+        // Can a walker even reach the band? Only if both tiles under them are dry.
+        let on_foot = departure == Tile::Walkable && band == Tile::Walkable;
+        match (arrival, on_foot) {
+            (Tile::Walkable, true) => Crossing::OnFoot,
+            (Tile::Walkable, false) => Crossing::BeachesBoat,
+            (Tile::Water, true) => Crossing::StrandsWalker,
+            (Tile::Water, false) => Crossing::ByBoat,
+            (Tile::Solid, _) => unreachable!("solid was handled above"),
         }
-        if path.iter().all(|tile| *tile == Tile::Water) {
-            return Crossing::ByBoat;
-        }
-        Crossing::MediumChange
     }
 }
 
@@ -134,14 +142,14 @@ impl SeamEvidence {
             defects.push(format!("{} tile pairs do not round-trip", lost.len()));
         }
 
-        // A medium change matters where an exit actually sends somebody across it.
-        let dumped = self
+        // A stranding matters where an exit actually sends somebody across it.
+        let stranded = self
             .pairs
             .iter()
-            .filter(|pair| pair.crossing == Crossing::MediumChange && pair.exit_out)
+            .filter(|pair| pair.crossing == Crossing::StrandsWalker && pair.exit_out)
             .count();
-        if dumped > 0 {
-            defects.push(format!("{dumped} exits cross between land and water"));
+        if stranded > 0 {
+            defects.push(format!("{stranded} exits leave a walker standing on water"));
         }
 
         let one_way = self.pairs.iter().filter(|pair| pair.exit_out && !pair.exit_back).count();
@@ -358,9 +366,10 @@ pub struct SeamSummary {
     pub on_foot: usize,
     pub by_boat: usize,
     pub blocked: usize,
-    pub medium_changes: usize,
-    /// Medium changes an exit actually sends a character across.
-    pub medium_changes_with_exits: usize,
+    pub strands_walker: usize,
+    pub beaches_boat: usize,
+    /// Strandings an exit actually sends a character across.
+    pub strandings_with_exits: usize,
     pub one_tile_failures: usize,
     pub round_trip_failures: usize,
     pub one_way_exits: usize,
@@ -402,11 +411,12 @@ pub fn summarise(
         summary.on_foot += found.count(Crossing::OnFoot);
         summary.by_boat += found.count(Crossing::ByBoat);
         summary.blocked += found.count(Crossing::Blocked);
-        summary.medium_changes += found.count(Crossing::MediumChange);
-        summary.medium_changes_with_exits += found
+        summary.strands_walker += found.count(Crossing::StrandsWalker);
+        summary.beaches_boat += found.count(Crossing::BeachesBoat);
+        summary.strandings_with_exits += found
             .pairs
             .iter()
-            .filter(|pair| pair.crossing == Crossing::MediumChange && pair.exit_out)
+            .filter(|pair| pair.crossing == Crossing::StrandsWalker && pair.exit_out)
             .count();
         summary.one_tile_failures += found.pairs.iter().filter(|pair| !pair.one_tile).count();
         summary.round_trip_failures += found.pairs.iter().filter(|pair| !pair.round_trip).count();
@@ -514,10 +524,10 @@ mod tests {
             evidence(&land, &sea, Side::East, Origin { x: 0, y: 0 }, Origin { x: PITCH_X, y: 0 });
 
         let pair = found.pairs.iter().find(|pair| pair.departure.1 == 50).expect("row 50");
-        assert_eq!(pair.crossing, Crossing::MediumChange);
+        assert_eq!(pair.crossing, Crossing::StrandsWalker);
         assert!(pair.band_matches_neighbour, "the art matches perfectly, and it is still wrong");
         assert!(pair.exit_out);
-        assert!(found.defects().iter().any(|note| note.contains("land and water")));
+        assert!(found.defects().iter().any(|note| note.contains("standing on water")));
     }
 
     #[test]
@@ -533,7 +543,8 @@ mod tests {
         let found =
             evidence(&west, &east, Side::East, Origin { x: 0, y: 0 }, Origin { x: PITCH_X, y: 0 });
         assert_eq!(found.count(Crossing::ByBoat), 80);
-        assert_eq!(found.count(Crossing::MediumChange), 0);
+        assert_eq!(found.count(Crossing::StrandsWalker), 0);
+        assert_eq!(found.count(Crossing::BeachesBoat), 0);
         assert_eq!(found.defects(), Vec::<String>::new());
     }
 

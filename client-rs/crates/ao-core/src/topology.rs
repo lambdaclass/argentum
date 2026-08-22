@@ -254,9 +254,18 @@ pub struct Baseline {
     pub land_seam_candidates: usize,
     pub land_seams_without_defects: usize,
     pub seam_tile_pairs: usize,
-    /// Exits that walk a character between land and water. The server transfers without
-    /// checking the arrival tile, so each one strands somebody.
-    pub seam_exits_across_medium: usize,
+    /// Exits that leave a walker standing on water. The server transfers without checking
+    /// the arrival tile, so each one strands somebody.
+    ///
+    /// This field was first pinned at 897 and that was wrong. It counted every boundary
+    /// where land met water, including the 452 where a boat arrives on land — which the
+    /// current server permits — and cases where no walker can reach the transition band in
+    /// the first place. Asking "could a walker get here at all?" collapsed it to 4. The
+    /// number was stable and gated the whole time; being pinned did not make it true.
+    pub seam_strandings_with_exits: usize,
+    /// Boundaries where a sailor's path arrives on dry land. Permitted today, and recorded
+    /// because whether a ship may beach itself is a content decision.
+    pub seam_beaches_boat: usize,
     pub seam_one_tile_failures: usize,
     pub seam_one_way_exits: usize,
     /// Seams whose band art repeats the neighbour's edge for at least 95% of crossable
@@ -338,9 +347,10 @@ pub const BASELINE: Baseline = Baseline {
     sea_sea_unresolved: 34,
     land_sea_unresolved: 1,
     land_seam_candidates: 931,
-    land_seams_without_defects: 456,
+    land_seams_without_defects: 638,
     seam_tile_pairs: 71_528,
-    seam_exits_across_medium: 897,
+    seam_strandings_with_exits: 4,
+    seam_beaches_boat: 452,
     seam_one_tile_failures: 912,
     seam_one_way_exits: 2_412,
     seam_ground_continuity_95: 899,
@@ -396,10 +406,11 @@ pub fn drift(expected: &Baseline, found: &Baseline) -> Vec<String> {
     );
     note("seam tile pairs", expected.seam_tile_pairs, found.seam_tile_pairs);
     note(
-        "exits across a medium change",
-        expected.seam_exits_across_medium,
-        found.seam_exits_across_medium,
+        "exits stranding a walker on water",
+        expected.seam_strandings_with_exits,
+        found.seam_strandings_with_exits,
     );
+    note("boundaries beaching a boat", expected.seam_beaches_boat, found.seam_beaches_boat);
     note("seam one-tile failures", expected.seam_one_tile_failures, found.seam_one_tile_failures);
     note("seam one-way exits", expected.seam_one_way_exits, found.seam_one_way_exits);
     note(
@@ -572,7 +583,8 @@ pub fn evidence(maps: &[PackedMap]) -> Evidence {
     baseline.land_seam_candidates = seams.land_seams;
     baseline.land_seams_without_defects = seams.without_defects;
     baseline.seam_tile_pairs = seams.tile_pairs;
-    baseline.seam_exits_across_medium = seams.medium_changes_with_exits;
+    baseline.seam_strandings_with_exits = seams.strandings_with_exits;
+    baseline.seam_beaches_boat = seams.beaches_boat;
     baseline.seam_one_tile_failures = seams.one_tile_failures;
     baseline.seam_one_way_exits = seams.one_way_exits;
     baseline.seam_ground_continuity_95 = seams.continuous_at_95;
