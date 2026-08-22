@@ -135,6 +135,45 @@ fn main() {
         }
     }
 
+    // Seam evidence: what a character could actually do at every candidate land boundary.
+    // Reported as observation, deliberately separate from any promotion decision.
+    let surfaces = topology::surfaces(&maps);
+    let placed: std::collections::BTreeMap<u16, topology::Origin> = found
+        .regions
+        .iter()
+        .flat_map(|region| region.origins.iter().map(|(id, origin)| (*id, *origin)))
+        .collect();
+    let (seams, per_seam) = ao_core::seam::summarise(&maps, &found.adjacencies, &placed, &surfaces);
+    println!("  candidate land seams      {}", seams.land_seams);
+    println!("    without defects         {}", seams.without_defects);
+    println!("    tile pairs              {}", seams.tile_pairs);
+    println!("      crossable on foot     {}", seams.on_foot);
+    println!("      crossable by boat     {}", seams.by_boat);
+    println!("      blocked               {}", seams.blocked);
+    println!("      land meets water      {}", seams.medium_changes);
+    println!("        with an exit        {}", seams.medium_changes_with_exits);
+    println!("    not one tile apart      {}", seams.one_tile_failures);
+    println!("    round-trip failures     {}", seams.round_trip_failures);
+    println!("    one-way exits           {}", seams.one_way_exits);
+    println!("    ground continuity >=95% {} seams", seams.continuous_at_95);
+    println!("    ground continuity >=85% {} seams", seams.continuous_at_85);
+
+    let mut worst: Vec<&ao_core::seam::SeamEvidence> =
+        per_seam.iter().filter(|found| !found.defects().is_empty()).collect();
+    worst.sort_by_key(|found| std::cmp::Reverse(found.defects().len()));
+    if !worst.is_empty() {
+        println!("  land seams with defects, worst first:");
+        for found in worst.iter().take(6) {
+            println!(
+                "    {} {:?} {}: {}",
+                found.seam.from_map,
+                found.seam.side,
+                found.seam.to_map,
+                found.defects().join("; ")
+            );
+        }
+    }
+
     // The largest components, because that is what a first seamless region is chosen from.
     let mut sizes: BTreeMap<u16, usize> = BTreeMap::new();
     let mut seen = std::collections::BTreeSet::new();

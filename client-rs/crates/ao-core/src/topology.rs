@@ -246,6 +246,22 @@ pub struct Baseline {
     pub land_land_unresolved: usize,
     pub sea_sea_unresolved: usize,
     pub land_sea_unresolved: usize,
+    /// Seam evidence, from `crate::seam`. Observations about what a character could do at
+    /// every candidate land boundary — pinned so they cannot drift silently, and pinned
+    /// *only* as observations. A seam with no defects is a seam worth reviewing; promoting
+    /// it to geography is a decision, and a baseline must never make that decision by
+    /// having recorded a number.
+    pub land_seam_candidates: usize,
+    pub land_seams_without_defects: usize,
+    pub seam_tile_pairs: usize,
+    /// Exits that walk a character between land and water. The server transfers without
+    /// checking the arrival tile, so each one strands somebody.
+    pub seam_exits_across_medium: usize,
+    pub seam_one_tile_failures: usize,
+    pub seam_one_way_exits: usize,
+    /// Seams whose band art repeats the neighbour's edge for at least 95% of crossable
+    /// pairs: the gutter hypothesis, measured.
+    pub seam_ground_continuity_95: usize,
 }
 
 /// The corpus this baseline was measured against.
@@ -321,6 +337,13 @@ pub const BASELINE: Baseline = Baseline {
     land_land_unresolved: 0,
     sea_sea_unresolved: 34,
     land_sea_unresolved: 1,
+    land_seam_candidates: 931,
+    land_seams_without_defects: 456,
+    seam_tile_pairs: 71_528,
+    seam_exits_across_medium: 897,
+    seam_one_tile_failures: 912,
+    seam_one_way_exits: 2_412,
+    seam_ground_continuity_95: 899,
 };
 
 /// How `found` differs from `expected`, field by field, or nothing if it does not.
@@ -365,6 +388,25 @@ pub fn drift(expected: &Baseline, found: &Baseline) -> Vec<String> {
     note("land-land unresolved", expected.land_land_unresolved, found.land_land_unresolved);
     note("sea-sea unresolved", expected.sea_sea_unresolved, found.sea_sea_unresolved);
     note("land-sea unresolved", expected.land_sea_unresolved, found.land_sea_unresolved);
+    note("land seam candidates", expected.land_seam_candidates, found.land_seam_candidates);
+    note(
+        "land seams without defects",
+        expected.land_seams_without_defects,
+        found.land_seams_without_defects,
+    );
+    note("seam tile pairs", expected.seam_tile_pairs, found.seam_tile_pairs);
+    note(
+        "exits across a medium change",
+        expected.seam_exits_across_medium,
+        found.seam_exits_across_medium,
+    );
+    note("seam one-tile failures", expected.seam_one_tile_failures, found.seam_one_tile_failures);
+    note("seam one-way exits", expected.seam_one_way_exits, found.seam_one_way_exits);
+    note(
+        "seams with 95% ground continuity",
+        expected.seam_ground_continuity_95,
+        found.seam_ground_continuity_95,
+    );
 
     lines
 }
@@ -520,6 +562,20 @@ pub fn evidence(maps: &[PackedMap]) -> Evidence {
     baseline.sea_maps = surfaces(maps).values().filter(|s| **s == Surface::Sea).count();
     baseline.discrete_regions =
         spaces.iter().filter(|region| region.geometry == Geometry::Discrete).count();
+
+    // Seam evidence needs the maps placed, so it reads the regions just measured.
+    let placed: BTreeMap<u16, Origin> = spaces
+        .iter()
+        .flat_map(|region| region.origins.iter().map(|(id, origin)| (*id, *origin)))
+        .collect();
+    let (seams, _) = crate::seam::summarise(maps, &adjacencies, &placed, &surfaces(maps));
+    baseline.land_seam_candidates = seams.land_seams;
+    baseline.land_seams_without_defects = seams.without_defects;
+    baseline.seam_tile_pairs = seams.tile_pairs;
+    baseline.seam_exits_across_medium = seams.medium_changes_with_exits;
+    baseline.seam_one_tile_failures = seams.one_tile_failures;
+    baseline.seam_one_way_exits = seams.one_way_exits;
+    baseline.seam_ground_continuity_95 = seams.continuous_at_95;
 
     let classes = by_claim_class(maps, &adjacencies);
     let unresolved = |class: ClaimClass| classes.get(&class).map(|c| c.unresolved).unwrap_or(0);

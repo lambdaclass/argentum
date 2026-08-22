@@ -14,6 +14,7 @@ pub mod fixtures;
 pub mod mappack;
 pub mod movement;
 pub mod protocol;
+pub mod seam;
 pub mod tiles;
 pub mod topology;
 pub mod view;
