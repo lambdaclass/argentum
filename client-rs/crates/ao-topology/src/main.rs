@@ -320,6 +320,82 @@ fn main() {
         println!("    from map {root:<5} {size} maps");
     }
 
+    // The manifest: measured evidence plus hand-recorded review, and the only place that
+    // says what is allowed to be geography.
+    let reviews = ao_core::manifest::reviews();
+    let manifest = ao_core::manifest::build(&maps, &found, &reviews);
+    println!("\n  manifest {} over corpus {}", manifest.content_hash(), manifest.corpus);
+    println!("    review lines recorded  {}", reviews.len());
+    for status in [
+        ao_core::manifest::Status::Active,
+        ao_core::manifest::Status::Reviewed,
+        ao_core::manifest::Status::Candidate,
+        ao_core::manifest::Status::Unresolved,
+    ] {
+        println!("    seams {:<11} {}", status.name(), manifest.count(status));
+    }
+    println!(
+        "    spaces: {} of {} unresolved, {} not addressable as map + u8 x/y",
+        manifest
+            .spaces
+            .iter()
+            .filter(|space| space.status == ao_core::manifest::Status::Unresolved)
+            .count(),
+        manifest.spaces.len(),
+        manifest.spaces.iter().filter(|space| !space.legacy_representable).count(),
+    );
+
+    let stuck: Vec<&ao_core::manifest::SpaceEntry> = manifest
+        .spaces
+        .iter()
+        .filter(|space| space.status == ao_core::manifest::Status::Unresolved)
+        .collect();
+    if !stuck.is_empty() {
+        println!("    unresolved spaces:");
+        for space in &stuck {
+            println!(
+                "      space {:<5} {:>3} maps, {} claims that cannot hold, {} overlapping cells",
+                space.id,
+                space.origins.len(),
+                space.unresolved_claims,
+                space.overlapping_cells
+            );
+            // A space with no contradictory claim and an overlap anyway: every constraint
+            // holds, and two maps still stand in the same place.
+            for group in atlases[&space.id].overlaps() {
+                println!("        maps sharing one cell: {group:?}");
+            }
+        }
+    }
+    let promotable: Vec<&ao_core::manifest::SeamEntry> = manifest
+        .seams
+        .iter()
+        .filter(|entry| entry.status == ao_core::manifest::Status::Candidate)
+        .collect();
+    println!("    candidate seams sit in {} spaces", {
+        let spaces: std::collections::BTreeSet<u16> = promotable
+            .iter()
+            .filter_map(|entry| region_of.get(&entry.seam.from_map).copied())
+            .collect();
+        spaces.len()
+    });
+
+    if let Some(index) = args.iter().position(|arg| arg == "--manifest") {
+        match args.get(index + 1) {
+            Some(path) => match std::fs::write(path, manifest.encode()) {
+                Ok(()) => println!("    wrote {path}"),
+                Err(error) => {
+                    eprintln!("{path}: {error}");
+                    std::process::exit(1);
+                }
+            },
+            None => {
+                eprintln!("--manifest needs a path");
+                std::process::exit(2);
+            }
+        }
+    }
+
     if checking {
         // The drift gate. Exits non-zero and says which numbers moved, because "the world
         // changed" is not actionable and "standard seams: expected 156084, found 156080"
@@ -327,6 +403,13 @@ fn main() {
         // throwing away.
         let mut differences = topology::drift(&topology::BASELINE, b);
         differences.extend(disagreements.iter().cloned());
+        let hash = manifest.content_hash();
+        if hash != ao_core::manifest::CONTENT_HASH {
+            differences.push(format!(
+                "manifest content hash: expected {}, found {hash}",
+                ao_core::manifest::CONTENT_HASH
+            ));
+        }
         if differences.is_empty() {
             println!("  baseline: matches the pinned corpus {}", topology::CORPUS);
         } else {

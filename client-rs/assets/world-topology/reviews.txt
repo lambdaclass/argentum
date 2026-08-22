@@ -1,0 +1,28 @@
+# Hand-recorded dispositions for world boundaries.
+#
+# This file is the only thing that can activate geography. A clean measurement makes a seam
+# a *candidate*; a candidate is a request for review, not a result. Nothing in the compiler
+# may add a line here, and no amount of matching ground art substitutes for one — art
+# continuity reached 100% on a boundary that walks a character into the sea.
+#
+# Format:
+#   seam <from-map> <west|east|north|south> <to-map> <disposition>
+#   space <space-id> geometry-confirmed
+#
+# Dispositions:
+#   geographic   two maps genuinely adjacent; walk across it seamlessly
+#   door         a doorway, not adjacency
+#   portal       a fixed magical link
+#   teleport     an arbitrary destination
+#   instance     the entrance to an instanced space
+#   unsupported  real, and this compiler will not model it
+#
+# A disposition is per *directed* claim, because that is what a player traverses: reviewing
+# `seam 199 east 274` says nothing about walking back west.
+#
+# Reviewed so far: nothing. 1,656 of the corpus's 2,219 seams have no measured defect and
+# are waiting here. The obvious first candidates are the eight directed crossings of
+# `199 274 / 573 570`, which the acceptance report proves clean in both directions with a
+# closing corner and unique resolution on all four cardinal walks -- but proving them clean
+# is not the same as deciding the world works that way, and that decision is not the
+# compiler's to make.

@@ -1305,6 +1305,16 @@ impl Atlas {
     pub fn ambiguous_cells(&self) -> usize {
         self.cells.values().filter(|maps| maps.len() > 1).count()
     }
+
+    /// The groups of maps that share a cell.
+    ///
+    /// Worth naming, because a space can satisfy every one of its claims and still be
+    /// non-injective: nothing in the corpus asserts that two maps reached by different paths
+    /// are different places, so a consistent set of constraints can stack them. Three spaces
+    /// in this corpus do exactly that, and no count of contradictory claims would show it.
+    pub fn overlaps(&self) -> Vec<Vec<u16>> {
+        self.cells.values().filter(|maps| maps.len() > 1).cloned().collect()
+    }
 }
 
 /// A map with at least this share of navigable water is sea rather than shore.
