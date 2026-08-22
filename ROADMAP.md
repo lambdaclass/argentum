@@ -149,8 +149,10 @@ Work:
 
 14. Turn benchmark results into performance regression budgets.
     - Store versioned baselines for representative hardware and scenarios
-    - Gate movement RTT p99, tick-duration p99, maximum queue depth, memory per
-      connected player, login throughput, and autosave latency
+    - Gate movement RTT p99, the duration p99 of the existing NPC-AI/regen/buff
+      jobs, maximum queue depth, memory per connected player, login throughput,
+      and autosave latency. These job budgets do not define or authorize one
+      global simulation tick
     - Report both the absolute result and change from the accepted baseline
 
 15. Produce a failure-reproduction bundle for integration, replay, load, and
@@ -177,14 +179,30 @@ Work:
       character, and concurrent double-consume end to end
 
 17. Add a negotiated, length-framed WebSocket protocol without changing the AO
-    gameplay payloads unnecessarily. *(Rust/Bevy: W-0021-W-0024, W-0029.)*
+    gameplay payload bodies unnecessarily. *(Rust/Bevy: W-0021-W-0024, W-0029.)*
     - Negotiate protocol version and capabilities before authentication
-    - Frame each message with enough length information to skip an unknown
-      optional packet without losing stream alignment
+    - Negotiate `argentum.v2` and use an explicit little-endian bounded
+      envelope—`message_type: u16`, `flags: u16`, `payload_length: u32`, then
+      payload—so an unknown optional message can be skipped without losing
+      stream alignment. Initially flag bit 0 means `required`; all other bits
+      must be zero. Unknown required types and unknown flag bits close with a
+      stable protocol reason. The subprotocol, not heuristic parsing, decides
+      whether framing is present
+    - In modern framing, `message_type` owns the packet ID and `payload` is the
+      existing AO packet body without its old signed-i16 ID prefix. The legacy
+      adapter alone reconstructs/parses `legacy_id + body`; do not transmit a
+      redundant second packet ID inside a modern envelope
     - Define explicit login accepted/rejected, world-pack signature, session,
       bootstrap, ping/pong, and protocol-error messages
-    - Bound frame size, buffered bytes, decoded messages per tick, and ingress
-      and egress queues before allocating or enqueueing
+    - Bound frame size, payload length, buffered bytes, decoded messages per
+      scheduler slice, and ingress/egress queues before allocating or
+      enqueueing. "Per scheduler slice" is a work budget, not a game tick
+    - Record message delivery class in the schema: atomic/critical,
+      transactional, latest-state/coalescible, ephemeral, or static. WebSocket
+      remains one reliable ordered TCP stream: a class controls queue priority,
+      coalescing and overload behavior, but is selected by trusted message-type
+      metadata rather than a client flag and must never be described or tested
+      as a real unreliable or unordered transport channel
     - Specify required-versus-optional capability behavior, downgrade policy,
       and clean close reasons for incompatible clients
     - Add hostile-length, truncated-frame, unknown-packet, queue-pressure, and
@@ -192,9 +210,10 @@ Work:
 
 18. Send a complete, ordered, authoritative bootstrap snapshot after login.
     *(Rust/Bevy: W-0024, W-0025, W-0030.)*
-    - Include snapshot version, world epoch, character identity, map and
-      position, visible entities, inventory, equipment, spells, hotbar, vitals,
-      cooldowns, quests, and relevant party/guild/faction state
+    - Include snapshot version, session epoch, authority epoch/revision,
+      replication epoch/revision baseline, character identity, map and position,
+      visible entities, inventory, equipment, spells, hotbar, vitals, cooldowns,
+      quests, and relevant party/guild/faction state
     - Use explicit begin/end or an equivalent atomic envelope so the client
       never guesses that bootstrap has finished
     - Route every member through one ordered, non-sheddable session path; no
@@ -203,7 +222,7 @@ Work:
       semantics without exposing a partially initialized playable world
     - Pin the full sequence with byte fixtures and a live login test
 
-19. Add correlated authoritative receipts for client commands.
+19. Add correlated authoritative receipts and revisioned state replication.
     *(Rust/Bevy: W-0026, W-0030 and the owning UI workflow tasks.)*
     - Carry a request/operation ID, command kind, success or rejection, stable
       reason code/localization key, affected entity or slot, and authoritative
@@ -215,11 +234,68 @@ Work:
       so the client never treats an unrelated state change as its response
     - Preserve server authority: optimistic presentation may be reconciled, but
       it may not invent a successful gameplay mutation
+    - Keep simulation event-driven. Do not add a global, world-wide, regional,
+      or protocol-driven fixed tick as part of protocol v2. Each MapServer
+      continues to serialize its own commands through its mailbox and runs only
+      the existing independently scheduled gameplay jobs it actually owns
+    - Give an accepted connection a `SessionEpoch`; give initial authority and
+      each committed ownership handoff a new `AuthorityEpoch`; and number
+      committed mutations monotonically with an `AuthorityRevision` scoped to
+      that authority epoch. A same-owner resnapshot does not invent a new owner
+    - Separately give each atomic client-view baseline a `ReplicationEpoch` and
+      number emitted per-session AOI deltas with `ReplicationRevision`.
+      Bootstrap, resnapshot and handoff install a new replication baseline. Use
+      distinct, non-wrapping `u64` wire types and reject an exhausted counter
+      rather than silently wrapping
+    - Increment `AuthorityRevision` exactly once after an accepted authoritative
+      transaction has committed. A rejected command returns the current
+      authority revision but does not advance it. Assign `ReplicationRevision`
+      only after filtering/coalescing one emitted session delta. The two must
+      remain separate: hidden mutations cannot create client-visible gaps, and
+      coalescing cannot erase an authoritative transaction version
+    - Epochs and revisions are ordering/version state, never elapsed time, frame
+      numbers, timers, or permission to advance the simulation
+    - Define movement as `MoveIntent {command_id, authority_epoch,
+      input_sequence, direction}`. The server processes it immediately and
+      returns an accepted/rejected receipt containing the same command/input
+      identifiers, resulting authority revision and canonical position. The
+      client may predict presentation, but never sends an authoritative position
+    - Build `WorldDelta {replication_epoch, base_replication_revision,
+      replication_revision, added, changed, removed}` per session from
+      already-committed changes inside that session's authorized AOI. Assign the
+      revision after filtering/coalescing. MapServers never wait for one another
+      or for an egress flush, and no central process receives every world mutation
+    - Apply a delta only when its replication epoch is current and its base
+      replication revision matches the client's applied replication revision.
+      Ignore an exact duplicate, reject a stale epoch, and request one bounded
+      authoritative resnapshot on a gap; never guess, partially apply, or
+      advance across a missing replication revision
+    - Send login, snapshot/handoff, inventory, trade and authoritative combat
+      outcomes immediately through non-sheddable ordered paths. Egress may
+      coalesce unsent position/heading/animation/vital projections by stable
+      entity ID and may shed explicitly ephemeral presentation under pressure;
+      it may not coalesce transactions, receipts or atomic snapshot members
+    - If measurement justifies batching latest-state projections, use a
+      configurable **maximum wait**, initially no more than 40 ms, only while a
+      connected session already has pending coalescible data. This is an egress
+      flush deadline, not simulation time: critical messages bypass it, it
+      never wakes an empty map, and changing it must not change gameplay results
+    - Prove the contract without wall-clock luck: identical command replay does
+      not double-apply; rejected commands do not advance revision; a missing
+      delta requests one snapshot; delayed/coalesced projections converge to
+      the same state; and changing the flush deadline leaves authoritative
+      commands, receipts and authority revisions byte-for-byte equivalent even
+      when the number of replication deltas legitimately differs
 
 20. Define and prove reconnect and resnapshot semantics.
     *(Rust/Bevy: W-0027, W-0033.)*
-    - Give each accepted world session a fresh epoch and discard queued or late
-      events from previous epochs
+    - Reconnect creates a fresh `SessionEpoch`, then its bootstrap installs fresh
+      authority and replication epochs; discard every queued or late event from
+      the old session
+    - A same-connection, same-owner resnapshot preserves session/authority epoch
+      and authority revision, but installs a fresh replication epoch and complete
+      replication baseline. Do not claim ownership changed merely to repair a
+      client-view gap
     - Reauthenticate with a fresh credential, rebuild from an authoritative
       snapshot, and never replay unsafe mutations implicitly
     - Return stable close/retry reasons for maintenance, server full, ban,
@@ -284,6 +360,10 @@ Work:
    - The source owns through prepare; destination validates topology, capacity,
      collision and readiness; one commit transfers authority. Abort, timeout,
      duplicate, crash, overload and topology races leave exactly one owner
+   - A successful commit installs a new authority epoch/revision and a new
+     replication epoch/revision baseline with its complete snapshot atomically.
+     Authority revisions from the source cannot be continued or translated;
+     delayed source deltas/receipts are rejected by their applicable epoch
    - Keep the same socket/session and stable character identity; reject queued
      envelopes from an old region/epoch and never trust a client transform or
      destination
@@ -348,6 +428,14 @@ Exit criteria:
   of view.
 - Mutating client commands receive correlated authoritative results, and
   reconnect creates a fresh epoch without duplicate or stale state.
+- Server simulation remains event-driven: no global/protocol tick or
+  cross-MapServer barrier exists. Session epoch, authority epoch/revision and
+  replication epoch/revision—not elapsed time—order state, and changing the
+  optional egress coalescing deadline does not change gameplay results.
+- A replication-revision gap, stale epoch or queue overflow produces one
+  explicit bounded resnapshot/close path; it never guesses missing state, grows
+  an unbounded queue or turns a latest-state optimization into lost
+  transactional authority.
 - The deterministic topology compiler emits a versioned/hash-addressed,
   reviewable world; every activated geographic seam has exact round trips and
   zero unresolved placement contradiction.
@@ -562,10 +650,21 @@ Work:
    - Route attacks/spells/interactions asynchronously to the target owner with
      command IDs/idempotency; validate global range, line of sight, zones,
      cooldowns and cost exactly once at authority
-   - Never block a local simulation tick on a neighbor, replicate private/full
-     entity state or send every position update through one central process
-   - Bound AOI radius, update bytes/rate, stale age, queues and work per tick;
-     record local versus cross-node latency and drop/resnapshot behavior
+   - Never use a synchronous cross-MapServer call on movement/combat hot paths,
+     wait for a neighbor before processing local authority, replicate private/
+     full entity state, or send every position update through one central
+     process
+   - Publish only committed, read-only projections. A border subscription may
+     flush/coalesce pending changes at a measured 10-25 Hz ceiling while it has
+     observers, but this is an asynchronous replication deadline—not a shared
+     simulation tick. No observer means no AOI publication timer or work
+   - Critical routed commands bypass projection batching. A slow, crashed or
+     partitioned neighbor leaves local simulation running; its projection may
+     become stale only up to the explicit age budget, after which it is removed
+     and resnapshotted rather than extrapolated as authority
+   - Bound AOI radius, update bytes/rate, stale age, queue depth and work per
+     publication window/command; record local versus cross-node latency,
+     coalescing, shedding and resnapshot behavior
    - Test ownership movement during an in-flight command, slow/crashed
      neighbors, crowded seams, projectiles, visibility and duplicate delivery
 
@@ -595,7 +694,8 @@ Exit criteria:
 - Persistence writes have explicit ownership and failure semantics.
 - Production topology activation is contradiction-free and atomic.
 - Cross-region AOI/commands preserve one owner and stay inside explicit
-  latency, queue, byte and per-tick work budgets without a central hot path.
+  latency, queue, byte and publication-work budgets without a global tick,
+  cross-map barrier or central hot path.
 - Hierarchical navigation keeps local work local, and runtime instances have
   supervised ownership, cleanup and safe-return semantics.
 

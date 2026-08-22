@@ -209,9 +209,9 @@ Five different counters have five different meanings:
 
 - `SessionEpoch: u64` identifies one accepted connection lifetime. Reconnect
   creates a new value and makes every queued message from the old session stale.
-- `AuthorityEpoch: u64` identifies one installed authoritative world snapshot.
-  Initial bootstrap and each committed ownership handoff install a new value;
-  resnapshot without an ownership change preserves it.
+- `AuthorityEpoch: u64` identifies one generation of the player's authoritative
+  owner. Initial bootstrap and each committed ownership handoff install a new
+  value; resnapshot without an ownership change preserves it.
 - `AuthorityRevision: u64` orders committed mutations to the owning
   authoritative aggregate within one authority epoch. It advances exactly once
   after an accepted transaction has committed; rejection does not advance it.
@@ -873,19 +873,28 @@ in Phases 7 and 8.
 - **Depends on:** W-0021
 
 Negotiate a versioned WS subprotocol/capability before authentication; never
-guess the format from the first payload. Carry unchanged AO packet bytes at
-first inside an explicit bounded envelope of `message_type: u16`, `flags: u16`,
-`payload_length: u32`, then exactly that many payload bytes. Modern clients
-safely skip unknown optional messages; an unknown required capability closes
-with a stable reason. Legacy TCP/WS remains unframed behind its adapter.
+guess the format from the first payload. The initial modern subprotocol is
+`argentum.v2`. Carry existing AO packet bodies at first inside this
+little-endian bounded envelope: `message_type: u16`, `flags: u16`,
+`payload_length: u32`, then exactly that many payload bytes. In the initial
+version, flag bit 0 means `required` and every other bit must be zero. A modern
+client skips an unknown optional type, closes with a stable
+`unsupported_required_message` reason for an unknown required type, and rejects
+unknown flag bits. Legacy TCP/WS remains unframed behind its adapter.
 
-WebSocket is one reliable ordered TCP byte stream. Envelope flags may describe
-an atomic/critical, transactional, latest-state/coalescible, ephemeral or static
-schema class, but cannot promise unreliable or unordered transport. Parsing
-must not depend on one AO envelope equalling one WebSocket callback. Test split
-headers/payloads, several envelopes in one callback, empty payloads, unknown
-IDs, hostile/truncated lengths, downgrade refusal and a valid message following
-a skipped optional message.
+`message_type` is the packet ID in modern framing; its payload omits the legacy
+signed-i16 packet-ID prefix. The legacy adapter alone translates between
+`legacy_id + body` and the schema's `message_type + body`. A modern envelope
+must not carry the ID twice.
+
+WebSocket is one reliable ordered TCP byte stream. Atomic/critical,
+transactional, latest-state/coalescible, ephemeral or static delivery class is
+trusted schema metadata selected by `message_type`, never a client-controlled
+flag, and cannot promise unreliable or unordered transport. Parsing must not
+depend on one AO envelope equalling one WebSocket callback. Test split headers/
+payloads, several envelopes in one callback, empty payloads, every flag case,
+unknown IDs, hostile/truncated lengths, downgrade refusal and a valid message
+following a skipped optional message.
 
 ### Task W-0023 — Canonical protocol schema decision
 
@@ -1062,6 +1071,11 @@ Implement meaningful close reasons, bounded heartbeat/RTT, exponential backoff,
 token expiry and explicit `Playing` only after bootstrap. Classify credentials,
 ban/mute, full, maintenance, stale world/assets and preload failures into Bevy
 states with independent retry/reconnect/forget-session actions.
+
+Reconnect discards the old session epoch and accepts new authority/replication
+epochs only through bootstrap. A same-connection, same-owner resnapshot keeps
+the authority epoch/revision, atomically replaces only the replication epoch/
+baseline and suppresses duplicate resnapshot requests until that attempt ends.
 
 ### Phase 2 exit gate
 
