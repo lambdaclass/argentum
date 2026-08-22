@@ -575,10 +575,30 @@ constraint and still stack two maps on one cell — `[50, 169]`, `[184, 790]`,
 paths are different places. Space 1 has 23 more. Each is named in the report and each
 needs a disposition in `W-0101`.
 
-Still outstanding here: valid/simulated tile masks, per-layer seam ownership, resource
-dependencies, transition classification for the non-seam exits, and rendered-pixel
-comparison against decoded GRH artwork rather than graphic identity. Nothing may be
-promoted on graphic identity alone.
+**Tile masks and transition shapes, delivered 2026-08-22.** `ao_core::mask` answers the
+"a bounding rectangle never makes a void tile walkable" requirement by measuring
+whether it does. Of 4,984,640 core tiles, 143,680 have no ground drawn and **141,236 of
+those are already blocked** — the authors walled off their own void — leaving **2,444
+void tiles across 47 maps that read as floor**, worst first: map 334 `Drenaje` 276, map
+142 ` Dungeon Veriil.` 184, map 176 `Ducto de escape.` 151. 748 of 842 maps are drawn
+completely.
+
+`topology::Shape` classifies every non-seam exit by geometry and refuses to guess the
+content classes: of the 1,220 valid non-seam exits, **0 are mis-typed seams**, 0 arrive
+in a band, 19 are band-to-interior and 1,201 leave from inside a map. `drift` now also
+proves independently of any pin that the shapes account for all 158,549 exits.
+
+**Three defects with one cause.** The exit path trusts a destination it never checks —
+`Arena.Map.Movement.check_tile_exit/5` consults neither the arrival tile nor the
+character's locomotion — and that produces **169 exits transferring a character into
+solid rock**, **48 arriving on a tile with no ground**, and **4 leaving a walker
+standing on water**. These are not three curation problems; they are one server change,
+and `W-0101` should take them together. None is corrected here: the client must not
+predict a refusal the server does not make.
+
+Still outstanding here: per-layer gutter ownership as an artist rule, resource
+dependencies, and rendered-pixel comparison against decoded GRH artwork rather than
+graphic identity. Nothing may be promoted on graphic identity alone.
 
 ### Task W-0098 — Canonical world-position and stable-identity contract
 
