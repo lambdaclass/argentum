@@ -438,6 +438,114 @@ fn main() {
         }
     }
 
+    // Every arrival the exit path currently allows and should not, plus the valid crossings
+    // and permitted beachings that must keep working. This is W-0105's regression gate, and
+    // it is generated from the corpus rather than hand-listed so it cannot fall behind it.
+    if let Some(index) = args.iter().position(|arg| arg == "--arrivals") {
+        let Some(path) = args.get(index + 1) else {
+            eprintln!("--arrivals needs a path");
+            std::process::exit(2);
+        };
+
+        let by_id: std::collections::BTreeMap<u16, &ao_core::mappack::PackedMap> =
+            maps.iter().map(|map| (map.map_id, map)).collect();
+        let mut rows: Vec<String> = Vec::new();
+        let mut counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+
+        for found in &per_seam {
+            let Some(destination) = by_id.get(&found.seam.to_map) else { continue };
+            for pair in &found.pairs {
+                if !pair.exit_out {
+                    continue;
+                }
+
+                // Classified by the *destination*, because that is what the rule is about. A
+                // solid way out means nobody reaches the arrival today, but the arrival is no
+                // more valid for being unreachable, and a rule that only covered reachable
+                // ones would pass the whole gate and still admit the rest tomorrow.
+                let locomotion = match pair.crossing {
+                    ao_core::seam::Crossing::Blocked => "any",
+                    ao_core::seam::Crossing::ByBoat | ao_core::seam::Crossing::BeachesBoat => {
+                        "boat"
+                    }
+                    _ => "foot",
+                };
+                let arrival = ao_core::mappack::Tile::of(
+                    destination.tile_at(pair.arrival.0 as i32, pair.arrival.1 as i32),
+                );
+
+                let verdict = if pair.arrival_is_void {
+                    "reject void"
+                } else {
+                    match (arrival, locomotion) {
+                        (ao_core::mappack::Tile::Solid, _) => "reject solid",
+                        (ao_core::mappack::Tile::Water, "foot") => "reject water-on-foot",
+                        (ao_core::mappack::Tile::Water, _) => "accept sailing",
+                        (ao_core::mappack::Tile::Walkable, "boat") => "accept beaching",
+                        (ao_core::mappack::Tile::Walkable, _) => "accept walking",
+                    }
+                };
+                *counts.entry(verdict).or_default() += 1;
+
+                let keep = verdict.starts_with("reject")
+                    || counts.get(verdict).copied().unwrap_or(0) <= 40;
+                if keep {
+                    rows.push(format!(
+                        "{} {} band {},{} to {} {},{} arrival {} drawn {} locomotion {locomotion} \
+                         reachable {} -> {verdict}",
+                        found.seam.from_map,
+                        match found.seam.side {
+                            topology::Side::West => "west",
+                            topology::Side::East => "east",
+                            topology::Side::North => "north",
+                            topology::Side::South => "south",
+                        },
+                        pair.band.0,
+                        pair.band.1,
+                        found.seam.to_map,
+                        pair.arrival.0,
+                        pair.arrival.1,
+                        // The rule's inputs, stated so the server test feeds them in rather
+                        // than asserting the verdict against itself.
+                        match arrival {
+                            ao_core::mappack::Tile::Walkable => "walkable",
+                            ao_core::mappack::Tile::Solid => "solid",
+                            ao_core::mappack::Tile::Water => "water",
+                        },
+                        if pair.arrival_is_void { "no" } else { "yes" },
+                        // Reachable means a character can get onto the band at all. An
+                        // unreachable bad arrival is still a bad arrival; it just cannot bite
+                        // until somebody clears the way out.
+                        if locomotion == "any" { "no" } else { "yes" },
+                    ));
+                }
+            }
+        }
+        rows.sort();
+
+        let header = format!(
+            "# Arrivals the exit path currently allows, with the verdict W-0105 must reach.\n\
+             # Generated: ao-topology <pack> --arrivals <path>. Corpus {}.\n\
+             # Every rejection is listed in full; acceptances are sampled at 40 per class.\n\
+             # `reachable no` means the way out is solid, so nobody reaches that arrival today:\n\
+             # of the solid arrivals 169 are reachable, of the void 24, and all 4 water ones.\n\
+             # The rule rejects them regardless -- an arrival is not valid for being unreachable.\n\
+             # Totals: {:?}\n\
+             # columns: <from-map> <side> band <x,y> to <map> <x,y> arrival <class> drawn <yes|no> \n\
+             #          locomotion <foot|boat|any> reachable <yes|no> -> <verdict>\n\
+             # The class, drawn flag and locomotion are the rule's *inputs*; the verdict is what\n\
+             # Arena.World.Arrival must return for them.\n",
+            topology::CORPUS, counts
+        );
+        match std::fs::write(path, header + &rows.join("\n") + "\n") {
+            Ok(()) => println!("\n  wrote {} arrival cases to {path}: {:?}", rows.len(), counts),
+            Err(error) => {
+                eprintln!("{path}: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     // The manifest: measured evidence plus hand-recorded review, and the only place that
     // says what is allowed to be geography.
     let reviews = ao_core::manifest::reviews();
