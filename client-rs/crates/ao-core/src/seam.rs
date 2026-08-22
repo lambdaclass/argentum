@@ -89,6 +89,30 @@ impl Crossing {
     }
 }
 
+/// Who draws a tile on one layer, and whether the two maps agree about it.
+///
+/// An *unreviewed record*, never a decision. The compiler can see that both maps draw
+/// something at a boundary tile and whether the two pictures and the two collision values
+/// match; it cannot see which one should win. Choosing a ground owner decides what a player
+/// may walk on, the only signal available here is art, and art has already been shown silent
+/// about exactly that -- 100% continuity across a boundary that walks a character into the
+/// sea. `W-0101` supplies the artist rule; this supplies the evidence for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LayerOwnership {
+    /// Ground, decoration, roof-adjacent, roof.
+    pub layer: usize,
+    /// The departing map draws something on its band tile for this layer.
+    pub band_drawn: bool,
+    /// The arriving map draws something on its core edge tile for this layer.
+    pub neighbour_drawn: bool,
+    /// Both draw, and they name the same graphic.
+    pub same_graphic: bool,
+    /// The band's collision value equals the neighbour's. Where these differ, whichever the
+    /// runtime believes changes whether a character can pass, which is the one thing an
+    /// artist rule must not be allowed to do by accident.
+    pub collision_agrees: bool,
+}
+
 /// One tile pair on a seam, with everything known about it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TilePair {
@@ -114,6 +138,9 @@ pub struct TilePair {
     /// The two core edge tiles carry the same ground art, which would be duplication
     /// rather than continuity.
     pub edges_identical: bool,
+    /// Per-layer ownership records for this tile pair, in layer order. Every one is
+    /// unreviewed by construction.
+    pub ownership: [LayerOwnership; 4],
     /// The arrival tile has no ground drawn on it at all. Walking across lands the character
     /// in a tile that is not part of the map -- and 2,444 such tiles in this corpus read as
     /// walkable, so nothing would stop them.
@@ -256,7 +283,11 @@ fn tile_pairs(side: Side) -> Vec<((u8, u8), (u8, u8), (u8, u8))> {
 }
 
 fn ground_art(map: &PackedMap) -> BTreeMap<(u8, u8), i32> {
-    map.layers[0].iter().map(|tile| ((tile.x, tile.y), tile.grh)).collect()
+    layer_art(map, 0)
+}
+
+fn layer_art(map: &PackedMap, layer: usize) -> BTreeMap<(u8, u8), i32> {
+    map.layers[layer].iter().map(|tile| ((tile.x, tile.y), tile.grh)).collect()
 }
 
 /// Judge one seam, tile pair by tile pair.
@@ -275,6 +306,10 @@ pub fn evidence(
     let from_art = ground_art(from);
     let to_art = ground_art(to);
     let to_simulated = crate::mask::simulated_tiles(to);
+    let from_layers: [BTreeMap<(u8, u8), i32>; 4] =
+        [layer_art(from, 0), layer_art(from, 1), layer_art(from, 2), layer_art(from, 3)];
+    let to_layers: [BTreeMap<(u8, u8), i32>; 4] =
+        [layer_art(to, 0), layer_art(to, 1), layer_art(to, 2), layer_art(to, 3)];
     let (step_x, step_y) = side.step();
 
     let exits_out: BTreeSet<(u8, u8, u8, u8)> = from
@@ -323,6 +358,20 @@ pub fn evidence(
             // core edge, which is the same pair read from the far side.
             let (_, back_arrival, back_band_tile) = back_band[index];
 
+            let band_tile = Tile::of(from.tile_at(band.0 as i32, band.1 as i32));
+            let arrival_tile = Tile::of(to.tile_at(arrival.0 as i32, arrival.1 as i32));
+            let ownership = std::array::from_fn(|layer| {
+                let mine = from_layers[layer].get(&band);
+                let theirs = to_layers[layer].get(&arrival);
+                LayerOwnership {
+                    layer,
+                    band_drawn: mine.is_some(),
+                    neighbour_drawn: theirs.is_some(),
+                    same_graphic: mine.is_some() && mine == theirs,
+                    collision_agrees: band_tile == arrival_tile,
+                }
+            });
+
             TilePair {
                 departure,
                 arrival,
@@ -337,6 +386,7 @@ pub fn evidence(
                 )),
                 one_tile,
                 resolves_uniquely,
+                ownership,
                 arrival_is_void: !to_simulated.contains(&arrival),
                 band_matches_neighbour: from_art.get(&band) == to_art.get(&arrival)
                     && from_art.contains_key(&band),
@@ -435,6 +485,13 @@ pub struct SeamSummary {
     pub one_way_exits: usize,
     /// Exits arriving on a tile the destination does not draw.
     pub arrivals_in_void: usize,
+    /// Boundary tiles where both maps draw the same layer and the pictures differ. Not a
+    /// defect: it is the artist question `W-0101` answers, counted so the size of that
+    /// question is known.
+    pub contested_layer_tiles: usize,
+    /// Boundary tiles where the band's collision disagrees with the neighbour's. Whichever
+    /// the runtime believes changes whether a character can pass.
+    pub contested_collision_tiles: usize,
     /// Seams whose band art repeats the neighbour's edge for at least 95% of crossable
     /// pairs, and for at least 85%.
     pub continuous_at_95: usize,
@@ -524,6 +581,17 @@ pub fn summarise(
             found.pairs.iter().filter(|pair| pair.exit_out && !pair.exit_back).count();
         summary.arrivals_in_void +=
             found.pairs.iter().filter(|pair| pair.exit_out && pair.arrival_is_void).count();
+        summary.contested_layer_tiles += found
+            .pairs
+            .iter()
+            .filter(|pair| {
+                pair.ownership
+                    .iter()
+                    .any(|owner| owner.band_drawn && owner.neighbour_drawn && !owner.same_graphic)
+            })
+            .count();
+        summary.contested_collision_tiles +=
+            found.pairs.iter().filter(|pair| !pair.ownership[0].collision_agrees).count();
         if found.defects().is_empty() {
             summary.without_defects += 1;
         }
@@ -778,6 +846,47 @@ mod tests {
             (4u16, Origin { x: PITCH_X + 1, y: PITCH_Y }),
         );
         assert!(!nudged.contiguous);
+    }
+
+    #[test]
+    fn ownership_is_recorded_per_layer_and_never_decided() {
+        // Both maps draw the same boundary tile with different roofs, and their collision
+        // disagrees. The record says so on both counts and names no owner, because choosing
+        // one decides what a player may walk on and the only evidence here is a picture.
+        let mut west = blank(1);
+        let mut east = blank(2);
+        west.layers[0].push(LayerTile { x: BAND_X.1, y: 50, grh: 100 });
+        east.layers[0].push(LayerTile { x: CORE_X.0, y: 50, grh: 100 });
+        west.layers[3].push(LayerTile { x: BAND_X.1, y: 50, grh: 700 });
+        east.layers[3].push(LayerTile { x: CORE_X.0, y: 50, grh: 800 });
+        set_tile(&mut east, CORE_X.0, 50, 2);
+
+        let found = evidence(
+            &west,
+            &east,
+            Side::East,
+            Origin { x: 0, y: 0 },
+            Origin { x: PITCH_X, y: 0 },
+            &side_by_side(),
+        );
+        let pair = found.pairs.iter().find(|pair| pair.departure.1 == 50).expect("row 50");
+
+        // Ground: both draw, same graphic, and the collision differs -- walkable band, water
+        // arrival -- which is the case an artist rule must not be allowed to paper over.
+        assert!(pair.ownership[0].band_drawn && pair.ownership[0].neighbour_drawn);
+        assert!(pair.ownership[0].same_graphic);
+        assert!(!pair.ownership[0].collision_agrees);
+
+        // Roof: both draw and the pictures differ. A question for W-0101, not a defect.
+        assert!(pair.ownership[3].band_drawn && pair.ownership[3].neighbour_drawn);
+        assert!(!pair.ownership[3].same_graphic);
+
+        // Layers nobody draws are recorded as such rather than as agreement.
+        assert!(!pair.ownership[1].band_drawn && !pair.ownership[1].neighbour_drawn);
+        assert!(!pair.ownership[1].same_graphic);
+
+        // And no defect is raised for any of it: contested art is a decision, not a fault.
+        assert!(!found.defects().iter().any(|note| note.contains("owner")));
     }
 
     #[test]

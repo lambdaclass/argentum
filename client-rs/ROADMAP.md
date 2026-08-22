@@ -496,9 +496,20 @@ exits, `mapsworlddata.dat`, map metadata and a small reviewed override file. It
 emits a content-hashed `WorldTopology` manifest shared by Elixir and Rust:
 stable spaces/regions, integer origins, storage bounds, simulation core,
 valid/simulated-tile masks for irregular or void space, transition bands,
-render gutters, per-layer seam ownership, resource dependencies and every
+render gutters, per-layer ownership *records*, resource dependencies and every
 transition classified as `geographic_seam`, `door`, `portal`, `teleport` or
-`instance_entrance`. A bounding rectangle never makes a void tile walkable. The
+`instance_entrance`.
+
+**Ownership boundary, settled 2026-08-22.** This task emits per-layer ownership
+as evidence plus an explicitly unreviewed record, and never guesses an owner.
+For every layer of every seam it records which map draws the tile, whether the
+neighbour draws the same thing, and whether their collision agrees — and marks
+the owner `unreviewed`. `W-0101` supplies the artist-reviewed rule that picks an
+owner and activates it. The two halves were previously stated as one
+requirement in two places, which is why this is written down: a compiler that
+chose a ground owner would be deciding what a player can walk on, and the only
+signal available to it is art, which has already been shown to be silent about
+exactly that. A bounding rectangle never makes a void tile walkable. The
 existing adjacency data is evidence, not unquestioned authority; the compiler
 validates it against the actual tiles and exits.
 
@@ -1509,10 +1520,12 @@ So this task owns, concretely:
 The land-based four-map MVP is not blocked by any of it — 931 land-land claims are
 consistent today — but W-0095 and the full world are.
 
-Define per-layer seam ownership. Ground/collision comes from the region that
-owns a global tile; gutter decorations/roofs may cross a core boundary only by
-an explicit priority/artist rule that cannot duplicate or erase interactive
-collision. Review corner junctions, occlusion/depth ordering, weather/audio
+Decide per-layer seam ownership from the records `W-0097` emits, which arrive
+marked `unreviewed` and are never resolved by the compiler. Ground and collision
+come from the region that owns a global tile; gutter decorations and roofs may
+cross a core boundary only by an explicit priority/artist rule that cannot
+duplicate or erase interactive collision. `W-0097` measures and reports; this
+task chooses and activates. Review corner junctions, occlusion/depth ordering, weather/audio
 zones and world-map alignment. Activate topology/content versions atomically;
 existing sessions pin a compatible version or receive an explicit resnapshot,
 never a half-updated geography.

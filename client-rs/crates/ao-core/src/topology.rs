@@ -395,6 +395,11 @@ pub struct SeamCounts {
     /// Seams whose band art repeats the neighbour's edge for at least 95% of crossable
     /// pairs: the gutter hypothesis, measured.
     pub ground_continuity_95: usize,
+    /// Boundary tiles where both maps draw a layer and the pictures differ, and where the
+    /// two collision values differ. Not defects: they size the artist question `W-0101`
+    /// answers, and the compiler records them unreviewed rather than picking a winner.
+    pub contested_layer_tiles: usize,
+    pub contested_collision_tiles: usize,
 }
 
 /// The corpus this baseline was measured against.
@@ -500,6 +505,8 @@ pub const BASELINE: Baseline = Baseline {
         resolution_failures: 542,
         one_way_exits: 2412,
         ground_continuity_95: 898,
+        contested_layer_tiles: 365,
+        contested_collision_tiles: 826,
     },
     shore_seams: SeamCounts {
         seams: 439,
@@ -516,6 +523,8 @@ pub const BASELINE: Baseline = Baseline {
         resolution_failures: 2636,
         one_way_exits: 713,
         ground_continuity_95: 421,
+        contested_layer_tiles: 823,
+        contested_collision_tiles: 375,
     },
     sea_seams: SeamCounts {
         seams: 849,
@@ -532,6 +541,8 @@ pub const BASELINE: Baseline = Baseline {
         resolution_failures: 10004,
         one_way_exits: 397,
         ground_continuity_95: 711,
+        contested_layer_tiles: 10264,
+        contested_collision_tiles: 6,
     },
 };
 
@@ -633,6 +644,16 @@ pub fn drift(expected: &Baseline, found: &Baseline) -> Vec<String> {
             &format!("{label} seams with 95% ground continuity"),
             want.ground_continuity_95,
             got.ground_continuity_95,
+        );
+        note(
+            &format!("{label} tiles with contested layer art"),
+            want.contested_layer_tiles,
+            got.contested_layer_tiles,
+        );
+        note(
+            &format!("{label} tiles with contested collision"),
+            want.contested_collision_tiles,
+            got.contested_collision_tiles,
         );
     }
 
@@ -837,6 +858,8 @@ pub fn evidence(maps: &[PackedMap]) -> Evidence {
                 resolution_failures: found.resolution_failures,
                 one_way_exits: found.one_way_exits,
                 ground_continuity_95: found.continuous_at_95,
+                contested_layer_tiles: found.contested_layer_tiles,
+                contested_collision_tiles: found.contested_collision_tiles,
             })
             .unwrap_or_default()
     };
