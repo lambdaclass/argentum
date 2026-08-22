@@ -86,10 +86,18 @@ semantics fixture and the walking routes all verified against the corpus;
 `mix test apps/arena/test/tile_semantics_test.exs` 9 tests; renders at
 `--example render`; `--manifest`, `--dependencies`, `--walks` and `--pixels` outputs.
 
-Deliberately not done, and recorded rather than assumed: the artist-reviewed
-per-layer ownership rule and the activation of any geography (`W-0101`), the ocean's
-own geometry and its 34 sea-to-sea contradictions (`W-0101`), and the server-side
-destination check for the four defect classes above.
+Deliberately not done, and recorded rather than assumed. Two of these need human
+judgment and one does not:
+
+- **Engineering, not judgment:** the destination check. 169 arrivals into solid tiles,
+  48 into undrawn void, 4 walkers stranded on water, and 2,444 void tiles reading as
+  floor. `Arena.Map.Movement.check_tile_exit/5` validates nothing about where it sends a
+  character, and that is a defect needing a server implementation and tests, tracked as
+  `W-0105`. Calling it a decision for somebody else was wrong: nobody has to decide
+  whether a player should end up inside rock.
+- **Product or artist judgment:** per-layer gutter ownership exceptions, the ocean's
+  geometry and its 34 contradictory claims, and any genuinely ambiguous geography or
+  transition classification (`W-0101`).
 
 ### Completed Task W-0090 — Atomic first-scene reveal
 

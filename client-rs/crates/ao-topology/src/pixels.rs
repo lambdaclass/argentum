@@ -104,6 +104,11 @@ impl Agreement {
     }
 
     /// Share of decodable pairs that are pixel-identical, or `None` if nothing decoded.
+    ///
+    /// Reported per seam by callers that summarise; the acceptance report prints the counts
+    /// and the pixel share instead, because "78 of 80 tiles identical" and "99% of pixels
+    /// match" answer different questions and the second hides a wholly wrong tile.
+    #[allow(dead_code)]
     pub fn tile_percent(&self) -> Option<usize> {
         if self.compared() == 0 {
             return None;

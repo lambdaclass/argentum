@@ -1273,6 +1273,36 @@ curates the full production topology, expands the proven composition path and
 adds gameplay that genuinely spans invisible simulation partitions. It does not
 replace one loaded MapServer per legacy map with a global bottleneck.
 
+### Task W-0105 — Validated exit destinations
+
+- **State:** planned
+- **Phase:** 3
+- **Depends on:** none
+
+`Arena.Map.Movement.check_tile_exit/5` transfers a character to whatever tile an exit
+names, without consulting the arrival tile, the character's locomotion or whether the
+destination is part of the map at all. `W-0097` measured what that produces across the
+corpus: **169 exits transfer a character into solid ground, 48 onto a tile with no
+ground drawn, and 4 leave a walker standing on water**, and 2,444 void tiles across 47
+maps read as walkable floor because the blocked layer says nothing about whether a tile
+exists.
+
+This is a defect, not a decision. Nobody has to judge whether a player should end up
+inside rock, so it is engineering work: validate the destination on the server, decide
+explicitly what happens when it fails — refuse the transfer, or relocate to the nearest
+valid tile, with the choice tested either way — and cover every one of the four classes
+with a test that names a real map and tile from the measured list.
+
+The client must not anticipate the fix. `mappack::Tile::enterable` and
+`ao_core::mask` deliberately reproduce today's server behaviour, including its
+asymmetry (water needs a boat; nothing stops a boat on dry land), because a client that
+predicts a refusal the server does not make desynchronises exactly where a player is
+most likely to be lost. When the server changes, `Arena.Map.TileSemantics`,
+`fixtures/tile_semantics.txt` and the client's reading move in the same commit.
+
+Re-run `ao-topology --check` afterwards: the four counts are pinned in `BASELINE`, so
+the fix shows up as drift with the numbers that moved.
+
 ### Task W-0101 — Production topology classification and activation
 
 - **State:** planned
@@ -1308,6 +1338,39 @@ So this task owns, concretely:
 
 The land-based four-map MVP is not blocked by any of it — 931 land-land claims are
 consistent today — but W-0095 and the full world are.
+
+**Review must be grouped, not per-seam or per-tile.** The manifest's review file takes
+one line per directed seam, which would mean approving roughly 1,630 clean seams by
+hand. That is a conservative default, not a requirement, and it must be replaced before
+production rollout by a policy applied to a whole space:
+
+```
+activate-space 199 using safe-geography-v1
+```
+
+The compiler expands such a decision only for seams that satisfy every mandatory check —
+consistent placement, unique destination, one-tile movement, valid arrival collision,
+compatible locomotion, reciprocity where required, no ambiguous overlapping map,
+deterministic layer policy, and a passing visual capture — and it still records
+per-seam evidence for all of them. The approval is of the rule, once.
+
+**A human-workload report is a prerequisite for full-world curation**, and it must first
+group three things the compiler currently reports as raw counts:
+
+1. the 1,220 non-standard exit records into distinct transitions, by source interaction
+   and destination, because those records are very likely far fewer actual doors,
+   portals and teleports;
+2. contested layer tiles into seam-level and root-cause clusters — never reviewed tile
+   by tile;
+3. the 26 multi-map cells into intentional aliases versus incorrect placements.
+
+The target the report has to hit: **no per-map or per-tile manual review, fewer than 100
+grouped review units, and fewer than 20 questions needing a product decision.** The
+expected product questions are the ocean's geometry, whether the Newbie Dungeon wraps, a
+handful of genuinely ambiguous overlap groups, how unusual portal and instance
+relationships should feel, visual exceptions where two valid layer choices differ, and
+approval of the activation policy itself. Everything else is evidence-backed curation
+that can be proposed, tested and committed without asking.
 
 Decide per-layer seam ownership from the records `W-0097` emits, which arrive
 marked `unreviewed` and are never resolved by the compiler. Ground and collision
