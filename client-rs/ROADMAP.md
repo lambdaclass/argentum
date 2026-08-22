@@ -455,33 +455,52 @@ seams are all reciprocal, in a component with no contradiction anywhere. `W-0099
 takes its slice from that list.
 
 **Corrected again 2026-08-21, by drawing the tiles.** Every measurement above was
-taken of a *plane*, and the plane is the wrong shape. Reproduce with
-`cargo run -p ao-topology --example render` and `--example wrap`:
+taken of a *plane*, and the corpus is not one plane. Reproduce with
+`cargo run -p ao-topology` and `--example render`:
 
-- Laying out the land from seam evidence alone places **148 maps with zero
-  contradicting seams**, and the render is a coherent continent — coastlines, roads
-  and city walls unbroken across every map boundary. That is the 74x80 pitch and
-  the band-to-core-edge seam rule confirmed by looking, which no count could do.
-- **278 of 842 maps are at least 95% blocked**: open water, crossed by boat, named
-  `Alta Mar` and `Mar este del desierto`, bolted onto coastlines at opposite ends of
-  the world. No plane holds both them and the land. Set them aside and **every
-  remaining piece of the world is consistent as a plane — 0 failing claims, where
-  the planar model reported 109.**
-- The four-map group is not inconsistent. Each of its pairs claims the other on
-  *both* opposite sides (37 has 168 to its West and to its East), which is a 2x2
-  world that loops, and it closes exactly as a **148x160 torus**.
+- The blocked layer is **not a boolean**. `Arena.Map.CsmParser` writes `0` walkable,
+  `1` solid and `2` navigable water — water from layer-1 GRH ranges, cancelled by a
+  layer-2 bridge — and `Arena.Map.Movement` crosses a `2` only while `navigating`.
+  **2,232,228 tiles of this corpus are sailable sea**, `Alta Mar` is 62% water and
+  37% solid, and no map lacks walkable ground entirely. `mappack::Tile` names the
+  three states; a compiler that reads the layer as blocked/not-blocked classifies a
+  95%-solid catacomb as ocean.
+- **287 maps are at least half navigable water.** Sailing is movement through the
+  world, so a shore-to-sea claim may be exactly as geographic as an inland one. No
+  claim is dropped by surface; each class is measured alone, which localises the
+  problem rather than averaging it: **931 land-land claims are entirely consistent,
+  439 shore claims have exactly one exception, and all 34 remaining contradictions
+  are sea-to-sea.** Combined, those 34 propagate to **99 unresolved claims** in the
+  single 424-map region.
+- Laid out with the sea drawn as sea, that region renders as a recognisable world:
+  continent, cities, coherent surrounding ocean, offshore islands, coastlines
+  unbroken across map boundaries. That is the 74x80 pitch and the band-to-core-edge
+  seam rule supported by looking. It is **not** yet the ground-layer and gutter
+  comparison this task requires before any seam is promoted; that is still owed.
+- The four Newbie Dungeon maps each claim the other on *both* opposite sides (37 has
+  168 to its West and to its East). On a plane that is a contradiction out by two map
+  widths; as a shape it closes exactly as a **148x160 torus**. Treat it as a torus
+  *candidate* pending seam and collision validation, not as settled.
+- `cycle_witnesses` keyed tree edges by map *pair*, so a second contradictory claim
+  between the same two maps was mistaken for the tree edge and produced no witness.
+  Keyed by the signed constraint it reports **56**, the figure the original audit
+  recorded.
 
-So the compiler emits a **region geometry** alongside each region: a plane, or a
-torus/cylinder with an integer period, or a no-seam region reached only by
-transition. Geometry is measured, never assumed: candidate periods come from a
-region's own failing loops, and a period is admissible only if the region still
-*fits* it — no two maps in one cell. Without that test a 2-map wrap "explains" 424
-maps in 44 cells, which is how the first run of this analysis was wrong. The
-`BASELINE` counts stay as they are: they are the planar drift gate, and they are
-correct about the plane.
+So the compiler emits an explicit geometry per space — `Plane`, `Cylinder { axis,
+period }`, `Torus { width, height }` or `Discrete` for the **199 spaces no seam
+reaches**. Geometry is measured, never assumed: candidate periods come from a space's
+own failing loops, and a period is admissible only if the space still *fits* it, with
+no two maps in one cell. Without that test a 2-map wrap "explains" 424 maps in 44
+cells, which is how the first run of this analysis was wrong.
 
-Water is classified by measuring the blocked fraction, not by matching a name, and
-the threshold ships in the manifest so it is arguable rather than hidden.
+What is **not** established: the ocean's own geometry — plane, cylinder, torus or a
+reused transition network — and whether sailing across it preserves seamless
+continuity. The 34 sea-to-sea contradictions are the open question, and they are
+`W-0101`'s, not a blocker for the land-based MVP.
+
+Every one of these numbers is in `BASELINE` and gated by `ao-topology --check`:
+regions, wrapping regions, unresolved seams, sea maps, discrete regions and the three
+per-class counts. A diagnostic that only compiles is not evidence.
 
 Do not silently choose geography. Existing conflicts become an explicit
 versioned baseline with one reviewed disposition each: corrected data,
@@ -509,13 +528,19 @@ Define shared Elixir/Rust fixtures and checked conversion APIs for
 `LocalPosition`, `RegionPlacement`, `RegionGeometry`, `TopologyVersion`,
 `TransitionKind`, stable `EntityId`, `AuthorityEpoch` and `TransferId`.
 
-Global coordinates are per-region and exact, because W-0097 found the world is not
-one plane: land regions are planes, the Newbie Dungeon is a 148x160 torus, and open
-water is entered only by transition. `RegionGeometry` carries that, and position
-arithmetic goes through it — a step in a toroidal region reduces modulo the period,
-a step off the edge of a planar region is a transition, and no caller may add tiles
-to a `WorldPosition` without saying which region it is in. Two positions in
-different regions are never comparable and never subtractable. New modern-domain code stores,
+Global coordinates are per-space and exact, because W-0097 found the world is an atlas
+of several geometries rather than one plane: most spaces are planes, the Newbie Dungeon
+closes as a 148x160 torus, and 199 spaces are reached only by transition.
+`WorldSpaceGeometry` is `Plane | Cylinder { axis, period } | Torus { width, height } |
+Discrete`, and position arithmetic goes through it — a step in a toroidal space reduces
+modulo the period, a step off the edge of a planar space is a transition, and no caller
+may add tiles to a `WorldPosition` without saying which space it is in. Two positions in
+different spaces are never comparable and never subtractable.
+
+A wrapping space needs one more thing the server does not: the client keeps a **nearest
+unwrapped render position**, so crossing the wrap moves the camera one tile rather than
+jumping it a whole period. The canonical position stays reduced; only rendering
+unwraps, and the two must never be confused in a fixture. New modern-domain code stores,
 compares, logs and transmits global positions; a MapServer derives local
 coordinates at its boundary for collision, occupancy and legacy content.
 
@@ -1177,7 +1202,7 @@ curates the full production topology, expands the proven composition path and
 adds gameplay that genuinely spans invisible simulation partitions. It does not
 replace one loaded MapServer per legacy map with a global bottleneck.
 
-### Task W-0101 — Production topology curation and activation
+### Task W-0101 — Production topology classification and activation
 
 - **State:** planned
 - **Phase:** 8
@@ -1189,14 +1214,29 @@ region may contain no unresolved contradiction. Not all 842 maps must become one
 continent: disconnected regions and explicit portals are valid, but approximate
 transforms and silent compiler winners are not.
 
-**Rescoped 2026-08-21.** This task used to open with "resolve every one of W-0097's
-baseline placement conflicts", and that premise is gone: W-0097's renders show the
-land is already consistent, with 0 failing claims once open water is a region of its
-own and the Newbie Dungeon is a torus. There is no corpus repair standing between us
-and W-0099 or W-0095. What remains here is genuine curation of the classes W-0097
-can only propose — which sea transitions are boat routes, which are map-edge wraps,
-which low-overlap seams are art rather than geography — plus the per-layer and
-activation work below.
+**Reframed 2026-08-21, and it is still required.** The old opening line — "resolve
+every one of W-0097's baseline placement conflicts" — read as repairing broken data.
+The corpus is not broken: the legacy world deliberately contains several spatial
+geometries, and the work is to classify and activate them. An earlier draft of this
+note claimed no curation was needed at all, which was wrong twice over — it rested on
+a water classifier that counted solid rock as ocean, and it ignored that the ocean
+itself still holds 34 unresolved sea-to-sea claims.
+
+So this task owns, concretely:
+
+- The **ocean's geometry** — plane, cylinder, torus or a reused transition network —
+  and the 34 sea-to-sea contradictions, which are the only remaining contradictions in
+  the corpus. Sailing must not lose seamless continuity because the sea was easier to
+  treat as scenery.
+- Confirming the Newbie Dungeon torus against seam and collision evidence before it is
+  activated as a wrapping space.
+- The **199 Discrete spaces**, each reached only by door, portal or teleport, and the
+  one shore claim that does not close.
+- Every non-standard exit and low-quality seam classified: corrected geographic data,
+  a door/portal/teleport/instance transition, or unsupported geography.
+
+The land-based four-map MVP is not blocked by any of it — 931 land-land claims are
+consistent today — but W-0095 and the full world are.
 
 Define per-layer seam ownership. Ground/collision comes from the region that
 owns a global tile; gutter decorations/roofs may cross a core boundary only by
