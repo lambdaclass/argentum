@@ -12,6 +12,7 @@
 
 pub mod fixtures;
 pub mod grh;
+pub mod identity;
 pub mod manifest;
 pub mod mappack;
 pub mod mask;
