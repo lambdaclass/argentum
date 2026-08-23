@@ -503,8 +503,23 @@ deterministic adapters until this phase.
 
 Define shared Elixir/Rust fixtures and checked conversion APIs for
 `WorldSpaceId`, stable `RegionId`, `WorldPosition<i32>`, bounded
-`LocalPosition`, `RegionPlacement`, `RegionGeometry`, `TopologyVersion`,
+`LocalPosition`, `RegionPlacement`, `WorldSpaceGeometry`, `TopologyVersion`,
 `TransitionKind`, stable `EntityId`, `AuthorityEpoch` and `TransferId`.
+
+**Corrected 2026-08-23.** This list said `RegionGeometry` while the prose below it said
+`WorldSpaceGeometry`, and the implementation settled the question: `W-0097` measured
+geometry per *coordinate space*, not per region. A space is a plane, a cylinder, a torus
+or reached-only-by-transition; the regions inside it are units of authority that share
+that shape and differ only in where they sit. A per-region geometry would let two
+regions of one space disagree about whether a step wraps, which is not a thing the
+corpus can express and not a thing a player could be told coherently.
+
+**Also corrected 2026-08-23:** `WorldSpaceId` is 128 bits, not 32. `W-0104` mints a
+world space per live dungeon instance, at runtime, from whichever region is asked — a
+narrower id would need a central allocator or hand-managed ranges to stay unique, and
+the failure mode is two parties sharing a space. `RegionId` stays 32 bits: regions are
+allocated by the topology manifest and never reused, so they need no independent
+minting.
 
 Global coordinates are per-space and exact, because W-0097 found the world is an atlas
 of several geometries rather than one plane: most spaces are planes, the Newbie Dungeon
