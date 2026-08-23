@@ -1,0 +1,135 @@
+defmodule Arena.World.Identity do
+  @moduledoc """
+  Who owns what, and who may act on it.
+
+  The Rust side is `ao_core::identity`, and neither defines the answers: both read
+  `client-rs/crates/ao-core/fixtures/identity_contract.txt`, hand-authored for exactly that
+  reason. A disagreement here is a disagreement about who is allowed to move a player.
+
+  Four things in this system look like an id and are not interchangeable, and mixing any two
+  only shows up under restart, reshard or a content release:
+
+    * **content identity** — which map, space or instance template. Names authored content, so
+      it is stable across everything.
+    * **world version** — which compiled release. The same tile has different global
+      coordinates under two releases, so a position without a version is a number without a
+      meaning.
+    * **runtime ownership** — which region is authoritative *right now*. Changes on every seam
+      crossing and every restart, and is never persisted or shown.
+    * **dynamic instance identity** — which live copy of a template. Exists only while that
+      copy does.
+
+  Authority belongs to a **region**, not a world space. Several regions occupy one space —
+  today one MapServer per map — so a seamless crossing hands a character between regions while
+  the space never changes. Ownership recorded per space could not describe the central event of
+  the seamless world.
+  """
+
+  @typedoc "A region: one unit of runtime authority, stable across restarts and releases."
+  @type region_id :: non_neg_integer()
+
+  @typedoc "An entity, for as long as it exists anywhere. Not a session, not a process."
+  @type entity_id :: non_neg_integer()
+
+  @typedoc "One generation of an entity's authoritative owner."
+  @type epoch :: non_neg_integer()
+
+  @typedoc "One attempt to move an entity from one owner to another."
+  @type transfer_id :: non_neg_integer()
+
+  @type ownership :: %{entity: entity_id(), region: region_id(), epoch: epoch()}
+  @type addressed :: %{entity: entity_id(), epoch: epoch()}
+  @type reach :: :authoritative | :observed
+  @type refusal :: :not_owner | :stale_epoch | :read_only
+
+  @max_epoch 18_446_744_073_709_551_615
+
+  @doc """
+  Whether a recipient may execute a command addressed to an entity.
+
+  One function so the rule cannot be restated differently in two routers. Order matters: the
+  ownership check comes first, because "you do not own this" is the honest answer and
+  reporting a stale epoch for an entity somebody never owned sends a reader to the wrong
+  problem.
+  """
+  @spec may_execute(addressed(), ownership(), reach()) :: :ok | {:error, refusal()}
+  def may_execute(command, owner, reach) when reach in [:authoritative, :observed] do
+    cond do
+      command.entity != owner.entity -> {:error, :not_owner}
+      reach == :observed -> {:error, :read_only}
+      command.epoch != owner.epoch -> {:error, :stale_epoch}
+      true -> :ok
+    end
+  end
+
+  @doc """
+  Advance an epoch, or say that it cannot be advanced.
+
+  Checked rather than incremented. `u64::MAX` handoffs is not a reachable number, and that is
+  not why this is checked: wrapping would turn the oldest possible message into the newest,
+  which is the one failure the epoch exists to prevent.
+  """
+  @spec advance(epoch()) :: {:ok, epoch()} | {:error, :exhausted}
+  def advance(@max_epoch), do: {:error, :exhausted}
+  def advance(epoch) when is_integer(epoch) and epoch >= 0, do: {:ok, epoch + 1}
+
+  @doc "The largest representable epoch, which is the one that cannot advance."
+  def max_epoch, do: @max_epoch
+
+  @doc """
+  Whether a message stamped `stamped` is current against the installed epoch.
+
+  An epoch from the future is as refused as one from the past: it did not come from this
+  installation, so nothing about it can be trusted.
+  """
+  @spec current?(epoch(), epoch()) :: boolean()
+  def current?(stamped, installed), do: stamped == installed
+
+  @doc """
+  Check the one-instance-to-one-runtime-space relationship.
+
+  Every live instance gets its own space. Two parties in the same dungeon design share a
+  template and share nothing else, so a reused runtime space would let one party stand on the
+  other's tiles.
+
+  Each entry is `%{template: t, instance: i, space: s}`.
+  """
+  @spec check_instances([map()]) ::
+          :ok | {:error, {:space_shared, non_neg_integer()}} | {:error, {:instance_repeated, non_neg_integer()}}
+  def check_instances(live) do
+    Enum.reduce_while(live, {MapSet.new(), MapSet.new()}, fn entry, {instances, spaces} ->
+      cond do
+        MapSet.member?(instances, entry.instance) ->
+          {:halt, {:error, {:instance_repeated, entry.instance}}}
+
+        MapSet.member?(spaces, entry.space) ->
+          {:halt, {:error, {:space_shared, entry.space}}}
+
+        true ->
+          {:cont, {MapSet.put(instances, entry.instance), MapSet.put(spaces, entry.space)}}
+      end
+    end)
+    |> case do
+      {:error, _} = error -> error
+      {_instances, _spaces} -> :ok
+    end
+  end
+
+  @doc """
+  The reaches a command can arrive with.
+
+  Listed rather than inferred from "not authoritative": an unrecognised reach is a programming
+  error and should raise, not be quietly treated as the read-only case and hidden.
+  """
+  def reaches, do: [:authoritative, :observed]
+
+  @doc """
+  Whether crossing this kind of boundary should be continuous for the player.
+
+  Only a geographic seam is. The rest are deliberate discontinuities, and a client that
+  animated a journey across a teleport would be inventing travel that never happened.
+  """
+  @spec seamless?(:seam | :door | :portal | :teleport | :instance) :: boolean()
+  def seamless?(:seam), do: true
+  def seamless?(kind) when kind in [:door, :portal, :teleport, :instance], do: false
+end

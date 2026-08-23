@@ -582,3 +582,123 @@ mod tests {
         assert_eq!(TopologyAnswer::NoSuchSpace.space(), None);
     }
 }
+
+/// The hand-authored identity contract, compiled in.
+///
+/// The same file `Arena.World.Identity` reads. Neither side defines the answers: these are the
+/// rules a router applies before letting anything act on an entity, and two implementations
+/// that agreed only with themselves would be two different answers to "who may move this
+/// player".
+pub fn contract() -> &'static str {
+    include_str!("../fixtures/identity_contract.txt")
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+
+    fn lines() -> impl Iterator<Item = (&'static str, Vec<&'static str>, Vec<&'static str>)> {
+        contract()
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| {
+                let (body, expected) = line.split_once("->").expect("every case states a result");
+                (
+                    line,
+                    body.split_whitespace().collect::<Vec<_>>(),
+                    expected.split_whitespace().collect::<Vec<_>>(),
+                )
+            })
+    }
+
+    #[test]
+    fn rust_satisfies_every_case_in_the_identity_contract() {
+        let mut checked = 0;
+
+        for (line, body, expected) in lines() {
+            match body.as_slice() {
+                ["execute", "owner", entity, region, epoch, "command", command_entity, command_epoch, "reach", reach] =>
+                {
+                    let owner = Ownership {
+                        entity: EntityId(entity.parse().expect("entity")),
+                        region: RegionId(region.parse().expect("region")),
+                        epoch: AuthorityEpoch(epoch.parse().expect("epoch")),
+                    };
+                    let command = Addressed {
+                        entity: EntityId(command_entity.parse().expect("entity")),
+                        epoch: AuthorityEpoch(command_epoch.parse().expect("epoch")),
+                        command: (),
+                    };
+                    let reach = match *reach {
+                        "authoritative" => Reach::Authoritative,
+                        "observed" => Reach::Observed,
+                        other => panic!("unknown reach {other}"),
+                    };
+
+                    let want = match expected.as_slice() {
+                        ["ok"] => Ok(()),
+                        ["not-owner"] => Err(Refusal::NotTheOwner),
+                        ["stale-epoch"] => Err(Refusal::StaleEpoch),
+                        ["read-only"] => Err(Refusal::ReadOnly),
+                        other => panic!("unknown result {other:?}"),
+                    };
+                    assert_eq!(may_execute(&command, owner, reach), want, "{line}");
+                }
+
+                ["advance", epoch] => {
+                    let epoch = AuthorityEpoch(epoch.parse().expect("epoch"));
+                    let want = match expected.as_slice() {
+                        ["exhausted"] => Err(EpochExhausted),
+                        [next] => Ok(AuthorityEpoch(next.parse().expect("next"))),
+                        other => panic!("unknown result {other:?}"),
+                    };
+                    assert_eq!(epoch.advance(), want, "{line}");
+                }
+
+                ["instances", entries @ ..] => {
+                    let live: Vec<RuntimeInstance> = entries
+                        .iter()
+                        .map(|entry| {
+                            let field: Vec<&str> = entry.split(':').collect();
+                            RuntimeInstance {
+                                template: InstanceTemplateId(field[0].parse().expect("template")),
+                                instance: InstanceId(field[1].parse().expect("instance")),
+                                space: WorldSpaceId(field[2].parse().expect("space")),
+                            }
+                        })
+                        .collect();
+
+                    let want = match expected.as_slice() {
+                        ["ok"] => Ok(()),
+                        ["space-shared", space] => Err(InstanceFault::SpaceShared {
+                            space: WorldSpaceId(space.parse().expect("space")),
+                        }),
+                        ["instance-repeated", id] => Err(InstanceFault::InstanceRepeated {
+                            instance: InstanceId(id.parse().expect("instance")),
+                        }),
+                        other => panic!("unknown result {other:?}"),
+                    };
+                    assert_eq!(check_instances(&live), want, "{line}");
+                }
+
+                ["seamless", kind] => {
+                    let kind = match *kind {
+                        "seam" => TransitionKind::GeographicSeam,
+                        "door" => TransitionKind::Door,
+                        "portal" => TransitionKind::Portal,
+                        "teleport" => TransitionKind::Teleport,
+                        "instance" => TransitionKind::InstanceEntrance,
+                        other => panic!("unknown kind {other}"),
+                    };
+                    assert_eq!(kind.is_seamless(), expected == ["yes"], "{line}");
+                }
+
+                other => panic!("cannot read contract line {other:?}"),
+            }
+            checked += 1;
+        }
+
+        assert!(checked >= 24, "the contract should be worth checking: {checked}");
+    }
+}

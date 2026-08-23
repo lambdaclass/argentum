@@ -1,0 +1,61 @@
+# The identity and authority rules, as cases both languages must satisfy.
+#
+# Hand-authored, like the position and wire contracts, so that neither implementation defines
+# the answers by having been written first. These are the rules a router applies before it
+# lets anything act on an entity, and a disagreement between the two sides here is a
+# disagreement about who is allowed to move a player.
+#
+# Directives:
+#   execute owner <entity> <region> <epoch> command <entity> <epoch> reach <authoritative|observed>
+#       -> ok | not-owner | stale-epoch | read-only
+#   advance <epoch> -> <epoch> | exhausted
+#   instances <template>:<instance>:<space> ... -> ok | space-shared <space> | instance-repeated <id>
+#   seamless <seam|door|portal|teleport|instance> -> yes | no
+
+# The ordinary case: the owner, the installed epoch, authority over the entity.
+execute owner 7 330 3 command 7 3 reach authoritative -> ok
+execute owner 7 330 0 command 7 0 reach authoritative -> ok
+# All zero: the values a partially-initialised record carries, which must still be judged by
+# the rule rather than waved through as "unset".
+execute owner 0 0 0 command 0 0 reach authoritative -> ok
+execute owner 0 0 0 command 0 1 reach authoritative -> stale-epoch
+
+# A command written before a handoff. Legitimate when sent, wrong when it arrives: the new
+# owner must not act on an intention formed under a world that no longer holds.
+execute owner 7 330 3 command 7 2 reach authoritative -> stale-epoch
+execute owner 7 330 3 command 7 0 reach authoritative -> stale-epoch
+
+# An epoch from the future is equally refused. It did not come from this installation.
+execute owner 7 330 3 command 7 4 reach authoritative -> stale-epoch
+
+# Somebody else's entity. Checked before the epoch, because "you do not own this" is the
+# honest answer and a stale-epoch report would send a reader to the wrong problem.
+execute owner 7 330 3 command 9 3 reach authoritative -> not-owner
+execute owner 7 330 3 command 9 1 reach authoritative -> not-owner
+
+# Observed across a region boundary: readable, never commandable, whatever the epoch says.
+execute owner 7 330 3 command 7 3 reach observed -> read-only
+execute owner 7 330 3 command 7 2 reach observed -> read-only
+
+# Epoch advancement is checked. u64::MAX cannot advance, and must not wrap: wrapping would
+# turn the oldest possible message into the newest.
+advance 0 -> 1
+advance 1 -> 2
+advance 3 -> 4
+advance 18446744073709551614 -> 18446744073709551615
+advance 18446744073709551615 -> exhausted
+
+# Every live instance gets its own runtime space. Two parties in one dungeon design share a
+# template and share nothing else.
+instances 4:1:9001 -> ok
+instances 4:1:9001 4:2:9002 -> ok
+instances 4:1:9001 5:2:9002 -> ok
+instances 4:1:9001 4:2:9001 -> space-shared 9001
+instances 4:1:9001 5:1:9002 -> instance-repeated 1
+
+# Only a geographic seam is crossed without noticing.
+seamless seam -> yes
+seamless door -> no
+seamless portal -> no
+seamless teleport -> no
+seamless instance -> no
