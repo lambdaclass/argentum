@@ -13,7 +13,7 @@
 #   step   <space> <gx>,<gy> by <dx>,<dy> -> inside <gx>,<gy> | leaves
 #   render <space> <gx>,<gy> near <nx>,<ny> -> <rx>,<ry>
 #   legacy <space> <gx>,<gy> -> <map> <x>,<y> | unrepresentable
-#   region <space> <region-id> <map>
+#   region <space> <region-id> <map> <ox>,<oy>
 #   region-at <space> <gx>,<gy> -> <region-id> | none
 #   compare <space> <version> <gx>,<gy> with <space> <version> <gx>,<gy>
 #       -> <dx>,<dy> | different-space | different-version
@@ -170,10 +170,10 @@ render 199 295,319 near 0,0 -> 295,319
 # crossing changes the region while the space does not -- the event the whole contract
 # exists to describe.
 # ---------------------------------------------------------------------------------------
-region 199 330 330
-region 199 269 269
-region 199 274 274
-region 199 287 287
+region 199 330 330 148,160
+region 199 269 269 222,160
+region 199 274 274 148,240
+region 199 287 287 222,240
 
 # The east seam of the acceptance square, region by region.
 region-at 199 221,214 -> 330

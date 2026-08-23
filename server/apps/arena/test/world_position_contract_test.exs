@@ -24,15 +24,19 @@ defmodule Arena.World.PositionContractTest do
               "position_contract.txt"
             ])
 
-  defp regions_of(lines) do
-    for ["region", space, region, map] <- lines, reduce: %{} do
+  defp placements_of(lines) do
+    for ["region", space, region, map, origin] <- lines, reduce: %{} do
       acc ->
-        Map.update(
-          acc,
-          String.to_integer(space),
-          %{String.to_integer(map) => String.to_integer(region)},
-          &Map.put(&1, String.to_integer(map), String.to_integer(region))
-        )
+        space_id = String.to_integer(space)
+
+        placement = %{
+          region: String.to_integer(region),
+          space: space_id,
+          map: String.to_integer(map),
+          origin: pair(origin)
+        }
+
+        Map.update(acc, space_id, [placement], &(&1 ++ [placement]))
     end
   end
 
@@ -53,7 +57,7 @@ defmodule Arena.World.PositionContractTest do
           updated = put_in(spaces[space].placements[String.to_integer(map)], pair(at))
           {updated, cases}
 
-        ["region", _space, _region, _map] ->
+        ["region", _space, _region, _map, _origin] ->
           {spaces, cases}
 
         other ->
@@ -151,14 +155,14 @@ defmodule Arena.World.PositionContractTest do
 
         ["region-at", space, at, "->", "none"] ->
           space = spaces[String.to_integer(space)]
-          regions = regions_of(all_lines())[space.id] || %{}
-          assert Position.region_at(space, pair(at), regions) == :none, "region-at #{at}"
+          placements = placements_of(all_lines())[space.id] || []
+          assert Position.region_at(space, pair(at), placements) == :none, "region-at #{at}"
 
         ["region-at", space, at, "->", region] ->
           space = spaces[String.to_integer(space)]
-          regions = regions_of(all_lines())[space.id] || %{}
+          placements = placements_of(all_lines())[space.id] || []
 
-          assert Position.region_at(space, pair(at), regions) ==
+          assert Position.region_at(space, pair(at), placements) ==
                    {:ok, String.to_integer(region)},
                  "region-at #{at}"
 
@@ -201,6 +205,37 @@ defmodule Arena.World.PositionContractTest do
         end
       end
     end
+  end
+
+  test "a drifted placement origin refuses to name an owner" do
+    # Codex review, 2026-08-23: `region_at` used only the map id, so a placement naming
+    # another space or carrying a stale origin still assigned authority successfully. The
+    # dangerous shape is that every conversion succeeds and every answer is wrong by a fixed
+    # offset.
+    {spaces, _} = parse()
+    space = spaces[199]
+    good = placements_of(all_lines())[199]
+
+    assert {:ok, 330} = Position.region_at(space, {221, 214}, good)
+
+    drifted =
+      Enum.map(good, fn placement ->
+        if placement.map == 330 do
+          {x, y} = placement.origin
+          %{placement | origin: {x + 1, y}}
+        else
+          placement
+        end
+      end)
+
+    assert {:error, {:origin_disagrees, 330, 330, {149, 160}, {148, 160}}} =
+             Position.region_at(space, {221, 214}, drifted)
+
+    stray = [%{region: 37, space: 37, map: 330, origin: {148, 160}}]
+    assert {:error, {:wrong_space, 37, 37}} = Position.region_at(space, {221, 214}, stray)
+
+    shared = good ++ [%{region: 331, space: 199, map: 330, origin: {148, 160}}]
+    assert {:error, {:map_shared, 330}} = Position.region_at(space, {221, 214}, shared)
   end
 
   test "the pinned walking routes produce the same coordinates here as in rust" do

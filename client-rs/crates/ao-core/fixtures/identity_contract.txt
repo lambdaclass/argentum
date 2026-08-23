@@ -11,6 +11,13 @@
 #   advance <epoch> -> <epoch> | exhausted
 #   instances <template>:<instance>:<space> ... -> ok | space-shared <space> | instance-repeated <id>
 #   seamless <seam|door|portal|teleport|instance> -> yes | no
+#   placements <space> <region>:<map>:<ox>,<oy> ...
+#       -> ok | wrong-space <region> | map-not-in-space <region> <map>
+#        | origin-disagrees <region> <map> | map-shared <map>
+#
+# The `placements` cases use a fixed space for checking: space 199 contains map 330 at 0,0 and
+# map 269 at 74,0. A placement is only usable if it names that space, names a map the space
+# contains, agrees with where the space puts it, and does not collide with another region.
 
 # The ordinary case: the owner, the installed epoch, authority over the entity.
 execute owner 7 330 3 command 7 3 reach authoritative -> ok
@@ -59,3 +66,15 @@ seamless door -> no
 seamless portal -> no
 seamless teleport -> no
 seamless instance -> no
+
+# Region placements must agree with the space they claim to place regions in. The origin on a
+# placement is a second copy of a fact the space already states, and a second copy nothing
+# compares is a fact waiting to disagree -- a region whose origin has drifted converts every
+# position successfully and answers every one wrong by a fixed offset.
+placements 199 330:330:0,0 269:269:74,0 -> ok
+placements 199 330:330:0,0 -> ok
+placements 199 330:330:0,0 269:269:75,0 -> origin-disagrees 269 269
+placements 199 330:330:1,0 -> origin-disagrees 330 330
+placements 199 330:999:0,0 -> map-not-in-space 330 999
+placements 199 330:330:0,0 331:330:0,0 -> map-shared 330
+placements 37 330:330:0,0 -> wrong-space 330

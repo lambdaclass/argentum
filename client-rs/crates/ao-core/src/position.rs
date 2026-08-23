@@ -649,11 +649,26 @@ pub mod contract {
                     at: pair(at),
                     expect: Some(local_at(map, tile)),
                 }),
-                ["region", space, region, map] => {
-                    regions.insert(
-                        (space.parse().expect("space"), map.parse().expect("map")),
-                        region.parse().expect("region"),
-                    );
+                ["region", space, region, map, origin] => {
+                    let (x, y) = origin.split_once(',').expect("an origin");
+                    let space: u128 = space.parse().expect("space");
+                    let map: u16 = map.parse().expect("map");
+                    // The declared origin must match where the space puts that map, or the
+                    // placement is describing a different world.
+                    let declared = crate::topology::Origin {
+                        x: x.parse().expect("ox"),
+                        y: y.parse().expect("oy"),
+                    };
+                    if let Some(space_origin) = spaces
+                        .get(&space)
+                        .and_then(|s| s.placements.get(&crate::position::MapId(map)))
+                    {
+                        assert_eq!(
+                            *space_origin, declared,
+                            "region placement for map {map} disagrees with space {space}"
+                        );
+                    }
+                    regions.insert((space, map), region.parse().expect("region"));
                 }
                 ["region-at", space, at, "->", "none"] => cases.push(Case::RegionAt {
                     space: space.parse().expect("space"),

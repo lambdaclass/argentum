@@ -170,25 +170,34 @@ defmodule Arena.World.Position do
   end
 
   @doc """
-  Which region owns a global position, given which region owns which map.
+  Which region owns a global position.
 
   Authority is per region, not per space: two regions of one space meet at a seam, and this is
   the question that crossing it answers differently on either side.
 
-  `regions` maps a map id to a region id.
+  `placements` is a list of `%{region:, space:, map:, origin:}`, checked by
+  `Arena.World.Identity.check_placements/2` before it is used. Refuses rather than guessing if
+  the placements do not describe this space: a drifted origin would otherwise assign authority
+  at coordinates the space does not agree with.
   """
-  @spec region_at(map(), {integer(), integer()}, %{integer() => integer()}) ::
-          {:ok, integer()} | :none
-  def region_at(space, position, regions) do
-    case to_local(space, position) do
-      {:ok, {map, _x, _y}} ->
-        case Map.fetch(regions, map) do
-          {:ok, region} -> {:ok, region}
-          :error -> :none
+  @spec region_at(map(), {integer(), integer()}, [map()]) ::
+          {:ok, integer()} | :none | {:error, tuple()}
+  def region_at(space, position, placements) do
+    case Arena.World.Identity.check_placements(space, placements) do
+      :ok ->
+        case to_local(space, position) do
+          {:ok, {map, _x, _y}} ->
+            case Enum.find(placements, &(&1.map == map)) do
+              nil -> :none
+              placement -> {:ok, placement.region}
+            end
+
+          :none ->
+            :none
         end
 
-      :none ->
-        :none
+      {:error, _} = fault ->
+        fault
     end
   end
 

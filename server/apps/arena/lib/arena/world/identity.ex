@@ -126,6 +126,47 @@ defmodule Arena.World.Identity do
   end
 
   @doc """
+  Check that region placements agree with the space they claim to place regions in.
+
+  The origin on a placement is a second copy of a fact the space already states, so that a
+  caller can do its own arithmetic without asking anything — and a second copy nothing compares
+  is a fact waiting to disagree. A region whose origin has drifted converts every position
+  successfully and answers every one wrong by a fixed offset, so nothing fails until a player
+  is somewhere nobody expects.
+
+  `space` is `%{id: id, placements: %{map => {ox, oy}}}`; each placement is
+  `%{region: r, space: s, map: m, origin: {ox, oy}}`.
+  """
+  @spec check_placements(map(), [map()]) :: :ok | {:error, tuple()}
+  def check_placements(space, placements) do
+    Enum.reduce_while(placements, MapSet.new(), fn placement, claimed ->
+      cond do
+        placement.space != space.id ->
+          {:halt, {:error, {:wrong_space, placement.region, placement.space}}}
+
+        not Map.has_key?(space.placements, placement.map) ->
+          {:halt, {:error, {:map_not_in_space, placement.region, placement.map}}}
+
+        Map.fetch!(space.placements, placement.map) != placement.origin ->
+          {:halt,
+           {:error,
+            {:origin_disagrees, placement.region, placement.map, placement.origin,
+             Map.fetch!(space.placements, placement.map)}}}
+
+        MapSet.member?(claimed, placement.map) ->
+          {:halt, {:error, {:map_shared, placement.map}}}
+
+        true ->
+          {:cont, MapSet.put(claimed, placement.map)}
+      end
+    end)
+    |> case do
+      {:error, _} = error -> error
+      %MapSet{} -> :ok
+    end
+  end
+
+  @doc """
   The reaches a command can arrive with.
 
   Listed rather than inferred from "not authoritative": an unrecognised reach is a programming

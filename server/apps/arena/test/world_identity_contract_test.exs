@@ -37,7 +37,7 @@ defmodule Arena.World.IdentityContractTest do
 
   test "the contract covers every rule and is worth checking" do
     kinds = cases() |> Enum.map(fn {_, [kind | _], _} -> kind end) |> Enum.uniq() |> Enum.sort()
-    assert kinds == ["advance", "execute", "instances", "seamless"]
+    assert kinds == ["advance", "execute", "instances", "placements", "seamless"]
     assert length(cases()) >= 24
   end
 
@@ -107,6 +107,51 @@ defmodule Arena.World.IdentityContractTest do
               ["ok"] -> :ok
               ["space-shared", space] -> {:error, {:space_shared, String.to_integer(space)}}
               ["instance-repeated", id] -> {:error, {:instance_repeated, String.to_integer(id)}}
+            end
+
+          assert got == want, "#{line} gave #{inspect(got)}"
+
+        ["placements", space | entries] ->
+          checked = %{id: 199, placements: %{330 => {0, 0}, 269 => {74, 0}}}
+          claimed_space = String.to_integer(space)
+
+          placements =
+            Enum.map(entries, fn entry ->
+              [region, map, origin] = String.split(entry, ":")
+              [ox, oy] = String.split(origin, ",")
+
+              %{
+                region: String.to_integer(region),
+                space: claimed_space,
+                map: String.to_integer(map),
+                origin: {String.to_integer(ox), String.to_integer(oy)}
+              }
+            end)
+
+          got = Identity.check_placements(checked, placements)
+
+          want =
+            case expected do
+              ["ok"] ->
+                :ok
+
+              ["wrong-space", region] ->
+                {:error, {:wrong_space, String.to_integer(region), claimed_space}}
+
+              ["map-not-in-space", region, map] ->
+                {:error,
+                 {:map_not_in_space, String.to_integer(region), String.to_integer(map)}}
+
+              ["origin-disagrees", region, map] ->
+                map_id = String.to_integer(map)
+                placement = Enum.find(placements, &(&1.map == map_id))
+
+                {:error,
+                 {:origin_disagrees, String.to_integer(region), map_id, placement.origin,
+                  Map.fetch!(checked.placements, map_id)}}
+
+              ["map-shared", map] ->
+                {:error, {:map_shared, String.to_integer(map)}}
             end
 
           assert got == want, "#{line} gave #{inspect(got)}"

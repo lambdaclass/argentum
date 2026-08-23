@@ -342,19 +342,64 @@ pub struct TopologyRequest {
     pub version: TopologyVersion,
 }
 
+/// A space whose region placements have been checked against it.
+///
+/// The fields are private and the only way in is [`ResolvedSpace::new`], which runs
+/// [`check_placements`]. That is deliberate: an earlier version let a caller build a
+/// "resolved" answer from any placements at all, and `region_at` then assigned authority from
+/// a placement naming another space or carrying a drifted origin. Making the invalid value
+/// unconstructible is stronger than remembering to validate it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedSpace {
+    space: Space,
+    regions: Vec<RegionPlacement>,
+}
+
+impl ResolvedSpace {
+    pub fn new(
+        space: Space,
+        regions: Vec<RegionPlacement>,
+    ) -> Result<ResolvedSpace, PlacementFault> {
+        check_placements(&space, &regions)?;
+        Ok(ResolvedSpace { space, regions })
+    }
+
+    pub fn space(&self) -> &Space {
+        &self.space
+    }
+
+    pub fn regions(&self) -> &[RegionPlacement] {
+        &self.regions
+    }
+
+    /// Which region owns a position.
+    ///
+    /// One answer or none. The placements are known consistent, so the only reasons for `None`
+    /// are that no map covers the position or that two maps do — and an ambiguous tile has no
+    /// owner, because answering with either would be a guess presented as authority.
+    pub fn region_at(&self, x: i32, y: i32) -> Option<RegionId> {
+        let local =
+            self.space.to_local(crate::position::WorldPosition { space: self.space.id, x, y })?;
+        self.regions
+            .iter()
+            .find(|placement| placement.map == local.map)
+            .map(|placement| placement.region)
+    }
+}
+
 /// What a versioned lookup can answer.
 ///
-/// `Resolved` carries the space itself — geometry and placements — because that is the only
+/// `Resolved` carries a checked space — geometry and placements — because that is the only
 /// answer a caller can use. A bare "yes, it exists" marker would force a second question per
 /// movement, which is exactly the central coordinate service this shape exists to avoid.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TopologyAnswer {
-    /// The space exists in that version, and here it is: enough to do local arithmetic
-    /// without asking anything else.
-    Resolved { space: Space, regions: Vec<RegionPlacement> },
+    Resolved(ResolvedSpace),
     /// The version is not the one loaded. The caller must not fall back to another: positions
     /// computed against a different release are not comparable.
-    WrongVersion { loaded: TopologyVersion },
+    WrongVersion {
+        loaded: TopologyVersion,
+    },
     /// No such space in that version.
     NoSuchSpace,
 }
@@ -363,22 +408,17 @@ impl TopologyAnswer {
     /// The resolved space, if the lookup succeeded.
     pub fn space(&self) -> Option<&Space> {
         match self {
-            TopologyAnswer::Resolved { space, .. } => Some(space),
+            TopologyAnswer::Resolved(resolved) => Some(resolved.space()),
             _ => None,
         }
     }
 
-    /// Which region owns a position, if any placement covers it.
-    ///
-    /// The cross-region question a seam poses: two regions of one space, and a position that
-    /// belongs to exactly one of them.
+    /// Which region owns a position, if the lookup succeeded and exactly one map covers it.
     pub fn region_at(&self, x: i32, y: i32) -> Option<RegionId> {
-        let TopologyAnswer::Resolved { space, regions } = self else { return None };
-        let local = space.to_local(crate::position::WorldPosition { space: space.id, x, y })?;
-        regions
-            .iter()
-            .find(|placement| placement.map == local.map)
-            .map(|placement| placement.region)
+        match self {
+            TopologyAnswer::Resolved(resolved) => resolved.region_at(x, y),
+            _ => None,
+        }
     }
 }
 
@@ -428,7 +468,9 @@ mod tests {
         // space, so ownership recorded per space would show nothing happening at the exact
         // moment the handoff happens.
         let (space, regions) = two_regions();
-        let answer = TopologyAnswer::Resolved { space: space.clone(), regions };
+        let answer = TopologyAnswer::Resolved(
+            ResolvedSpace::new(space.clone(), regions).expect("the placements agree"),
+        );
 
         let west_edge = space
             .to_global(LocalPosition { map: MapId(330), x: CORE_X.1, y: 50 })
@@ -447,7 +489,9 @@ mod tests {
     #[test]
     fn a_resolved_answer_carries_enough_to_do_arithmetic_without_asking_again() {
         let (space, regions) = two_regions();
-        let answer = TopologyAnswer::Resolved { space, regions };
+        let answer = TopologyAnswer::Resolved(
+            ResolvedSpace::new(space, regions).expect("the placements agree"),
+        );
 
         let resolved = answer.space().expect("a resolved answer has a space");
         let at = resolved
@@ -733,6 +777,73 @@ mod contract_tests {
                         other => panic!("unknown result {other:?}"),
                     };
                     assert_eq!(check_instances(&live), want, "{line}");
+                }
+
+                ["placements", space, entries @ ..] => {
+                    // The checking space the contract fixes: 199 with map 330 at 0,0 and map
+                    // 269 at 74,0.
+                    let checked = Space {
+                        id: WorldSpaceId(199),
+                        version: TopologyVersion(1),
+                        geometry: crate::topology::Geometry::Plane,
+                        placements: std::collections::BTreeMap::from([
+                            (MapId(330), Origin { x: 0, y: 0 }),
+                            (MapId(269), Origin { x: 74, y: 0 }),
+                        ]),
+                    };
+                    let claimed_space: u128 = space.parse().expect("space");
+
+                    let placements: Vec<RegionPlacement> = entries
+                        .iter()
+                        .map(|entry| {
+                            let field: Vec<&str> = entry.split(':').collect();
+                            let (x, y) = field[2].split_once(',').expect("an origin");
+                            RegionPlacement {
+                                region: RegionId(field[0].parse().expect("region")),
+                                space: WorldSpaceId(claimed_space),
+                                map: MapId(field[1].parse().expect("map")),
+                                origin: Origin {
+                                    x: x.parse().expect("ox"),
+                                    y: y.parse().expect("oy"),
+                                },
+                            }
+                        })
+                        .collect();
+
+                    let want = match expected.as_slice() {
+                        ["ok"] => Ok(()),
+                        ["wrong-space", region] => Err(PlacementFault::WrongSpace {
+                            region: RegionId(region.parse().expect("region")),
+                            space: WorldSpaceId(claimed_space),
+                        }),
+                        ["map-not-in-space", region, map] => Err(PlacementFault::MapNotInSpace {
+                            region: RegionId(region.parse().expect("region")),
+                            map: MapId(map.parse().expect("map")),
+                        }),
+                        ["origin-disagrees", region, map] => {
+                            let map = MapId(map.parse().expect("map"));
+                            let placement = placements
+                                .iter()
+                                .find(|p| p.map == map)
+                                .expect("the named placement");
+                            Err(PlacementFault::OriginDisagrees {
+                                region: RegionId(region.parse().expect("region")),
+                                map,
+                                placement: placement.origin,
+                                space: checked.placements[&map],
+                            })
+                        }
+                        ["map-shared", map] => Err(PlacementFault::MapSharedByRegions {
+                            map: MapId(map.parse().expect("map")),
+                        }),
+                        other => panic!("unknown placement result {other:?}"),
+                    };
+
+                    assert_eq!(check_placements(&checked, &placements), want, "{line}");
+
+                    // And the resolved value cannot exist when the placements are bad.
+                    let resolved = ResolvedSpace::new(checked.clone(), placements);
+                    assert_eq!(resolved.is_ok(), want.is_ok(), "{line}");
                 }
 
                 ["seamless", kind] => {
