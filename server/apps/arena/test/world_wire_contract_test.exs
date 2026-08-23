@@ -39,6 +39,15 @@ defmodule Arena.World.WireContractTest do
     |> :erlang.list_to_binary()
   end
 
+  # Mapped explicitly, never `to_existing_atom`. An atom exists only once some loaded module
+  # mentions it, so parsing external data that way passes or fails depending on which test ran
+  # first -- this exact test passed in isolation and failed in the full suite.
+  defp transition_named("seam"), do: :seam
+  defp transition_named("door"), do: :door
+  defp transition_named("portal"), do: :portal
+  defp transition_named("teleport"), do: :teleport
+  defp transition_named("instance"), do: :instance
+
   defp semantic_cases do
     for line <- lines(), not String.starts_with?(line, "reject") do
       [semantic, hex] = String.split(line, "=", parts: 2)
@@ -55,7 +64,7 @@ defmodule Arena.World.WireContractTest do
              String.to_integer(epoch)}
 
           ["transfer", transfer, transition, from, to] ->
-            {:transfer, String.to_integer(transfer), String.to_existing_atom(transition),
+            {:transfer, String.to_integer(transfer), transition_named(transition),
              String.to_integer(from), String.to_integer(to)}
         end
 

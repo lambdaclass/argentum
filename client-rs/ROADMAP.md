@@ -1582,9 +1582,11 @@ handoff, so deferring this broader sweep cannot permit a placeholder transition.
 Close with layer-owned tests and a busy-HUD capture showing no name without a
 body, duplicated name or feedback that outlives its cause.
 
-- **`ConcurrentCombatTest` "killer gets npcs_killed increment" is flaky.** Seen once under
-  full-suite load on 2026-08-22 with the NPC at 1 hp instead of 0; passes in isolation and in
-  subsequent full runs. It touches no exit or transfer path, so it is not W-0105's, but a
+- **`ConcurrentCombatTest` "killer gets npcs_killed increment" is flaky.** Seen twice under
+  full-suite load, 2026-08-22 and 2026-08-23, both times with the NPC at 1 hp instead of 0;
+  passes in isolation and in most full runs, so roughly one run in five. It failed the gate
+  for commit `a16e0b22`, which was pushed before the log was read -- the push was of
+  independently green work, but the gate was red and the commit message implied otherwise. It touches no exit or transfer path, so it is not W-0105's, but a
   test that fails one run in five is a test nobody trusts. Reproduce under load rather than
   in isolation, and either find the race or make the test wait on the kill rather than on
   timing.

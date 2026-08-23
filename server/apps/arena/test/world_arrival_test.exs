@@ -15,6 +15,13 @@ defmodule Arena.World.ArrivalTest do
 
   @cases Path.join([__DIR__, "fixtures", "arrival_cases.txt"])
 
+  # Mapped explicitly, never `to_existing_atom`. An atom exists only once some loaded module
+  # mentions it, so parsing external data that way passes or fails depending on which test ran
+  # first -- the wire contract test did exactly that, passing alone and failing in the suite.
+  defp class_named("walkable"), do: :walkable
+  defp class_named("solid"), do: :solid
+  defp class_named("water"), do: :water
+
   defp fixture do
     @cases
     |> File.read!()
@@ -37,7 +44,7 @@ defmodule Arena.World.ArrivalTest do
 
       %{
         line: line,
-        class: after_word.("arrival") |> String.to_existing_atom(),
+        class: class_named(after_word.("arrival")),
         drawn?: after_word.("drawn") == "yes",
         locomotion: after_word.("locomotion"),
         reachable?: after_word.("reachable") == "yes",
