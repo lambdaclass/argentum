@@ -538,8 +538,10 @@ compares, logs and transmits global positions; a MapServer derives local
 coordinates at its boundary for collision, occupancy and legacy content.
 
 Keep content identity, topology version, runtime process ownership and dynamic
-instance identity separate. Region IDs remain stable across process restarts
-and topology releases; they are never sequential PIDs or array positions.
+instance identity separate. Region IDs are never sequential PIDs or array
+positions, and must remain stable across process restarts and topology releases —
+a requirement this task states and `W-0125` establishes, because `W-0097`'s
+manifest emits no regions at all and nothing allocates them yet.
 Transition-band positions are operation-local and cannot be persisted. A
 retained legacy adapter projects an eligible global position to
 `map_id + u8 x/y` and rejects an unrepresentable region explicitly.

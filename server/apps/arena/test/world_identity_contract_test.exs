@@ -231,6 +231,17 @@ defmodule Arena.World.IdentityContractTest do
       refute handed_off.region == owner.region, "its owner did"
     end
 
+    test "an epoch above u64 is not an epoch" do
+      # Restored: `f9aaf016` deleted this while rewriting the test next to it, so the only
+      # coverage of above-maximum epochs disappeared in the same commit that claimed to be
+      # improving the evidence. Codex re-review, 2026-08-23, caught the regression.
+      assert_raise ArgumentError, fn -> Identity.advance(Identity.max_epoch() + 1) end
+      assert_raise ArgumentError, fn -> Identity.advance(Identity.max_epoch() * 2) end
+
+      assert Identity.advance(Identity.max_epoch()) == {:error, :exhausted}
+      assert Identity.advance(Identity.max_epoch() - 1) == {:ok, Identity.max_epoch()}
+    end
+
     test "an empty instance set is trivially consistent" do
       assert Identity.check_instances([]) == :ok
     end
