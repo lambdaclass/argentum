@@ -197,3 +197,25 @@ compare 199 1 0,0 with 199 1 0,0 -> 0,0
 compare 199 1 221,214 with 37 1 221,214 -> different-space
 compare 199 1 221,214 with 199 2 222,214 -> different-version
 compare 199 2 221,214 with 199 1 221,214 -> different-version
+
+# ---------------------------------------------------------------------------------------
+# Boundaries where the two languages disagreed. A global coordinate is an i32, so a space
+# whose layout would push a tile past that has no position for it -- Elixir used to return
+# an unbounded integer where Rust returned nothing. And a difference between two i32
+# coordinates needs 33 bits: subtracting them as i32 wrapped to -1 in release, panicked in
+# debug, and returned 4294967295 on the server. One contract, three answers.
+# ---------------------------------------------------------------------------------------
+space 700 plane
+place 700 700 2147483574,0
+
+global 700 700 87,11 -> 2147483647,0
+compare 700 1 -2147483648,0 with 700 1 2147483647,0 -> 4294967295,0
+compare 700 1 2147483647,0 with 700 1 -2147483648,0 -> -4294967295,0
+compare 700 1 0,-2147483648 with 700 1 0,2147483647 -> 0,4294967295
+
+space 701 plane
+place 701 701 2147483575,0
+
+# One tile further out and the last column has no global position at all.
+global 701 701 87,11 -> none
+global 701 701 86,11 -> 2147483647,0

@@ -140,7 +140,9 @@ defmodule Arena.World.PositionContractTest do
         ["render", space, at, "near", near, "->", expected] ->
           space = spaces[String.to_integer(space)]
 
-          assert Position.nearest_unwrapped(space, pair(at), pair(near)) == pair(expected),
+          {rx, ry} = pair(expected)
+
+          assert Position.nearest_unwrapped(space, pair(at), pair(near)) == {:render, rx, ry},
                  "render #{at} near #{near}"
 
         ["legacy", space, at, "->", "unrepresentable"] ->
@@ -187,24 +189,75 @@ defmodule Arena.World.PositionContractTest do
     end
   end
 
-  test "local to global to local returns the original tile for every core tile" do
+  test "local to global to local returns the original tile, and every refusal is justified" do
     # The invariant the contract rests on, checked exhaustively on this side too rather than
-    # trusted because Rust checks it: a spec both languages read is only worth what each one
-    # independently verifies.
+    # trusted because Rust checks it.
+    #
+    # Codex review, 2026-08-23: this used to accept `:none` from `to_local` whenever a space
+    # held more than one map, so a regression that lost every multi-map tile would have passed.
+    # Now a refusal has to be explained: either the tile's coordinate is outside i32, or the
+    # space is the one the contract declares ambiguous on purpose.
     {spaces, _} = parse()
+    ambiguous = 900
+    checked = 0
 
-    for {_id, space} <- spaces, {map, _origin} <- space.placements do
-      for y <- Position.core_y(), x <- Position.core_x() do
-        original = {map, x, y}
-        {:ok, global} = Position.to_global(space, original)
+    checked =
+      for {id, space} <- spaces, {map, {ox, oy}} <- space.placements, reduce: checked do
+        acc ->
+          for y <- Position.core_y(), x <- Position.core_x(), reduce: acc do
+            inner ->
+              original = {map, x, y}
+              # What the coordinate would be before any range check.
+              raw_x = ox + (x - Position.core_x().first)
+              raw_y = oy + (y - Position.core_y().first)
+              in_range = raw_x in Position.coordinate_range() and raw_y in Position.coordinate_range()
 
-        # A space with two maps on one cell has no unique local tile, and says so.
-        case Position.to_local(space, global) do
-          {:ok, roundtripped} -> assert roundtripped == original
-          :none -> assert map_size(space.placements) > 1
-        end
+              case Position.to_global(space, original) do
+                :none ->
+                  refute in_range,
+                         "space #{id} refused #{inspect(original)} whose coordinate fits i32"
+
+                  inner + 1
+
+                {:ok, global} ->
+                  assert in_range
+
+                  case Position.to_local(space, global) do
+                    {:ok, roundtripped} ->
+                      assert roundtripped == original
+                      inner + 1
+
+                    :none ->
+                      assert id == ambiguous,
+                             "space #{id} lost #{inspect(original)}; only the deliberately " <>
+                               "ambiguous space #{ambiguous} may refuse"
+
+                      inner + 1
+                  end
+              end
+          end
       end
-    end
+
+    assert checked > 50_000, "expected the whole core of every space, got #{checked} tiles"
+  end
+
+  test "a coordinate outside i32 is not a position here either" do
+    # Codex review, 2026-08-23: Elixir returned unbounded coordinates where Rust returned
+    # none, so an origin near the maximum produced a position the other side could not hold.
+    space = %{id: 1, geometry: :plane, placements: %{1 => {2_147_483_647, 0}}}
+    assert Position.to_global(space, {1, 20, 11}) == :none
+    assert Position.coordinate_range() == -2_147_483_648..2_147_483_647
+
+    at_the_edge = %{id: 1, geometry: :plane, placements: %{1 => {2_147_483_647 - 73, 0}}}
+    assert Position.to_global(at_the_edge, {1, 87, 11}) == {:ok, {2_147_483_647, 0}}
+  end
+
+  test "a render position is tagged so it cannot be stored as a position" do
+    torus = %{id: 37, geometry: {:torus, 148, 160}, placements: %{168 => {0, 0}}}
+
+    assert {:render, 148, 39} = Position.nearest_unwrapped(torus, {0, 39}, {147, 39})
+    refute Position.canonical?(torus, {148, 39}), "148 is a render value on a 148-wide torus"
+    assert Position.canonical?(torus, {0, 39})
   end
 
   test "a drifted placement origin refuses to name an owner" do

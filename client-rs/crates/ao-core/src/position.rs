@@ -91,6 +91,24 @@ pub struct WorldPosition {
     pub y: i32,
 }
 
+/// Where to *draw* something this frame, which is not where it is.
+///
+/// Its own type, and wider, for two reasons found by review. A bare pair was
+/// indistinguishable from a canonical position, so on a 148-wide torus `x = 0` and render-only
+/// `x = 148` were both valid-looking position records and nothing could detect their
+/// transposition — which the contract explicitly requires. And unwrapping adds a period to a
+/// coordinate that may already be near `i32::MAX`, so the result does not always fit where the
+/// canonical value does.
+///
+/// A `RenderPosition` must never be stored, transmitted or compared with a `WorldPosition`.
+/// There is deliberately no conversion back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RenderPosition {
+    pub space: WorldSpaceId,
+    pub x: i64,
+    pub y: i64,
+}
+
 /// What happened when a position was moved by one tile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
@@ -186,19 +204,34 @@ impl Space {
     /// camera snaps across the map and the player is told they teleported. With it, the two
     /// disagree by exactly one period, which is why they must never be confused in a fixture:
     /// one is where the character is, the other is where to draw them this frame.
-    pub fn nearest_unwrapped(&self, position: WorldPosition, near: (i32, i32)) -> (i32, i32) {
+    pub fn nearest_unwrapped(&self, position: WorldPosition, near: (i32, i32)) -> RenderPosition {
         let (px, py) = self.geometry.periods();
-        (nearest_on_axis(position.x, near.0, px), nearest_on_axis(position.y, near.1, py))
+        RenderPosition {
+            space: position.space,
+            x: nearest_on_axis(position.x as i64, near.0 as i64, px),
+            y: nearest_on_axis(position.y as i64, near.1 as i64, py),
+        }
+    }
+
+    /// Whether a position is in this space's canonical range.
+    ///
+    /// A wrapping space reduces its coordinates, so `x = 148` on a 148-wide torus is a render
+    /// position that has been mistaken for a stored one. Checked where a position enters a
+    /// space-aware layer; the wire cannot check it, because bytes arrive without geometry.
+    pub fn is_canonical(&self, position: WorldPosition) -> bool {
+        position.space == self.id
+            && self.geometry.reduce((position.x as i64, position.y as i64))
+                == (position.x as i64, position.y as i64)
     }
 }
 
-fn nearest_on_axis(value: i32, near: i32, period: i64) -> i32 {
+fn nearest_on_axis(value: i64, near: i64, period: i64) -> i64 {
     if period == 0 {
         return value;
     }
-    let period = period as i32;
     // Candidates one period either side; the wrap is never more than one period away from a
-    // camera that was following the character.
+    // camera that was following the character. Computed in `i64` so adding a period to a
+    // coordinate near `i32::MAX` cannot overflow.
     [value - period, value, value + period]
         .into_iter()
         .min_by_key(|candidate| (candidate - near).abs())
@@ -213,10 +246,11 @@ fn nearest_on_axis(value: i32, near: i32, period: i64) -> i32 {
 /// a distance and is not one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Difference {
-    Tiles {
-        dx: i32,
-        dy: i32,
-    },
+    /// In tiles, as `i64`: the difference between two `i32` coordinates needs 33 bits, and
+    /// subtracting them as `i32` overflows. `i32::MAX - i32::MIN` wrapped to `-1` in release
+    /// and panicked in debug, while the Elixir side returned 4,294,967,295 — one contract,
+    /// three answers.
+    Tiles { dx: i64, dy: i64 },
     /// Different spaces have no distance between them at all.
     DifferentSpace,
     /// One of the positions was computed against another topology release.
@@ -236,7 +270,10 @@ pub fn compare(
     if left_version != right_version {
         return Difference::DifferentVersion;
     }
-    Difference::Tiles { dx: right_at.x - left_at.x, dy: right_at.y - left_at.y }
+    Difference::Tiles {
+        dx: right_at.x as i64 - left_at.x as i64,
+        dy: right_at.y as i64 - left_at.y as i64,
+    }
 }
 
 /// Project a global position to legacy `map_id + u8 x/y`, or say why it cannot be.
@@ -289,6 +326,53 @@ mod tests {
                 (MapId(264), Origin { x: PITCH_X, y: PITCH_Y }),
             ]),
         }
+    }
+
+    #[test]
+    fn every_contract_space_round_trips_and_every_refusal_is_justified() {
+        // Codex review, 2026-08-23: the exhaustive loop below covers only this module's plane
+        // and torus helpers, so cylinder, discrete, ambiguous and the real acceptance square
+        // were never exercised tile by tile. This runs the same invariant over every space the
+        // contract declares, and requires a reason for each refusal rather than accepting it.
+        let (spaces, _) = contract::parse(contract::text());
+        let ambiguous = WorldSpaceId(900);
+        let mut checked = 0usize;
+
+        for space in spaces.values() {
+            for (map, origin) in &space.placements {
+                for y in CORE_Y.0..=CORE_Y.1 {
+                    for x in CORE_X.0..=CORE_X.1 {
+                        let local = LocalPosition { map: *map, x, y };
+                        let raw =
+                            (origin.x + (x - CORE_X.0) as i64, origin.y + (y - CORE_Y.0) as i64);
+                        let fits = i32::try_from(raw.0).is_ok() && i32::try_from(raw.1).is_ok();
+
+                        match space.to_global(local) {
+                            None => assert!(
+                                !fits,
+                                "space {:?} refused {local:?} whose coordinate fits i32",
+                                space.id
+                            ),
+                            Some(global) => {
+                                assert!(fits);
+                                match space.to_local(global) {
+                                    Some(back) => assert_eq!(back, local, "space {:?}", space.id),
+                                    None => assert_eq!(
+                                        space.id, ambiguous,
+                                        "space {:?} lost {local:?}; only the deliberately \
+                                         ambiguous space may refuse",
+                                        space.id
+                                    ),
+                                }
+                            }
+                        }
+                        checked += 1;
+                    }
+                }
+            }
+        }
+
+        assert!(checked > 50_000, "expected the whole core of every space, got {checked}");
     }
 
     #[test]
@@ -382,15 +466,25 @@ mod tests {
 
         assert_eq!(wrapped.x - east_edge.x, -(2 * PITCH_X as i32) + 1, "the stored jump");
         let drawn = space.nearest_unwrapped(wrapped, (east_edge.x, east_edge.y));
-        assert_eq!(drawn.0 - east_edge.x, 1, "the camera moves one tile");
-        assert_eq!(drawn.1, east_edge.y);
+        assert_eq!(drawn.x - east_edge.x as i64, 1, "the camera moves one tile");
+        assert_eq!(drawn.y, east_edge.y as i64);
+        // The drawn value is not a position: on this torus x = 148 is outside the canonical
+        // range, and the type keeps the two from being interchanged at all.
+        assert!(!space.is_canonical(WorldPosition {
+            space: space.id,
+            x: drawn.x as i32,
+            y: drawn.y as i32
+        }));
+        assert!(space.is_canonical(wrapped));
     }
 
     #[test]
     fn a_plane_never_unwraps_anything() {
         let space = plane();
         let at = space.to_global(LocalPosition { map: MapId(1), x: 40, y: 40 }).unwrap();
-        assert_eq!(space.nearest_unwrapped(at, (10_000, -10_000)), (at.x, at.y));
+        let drawn = space.nearest_unwrapped(at, (10_000, -10_000));
+        assert_eq!((drawn.x, drawn.y), (at.x as i64, at.y as i64));
+        assert!(space.is_canonical(at), "a plane's positions are always canonical");
     }
 
     #[test]
@@ -686,8 +780,13 @@ pub mod contract {
                         ["different-space"] => Difference::DifferentSpace,
                         ["different-version"] => Difference::DifferentVersion,
                         [tiles] => {
-                            let (dx, dy) = pair(tiles);
-                            Difference::Tiles { dx, dy }
+                            // Parsed as i64: a difference between two i32 coordinates needs
+                            // 33 bits, so the contract can state values `pair` could not hold.
+                            let (dx, dy) = tiles.split_once(',').expect("a pair");
+                            Difference::Tiles {
+                                dx: dx.trim().parse().expect("dx"),
+                                dy: dy.trim().parse().expect("dy"),
+                            }
                         }
                         other => panic!("unknown comparison result {other:?}"),
                     };
@@ -765,7 +864,13 @@ mod contract_tests {
                 Case::Render { space, at, near, expect } => {
                     let space = &spaces[space];
                     let position = WorldPosition { space: space.id, x: at.0, y: at.1 };
-                    assert_eq!(space.nearest_unwrapped(position, *near), *expect, "render {at:?}");
+                    let drawn = space.nearest_unwrapped(position, *near);
+                    assert_eq!(
+                        (drawn.x, drawn.y),
+                        (expect.0 as i64, expect.1 as i64),
+                        "render {at:?}"
+                    );
+                    assert_eq!(drawn.space, position.space, "a render position keeps its space");
                 }
                 Case::RegionAt { space, at, expect } => {
                     let (_, _, regions) = contract::parse_with_regions(contract::text());

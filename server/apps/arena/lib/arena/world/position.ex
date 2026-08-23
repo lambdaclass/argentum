@@ -21,6 +21,12 @@ defmodule Arena.World.Position do
   @pitch_x 74
   @pitch_y 80
 
+  # A global coordinate is an i32 on the wire and in Rust, so a position outside that range is
+  # not a position. Elixir integers are unbounded, so without this the two sides disagreed: an
+  # origin near the maximum returned `{2_147_483_653, 0}` here and `None` there.
+  @i32_min -2_147_483_648
+  @i32_max 2_147_483_647
+
   @typedoc "A coordinate space's shape. Periods are in tiles; 0 means the axis does not wrap."
   @type geometry ::
           :plane
@@ -76,12 +82,17 @@ defmodule Arena.World.Position do
   @spec to_global(space(), local()) :: {:ok, {integer(), integer()}} | :none
   def to_global(space, {map, x, y} = local) do
     with true <- in_core?(local),
-         {ox, oy} when is_integer(ox) <- Map.get(space.placements, map, :missing) do
-      {:ok, reduce(space.geometry, {ox + (x - @core_x.first), oy + (y - @core_y.first)})}
+         {ox, oy} when is_integer(ox) <- Map.get(space.placements, map, :missing),
+         {gx, gy} <- reduce(space.geometry, {ox + (x - @core_x.first), oy + (y - @core_y.first)}),
+         true <- gx in @i32_min..@i32_max and gy in @i32_min..@i32_max do
+      {:ok, {gx, gy}}
     else
       _ -> :none
     end
   end
+
+  @doc "The inclusive range a global coordinate must lie in."
+  def coordinate_range, do: @i32_min..@i32_max
 
   @doc """
   The local tile a global position falls on, or `:none`.
@@ -137,10 +148,25 @@ defmodule Arena.World.Position do
   where the character is, the other is where to draw them this frame.
   """
   @spec nearest_unwrapped(space(), {integer(), integer()}, {integer(), integer()}) ::
-          {integer(), integer()}
+          {:render, integer(), integer()}
   def nearest_unwrapped(space, {x, y}, {near_x, near_y}) do
     {px, py} = periods(space.geometry)
-    {nearest_on_axis(x, near_x, px), nearest_on_axis(y, near_y, py)}
+    # Tagged `:render` so it cannot be passed where a canonical `{x, y}` is expected. On a
+    # 148-wide torus, canonical 0 and render-only 148 are both plausible-looking pairs, and the
+    # contract requires that the two never be confused.
+    {:render, nearest_on_axis(x, near_x, px), nearest_on_axis(y, near_y, py)}
+  end
+
+  @doc """
+  Whether a position is in this space's canonical range.
+
+  A wrapping space reduces its coordinates, so `x = 148` on a 148-wide torus is a render
+  position that has been mistaken for a stored one.
+  """
+  @spec canonical?(space(), {integer(), integer()}) :: boolean()
+  def canonical?(space, {x, y}) do
+    reduce(space.geometry, {x, y}) == {x, y} and x in @i32_min..@i32_max and
+      y in @i32_min..@i32_max
   end
 
   defp nearest_on_axis(value, _near, 0), do: value
