@@ -156,6 +156,17 @@ defmodule Arena.World.IdentityContractTest do
       assert handed_off.entity == before.entity
     end
 
+    test "an epoch above u64 is not an epoch" do
+      # Codex review, 2026-08-23: `advance/1` matched the maximum exactly and incremented
+      # anything else, so `advance(2**64)` returned `2**64 + 1` -- a value the wire and the
+      # Rust side cannot represent, which would have become a truncated epoch on encode.
+      assert_raise ArgumentError, fn -> Identity.advance(Identity.max_epoch() + 1) end
+      assert_raise ArgumentError, fn -> Identity.advance(Identity.max_epoch() * 2) end
+
+      assert Identity.advance(Identity.max_epoch()) == {:error, :exhausted}
+      assert Identity.advance(Identity.max_epoch() - 1) == {:ok, Identity.max_epoch()}
+    end
+
     test "an empty instance set is trivially consistent" do
       assert Identity.check_instances([]) == :ok
     end

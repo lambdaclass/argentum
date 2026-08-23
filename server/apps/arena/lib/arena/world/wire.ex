@@ -37,6 +37,17 @@ defmodule Arena.World.Wire do
   @ownership 2
   @transfer 3
 
+  # Elixir integers are unbounded and bit syntax silently keeps only the low bits, so a value
+  # one past a field's range encodes as something else entirely: `space = 2^128` produced the
+  # same bytes as `space = 0`, and `x = 2^31` came back as `-2^31`. Rust's types cannot hold
+  # those inputs at all, so the two sides would have disagreed about identity while both test
+  # suites stayed green. Every field is range-checked before it is written.
+  @u32 0xFFFF_FFFF
+  @u64 0xFFFF_FFFF_FFFF_FFFF
+  @u128 0xFFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF
+  @i32_min -2_147_483_648
+  @i32_max 2_147_483_647
+
   @seam 1
   @door 2
   @portal 3
@@ -65,21 +76,88 @@ defmodule Arena.World.Wire do
   def byte_size_of({:ownership, _, _, _}), do: 21
   def byte_size_of({:transfer, _, _, _, _}), do: 18
 
-  @doc "Encode a record."
+  @doc """
+  Encode a record.
+
+  Raises on a value outside its field's range rather than truncating it. Truncation here is not
+  a rounding error: it silently rewrites an identity, so two different spaces or entities become
+  the same one, and nothing downstream can tell.
+  """
   @spec encode(record()) :: binary()
-  def encode({:position, version, space, x, y}) do
+  def encode({:position, version, space, x, y})
+      when version in 0..@u32 and space in 0..@u128 and x in @i32_min..@i32_max and
+             y in @i32_min..@i32_max do
     <<@position::unsigned-8, version::little-unsigned-32, space::little-unsigned-128,
       x::little-signed-32, y::little-signed-32>>
   end
 
-  def encode({:ownership, entity, region, epoch}) do
+  def encode({:ownership, entity, region, epoch})
+      when entity in 0..@u64 and region in 0..@u32 and epoch in 0..@u64 do
     <<@ownership::unsigned-8, entity::little-unsigned-64, region::little-unsigned-32,
       epoch::little-unsigned-64>>
   end
 
-  def encode({:transfer, transfer, transition, from, to}) do
+  def encode({:transfer, transfer, transition, from, to})
+      when transfer in 0..@u64 and from in 0..@u32 and to in 0..@u32 do
     <<@transfer::unsigned-8, transfer::little-unsigned-64, transition_byte(transition)::unsigned-8,
       from::little-unsigned-32, to::little-unsigned-32>>
+  end
+
+  # Reached only when a field is out of range, since the clauses above cover every in-range
+  # record. Names the offending field and its bound, because "encode failed" would send a
+  # reader looking at the wrong value.
+  def encode(record) do
+    raise ArgumentError, """
+    #{inspect(record)} cannot be encoded: #{out_of_range(record)}.
+
+    Elixir integers are unbounded and bit syntax keeps only the low bits, so encoding this
+    would have produced the bytes of a different record. The bounds are the wire contract's:
+    u32 for a topology version and a region, u128 for a world space, u64 for an entity, epoch
+    and transfer id, and signed i32 for a coordinate.
+    """
+  end
+
+  defp out_of_range({:position, version, space, x, y}) do
+    cond do
+      version not in 0..@u32 -> "topology version #{version} exceeds u32"
+      space not in 0..@u128 -> "world space #{space} exceeds u128"
+      x not in @i32_min..@i32_max -> "x #{x} is outside i32"
+      y not in @i32_min..@i32_max -> "y #{y} is outside i32"
+      true -> "an unknown field is out of range"
+    end
+  end
+
+  defp out_of_range({:ownership, entity, region, epoch}) do
+    cond do
+      entity not in 0..@u64 -> "entity #{entity} exceeds u64"
+      region not in 0..@u32 -> "region #{region} exceeds u32"
+      epoch not in 0..@u64 -> "epoch #{epoch} exceeds u64"
+      true -> "an unknown field is out of range"
+    end
+  end
+
+  defp out_of_range({:transfer, transfer, _transition, from, to}) do
+    cond do
+      transfer not in 0..@u64 -> "transfer id #{transfer} exceeds u64"
+      from not in 0..@u32 -> "source region #{from} exceeds u32"
+      to not in 0..@u32 -> "destination region #{to} exceeds u32"
+      true -> "an unknown field is out of range"
+    end
+  end
+
+  defp out_of_range(_), do: "it is not a record this version knows"
+
+  @doc "The inclusive bounds of each field, so a caller can check before it builds a record."
+  def bounds do
+    %{
+      topology_version: 0..@u32,
+      world_space: 0..@u128,
+      coordinate: @i32_min..@i32_max,
+      entity: 0..@u64,
+      region: 0..@u32,
+      epoch: 0..@u64,
+      transfer: 0..@u64
+    }
   end
 
   @doc """

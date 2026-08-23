@@ -71,7 +71,17 @@ defmodule Arena.World.Identity do
   """
   @spec advance(epoch()) :: {:ok, epoch()} | {:error, :exhausted}
   def advance(@max_epoch), do: {:error, :exhausted}
-  def advance(epoch) when is_integer(epoch) and epoch >= 0, do: {:ok, epoch + 1}
+  def advance(epoch) when is_integer(epoch) and epoch >= 0 and epoch < @max_epoch,
+    do: {:ok, epoch + 1}
+
+  # An epoch above u64 is not an epoch: Elixir would happily increment it forever while the
+  # wire and the Rust side cannot represent it at all. Matching `@max_epoch` exactly and then
+  # incrementing anything else meant `advance(2**64)` returned `2**64 + 1`.
+  def advance(epoch) when is_integer(epoch) do
+    raise ArgumentError,
+          "epoch #{epoch} is outside u64, so it cannot be an authority epoch " <>
+            "(the maximum is #{@max_epoch})"
+  end
 
   @doc "The largest representable epoch, which is the one that cannot advance."
   def max_epoch, do: @max_epoch

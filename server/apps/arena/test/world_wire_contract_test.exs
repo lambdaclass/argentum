@@ -186,6 +186,47 @@ defmodule Arena.World.WireContractTest do
       end
     end
 
+    test "one past every field's range is refused rather than truncated" do
+      # Codex review, 2026-08-23: Elixir integers are unbounded and bit syntax keeps only the
+      # low bits, so every one of these silently encoded as a *different* record. `space =
+      # 2^128` produced the bytes of `space = 0` -- an identity collision that no test caught,
+      # because the tests stopped at each maximum and never tried maximum-plus-one.
+      u32 = 4_294_967_296
+      u64 = 18_446_744_073_709_551_616
+      u128 = 340_282_366_920_938_463_463_374_607_431_768_211_456
+
+      for record <- [
+            {:position, u32, 1, 0, 0},
+            {:position, 1, u128, 0, 0},
+            {:position, 1, 1, 2_147_483_648, 0},
+            {:position, 1, 1, 0, -2_147_483_649},
+            {:position, 1, -1, 0, 0},
+            {:ownership, u64, 1, 1},
+            {:ownership, 1, u32, 1},
+            {:ownership, 1, 1, u64},
+            {:transfer, u64, :seam, 1, 1},
+            {:transfer, 1, :seam, u32, 1},
+            {:transfer, 1, :seam, 1, u32}
+          ] do
+        assert_raise ArgumentError, fn -> Wire.encode(record) end
+      end
+
+      # And the maximum itself still encodes, so the bound is inclusive rather than off by one.
+      assert Wire.decode(Wire.encode({:position, u32 - 1, u128 - 1, 2_147_483_647, -2_147_483_648})) ==
+               {:ok, {:position, u32 - 1, u128 - 1, 2_147_483_647, -2_147_483_648}}
+
+      assert Wire.decode(Wire.encode({:ownership, u64 - 1, u32 - 1, u64 - 1})) ==
+               {:ok, {:ownership, u64 - 1, u32 - 1, u64 - 1}}
+    end
+
+    test "the declared bounds are the ones the encoder enforces" do
+      bounds = Wire.bounds()
+      assert bounds.world_space.last == 340_282_366_920_938_463_463_374_607_431_768_211_455
+      assert bounds.coordinate.first == -2_147_483_648
+      assert bounds.entity.last == 18_446_744_073_709_551_615
+      assert bounds.region.last == 4_294_967_295
+    end
+
     test "an unknown record names the discriminant it did not know" do
       for discriminant <- [0, 4, 9, 255] do
         bytes = :binary.copy(<<discriminant>>, 21)
