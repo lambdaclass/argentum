@@ -146,8 +146,16 @@ defmodule Arena.World.WireContractTest do
     test "negative coordinates survive as negative coordinates" do
       record = {:position, 3, 199, -1, -1406}
       bytes = Wire.encode(record)
-      assert :binary.part(bytes, 21, 4) == <<0xFF, 0xFF, 0xFF, 0xFF>>
+      assert :binary.part(bytes, 25, 4) == <<0xFF, 0xFF, 0xFF, 0xFF>>
       assert Wire.decode(bytes) == {:ok, record}
+    end
+
+    test "the topology version carries a real manifest hash" do
+      # 0x3e6df36b27c82aab is the manifest hash W-0097 pinned for this corpus. A position
+      # naming it can be checked against a release that exists; a bare counter could not.
+      hash = 0x3E6DF36B27C82AAB
+      assert {:ok, {:position, ^hash, 199, 221, 214}} =
+               Wire.decode(Wire.encode({:position, hash, 199, 221, 214}))
     end
 
     test "a runtime instance space id survives that a 32-bit field would truncate" do
@@ -196,7 +204,7 @@ defmodule Arena.World.WireContractTest do
       u128 = 340_282_366_920_938_463_463_374_607_431_768_211_456
 
       for record <- [
-            {:position, u32, 1, 0, 0},
+            {:position, u64, 1, 0, 0},
             {:position, 1, u128, 0, 0},
             {:position, 1, 1, 2_147_483_648, 0},
             {:position, 1, 1, 0, -2_147_483_649},
@@ -212,8 +220,8 @@ defmodule Arena.World.WireContractTest do
       end
 
       # And the maximum itself still encodes, so the bound is inclusive rather than off by one.
-      assert Wire.decode(Wire.encode({:position, u32 - 1, u128 - 1, 2_147_483_647, -2_147_483_648})) ==
-               {:ok, {:position, u32 - 1, u128 - 1, 2_147_483_647, -2_147_483_648}}
+      assert Wire.decode(Wire.encode({:position, u64 - 1, u128 - 1, 2_147_483_647, -2_147_483_648})) ==
+               {:ok, {:position, u64 - 1, u128 - 1, 2_147_483_647, -2_147_483_648}}
 
       assert Wire.decode(Wire.encode({:ownership, u64 - 1, u32 - 1, u64 - 1})) ==
                {:ok, {:ownership, u64 - 1, u32 - 1, u64 - 1}}
@@ -221,6 +229,7 @@ defmodule Arena.World.WireContractTest do
 
     test "the declared bounds are the ones the encoder enforces" do
       bounds = Wire.bounds()
+      assert bounds.topology_version.last == 18_446_744_073_709_551_615
       assert bounds.world_space.last == 340_282_366_920_938_463_463_374_607_431_768_211_455
       assert bounds.coordinate.first == -2_147_483_648
       assert bounds.entity.last == 18_446_744_073_709_551_615

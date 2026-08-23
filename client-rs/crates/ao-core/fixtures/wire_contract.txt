@@ -8,14 +8,20 @@
 # Little-endian throughout. Every record begins with a u8 discriminant, and the field order,
 # widths and signedness below are the contract:
 #
-#   1 position  : topology_version u32, space u128, x i32, y i32         (29 bytes)
+#   1 position  : topology_version u64, space u128, x i32, y i32         (33 bytes)
 #   2 ownership : entity u64, region u32, epoch u64                      (21 bytes)
 #   3 transfer  : transfer u64, transition u8, from_region u32, to u32    (18 bytes)
 #
+# The topology version is the manifest's content hash -- sixteen hex characters, exactly u64 --
+# so a position can only claim a release that was actually compiled.
+#
 # A space id is 128 bits because not every space is compiled: `W-0104` mints one per live
 # dungeon instance at runtime, from whichever region is asked, and a narrower id would need a
-# central allocator or hand-managed ranges to stay unique. A region id stays 32 bits because
-# regions are allocated by the topology manifest and never reused.
+# central allocator or hand-managed ranges to stay unique. A region id stays 32 bits because a
+# region is a unit of authority over compiled content, not something minted per player action.
+# It is not yet allocated by anything: W-0097's manifest emits spaces, geometry, maps and
+# origins and contains no regions, so the region ids here are hand-authored and W-0125 owes a
+# stable allocator.
 #
 # Transition discriminants: 1 seam, 2 door, 3 portal, 4 teleport, 5 instance. 0 is not a
 # kind -- a zero byte is what an uninitialised field looks like, and it must not decode as
@@ -30,13 +36,13 @@
 # columns: <record> <fields...> = <hex bytes>
 #          reject <hex bytes> <truncated|oversized|unknown-record|unknown-transition>
 # zero everywhere: a valid record, and the one a lazy encoder gets right by accident
-position 0 0 0 0 = 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+position 0 0 0 0 = 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
 ownership 0 0 0 = 02 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
 transfer 0 seam 0 0 = 03 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 00
 
 # ordinary values from the acceptance square's east seam
-position 1 199 221 214 = 01 01 00 00 00 c7 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 dd 00 00 00 d6 00 00 00
-position 1 199 222 214 = 01 01 00 00 00 c7 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 de 00 00 00 d6 00 00 00
+position 1 199 221 214 = 01 01 00 00 00 00 00 00 00 c7 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 dd 00 00 00 d6 00 00 00
+position 1 199 222 214 = 01 01 00 00 00 00 00 00 00 c7 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 de 00 00 00 d6 00 00 00
 ownership 7 330 3 = 02 07 00 00 00 00 00 00 00 4a 01 00 00 03 00 00 00 00 00 00 00
 transfer 9 seam 330 269 = 03 09 00 00 00 00 00 00 00 01 4a 01 00 00 0d 01 00 00
 
@@ -47,19 +53,20 @@ transfer 1 teleport 2 3 = 03 01 00 00 00 00 00 00 00 04 02 00 00 00 03 00 00 00
 transfer 1 instance 2 3 = 03 01 00 00 00 00 00 00 00 05 02 00 00 00 03 00 00 00
 
 # negative global coordinates: the world has them, and i32 is signed
-position 3 199 -1 -1406 = 01 03 00 00 00 c7 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ff ff ff ff 82 fa ff ff
-position 3 199 -1406 -1 = 01 03 00 00 00 c7 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 82 fa ff ff ff ff ff ff
+position 3 199 -1 -1406 = 01 03 00 00 00 00 00 00 00 c7 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ff ff ff ff 82 fa ff ff
+position 3 199 -1406 -1 = 01 03 00 00 00 00 00 00 00 c7 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 82 fa ff ff ff ff ff ff
 
-# i32 boundaries, and a topology version at the top of its range
-position 0 0 2147483647 -2147483648 = 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ff ff ff 7f 00 00 00 80
-position 4294967295 4294967295 -2147483648 2147483647 = 01 ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 80 ff ff ff 7f
+# i32 boundaries, and a real manifest content hash as the topology version
+position 0 0 2147483647 -2147483648 = 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ff ff ff 7f 00 00 00 80
+position 18446744073709551615 4294967295 -2147483648 2147483647 = 01 ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 80 ff ff ff 7f
+position 4498519244367473323 199 221 214 = 01 ab 2a c8 27 6b f3 6d 3e c7 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 dd 00 00 00 d6 00 00 00
 
 # Runtime instance spaces. W-0104 mints one per live dungeon copy, at runtime, without
 # coordinating -- so the field is 128 bits. A 32-bit id would truncate all three of
 # these to the same value and put three parties in one space.
-position 1 4294967296 10 20 = 01 01 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 0a 00 00 00 14 00 00 00
-position 1 18446744073709551617 10 20 = 01 01 00 00 00 01 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 0a 00 00 00 14 00 00 00
-position 1 340282366920938463463374607431768211455 10 20 = 01 01 00 00 00 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 0a 00 00 00 14 00 00 00
+position 1 4294967296 10 20 = 01 01 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 0a 00 00 00 14 00 00 00
+position 1 18446744073709551617 10 20 = 01 01 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 0a 00 00 00 14 00 00 00
+position 1 340282366920938463463374607431768211455 10 20 = 01 01 00 00 00 00 00 00 00 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 0a 00 00 00 14 00 00 00
 
 # u64 boundaries, including an epoch that can no longer advance
 ownership 18446744073709551615 4294967295 18446744073709551615 = 02 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
@@ -69,17 +76,17 @@ transfer 18446744073709551615 seam 0 4294967295 = 03 ff ff ff ff ff ff ff ff 01 
 # swapped fields would still be valid widths, so every field differs from every
 # other: an implementation with version and space transposed, or entity and epoch,
 # or from and to, fails here rather than round-tripping its own mistake
-position 1 2 3 4 = 01 01 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 03 00 00 00 04 00 00 00
+position 1 2 3 4 = 01 01 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 03 00 00 00 04 00 00 00
 ownership 1 2 3 = 02 01 00 00 00 00 00 00 00 02 00 00 00 03 00 00 00 00 00 00 00
 transfer 1 seam 2 3 = 03 01 00 00 00 00 00 00 00 01 02 00 00 00 03 00 00 00
 
 # rejections. Each is the shortest edit to a valid record that must not decode.
-reject 01 01 00 00 00 c7 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 dd 00 00 00 d6 00 00 truncated
+reject 01 01 00 00 00 00 00 00 00 c7 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 dd 00 00 00 d6 00 00 truncated
 reject 01 truncated
 reject  truncated
-reject 01 01 00 00 00 c7 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 dd 00 00 00 d6 00 00 00 00 oversized
-reject 09 01 00 00 00 c7 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 dd 00 00 00 d6 00 00 00 unknown-record
-reject 00 01 00 00 00 c7 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 dd 00 00 00 d6 00 00 00 unknown-record
+reject 01 01 00 00 00 00 00 00 00 c7 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 dd 00 00 00 d6 00 00 00 00 oversized
+reject 09 01 00 00 00 00 00 00 00 c7 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 dd 00 00 00 d6 00 00 00 unknown-record
+reject 00 01 00 00 00 00 00 00 00 c7 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 dd 00 00 00 d6 00 00 00 unknown-record
 reject 02 07 00 00 00 00 00 00 00 4a 01 00 00 03 00 00 00 00 00 truncated
 reject 02 07 00 00 00 00 00 00 00 4a 01 00 00 03 00 00 00 00 00 00 00 ff oversized
 reject 03 09 00 00 00 00 00 00 00 63 4a 01 00 00 0d 01 00 00 unknown-transition

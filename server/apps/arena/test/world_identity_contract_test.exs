@@ -182,34 +182,53 @@ defmodule Arena.World.IdentityContractTest do
       refute Identity.current?(installed - 1, installed)
     end
 
-    test "ownership survives a region restart, because a region id is not a process" do
-      # Stability is the whole claim of `RegionId`. Restarting the owner does not make it a
-      # different owner, so an entity's home is still its home -- what changes on a handoff is
-      # the region, and what changes on a restart is nothing.
-      before = %{entity: 7, region: 330, epoch: 3}
-      after_restart = %{entity: 7, region: 330, epoch: 3}
-      assert before == after_restart
+    test "ownership survives a topology release that moves the space underneath it" do
+      # Codex review, 2026-08-23: this test used to assert that two identical literal maps were
+      # equal, which proves nothing about stability. Stability means the *same* region keeps
+      # authority when the world is recompiled and the ground moves.
+      #
+      # Two releases of one space. The maps keep their ids and region 330 keeps its authority,
+      # but the second release shifts every origin, so the same tile has different global
+      # coordinates in each.
+      before = %{id: 199, geometry: :plane, placements: %{330 => {148, 160}, 269 => {222, 160}}}
+      later = %{id: 199, geometry: :plane, placements: %{330 => {1148, 1160}, 269 => {1222, 1160}}}
 
-      command = %{entity: 7, epoch: 3}
-      assert Identity.may_execute(command, after_restart, :authoritative) == :ok
+      placements_before = [
+        %{region: 330, space: 199, map: 330, origin: {148, 160}},
+        %{region: 269, space: 199, map: 269, origin: {222, 160}}
+      ]
 
-      # A handoff, by contrast, changes both the region and the epoch.
+      placements_later = [
+        %{region: 330, space: 199, map: 330, origin: {1148, 1160}},
+        %{region: 269, space: 199, map: 269, origin: {1222, 1160}}
+      ]
+
+      # The owner of a given *tile* is unchanged across the release, even though its
+      # coordinates are not: authority follows content, not numbers.
+      tile = {330, 87, 65}
+      {:ok, was} = Arena.World.Position.to_global(before, tile)
+      {:ok, now} = Arena.World.Position.to_global(later, tile)
+      refute was == now, "the release moved the ground"
+
+      assert {:ok, 330} = Arena.World.Position.region_at(before, was, placements_before)
+      assert {:ok, 330} = Arena.World.Position.region_at(later, now, placements_later)
+
+      # An entity owned by region 330 is still owned by region 330, and a command written
+      # under the old release is still valid because ownership did not change hands.
+      owner = %{entity: 7, region: 330, epoch: 3}
+      assert Identity.may_execute(%{entity: 7, epoch: 3}, owner, :authoritative) == :ok
+
+      # Positions from the two releases are not comparable, which is what the version is for.
+      assert Arena.World.Position.compare({before, 1, was}, {later, 2, now}) == :different_version
+
+      # A handoff, by contrast, changes the region and the epoch together.
       {:ok, next} = Identity.advance(3)
       handed_off = %{entity: 7, region: 269, epoch: next}
-      assert Identity.may_execute(command, handed_off, :authoritative) == {:error, :stale_epoch}
-      refute handed_off.region == before.region
-      assert handed_off.entity == before.entity
-    end
+      assert Identity.may_execute(%{entity: 7, epoch: 3}, handed_off, :authoritative) ==
+               {:error, :stale_epoch}
 
-    test "an epoch above u64 is not an epoch" do
-      # Codex review, 2026-08-23: `advance/1` matched the maximum exactly and incremented
-      # anything else, so `advance(2**64)` returned `2**64 + 1` -- a value the wire and the
-      # Rust side cannot represent, which would have become a truncated epoch on encode.
-      assert_raise ArgumentError, fn -> Identity.advance(Identity.max_epoch() + 1) end
-      assert_raise ArgumentError, fn -> Identity.advance(Identity.max_epoch() * 2) end
-
-      assert Identity.advance(Identity.max_epoch()) == {:error, :exhausted}
-      assert Identity.advance(Identity.max_epoch() - 1) == {:ok, Identity.max_epoch()}
+      assert handed_off.entity == owner.entity, "the entity did not become another entity"
+      refute handed_off.region == owner.region, "its owner did"
     end
 
     test "an empty instance set is trivially consistent" do

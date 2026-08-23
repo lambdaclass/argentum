@@ -56,8 +56,32 @@ pub struct MapId(pub u16);
 /// without the layout that produced it: the same tile has different global coordinates under
 /// two topology releases, and silently comparing across them would place a player somewhere
 /// plausible and wrong.
+///
+/// 64 bits because it *is* the manifest's content hash — `manifest::CONTENT_HASH`, sixteen hex
+/// characters, which is exactly `u64`. An earlier version was a freely constructed `u32` with
+/// no relationship to any artifact, so "stale version" tests compared hand-authored integers
+/// and nothing tied a position to the topology that produced it. Binding the two means a
+/// version can only name a release that was actually compiled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TopologyVersion(pub u32);
+pub struct TopologyVersion(pub u64);
+
+impl TopologyVersion {
+    /// The version a manifest content hash names, or `None` if it is not one.
+    ///
+    /// Sixteen lowercase hex characters. Anything else is not a hash this system produced, and
+    /// accepting it would let a position claim a release that never existed.
+    pub fn from_manifest_hash(hash: &str) -> Option<TopologyVersion> {
+        if hash.len() != 16 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return None;
+        }
+        u64::from_str_radix(hash, 16).ok().map(TopologyVersion)
+    }
+
+    /// The hash this version names, in the form the manifest writes it.
+    pub fn manifest_hash(self) -> String {
+        format!("{:016x}", self.0)
+    }
+}
 
 /// A tile inside one map, in the coordinates the legacy content and the collision grid use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -583,8 +607,8 @@ pub mod contract {
             expect: Option<u32>,
         },
         Compare {
-            left: (u128, u32, (i32, i32)),
-            right: (u128, u32, (i32, i32)),
+            left: (u128, u64, (i32, i32)),
+            right: (u128, u64, (i32, i32)),
             expect: Difference,
         },
         Global {
@@ -882,7 +906,7 @@ mod contract_tests {
                     assert_eq!(found, *expect, "region at {at:?}");
                 }
                 Case::Compare { left, right, expect } => {
-                    let position = |(space, _version, at): &(u128, u32, (i32, i32))| {
+                    let position = |(space, _version, at): &(u128, u64, (i32, i32))| {
                         WorldPosition { space: WorldSpaceId(*space), x: at.0, y: at.1 }
                     };
                     let found = compare(

@@ -9,10 +9,13 @@
 //! Three records, little-endian, each behind a u8 discriminant:
 //!
 //! ```text
-//! 1 position  : topology_version u32, space u128, x i32, y i32         29 bytes
+//! 1 position  : topology_version u64, space u128, x i32, y i32         33 bytes
 //! 2 ownership : entity u64, region u32, epoch u64                      21 bytes
 //! 3 transfer  : transfer u64, transition u8, from_region u32, to u32   18 bytes
 //! ```
+//!
+//! The topology version is the manifest's content hash, so a position can only claim a release
+//! that was compiled. It was a freely constructed `u32` with no relationship to any artifact.
 //!
 //! A space id is 128 bits because not every space is compiled: `W-0104` mints one per live
 //! dungeon instance, at runtime, from whichever region is asked. A narrower id would need a
@@ -72,7 +75,7 @@ impl Record {
     /// The encoded length of this record, including its discriminant.
     pub fn len(&self) -> usize {
         match self {
-            Record::Position { .. } => 29,
+            Record::Position { .. } => 33,
             Record::Ownership { .. } => 21,
             Record::Transfer { .. } => 18,
         }
@@ -118,7 +121,7 @@ impl Record {
         };
 
         let expected = match discriminant {
-            POSITION => 29,
+            POSITION => 33,
             OWNERSHIP => 21,
             TRANSFER => 18,
             other => return Err(WireError::UnknownRecord(other)),
@@ -157,11 +160,11 @@ impl Record {
 
         match discriminant {
             POSITION => Ok(Record::Position {
-                version: TopologyVersion(u32_at(1)),
+                version: TopologyVersion(u64_at(1)),
                 position: WorldPosition {
-                    space: WorldSpaceId(u128_at(5)),
-                    x: i32_at(21),
-                    y: i32_at(25),
+                    space: WorldSpaceId(u128_at(9)),
+                    x: i32_at(25),
+                    y: i32_at(29),
                 },
             }),
             OWNERSHIP => Ok(Record::Ownership {
@@ -325,7 +328,7 @@ mod tests {
             position: WorldPosition { space: WorldSpaceId(199), x: -1, y: -1406 },
         };
         let bytes = record.encode();
-        assert_eq!(&bytes[21..25], &[0xff, 0xff, 0xff, 0xff]);
+        assert_eq!(&bytes[25..29], &[0xff, 0xff, 0xff, 0xff]);
         assert_eq!(Record::decode(&bytes), Ok(record));
     }
 
@@ -366,7 +369,7 @@ mod tests {
     fn boundaries_round_trip_without_saturating() {
         for record in [
             Record::Position {
-                version: TopologyVersion(u32::MAX),
+                version: TopologyVersion(u64::MAX),
                 position: WorldPosition {
                     space: WorldSpaceId(u128::MAX),
                     x: i32::MIN,
@@ -424,6 +427,29 @@ mod tests {
             longer.push(0);
             assert!(matches!(Record::decode(&longer), Err(WireError::Oversized { .. })));
         }
+    }
+
+    #[test]
+    fn a_topology_version_is_a_manifest_hash_and_survives_the_wire() {
+        // Codex review, 2026-08-23: the version was a freely constructed u32 unrelated to any
+        // artifact, so "stale version" only ever compared hand-authored integers. It is now
+        // the manifest's content hash, which means a position can name a release that exists.
+        let pinned = crate::manifest::CONTENT_HASH;
+        let version = TopologyVersion::from_manifest_hash(pinned).expect("the pinned hash");
+        assert_eq!(version.manifest_hash(), pinned);
+
+        let record = Record::Position {
+            version,
+            position: WorldPosition { space: WorldSpaceId(199), x: 221, y: 214 },
+        };
+        assert_eq!(Record::decode(&record.encode()), Ok(record));
+
+        // Anything that is not sixteen hex characters is not a hash this system produced, and
+        // accepting it would let a position claim a release that never existed.
+        assert_eq!(TopologyVersion::from_manifest_hash(""), None);
+        assert_eq!(TopologyVersion::from_manifest_hash("3e6df36b27c82aa"), None);
+        assert_eq!(TopologyVersion::from_manifest_hash("3e6df36b27c82aabb"), None);
+        assert_eq!(TopologyVersion::from_manifest_hash("zzzzzzzzzzzzzzzz"), None);
     }
 
     #[test]

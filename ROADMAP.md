@@ -1304,6 +1304,37 @@ curates the full production topology, expands the proven composition path and
 adds gameplay that genuinely spans invisible simulation partitions. It does not
 replace one loaded MapServer per legacy map with a global bottleneck.
 
+### Task W-0125 — Stable region identity in the compiled topology
+
+- **State:** planned
+- **Phase:** 1
+- **Depends on:** W-0097, W-0098
+
+`W-0098` defines `RegionId` as a unit of runtime authority that is stable across process
+restarts and topology releases, and defines `RegionPlacement` as where a region sits. Nothing
+allocates either. `W-0097`'s manifest emits spaces, geometry, maps and origins and contains no
+regions at all, so the region ids in the contract fixtures are hand-authored, and the claim in
+an earlier draft of the wire documentation that they "come from the topology manifest" was
+false when it was written.
+
+What is already true, and does not need this task: the type cannot be a PID, an array index or
+a boot-order position, and it cannot be derived from a map id. What is *not* established is
+stability — that region 330 in one topology release is the same authority as region 330 in the
+next, and that resharding a crowded space into two regions does not renumber the rest.
+
+So the manifest must allocate them. Emit a region section beside the spaces: a stable id per
+region, the space it belongs to, the maps it owns and the origin of each, with the same
+determinism the rest of the manifest has — same corpus, identical bytes. Allocation must
+survive a corpus change that adds or removes maps: an id, once issued, names that authority
+forever, and a removed region's id is retired rather than reused. A reshard that splits one
+region into two issues new ids for the new parts and does not disturb any other.
+
+The evidence this needs is a topology release *pair*, not a single manifest: compile two
+corpora that differ, and show that every region present in both kept its id, that new regions
+got unused ids, and that a position's owner is unchanged where the geometry is unchanged.
+`W-0098`'s cross-language fixtures then stop hand-authoring region ids and read them from the
+manifest instead.
+
 ### Task W-0101 — Production topology classification and activation
 
 - **State:** planned

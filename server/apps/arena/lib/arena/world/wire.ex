@@ -10,15 +10,25 @@ defmodule Arena.World.Wire do
 
   Three records, little-endian, each behind a one-byte discriminant:
 
-      1 position  : topology_version u32, space u128, x i32, y i32         29 bytes
+      1 position  : topology_version u64, space u128, x i32, y i32         33 bytes
       2 ownership : entity u64, region u32, epoch u64                      21 bytes
       3 transfer  : transfer u64, transition u8, from_region u32, to u32   18 bytes
+
+  The topology version is the manifest's content hash — sixteen hex characters, exactly u64 —
+  so a position can only claim a release that was actually compiled. It was a freely
+  constructed u32 with no relationship to any artifact.
 
   A space id is 128 bits because not every space is compiled: `W-0104` mints one per live
   dungeon instance at runtime, from whichever region is asked, and a narrower id would need a
   central allocator or hand-managed ranges to stay unique. Getting that wrong puts two parties
-  in one space. A region id stays 32 bits: regions come from the topology manifest and are
-  never reused.
+  in one space. A region id stays 32 bits: a region is a unit of authority over compiled
+  content, not something minted per player action.
+
+  It is *not* yet allocated by anything. `W-0097`'s manifest emits spaces, geometry, maps and
+  origins and contains no regions, so the earlier claim that region ids "come from the topology
+  manifest" was false when written. Nothing in this contract depends on the allocator existing —
+  the type is opaque and stable by construction — but stability across releases and reshards is
+  not yet *established*, and `W-0125` owes it.
 
   Coordinates are signed because the world has negative ones. Reading `x` as unsigned turns a
   tile one step west of a space's origin into a position four billion tiles east, which looks
@@ -72,7 +82,7 @@ defmodule Arena.World.Wire do
 
   @doc "The encoded length of a record, including its discriminant."
   @spec byte_size_of(record()) :: pos_integer()
-  def byte_size_of({:position, _, _, _, _}), do: 29
+  def byte_size_of({:position, _, _, _, _}), do: 33
   def byte_size_of({:ownership, _, _, _}), do: 21
   def byte_size_of({:transfer, _, _, _, _}), do: 18
 
@@ -85,9 +95,9 @@ defmodule Arena.World.Wire do
   """
   @spec encode(record()) :: binary()
   def encode({:position, version, space, x, y})
-      when version in 0..@u32 and space in 0..@u128 and x in @i32_min..@i32_max and
+      when version in 0..@u64 and space in 0..@u128 and x in @i32_min..@i32_max and
              y in @i32_min..@i32_max do
-    <<@position::unsigned-8, version::little-unsigned-32, space::little-unsigned-128,
+    <<@position::unsigned-8, version::little-unsigned-64, space::little-unsigned-128,
       x::little-signed-32, y::little-signed-32>>
   end
 
@@ -119,7 +129,7 @@ defmodule Arena.World.Wire do
 
   defp out_of_range({:position, version, space, x, y}) do
     cond do
-      version not in 0..@u32 -> "topology version #{version} exceeds u32"
+      version not in 0..@u64 -> "topology version #{version} exceeds u64"
       space not in 0..@u128 -> "world space #{space} exceeds u128"
       x not in @i32_min..@i32_max -> "x #{x} is outside i32"
       y not in @i32_min..@i32_max -> "y #{y} is outside i32"
@@ -150,7 +160,7 @@ defmodule Arena.World.Wire do
   @doc "The inclusive bounds of each field, so a caller can check before it builds a record."
   def bounds do
     %{
-      topology_version: 0..@u32,
+      topology_version: 0..@u64,
       world_space: 0..@u128,
       coordinate: @i32_min..@i32_max,
       entity: 0..@u64,
@@ -176,7 +186,7 @@ defmodule Arena.World.Wire do
     end
   end
 
-  defp expected_size(@position), do: {:ok, 29}
+  defp expected_size(@position), do: {:ok, 33}
   defp expected_size(@ownership), do: {:ok, 21}
   defp expected_size(@transfer), do: {:ok, 18}
   defp expected_size(_), do: :error
@@ -191,7 +201,7 @@ defmodule Arena.World.Wire do
     end
   end
 
-  defp decode_body(@position, <<_::unsigned-8, version::little-unsigned-32,
+  defp decode_body(@position, <<_::unsigned-8, version::little-unsigned-64,
          space::little-unsigned-128, x::little-signed-32, y::little-signed-32>>) do
     {:ok, {:position, version, space, x, y}}
   end

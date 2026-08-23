@@ -36,6 +36,11 @@ use crate::topology::Origin;
 ///
 /// Stable means stable: never a PID, never an array index, never a position in a boot order.
 /// A region that restarts is the same region, and an entity's saved home survives a reshard.
+///
+/// Not yet *allocated* by anything, and that gap is real: `W-0097`'s manifest emits spaces,
+/// geometry, maps and origins, and contains no regions. The type cannot be a PID and cannot be
+/// derived from a map, which is what this contract needed; who hands out the numbers, and how
+/// they survive a topology release, is `W-0125`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RegionId(pub u32);
 
