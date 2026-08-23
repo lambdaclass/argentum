@@ -210,6 +210,22 @@ case "$TARGET" in
     else
       echo "    corpus or annotations not present; drift NOT verified"
     fi
+
+    echo "==> wire bytes agree with a third implementation"
+    # `wire_contract.txt` is the specification for both codecs, so its hexadecimal must not
+    # come from either of them: a fixture generated from one implementation proves that
+    # implementation is consistent with itself. The checker re-derives every record with
+    # Python `struct` and refuses any `reject` line that is really a valid record.
+    #
+    # Fails loudly without python3 rather than skipping. A gate that goes green because a
+    # check did not run is worse than one that fails, because the green is the thing people
+    # read.
+    if command -v python3 >/dev/null 2>&1; then
+      python3 crates/ao-core/fixtures/check_wire_bytes.py | sed 's/^/    /'
+    else
+      echo "    python3 is required to verify the wire bytes independently" >&2
+      exit 1
+    fi
     ;;
 
   *)

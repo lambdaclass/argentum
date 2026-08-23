@@ -5,6 +5,12 @@
 # mistake. A fixture generated from the code it validates proves only that the code is
 # consistent with itself.
 #
+# `check_wire_bytes.py` beside this file re-derives every record and is run by
+# `./build.sh check`, so that independence is re-established on every gate rather than being a
+# claim about how the file was written once. It verifies and never writes: a generator committed
+# beside its output invites regenerating instead of hand-authoring, and the independence is gone
+# at that moment.
+#
 # Little-endian throughout. Every record begins with a u8 discriminant, and the field order,
 # widths and signedness below are the contract:
 #
