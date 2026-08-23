@@ -10,6 +10,7 @@ defmodule Arena.World.PositionContractTest do
   use ExUnit.Case, async: true
 
   alias Arena.World.Position
+  alias Arena.World.Topology
 
   @contract Path.join([
               __DIR__,
@@ -38,6 +39,23 @@ defmodule Arena.World.PositionContractTest do
 
         Map.update(acc, space_id, [placement], &(&1 ++ [placement]))
     end
+  end
+
+  # The contract's spaces as a loaded release, built through `Topology.load/2` so the region and
+  # resolve cases exercise the real lookup. The `region-at` cases went straight to
+  # `Position.region_at/3`, which left the versioned path -- the part that refuses a stale
+  # request -- untested on this side.
+  defp release do
+    lines = all_lines()
+    [["load", hash]] = for ["load", h] <- lines, do: ["load", h]
+    {:ok, version} = Topology.from_manifest_hash(hash)
+    {spaces, _} = parse()
+    placements = placements_of(lines)
+
+    {:ok, loaded} =
+      Topology.load(version, for({id, space} <- spaces, do: {space, placements[id] || []}))
+
+    {loaded, version}
   end
 
   defp parse do
@@ -179,20 +197,70 @@ defmodule Arena.World.PositionContractTest do
                  "legacy #{at}"
 
         ["region-at", space, at, "->", "none"] ->
-          space = spaces[String.to_integer(space)]
-          placements = placements_of(all_lines())[space.id] || []
-          assert Position.region_at(space, pair(at), placements) == :none, "region-at #{at}"
+          {loaded, version} = release()
+          space_id = String.to_integer(space)
+
+          assert Topology.region_at(loaded, space_id, version, pair(at)) == :none,
+                 "region-at #{at}"
 
         ["region-at", space, at, "->", region] ->
-          space = spaces[String.to_integer(space)]
-          placements = placements_of(all_lines())[space.id] || []
+          {loaded, version} = release()
+          space_id = String.to_integer(space)
 
-          assert Position.region_at(space, pair(at), placements) ==
+          assert Topology.region_at(loaded, space_id, version, pair(at)) ==
                    {:ok, String.to_integer(region)},
                  "region-at #{at}"
 
-        ["compare", left_space, left_version, left_at, "with", right_space, right_version,
-         right_at | verdict] ->
+        ["load", _hash] ->
+          # A declaration, executed by `release/0`. Asserted here so the release the whole
+          # contract resolves against is the one this line names, rather than one the test
+          # chose.
+          {loaded, version} = release()
+          assert Topology.version(loaded) == version
+
+        ["resolve", space, at_version, "at", _at, "->", "no-such-space"] ->
+          {loaded, _} = release()
+          {:ok, asked} = Topology.from_manifest_hash(at_version)
+
+          assert Topology.resolve(loaded, String.to_integer(space), asked) == :no_such_space,
+                 "resolve #{space} #{at_version}"
+
+        ["resolve", space, at_version, "at", _at, "->", "wrong-version", declared] ->
+          {loaded, _} = release()
+          {:ok, asked} = Topology.from_manifest_hash(at_version)
+          {:ok, expected} = Topology.from_manifest_hash(declared)
+
+          assert Topology.resolve(loaded, String.to_integer(space), asked) ==
+                   {:wrong_version, expected},
+                 "resolve #{space} #{at_version}"
+
+        ["resolve", space, at_version, "at", at, "->", "none"] ->
+          {loaded, _} = release()
+          {:ok, asked} = Topology.from_manifest_hash(at_version)
+          space_id = String.to_integer(space)
+
+          assert match?({:resolved, _}, Topology.resolve(loaded, space_id, asked)),
+                 "resolve #{space} #{at_version} should have succeeded"
+
+          assert Topology.region_at(loaded, space_id, asked, pair(at)) == :none,
+                 "resolve #{space} at #{at}"
+
+        ["resolve", space, at_version, "at", at, "->", region] ->
+          {loaded, _} = release()
+          {:ok, asked} = Topology.from_manifest_hash(at_version)
+          space_id = String.to_integer(space)
+
+          assert Topology.region_at(loaded, space_id, asked, pair(at)) ==
+                   {:ok, String.to_integer(region)},
+                 "resolve #{space} at #{at}"
+
+        ["bad-version", text] ->
+          assert Topology.from_manifest_hash(text) == :error, "#{text} parsed as a version"
+
+        ["bad-version"] ->
+          assert Topology.from_manifest_hash("") == :error
+
+        ["compare", left_space, left_version, left_at, "with", right_space, right_version, right_at | verdict] ->
           left = {spaces[String.to_integer(left_space)], String.to_integer(left_version), pair(left_at)}
           right = {spaces[String.to_integer(right_space)], String.to_integer(right_version), pair(right_at)}
 

@@ -409,6 +409,65 @@ pub enum TopologyAnswer {
     NoSuchSpace,
 }
 
+/// A release, and the only thing that can produce a [`TopologyAnswer`].
+///
+/// The types above described a versioned lookup; nothing performed one. `WrongVersion` and
+/// `NoSuchSpace` were values a test wrote by hand, which proves the enum has three variants and
+/// nothing about whether a stale request is ever refused. A caller with the enum in scope could
+/// equally have constructed `Resolved` for a version that was never compiled.
+///
+/// So the answer is produced here or not at all. A version identifies a release exactly when it
+/// is the one loaded: `TopologyVersion::from_manifest_hash` checks that a string is shaped like
+/// a content hash, which is a different and much weaker claim, and on its own it let a position
+/// name a release nobody ever built.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadedTopology {
+    version: TopologyVersion,
+    spaces: Vec<ResolvedSpace>,
+}
+
+/// Why a release cannot be loaded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TopologyFault {
+    /// Two spaces claiming one id in the same release. The resolver would answer with whichever
+    /// it found first, and every tile of the other would silently be somewhere else.
+    DuplicateSpace { space: WorldSpaceId },
+}
+
+impl LoadedTopology {
+    pub fn new(
+        version: TopologyVersion,
+        spaces: Vec<ResolvedSpace>,
+    ) -> Result<LoadedTopology, TopologyFault> {
+        for (index, space) in spaces.iter().enumerate() {
+            if spaces[..index].iter().any(|earlier| earlier.space().id == space.space().id) {
+                return Err(TopologyFault::DuplicateSpace { space: space.space().id });
+            }
+        }
+        Ok(LoadedTopology { version, spaces })
+    }
+
+    pub fn version(&self) -> TopologyVersion {
+        self.version
+    }
+
+    /// Resolve a space once, against a stated version.
+    ///
+    /// A mismatched version is refused rather than served from this release. Falling back would
+    /// answer a different question than the one asked: the same tile has different global
+    /// coordinates under two releases, so the caller would receive coordinates that look valid
+    /// and denote somewhere else.
+    pub fn resolve(&self, request: TopologyRequest) -> TopologyAnswer {
+        if request.version != self.version {
+            return TopologyAnswer::WrongVersion { loaded: self.version };
+        }
+        match self.spaces.iter().find(|resolved| resolved.space().id == request.space) {
+            Some(resolved) => TopologyAnswer::Resolved(resolved.clone()),
+            None => TopologyAnswer::NoSuchSpace,
+        }
+    }
+}
+
 impl TopologyAnswer {
     /// The resolved space, if the lookup succeeded.
     pub fn space(&self) -> Option<&Space> {
@@ -669,6 +728,75 @@ mod tests {
         };
         assert_eq!(moved.entity, owner().entity, "the entity did not become another entity");
         assert_ne!(moved.region, owner().region, "its owner did");
+    }
+
+    /// A space of one map, so two of them can be given the same id.
+    fn one_map_space(id: u128, map: u16) -> Space {
+        Space {
+            id: WorldSpaceId(id),
+            version: TopologyVersion(1),
+            geometry: Geometry::Plane,
+            placements: BTreeMap::from([(MapId(map), Origin { x: 0, y: 0 })]),
+        }
+    }
+
+    #[test]
+    fn a_release_refuses_two_spaces_with_one_id() {
+        // The resolver would answer with whichever it found first, and every tile of the other
+        // would silently be somewhere else -- a world that loads cleanly and puts half its
+        // players in the wrong place.
+        let one = ResolvedSpace::new(one_map_space(199, 330), vec![]).expect("no placements");
+        let other = ResolvedSpace::new(one_map_space(199, 269), vec![]).expect("no placements");
+
+        assert_eq!(
+            LoadedTopology::new(TopologyVersion(7), vec![one.clone(), other]),
+            Err(TopologyFault::DuplicateSpace { space: WorldSpaceId(199) })
+        );
+        assert!(LoadedTopology::new(TopologyVersion(7), vec![one]).is_ok());
+    }
+
+    #[test]
+    fn a_version_that_parses_is_not_a_version_that_exists() {
+        // `from_manifest_hash` checks sixteen lowercase hex characters, which is a check on
+        // shape. This is the only thing that can tell a compiled release from a well-formed
+        // number, and before it existed nothing did: the answers below were values the tests
+        // wrote by hand.
+        let space = ResolvedSpace::new(one_map_space(199, 330), vec![]).expect("no placements");
+        let compiled =
+            TopologyVersion::from_manifest_hash("3e6df36b27c82aab").expect("a manifest hash");
+        let loaded = LoadedTopology::new(compiled, vec![space]).expect("one space");
+
+        let never_built =
+            TopologyVersion::from_manifest_hash("0000000000000001").expect("a manifest hash");
+        assert_eq!(
+            loaded.resolve(TopologyRequest { space: WorldSpaceId(199), version: never_built }),
+            TopologyAnswer::WrongVersion { loaded: compiled },
+            "a well-formed hash nobody compiled must not resolve"
+        );
+
+        assert!(matches!(
+            loaded.resolve(TopologyRequest { space: WorldSpaceId(199), version: compiled }),
+            TopologyAnswer::Resolved(_)
+        ));
+        assert_eq!(
+            loaded.resolve(TopologyRequest { space: WorldSpaceId(42), version: compiled }),
+            TopologyAnswer::NoSuchSpace,
+            "an unknown space in the right release is not a wrong version"
+        );
+    }
+
+    #[test]
+    fn a_manifest_hash_round_trips_and_only_in_the_form_the_manifest_writes() {
+        for hash in ["3e6df36b27c82aab", "0000000000000000", "ffffffffffffffff"] {
+            let version = TopologyVersion::from_manifest_hash(hash).expect("a manifest hash");
+            assert_eq!(version.manifest_hash(), hash, "{hash} did not round trip");
+        }
+
+        // Uppercase is the same number and a string no manifest emits, so accepting it would
+        // break the round trip above and let a version exist in two spellings.
+        for text in ["3E6DF36B27C82AAB", "3e6df36b27c82aa", "3e6df36b27c82aabb", "", "zzzz"] {
+            assert_eq!(TopologyVersion::from_manifest_hash(text), None, "{text:?} parsed");
+        }
     }
 
     #[test]

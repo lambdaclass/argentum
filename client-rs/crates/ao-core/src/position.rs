@@ -68,10 +68,18 @@ pub struct TopologyVersion(pub u64);
 impl TopologyVersion {
     /// The version a manifest content hash names, or `None` if it is not one.
     ///
-    /// Sixteen lowercase hex characters. Anything else is not a hash this system produced, and
-    /// accepting it would let a position claim a release that never existed.
+    /// Exactly sixteen *lowercase* hex characters: that is the form the pack filename and the
+    /// manifest write, so `manifest_hash` is the inverse of this on everything it accepts. The
+    /// doc comment claimed lowercase and the check used `is_ascii_hexdigit`, which accepts
+    /// uppercase too -- Elixir's regex did not, so one string was a version on one side and not
+    /// on the other. The contract's `bad-version 3E6DF36B27C82AAB` case found it.
+    ///
+    /// This checks the shape and nothing more. It cannot tell whether the release was ever
+    /// compiled; only [`crate::identity::LoadedTopology::resolve`] can, by comparing against
+    /// the release actually loaded. A version that parses is not a version that exists.
     pub fn from_manifest_hash(hash: &str) -> Option<TopologyVersion> {
-        if hash.len() != 16 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        let lowercase_hex = |byte: u8| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte);
+        if hash.len() != 16 || !hash.bytes().all(lowercase_hex) {
             return None;
         }
         u64::from_str_radix(hash, 16).ok().map(TopologyVersion)
@@ -712,6 +720,17 @@ pub mod contract {
             space: u128,
             at: (i64, i64),
         },
+        /// A versioned lookup, performed against the release the `load` line declares.
+        Resolve {
+            space: u128,
+            version: u64,
+            at: (i32, i32),
+            expect: ResolveExpect,
+        },
+        /// A string that is not a manifest content hash, so not a version.
+        BadVersion {
+            text: String,
+        },
         Legacy {
             space: u128,
             at: (i32, i32),
@@ -720,24 +739,31 @@ pub mod contract {
     }
 
     /// The spaces and cases the contract file declares, plus which region owns each map.
-    pub fn parse_with_regions(
-        text: &str,
-    ) -> (BTreeMap<u128, Space>, Vec<Case>, BTreeMap<(u128, u16), u32>) {
-        let (spaces, cases, regions) = parse_inner(text);
-        (spaces, cases, regions)
+    /// Everything the contract file declares, including the loaded release.
+    pub struct Contract {
+        pub spaces: BTreeMap<u128, Space>,
+        pub cases: Vec<Case>,
+        /// Which region owns which map, keyed by (space, map).
+        pub regions: BTreeMap<(u128, u16), u32>,
+        pub loaded: TopologyVersion,
+    }
+
+    pub fn parse_with_regions(text: &str) -> Contract {
+        parse_inner(text)
     }
 
     /// The spaces and cases the contract file declares.
     pub fn parse(text: &str) -> (BTreeMap<u128, Space>, Vec<Case>) {
-        let (spaces, cases, _) = parse_inner(text);
-        (spaces, cases)
+        let contract = parse_inner(text);
+        (contract.spaces, contract.cases)
     }
 
-    fn parse_inner(text: &str) -> (BTreeMap<u128, Space>, Vec<Case>, BTreeMap<(u128, u16), u32>) {
+    fn parse_inner(text: &str) -> Contract {
         let mut spaces: BTreeMap<u128, Space> = BTreeMap::new();
         let mut cases = Vec::new();
         // Which region owns which map, keyed by (space, map).
         let mut regions: BTreeMap<(u128, u16), u32> = BTreeMap::new();
+        let mut loaded: Option<u64> = None;
 
         let coords = |text: &str| -> Option<(i64, i64)> {
             let (x, y) = text.split_once(',')?;
@@ -836,6 +862,43 @@ pub mod contract {
                     near: wide(near),
                     expect: wide(expect),
                 }),
+                ["load", hash] => {
+                    assert!(loaded.is_none(), "the contract declares one loaded release");
+                    loaded = Some(version(hash));
+                }
+                ["resolve", space, at_version, "at", at, "->", "no-such-space"] => {
+                    cases.push(Case::Resolve {
+                        space: space.parse().expect("space"),
+                        version: version(at_version),
+                        at: pair(at),
+                        expect: ResolveExpect::NoSuchSpace,
+                    })
+                }
+                ["resolve", space, at_version, "at", at, "->", "wrong-version", declared] => cases
+                    .push(Case::Resolve {
+                        space: space.parse().expect("space"),
+                        version: version(at_version),
+                        at: pair(at),
+                        expect: ResolveExpect::WrongVersion(version(declared)),
+                    }),
+                ["resolve", space, at_version, "at", at, "->", "none"] => {
+                    cases.push(Case::Resolve {
+                        space: space.parse().expect("space"),
+                        version: version(at_version),
+                        at: pair(at),
+                        expect: ResolveExpect::NoRegion,
+                    })
+                }
+                ["resolve", space, at_version, "at", at, "->", region] => {
+                    cases.push(Case::Resolve {
+                        space: space.parse().expect("space"),
+                        version: version(at_version),
+                        at: pair(at),
+                        expect: ResolveExpect::Region(region.parse().expect("region")),
+                    })
+                }
+                ["bad-version", text] => cases.push(Case::BadVersion { text: (*text).to_string() }),
+                ["bad-version"] => cases.push(Case::BadVersion { text: String::new() }),
                 ["unrepresentable", space, at] => cases.push(Case::Unrepresentable {
                     space: space.parse().expect("space"),
                     at: wide(at),
@@ -915,7 +978,31 @@ pub mod contract {
             }
         }
 
-        (spaces, cases, regions)
+        Contract {
+            spaces,
+            cases,
+            regions,
+            loaded: TopologyVersion(loaded.expect("the contract declares a loaded release")),
+        }
+    }
+
+    /// What a `resolve` line expects. `NoRegion` and `NoSuchSpace` are deliberately distinct:
+    /// the first is a lookup that succeeded and found no owner, the second a release that does
+    /// not contain the space at all, and collapsing them would hide a stale-topology bug behind
+    /// an ordinary unowned tile.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum ResolveExpect {
+        Region(u32),
+        NoRegion,
+        NoSuchSpace,
+        WrongVersion(u64),
+    }
+
+    /// A manifest hash as the contract writes it, refused if it is not one.
+    fn version(text: &str) -> u64 {
+        crate::position::TopologyVersion::from_manifest_hash(text)
+            .unwrap_or_else(|| panic!("{text:?} is not a manifest hash"))
+            .0
     }
 
     fn pair(text: &str) -> (i32, i32) {
@@ -948,12 +1035,48 @@ mod contract_tests {
     use super::contract::{self, Case};
     use super::*;
 
+    /// The contract's spaces as a loaded release.
+    ///
+    /// Built through `ResolvedSpace::new` and `LoadedTopology::new`, so the fixture's region
+    /// and resolve cases exercise the real lookup rather than a reimplementation of it. The
+    /// `region-at` cases used to read the parsed region map directly, which tested the fixture
+    /// against itself and left `ResolvedSpace::region_at` uncovered by the contract.
+    fn release(contract: &contract::Contract) -> crate::identity::LoadedTopology {
+        let resolved = contract
+            .spaces
+            .values()
+            .map(|space| {
+                let placements = space
+                    .placements
+                    .iter()
+                    .filter_map(|(map, origin)| {
+                        contract.regions.get(&(space.id.0, map.0)).map(|region| {
+                            crate::identity::RegionPlacement {
+                                region: crate::identity::RegionId(*region),
+                                space: space.id,
+                                map: *map,
+                                origin: *origin,
+                            }
+                        })
+                    })
+                    .collect();
+                crate::identity::ResolvedSpace::new(space.clone(), placements)
+                    .expect("the contract's placements are consistent")
+            })
+            .collect();
+        crate::identity::LoadedTopology::new(contract.loaded, resolved)
+            .expect("the contract declares each space once")
+    }
+
     #[test]
     fn rust_satisfies_every_case_in_the_position_contract() {
-        let (spaces, cases) = contract::parse(contract::text());
+        let contract = contract::parse_with_regions(contract::text());
+        let spaces = &contract.spaces;
+        let cases = &contract.cases;
+        let loaded = release(&contract);
         assert!(cases.len() >= 50, "the contract should be worth checking: {}", cases.len());
 
-        for case in &cases {
+        for case in cases {
             match case {
                 Case::Global { space, local, expect } => {
                     let space = &spaces[space];
@@ -984,13 +1107,42 @@ mod contract_tests {
                     assert_eq!(drawn.space, position.space, "a render position keeps its space");
                 }
                 Case::RegionAt { space, at, expect } => {
-                    let (_, _, regions) = contract::parse_with_regions(contract::text());
-                    let space = &spaces[space];
-                    let position = WorldPosition { space: space.id, x: at.0, y: at.1 };
-                    let found = space
-                        .to_local(position)
-                        .and_then(|local| regions.get(&(space.id.0, local.map.0)).copied());
+                    let request = crate::identity::TopologyRequest {
+                        space: WorldSpaceId(*space),
+                        version: contract.loaded,
+                    };
+                    let found =
+                        loaded.resolve(request).region_at(at.0, at.1).map(|region| region.0);
                     assert_eq!(found, *expect, "region at {at:?}");
+                }
+                Case::Resolve { space, version, at, expect } => {
+                    let request = crate::identity::TopologyRequest {
+                        space: WorldSpaceId(*space),
+                        version: TopologyVersion(*version),
+                    };
+                    let answer = loaded.resolve(request);
+                    let found = match &answer {
+                        crate::identity::TopologyAnswer::WrongVersion { loaded } => {
+                            contract::ResolveExpect::WrongVersion(loaded.0)
+                        }
+                        crate::identity::TopologyAnswer::NoSuchSpace => {
+                            contract::ResolveExpect::NoSuchSpace
+                        }
+                        crate::identity::TopologyAnswer::Resolved(resolved) => {
+                            match resolved.region_at(at.0, at.1) {
+                                Some(region) => contract::ResolveExpect::Region(region.0),
+                                None => contract::ResolveExpect::NoRegion,
+                            }
+                        }
+                    };
+                    assert_eq!(found, *expect, "resolve {space} at {at:?}");
+                }
+                Case::BadVersion { text } => {
+                    assert_eq!(
+                        TopologyVersion::from_manifest_hash(text),
+                        None,
+                        "{text:?} parsed as a version"
+                    );
                 }
                 Case::Compare { left, right, expect } => {
                     let position = |(space, _version, at): &(u128, u64, (i32, i32))| {

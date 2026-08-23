@@ -44,8 +44,7 @@ defmodule Arena.World.IdentityContractTest do
   test "elixir satisfies every case in the identity contract" do
     for {line, body, expected} <- cases() do
       case body do
-        ["execute", "owner", entity, region, epoch, "command", command_entity, command_epoch,
-         "reach", reach] ->
+        ["execute", "owner", entity, region, epoch, "command", command_entity, command_epoch, "reach", reach] ->
           owner = %{
             entity: String.to_integer(entity),
             region: String.to_integer(region),
@@ -139,8 +138,7 @@ defmodule Arena.World.IdentityContractTest do
                 {:error, {:wrong_space, String.to_integer(region), claimed_space}}
 
               ["map-not-in-space", region, map] ->
-                {:error,
-                 {:map_not_in_space, String.to_integer(region), String.to_integer(map)}}
+                {:error, {:map_not_in_space, String.to_integer(region), String.to_integer(map)}}
 
               ["origin-disagrees", region, map] ->
                 map_id = String.to_integer(map)
@@ -224,6 +222,7 @@ defmodule Arena.World.IdentityContractTest do
       # A handoff, by contrast, changes the region and the epoch together.
       {:ok, next} = Identity.advance(3)
       handed_off = %{entity: 7, region: 269, epoch: next}
+
       assert Identity.may_execute(%{entity: 7, epoch: 3}, handed_off, :authoritative) ==
                {:error, :stale_epoch}
 

@@ -13,6 +13,10 @@
 #   step   <space> <gx>,<gy> by <dx>,<dy> -> inside <gx>,<gy> | leaves
 #   render <space> <gx>,<gy> near <nx>,<ny> -> <rx>,<ry>
 #   unrepresentable <space> <gx>,<gy>
+#   load <manifest-hash>
+#   resolve <space> <manifest-hash> at <gx>,<gy> -> <region-id> | none | no-such-space
+#                                              -> wrong-version <loaded-hash>
+#   bad-version <string>
 #   legacy <space> <gx>,<gy> -> <map> <x>,<y> | unrepresentable
 #   region <space> <region-id> <map> <ox>,<oy>
 #   region-at <space> <gx>,<gy> -> <region-id> | none
@@ -266,3 +270,46 @@ step 703 -2147483648,0 by -1,0 -> leaves
 unrepresentable 703 2147483648,0
 unrepresentable 703 -2147483649,0
 unrepresentable 703 4294967296,0
+
+# ---------------------------------------------------------------------------------------
+# The versioned lookup, performed rather than described. `W-0098` defined three answers --
+# resolved, wrong version, no such space -- and nothing produced them: the tests wrote the
+# enum values by hand, which proves the shape has three cases and says nothing about whether
+# a stale request is ever refused. A caller could equally have hand-built a resolved answer
+# for a release nobody ever compiled.
+#
+# A version identifies a release exactly when it is the one loaded. Parsing a manifest hash
+# checks sixteen hex characters, which is a check on shape, and both languages accept any u64
+# on the wire. The comparison below is the only thing that can tell a real release from a
+# well-formed number.
+# ---------------------------------------------------------------------------------------
+load 3e6df36b27c82aab
+
+# The acceptance square's east seam, resolved and owned.
+resolve 199 3e6df36b27c82aab at 221,214 -> 330
+resolve 199 3e6df36b27c82aab at 222,214 -> 269
+
+# Resolved, and no owner: four different reasons that must not be one answer. A tile no map
+# covers, a tile two maps claim, and a space that declares no regions at all are each `none`
+# from a lookup that *succeeded*; a space this release does not contain is not.
+resolve 199 3e6df36b27c82aab at 100000,0 -> none
+resolve 900 3e6df36b27c82aab at 10,10 -> none
+resolve 1 3e6df36b27c82aab at 40,40 -> none
+resolve 42 3e6df36b27c82aab at 0,0 -> no-such-space
+
+# A version that was never loaded is refused, and the answer names the release that was, so a
+# caller can say so rather than retrying blind. It must not fall back: the same tile has
+# different global coordinates under two releases, so serving this from the loaded one returns
+# coordinates that look valid and denote somewhere else.
+resolve 199 0000000000000001 at 221,214 -> wrong-version 3e6df36b27c82aab
+resolve 199 ffffffffffffffff at 221,214 -> wrong-version 3e6df36b27c82aab
+resolve 42 0000000000000001 at 0,0 -> wrong-version 3e6df36b27c82aab
+
+# Not a manifest hash, so not a version. Fifteen characters, seventeen, a non-hex digit, and
+# uppercase -- the pack filename this hash is taken from is lowercase, and accepting both would
+# make one release two versions.
+bad-version 3e6df36b27c82aa
+bad-version 3e6df36b27c82aabb
+bad-version 3e6df36b27c82aaz
+bad-version 3E6DF36B27C82AAB
+bad-version

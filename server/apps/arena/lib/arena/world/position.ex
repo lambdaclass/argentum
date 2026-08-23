@@ -197,8 +197,10 @@ defmodule Arena.World.Position do
   global coordinates under two releases, so a difference taken across them looks like a
   distance and is not one.
   """
-  @spec compare({space :: map(), version :: integer(), {integer(), integer()}},
-                {space :: map(), version :: integer(), {integer(), integer()}}) ::
+  @spec compare(
+          {space :: map(), version :: integer(), {integer(), integer()}},
+          {space :: map(), version :: integer(), {integer(), integer()}}
+        ) ::
           {:tiles, {integer(), integer()}} | :different_space | :different_version
   def compare({left_space, left_version, {lx, ly}}, {right_space, right_version, {rx, ry}}) do
     cond do
