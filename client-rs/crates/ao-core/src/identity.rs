@@ -23,7 +23,74 @@
 //! read-only cross-space observation, commands routed to the owner, instance templates
 //! separate from runtime spaces, and a versioned lookup rather than a per-movement service.
 
-use crate::position::{TopologyVersion, WorldSpaceId};
+use crate::position::{MapId, Space, TopologyVersion, WorldSpaceId};
+use crate::topology::Origin;
+
+/// A region: one unit of runtime authority, stable across restarts and topology releases.
+///
+/// Authority belongs here, not to a world space. Several regions occupy one space — today one
+/// per map, tomorrow perhaps a spatial partition of a crowded one — so a seamless crossing
+/// changes the region that owns a character while the space they are in does not change at
+/// all. `Ownership` keyed by space could not express that, and would have made the central
+/// event of the seamless world invisible to the type that exists to describe it.
+///
+/// Stable means stable: never a PID, never an array index, never a position in a boot order.
+/// A region that restarts is the same region, and an entity's saved home survives a reshard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RegionId(pub u32);
+
+/// Where a region sits, and what it owns.
+///
+/// One region owns one map today, which is what a MapServer is. The origin is that map's core
+/// in the space's coordinates, so a caller holding a placement can do its own arithmetic
+/// without consulting anything: that is the point of publishing placements rather than
+/// answering coordinate questions per movement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RegionPlacement {
+    pub region: RegionId,
+    pub space: WorldSpaceId,
+    pub map: MapId,
+    pub origin: Origin,
+}
+
+/// How a boundary is crossed.
+///
+/// The same vocabulary `W-0097`'s manifest reviews, carried into the position contract so the
+/// two cannot drift into different words for the same thing. A geographic seam is the only
+/// kind a player walks across without noticing; the rest are deliberate discontinuities, and
+/// a client that treated a teleport as a seam would try to animate a journey that never
+/// happened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TransitionKind {
+    GeographicSeam,
+    Door,
+    Portal,
+    Teleport,
+    InstanceEntrance,
+}
+
+impl TransitionKind {
+    /// Whether crossing this should be continuous for the player.
+    pub fn is_seamless(self) -> bool {
+        matches!(self, TransitionKind::GeographicSeam)
+    }
+
+    /// The reviewed disposition this corresponds to, or `None` for a disposition that is not a
+    /// transition at all.
+    pub fn from_disposition(disposition: crate::manifest::Disposition) -> Option<TransitionKind> {
+        match disposition {
+            crate::manifest::Disposition::Geographic => Some(TransitionKind::GeographicSeam),
+            crate::manifest::Disposition::Door => Some(TransitionKind::Door),
+            crate::manifest::Disposition::Portal => Some(TransitionKind::Portal),
+            crate::manifest::Disposition::Teleport => Some(TransitionKind::Teleport),
+            crate::manifest::Disposition::InstanceEntrance => {
+                Some(TransitionKind::InstanceEntrance)
+            }
+            // Real, and this compiler will not model it: there is no kind to give it.
+            crate::manifest::Disposition::Unsupported => None,
+        }
+    }
+}
 
 /// An entity, for as long as it exists anywhere.
 ///
@@ -42,9 +109,22 @@ pub struct EntityId(pub u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AuthorityEpoch(pub u64);
 
+/// An epoch that cannot advance again.
+///
+/// Its own error rather than a wrap or a panic. Wrapping would silently make an ancient
+/// message look current, which is the exact failure the epoch exists to prevent; panicking
+/// would take down a region for a condition that is recoverable by resharding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EpochExhausted;
+
 impl AuthorityEpoch {
-    pub fn next(self) -> AuthorityEpoch {
-        AuthorityEpoch(self.0 + 1)
+    /// Advance, or say that this epoch cannot.
+    ///
+    /// `u64::MAX` handoffs is not a reachable number in practice, and that is not the reason
+    /// to check: an unchecked `+ 1` here means the one arithmetic error in this file makes
+    /// every stale command look current.
+    pub fn advance(self) -> Result<AuthorityEpoch, EpochExhausted> {
+        self.0.checked_add(1).map(AuthorityEpoch).ok_or(EpochExhausted)
     }
 
     /// Whether a message stamped `self` is still current against `installed`.
@@ -73,23 +153,72 @@ pub struct InstanceTemplateId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct InstanceId(pub u64);
 
-/// Which process is authoritative for an entity, and since when.
+/// A live instance: authored content, this copy of it, and the runtime space it occupies.
 ///
-/// `space` says where the owner is; `epoch` says which generation of ownership this is. Both
-/// are needed: the same space owns an entity many times over a session, and a stale message
-/// from a previous stay would otherwise look current.
+/// The invariant, stated because it is the whole reason these are three types and not one:
+/// **every live instance gets its own `WorldSpaceId`.** Two copies of the same dungeon share
+/// a template and share nothing else, so positions in one are meaningless in the other. A
+/// runtime space reused across copies would let a party in one dungeon see and step on the
+/// other's tiles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeInstance {
+    pub template: InstanceTemplateId,
+    pub instance: InstanceId,
+    pub space: WorldSpaceId,
+}
+
+/// Why a set of live instances is not valid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstanceFault {
+    /// Two live instances claim one runtime space.
+    SpaceShared { space: WorldSpaceId },
+    /// One instance id appears twice.
+    InstanceRepeated { instance: InstanceId },
+}
+
+/// Check the one-instance-to-one-space relationship over a set of live instances.
+///
+/// A function rather than a comment, so the invariant is testable and so the eventual registry
+/// has something to call rather than restating it.
+pub fn check_instances(live: &[RuntimeInstance]) -> Result<(), InstanceFault> {
+    let mut spaces = std::collections::BTreeSet::new();
+    let mut instances = std::collections::BTreeSet::new();
+
+    for entry in live {
+        if !instances.insert(entry.instance) {
+            return Err(InstanceFault::InstanceRepeated { instance: entry.instance });
+        }
+        if !spaces.insert(entry.space) {
+            return Err(InstanceFault::SpaceShared { space: entry.space });
+        }
+    }
+
+    Ok(())
+}
+
+/// Which region is authoritative for an entity, and since when.
+///
+/// Keyed by region, not by space. A seamless crossing hands a character from one region to
+/// another *within* the same space, so ownership recorded per space could not tell the two
+/// sides of a seam apart — and the handoff across that seam is the entire subject of W-0096.
+///
+/// The epoch is needed as well as the region: the same region owns an entity many times over a
+/// session, and a message from a previous stay would otherwise look current.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Ownership {
     pub entity: EntityId,
-    pub space: WorldSpaceId,
+    pub region: RegionId,
     pub epoch: AuthorityEpoch,
 }
 
 /// What a reader is allowed to do with what it can see.
 ///
-/// The extension point, stated rather than built. An entity observed across a space boundary
-/// is readable and never commandable: the observer is not its owner, so acting on it would be
-/// two processes deciding one entity's fate. Commands go to the owner or nowhere.
+/// The extension point, stated rather than built. An entity observed across a *region*
+/// boundary is readable and never commandable: the observer is not its owner, so acting on it
+/// would be two processes deciding one entity's fate. Commands go to the owner or nowhere.
+///
+/// Cross-region, not necessarily cross-space: the interesting case is two regions of one space
+/// looking at each other across a seam, which is what makes a seamless world visible.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reach {
     /// The reader owns this entity: it may command it.
@@ -161,10 +290,15 @@ pub struct TopologyRequest {
 }
 
 /// What a versioned lookup can answer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// `Resolved` carries the space itself — geometry and placements — because that is the only
+/// answer a caller can use. A bare "yes, it exists" marker would force a second question per
+/// movement, which is exactly the central coordinate service this shape exists to avoid.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TopologyAnswer {
-    /// The space exists in that version.
-    Known,
+    /// The space exists in that version, and here it is: enough to do local arithmetic
+    /// without asking anything else.
+    Resolved { space: Space, regions: Vec<RegionPlacement> },
     /// The version is not the one loaded. The caller must not fall back to another: positions
     /// computed against a different release are not comparable.
     WrongVersion { loaded: TopologyVersion },
@@ -172,12 +306,104 @@ pub enum TopologyAnswer {
     NoSuchSpace,
 }
 
+impl TopologyAnswer {
+    /// The resolved space, if the lookup succeeded.
+    pub fn space(&self) -> Option<&Space> {
+        match self {
+            TopologyAnswer::Resolved { space, .. } => Some(space),
+            _ => None,
+        }
+    }
+
+    /// Which region owns a position, if any placement covers it.
+    ///
+    /// The cross-region question a seam poses: two regions of one space, and a position that
+    /// belongs to exactly one of them.
+    pub fn region_at(&self, x: i32, y: i32) -> Option<RegionId> {
+        let TopologyAnswer::Resolved { space, regions } = self else { return None };
+        let local = space.to_local(crate::position::WorldPosition { space: space.id, x, y })?;
+        regions
+            .iter()
+            .find(|placement| placement.map == local.map)
+            .map(|placement| placement.region)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::position::LocalPosition;
+    use crate::topology::{Geometry, CORE_X, CORE_Y, PITCH_X};
+    use std::collections::BTreeMap;
 
     fn owner() -> Ownership {
-        Ownership { entity: EntityId(7), space: WorldSpaceId(199), epoch: AuthorityEpoch(3) }
+        Ownership { entity: EntityId(7), region: RegionId(330), epoch: AuthorityEpoch(3) }
+    }
+
+    /// Two regions of one space, side by side across a seam: the case the whole contract is
+    /// about, and the one `Ownership` keyed by space could not express.
+    fn two_regions() -> (Space, Vec<RegionPlacement>) {
+        let space = Space {
+            id: WorldSpaceId(199),
+            version: TopologyVersion(1),
+            geometry: Geometry::Plane,
+            placements: BTreeMap::from([
+                (MapId(330), Origin { x: 0, y: 0 }),
+                (MapId(269), Origin { x: PITCH_X, y: 0 }),
+            ]),
+        };
+        let regions = vec![
+            RegionPlacement {
+                region: RegionId(330),
+                space: space.id,
+                map: MapId(330),
+                origin: Origin { x: 0, y: 0 },
+            },
+            RegionPlacement {
+                region: RegionId(269),
+                space: space.id,
+                map: MapId(269),
+                origin: Origin { x: PITCH_X, y: 0 },
+            },
+        ];
+        (space, regions)
+    }
+
+    #[test]
+    fn a_seam_crossing_changes_region_and_not_space() {
+        // The reason authority is keyed by region. Both sides of this seam are the same world
+        // space, so ownership recorded per space would show nothing happening at the exact
+        // moment the handoff happens.
+        let (space, regions) = two_regions();
+        let answer = TopologyAnswer::Resolved { space: space.clone(), regions };
+
+        let west_edge = space
+            .to_global(LocalPosition { map: MapId(330), x: CORE_X.1, y: 50 })
+            .expect("east column of the western map");
+        let east_edge = space
+            .to_global(LocalPosition { map: MapId(269), x: CORE_X.0, y: 50 })
+            .expect("west column of the eastern map");
+
+        assert_eq!(east_edge.x - west_edge.x, 1, "one tile apart");
+        assert_eq!(west_edge.space, east_edge.space, "and the same space");
+
+        assert_eq!(answer.region_at(west_edge.x, west_edge.y), Some(RegionId(330)));
+        assert_eq!(answer.region_at(east_edge.x, east_edge.y), Some(RegionId(269)));
+    }
+
+    #[test]
+    fn a_resolved_answer_carries_enough_to_do_arithmetic_without_asking_again() {
+        let (space, regions) = two_regions();
+        let answer = TopologyAnswer::Resolved { space, regions };
+
+        let resolved = answer.space().expect("a resolved answer has a space");
+        let at = resolved
+            .to_global(LocalPosition { map: MapId(269), x: 40, y: 40 })
+            .expect("inside the core");
+        assert_eq!(resolved.to_local(at).map(|local| local.map), Some(MapId(269)));
+
+        // Nothing covers this, so no region owns it.
+        assert_eq!(answer.region_at(100_000, 0), None);
     }
 
     #[test]
@@ -186,14 +412,25 @@ mod tests {
         assert!(AuthorityEpoch(3).current_against(installed));
         assert!(!AuthorityEpoch(2).current_against(installed));
         assert!(!AuthorityEpoch(4).current_against(installed));
-        assert_eq!(installed.next(), AuthorityEpoch(4));
+        assert_eq!(installed.advance(), Ok(AuthorityEpoch(4)));
+    }
+
+    #[test]
+    fn an_exhausted_epoch_says_so_rather_than_wrapping() {
+        // Wrapping would turn the oldest possible message into the newest, which is the one
+        // thing the epoch exists to prevent. Unreachable in practice; cheap to be sure of.
+        assert_eq!(AuthorityEpoch(u64::MAX).advance(), Err(EpochExhausted));
+        assert_eq!(AuthorityEpoch(u64::MAX - 1).advance(), Ok(AuthorityEpoch(u64::MAX)));
+
+        // And an exhausted epoch is still comparable, so a region in that state keeps
+        // refusing stale commands rather than accepting everything.
+        let installed = AuthorityEpoch(u64::MAX);
+        assert!(installed.current_against(installed));
+        assert!(!AuthorityEpoch(0).current_against(installed));
     }
 
     #[test]
     fn a_command_from_before_a_handoff_is_refused_by_the_new_owner() {
-        // The case the epoch exists for. The command was legitimate when written; by the time
-        // it arrives the entity has a different owner, and executing it would apply an
-        // intention formed under a world that no longer holds.
         let command = Addressed { entity: EntityId(7), epoch: AuthorityEpoch(2), command: "walk" };
         assert_eq!(may_execute(&command, owner(), Reach::Authoritative), Err(Refusal::StaleEpoch));
 
@@ -219,24 +456,117 @@ mod tests {
     }
 
     #[test]
-    fn the_four_kinds_of_identity_are_not_interchangeable() {
+    fn every_live_instance_gets_its_own_runtime_space() {
+        // Two parties in the same dungeon design. Same template, different copies, and their
+        // positions must not be comparable -- so different runtime spaces.
+        let live = [
+            RuntimeInstance {
+                template: InstanceTemplateId(4),
+                instance: InstanceId(1),
+                space: WorldSpaceId(9001),
+            },
+            RuntimeInstance {
+                template: InstanceTemplateId(4),
+                instance: InstanceId(2),
+                space: WorldSpaceId(9002),
+            },
+        ];
+        assert_eq!(check_instances(&live), Ok(()));
+        assert_eq!(live[0].template, live[1].template, "one authored dungeon");
+        assert_ne!(live[0].space, live[1].space, "two places");
+    }
+
+    #[test]
+    fn two_live_instances_sharing_a_runtime_space_is_a_fault() {
+        let shared = [
+            RuntimeInstance {
+                template: InstanceTemplateId(4),
+                instance: InstanceId(1),
+                space: WorldSpaceId(9001),
+            },
+            RuntimeInstance {
+                template: InstanceTemplateId(4),
+                instance: InstanceId(2),
+                space: WorldSpaceId(9001),
+            },
+        ];
+        assert_eq!(
+            check_instances(&shared),
+            Err(InstanceFault::SpaceShared { space: WorldSpaceId(9001) })
+        );
+
+        let repeated = [
+            RuntimeInstance {
+                template: InstanceTemplateId(4),
+                instance: InstanceId(1),
+                space: WorldSpaceId(9001),
+            },
+            RuntimeInstance {
+                template: InstanceTemplateId(5),
+                instance: InstanceId(1),
+                space: WorldSpaceId(9002),
+            },
+        ];
+        assert_eq!(
+            check_instances(&repeated),
+            Err(InstanceFault::InstanceRepeated { instance: InstanceId(1) })
+        );
+    }
+
+    #[test]
+    fn only_a_geographic_seam_is_crossed_without_noticing() {
+        assert!(TransitionKind::GeographicSeam.is_seamless());
+        for kind in [
+            TransitionKind::Door,
+            TransitionKind::Portal,
+            TransitionKind::Teleport,
+            TransitionKind::InstanceEntrance,
+        ] {
+            assert!(!kind.is_seamless(), "{kind:?} is a deliberate discontinuity");
+        }
+    }
+
+    #[test]
+    fn the_reviewed_dispositions_map_onto_transition_kinds_without_a_second_vocabulary() {
+        use crate::manifest::Disposition;
+
+        assert_eq!(
+            TransitionKind::from_disposition(Disposition::Geographic),
+            Some(TransitionKind::GeographicSeam)
+        );
+        assert_eq!(TransitionKind::from_disposition(Disposition::Door), Some(TransitionKind::Door));
+        assert_eq!(
+            TransitionKind::from_disposition(Disposition::InstanceEntrance),
+            Some(TransitionKind::InstanceEntrance)
+        );
+        // "Real, and this compiler will not model it" has no kind, and inventing one would be
+        // the compiler deciding geography after all.
+        assert_eq!(TransitionKind::from_disposition(Disposition::Unsupported), None);
+    }
+
+    #[test]
+    fn the_kinds_of_identity_are_not_interchangeable() {
         // A compile-time property, asserted here as documentation of intent: the same number
         // in two of these types is two different things, and there is no conversion.
         let entity = EntityId(42);
         let instance = InstanceId(42);
         let template = InstanceTemplateId(42);
         let space = WorldSpaceId(42);
+        let region = RegionId(42);
 
-        assert_eq!(entity.0 as u64, instance.0);
-        assert_eq!(template.0 as u64, space.0 as u64);
+        assert_eq!(entity.0, instance.0);
+        assert_eq!(template.0, space.0);
+        assert_eq!(region.0, space.0);
 
-        // Ownership carries a space and an epoch, and neither is the entity's identity: the
+        // Ownership carries a region and an epoch, and neither is the entity's identity: the
         // entity outlives every owner it has.
-        let mut moved = owner();
-        moved.space = WorldSpaceId(37);
-        moved.epoch = moved.epoch.next();
+        let moved = Ownership {
+            region: RegionId(269),
+            epoch: owner().epoch.advance().expect("room to advance"),
+            ..owner()
+        };
         assert_eq!(moved.entity, owner().entity, "the entity did not become another entity");
-        assert_ne!(moved.space, owner().space);
+        assert_ne!(moved.region, owner().region, "its owner did");
     }
 
     #[test]
@@ -244,10 +574,11 @@ mod tests {
         // Falling back to the loaded version would answer a different question than the one
         // asked, with coordinates that are not comparable to the caller's.
         let answer = TopologyAnswer::WrongVersion { loaded: TopologyVersion(9) };
-        assert_ne!(answer, TopologyAnswer::Known);
+        assert_eq!(answer.space(), None);
+        assert_eq!(answer.region_at(0, 0), None);
 
         let request = TopologyRequest { space: WorldSpaceId(199), version: TopologyVersion(8) };
         assert_eq!(request.version, TopologyVersion(8));
-        assert_ne!(TopologyAnswer::NoSuchSpace, TopologyAnswer::Known);
+        assert_eq!(TopologyAnswer::NoSuchSpace.space(), None);
     }
 }
