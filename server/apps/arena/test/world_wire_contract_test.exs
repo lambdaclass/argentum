@@ -146,8 +146,20 @@ defmodule Arena.World.WireContractTest do
     test "negative coordinates survive as negative coordinates" do
       record = {:position, 3, 199, -1, -1406}
       bytes = Wire.encode(record)
-      assert :binary.part(bytes, 9, 4) == <<0xFF, 0xFF, 0xFF, 0xFF>>
+      assert :binary.part(bytes, 21, 4) == <<0xFF, 0xFF, 0xFF, 0xFF>>
       assert Wire.decode(bytes) == {:ok, record}
+    end
+
+    test "a runtime instance space id survives that a 32-bit field would truncate" do
+      # Three spaces that differ only above bit 32. A narrower field would encode all three
+      # identically and put three parties in one place.
+      a = Wire.encode({:position, 1, 4_294_967_296, 10, 20})
+      b = Wire.encode({:position, 1, 8_589_934_592, 10, 20})
+      c = Wire.encode({:position, 1, 0, 10, 20})
+
+      assert a != b
+      assert a != c
+      assert {:ok, {:position, 1, 4_294_967_296, 10, 20}} = Wire.decode(a)
     end
 
     test "transposing two fields of equal width changes the bytes" do
@@ -162,9 +174,11 @@ defmodule Arena.World.WireContractTest do
     test "boundaries round-trip without saturating" do
       max_u32 = 4_294_967_295
       max_u64 = 18_446_744_073_709_551_615
+      max_u128 = 340_282_366_920_938_463_463_374_607_431_768_211_455
 
       for record <- [
-            {:position, max_u32, max_u32, -2_147_483_648, 2_147_483_647},
+            {:position, max_u32, max_u128, -2_147_483_648, 2_147_483_647},
+            {:position, 1, 4_294_967_296, 10, 20},
             {:ownership, max_u64, max_u32, max_u64},
             {:transfer, max_u64, :instance, 0, max_u32}
           ] do

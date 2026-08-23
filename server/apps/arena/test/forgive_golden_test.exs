@@ -4,7 +4,8 @@ defmodule Arena.ForgiveGoldenTest do
   (`Arena.Map.NpcInteraction.handle_forgive/3`), written against the
   deterministic scenario harness.
 
-  Phase 1 / Item 5 of `ROADMAP.md`. Pins VB6 parity for:
+  Historical deterministic-parity golden work recorded in the root
+  `CHANGELOG.md`. Pins VB6 parity for:
     * Required donation tied to `citizens_killed` (HandleDonateGold).
     * Faction-member rejection (armada/caos cannot use /PERDON).
     * Priest range (3 tiles, VB6 `Distancia`).

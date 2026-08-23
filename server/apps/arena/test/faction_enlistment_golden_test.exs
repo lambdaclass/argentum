@@ -4,7 +4,8 @@ defmodule Arena.FactionEnlistmentGoldenTest do
   flows (`Arena.Map.Faction`), written against the deterministic
   scenario harness.
 
-  Phase 1 / Item 5 of `ROADMAP.md`. Pins VB6 parity for:
+  Historical deterministic-parity golden work recorded in the root
+  `CHANGELOG.md`. Pins VB6 parity for:
     * `handle_enlist_faction/3` → `handle_enlistador_click/4` happy
       paths (Real / Caos).
     * `handle_enlistador_click/4` rejections (dead, already-in-faction,

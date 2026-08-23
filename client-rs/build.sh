@@ -156,7 +156,7 @@ case "$TARGET" in
 
   check)
     echo "==> roadmap structure"
-    bash scripts/check_roadmap.sh
+    bash ../scripts/check_roadmap.sh
     echo "==> formatting"
     cargo fmt --all --check
     echo "==> check wasm target"

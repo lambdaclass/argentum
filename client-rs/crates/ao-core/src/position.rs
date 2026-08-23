@@ -33,12 +33,18 @@ use std::collections::BTreeMap;
 /// A coordinate space: content identity, stable across process restarts and topology
 /// releases.
 ///
-/// Never a PID, an array position or a map number. The manifest names spaces by their
-/// smallest member map because that is a fact about the group rather than about the order it
-/// was discovered in, but callers must treat the value as opaque — deriving a map from a
-/// space id is exactly the coupling this type exists to prevent.
+/// Never a PID, an array position or a map number. The manifest names compiled spaces after
+/// their smallest member map because that is a fact about the group rather than about the
+/// order it was discovered in, but callers must treat the value as **opaque** — deriving a map
+/// from a space id is exactly the coupling this type exists to prevent.
+///
+/// 128 bits, because not every space is compiled. `W-0104` creates a world space per live
+/// dungeon instance, and those are minted at runtime by whichever region is asked: a 32-bit id
+/// would need a central allocator or hand-managed ranges to stay unique, and the failure mode
+/// of getting that wrong is two parties sharing a space. 128 bits is wide enough to mint
+/// independently and never coordinate, which is what "UUID-like" in `W-0104` means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct WorldSpaceId(pub u32);
+pub struct WorldSpaceId(pub u128);
 
 /// A legacy map number: `map_id + u8 x/y` addressing, for content and adapters only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -460,7 +466,7 @@ mod tests {
 
         // The overlap is a coincidence of naming, not a conversion, and the types do not
         // permit one.
-        let ids: Vec<u32> = space.placements.keys().map(|map| map.0 as u32).collect();
+        let ids: Vec<u128> = space.placements.keys().map(|map| map.0 as u128).collect();
         assert!(ids.contains(&space.id.0), "the manifest names a space after its smallest map");
     }
 }
@@ -477,34 +483,64 @@ pub mod contract {
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum Case {
-        RegionAt { space: u32, at: (i32, i32), expect: Option<u32> },
-        Compare { left: (u32, u32, (i32, i32)), right: (u32, u32, (i32, i32)), expect: Difference },
-        Global { space: u32, local: LocalPosition, expect: Option<(i32, i32)> },
-        Local { space: u32, at: (i32, i32), expect: Option<LocalPosition> },
-        Step { space: u32, at: (i32, i32), by: (i32, i32), expect: Option<(i32, i32)> },
-        Render { space: u32, at: (i32, i32), near: (i32, i32), expect: (i32, i32) },
-        Legacy { space: u32, at: (i32, i32), expect: Option<LocalPosition> },
+        RegionAt {
+            space: u128,
+            at: (i32, i32),
+            expect: Option<u32>,
+        },
+        Compare {
+            left: (u128, u32, (i32, i32)),
+            right: (u128, u32, (i32, i32)),
+            expect: Difference,
+        },
+        Global {
+            space: u128,
+            local: LocalPosition,
+            expect: Option<(i32, i32)>,
+        },
+        Local {
+            space: u128,
+            at: (i32, i32),
+            expect: Option<LocalPosition>,
+        },
+        Step {
+            space: u128,
+            at: (i32, i32),
+            by: (i32, i32),
+            expect: Option<(i32, i32)>,
+        },
+        Render {
+            space: u128,
+            at: (i32, i32),
+            near: (i32, i32),
+            expect: (i32, i32),
+        },
+        Legacy {
+            space: u128,
+            at: (i32, i32),
+            expect: Option<LocalPosition>,
+        },
     }
 
     /// The spaces and cases the contract file declares, plus which region owns each map.
     pub fn parse_with_regions(
         text: &str,
-    ) -> (BTreeMap<u32, Space>, Vec<Case>, BTreeMap<(u32, u16), u32>) {
+    ) -> (BTreeMap<u128, Space>, Vec<Case>, BTreeMap<(u128, u16), u32>) {
         let (spaces, cases, regions) = parse_inner(text);
         (spaces, cases, regions)
     }
 
     /// The spaces and cases the contract file declares.
-    pub fn parse(text: &str) -> (BTreeMap<u32, Space>, Vec<Case>) {
+    pub fn parse(text: &str) -> (BTreeMap<u128, Space>, Vec<Case>) {
         let (spaces, cases, _) = parse_inner(text);
         (spaces, cases)
     }
 
-    fn parse_inner(text: &str) -> (BTreeMap<u32, Space>, Vec<Case>, BTreeMap<(u32, u16), u32>) {
-        let mut spaces: BTreeMap<u32, Space> = BTreeMap::new();
+    fn parse_inner(text: &str) -> (BTreeMap<u128, Space>, Vec<Case>, BTreeMap<(u128, u16), u32>) {
+        let mut spaces: BTreeMap<u128, Space> = BTreeMap::new();
         let mut cases = Vec::new();
         // Which region owns which map, keyed by (space, map).
-        let mut regions: BTreeMap<(u32, u16), u32> = BTreeMap::new();
+        let mut regions: BTreeMap<(u128, u16), u32> = BTreeMap::new();
 
         let coords = |text: &str| -> Option<(i64, i64)> {
             let (x, y) = text.split_once(',')?;
@@ -520,7 +556,7 @@ pub mod contract {
 
             match word.as_slice() {
                 ["space", id, shape] => {
-                    let id: u32 = id.parse().expect("space id");
+                    let id: u128 = id.parse().expect("space id");
                     let geometry = match *shape {
                         "plane" => Geometry::Plane,
                         "discrete" => Geometry::Discrete,
@@ -557,7 +593,7 @@ pub mod contract {
                     );
                 }
                 ["place", space, map, at] => {
-                    let space: u32 = space.parse().expect("space");
+                    let space: u128 = space.parse().expect("space");
                     let (x, y) = coords(at).expect("origin");
                     spaces
                         .get_mut(&space)
@@ -726,10 +762,8 @@ mod contract_tests {
                     assert_eq!(found, *expect, "region at {at:?}");
                 }
                 Case::Compare { left, right, expect } => {
-                    let position = |(space, _version, at): &(u32, u32, (i32, i32))| WorldPosition {
-                        space: WorldSpaceId(*space),
-                        x: at.0,
-                        y: at.1,
+                    let position = |(space, _version, at): &(u128, u32, (i32, i32))| {
+                        WorldPosition { space: WorldSpaceId(*space), x: at.0, y: at.1 }
                     };
                     let found = compare(
                         (position(left), TopologyVersion(left.1)),

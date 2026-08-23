@@ -10,9 +10,15 @@ defmodule Arena.World.Wire do
 
   Three records, little-endian, each behind a one-byte discriminant:
 
-      1 position  : topology_version u32, space u32, x i32, y i32          17 bytes
+      1 position  : topology_version u32, space u128, x i32, y i32         29 bytes
       2 ownership : entity u64, region u32, epoch u64                      21 bytes
       3 transfer  : transfer u64, transition u8, from_region u32, to u32   18 bytes
+
+  A space id is 128 bits because not every space is compiled: `W-0104` mints one per live
+  dungeon instance at runtime, from whichever region is asked, and a narrower id would need a
+  central allocator or hand-managed ranges to stay unique. Getting that wrong puts two parties
+  in one space. A region id stays 32 bits: regions come from the topology manifest and are
+  never reused.
 
   Coordinates are signed because the world has negative ones. Reading `x` as unsigned turns a
   tile one step west of a space's origin into a position four billion tiles east, which looks
@@ -55,14 +61,14 @@ defmodule Arena.World.Wire do
 
   @doc "The encoded length of a record, including its discriminant."
   @spec byte_size_of(record()) :: pos_integer()
-  def byte_size_of({:position, _, _, _, _}), do: 17
+  def byte_size_of({:position, _, _, _, _}), do: 29
   def byte_size_of({:ownership, _, _, _}), do: 21
   def byte_size_of({:transfer, _, _, _, _}), do: 18
 
   @doc "Encode a record."
   @spec encode(record()) :: binary()
   def encode({:position, version, space, x, y}) do
-    <<@position::unsigned-8, version::little-unsigned-32, space::little-unsigned-32,
+    <<@position::unsigned-8, version::little-unsigned-32, space::little-unsigned-128,
       x::little-signed-32, y::little-signed-32>>
   end
 
@@ -92,7 +98,7 @@ defmodule Arena.World.Wire do
     end
   end
 
-  defp expected_size(@position), do: {:ok, 17}
+  defp expected_size(@position), do: {:ok, 29}
   defp expected_size(@ownership), do: {:ok, 21}
   defp expected_size(@transfer), do: {:ok, 18}
   defp expected_size(_), do: :error
@@ -108,7 +114,7 @@ defmodule Arena.World.Wire do
   end
 
   defp decode_body(@position, <<_::unsigned-8, version::little-unsigned-32,
-         space::little-unsigned-32, x::little-signed-32, y::little-signed-32>>) do
+         space::little-unsigned-128, x::little-signed-32, y::little-signed-32>>) do
     {:ok, {:position, version, space, x, y}}
   end
 

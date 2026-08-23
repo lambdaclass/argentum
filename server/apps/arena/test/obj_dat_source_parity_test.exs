@@ -1,8 +1,8 @@
 defmodule Arena.ObjDatSourceParityTest do
   @moduledoc """
   Source-data parity for `apps/arena/lib/arena/data/item_def.ex` against
-  the real shipped `resources/raw/Dat/obj.dat`. Phase 1 / Item 1 of
-  `ROADMAP.md` — closes the backend parity tail for:
+  the real shipped `resources/raw/Dat/obj.dat`. This completed backend parity
+  tail is recorded in the root `CHANGELOG.md` and covers:
 
     * Per-instance `elemental_tags` parsing on `ItemDef`.
     * Faction-exclusive item flags (`real`, `caos`) on `ItemDef`.

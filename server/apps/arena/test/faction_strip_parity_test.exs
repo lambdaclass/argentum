@@ -1,7 +1,8 @@
 defmodule Arena.FactionStripParityTest do
   @moduledoc """
   Pins VB6 parity for faction-exclusive item stripping on faction
-  transitions (Phase 1 / Item 1 of `ROADMAP.md`).
+  transitions. The completed source-parity work is recorded in the root
+  `CHANGELOG.md`.
 
   VB6 anchors:
     * `ModFacciones.bas:144` — ExpulsarFaccionReal (leave path).

@@ -1,8 +1,9 @@
-# Rust/Bevy Client Changelog
+# Historical Rust/Bevy Client Changelog
 
-This is the append-only home for closed roadmap tasks and dated, verified
-milestones. Active execution order and phase completion gates live together in
-`ROADMAP.md`.
+This is the append-only archive for roadmap tasks closed before the repository
+roadmaps were consolidated. The single active execution plan is now
+[`../ROADMAP.md`](../ROADMAP.md), and new closures go to
+[`../CHANGELOG.md`](../CHANGELOG.md). Do not add new entries here.
 
 Stable `W-NNNN` identities were introduced on 2026-08-16. Earlier work is
 recorded as pre-ID foundation rather than assigned invented task identities

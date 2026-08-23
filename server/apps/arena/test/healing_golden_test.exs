@@ -8,8 +8,9 @@ defmodule Arena.HealingGoldenTest do
   shape. Counterpart to `healing_drift_test.exs`, which pins specific
   drift items in the legacy mailbox style.
 
-  Phase 1 / Item 5 of `ROADMAP.md` — "per-flow golden fixtures for
-  high-drift gameplay flows", starting with heal because `Arena.Map.Healing`
+  Historical deterministic-parity work recorded in the root `CHANGELOG.md` —
+  per-flow golden fixtures for high-drift gameplay flows, starting with heal
+  because `Arena.Map.Healing`
   was the first effects-migrated module.
 
   VB6 anchors (confirmed against `Arena.Map.Healing` port comments; no VB6

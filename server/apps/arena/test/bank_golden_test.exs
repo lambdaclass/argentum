@@ -3,7 +3,8 @@ defmodule Arena.BankGoldenTest do
   Golden fixture for the bank flow (`Arena.Map.Bank`), written against
   the deterministic scenario harness (`Arena.Test.Scenario`).
 
-  Phase 1 / Item 5 of `ROADMAP.md` — sibling of `gamble_golden_test.exs`,
+  Historical deterministic-parity golden work recorded in the root
+  `CHANGELOG.md` — sibling of `gamble_golden_test.exs`,
   `forgive_golden_test.exs`, `healing_golden_test.exs`,
   `potions_golden_test.exs`. All six bank entry points
   (`handle_open_bank`, `handle_bank_deposit`, `handle_bank_extract_item`,

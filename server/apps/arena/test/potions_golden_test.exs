@@ -9,7 +9,8 @@ defmodule Arena.PotionsGoldenTest do
   `Arena.Map.StatusTicks.process_player_buffs/4` expiry path that
   restores attributes on `duracion_efecto` zero-out.
 
-  Phase 1 / Item 5 of `ROADMAP.md` — sibling of `healing_golden_test.exs`
+  Historical deterministic-parity golden work recorded in the root
+  `CHANGELOG.md` — sibling of `healing_golden_test.exs`
   and `forgive_golden_test.exs`.
 
   VB6 anchors (lines confirmed against `Arena.Map.InventoryHandlers` /

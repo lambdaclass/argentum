@@ -4,7 +4,8 @@ defmodule Arena.GambleGoldenTest do
   (`Arena.Map.NpcInteraction.handle_gamble/4`), written against the
   deterministic scenario harness.
 
-  Phase 1 / Item 5 of `ROADMAP.md`. Pins VB6 parity for:
+  Historical deterministic-parity golden work recorded in the root
+  `CHANGELOG.md`. Pins VB6 parity for:
     * Player-state rejections (dead).
     * Bet validation (>0, <=5000, gold sufficiency).
     * Timbero NPC selection + range (10 tiles).

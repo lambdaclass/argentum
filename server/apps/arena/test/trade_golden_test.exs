@@ -4,7 +4,8 @@ defmodule Arena.TradeGoldenTest do
   (`Arena.Map.Trade`), written against the deterministic scenario
   harness (`Arena.Test.Scenario`).
 
-  Phase 1 / Item 5 of `ROADMAP.md` — sibling of `healing_golden_test.exs`,
+  Historical deterministic-parity golden work recorded in the root
+  `CHANGELOG.md` — sibling of `healing_golden_test.exs`,
   `forgive_golden_test.exs`, `gamble_golden_test.exs`, and
   `potions_golden_test.exs`.
 

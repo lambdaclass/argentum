@@ -9,10 +9,15 @@
 //! Three records, little-endian, each behind a u8 discriminant:
 //!
 //! ```text
-//! 1 position  : topology_version u32, space u32, x i32, y i32          17 bytes
+//! 1 position  : topology_version u32, space u128, x i32, y i32         29 bytes
 //! 2 ownership : entity u64, region u32, epoch u64                      21 bytes
 //! 3 transfer  : transfer u64, transition u8, from_region u32, to u32   18 bytes
 //! ```
+//!
+//! A space id is 128 bits because not every space is compiled: `W-0104` mints one per live
+//! dungeon instance, at runtime, from whichever region is asked. A narrower id would need a
+//! central allocator or hand-managed ranges to stay unique, and getting that wrong puts two
+//! parties in one space. Wide enough to mint without coordinating is the requirement.
 //!
 //! Coordinates are signed because the world has negative ones: a space's origin is wherever
 //! its layout put it, and reading `x` as unsigned turns a tile one step west of the origin
@@ -67,7 +72,7 @@ impl Record {
     /// The encoded length of this record, including its discriminant.
     pub fn len(&self) -> usize {
         match self {
-            Record::Position { .. } => 17,
+            Record::Position { .. } => 29,
             Record::Ownership { .. } => 21,
             Record::Transfer { .. } => 18,
         }
@@ -113,7 +118,7 @@ impl Record {
         };
 
         let expected = match discriminant {
-            POSITION => 17,
+            POSITION => 29,
             OWNERSHIP => 21,
             TRANSFER => 18,
             other => return Err(WireError::UnknownRecord(other)),
@@ -132,6 +137,11 @@ impl Record {
         let i32_at = |at: usize| {
             i32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]])
         };
+        let u128_at = |at: usize| {
+            let mut buffer = [0u8; 16];
+            buffer.copy_from_slice(&bytes[at..at + 16]);
+            u128::from_le_bytes(buffer)
+        };
         let u64_at = |at: usize| {
             u64::from_le_bytes([
                 bytes[at],
@@ -149,9 +159,9 @@ impl Record {
             POSITION => Ok(Record::Position {
                 version: TopologyVersion(u32_at(1)),
                 position: WorldPosition {
-                    space: WorldSpaceId(u32_at(5)),
-                    x: i32_at(9),
-                    y: i32_at(13),
+                    space: WorldSpaceId(u128_at(5)),
+                    x: i32_at(21),
+                    y: i32_at(25),
                 },
             }),
             OWNERSHIP => Ok(Record::Ownership {
@@ -315,7 +325,7 @@ mod tests {
             position: WorldPosition { space: WorldSpaceId(199), x: -1, y: -1406 },
         };
         let bytes = record.encode();
-        assert_eq!(&bytes[9..13], &[0xff, 0xff, 0xff, 0xff]);
+        assert_eq!(&bytes[21..25], &[0xff, 0xff, 0xff, 0xff]);
         assert_eq!(Record::decode(&bytes), Ok(record));
     }
 
@@ -357,7 +367,11 @@ mod tests {
         for record in [
             Record::Position {
                 version: TopologyVersion(u32::MAX),
-                position: WorldPosition { space: WorldSpaceId(u32::MAX), x: i32::MIN, y: i32::MAX },
+                position: WorldPosition {
+                    space: WorldSpaceId(u128::MAX),
+                    x: i32::MIN,
+                    y: i32::MAX,
+                },
             },
             Record::Ownership {
                 entity: EntityId(u64::MAX),

@@ -333,7 +333,7 @@ impl TopologyAnswer {
 mod tests {
     use super::*;
     use crate::position::LocalPosition;
-    use crate::topology::{Geometry, CORE_X, CORE_Y, PITCH_X};
+    use crate::topology::{Geometry, CORE_X, PITCH_X};
     use std::collections::BTreeMap;
 
     fn owner() -> Ownership {
@@ -555,8 +555,8 @@ mod tests {
         let region = RegionId(42);
 
         assert_eq!(entity.0, instance.0);
-        assert_eq!(template.0, space.0);
-        assert_eq!(region.0, space.0);
+        assert_eq!(template.0 as u128, space.0);
+        assert_eq!(region.0 as u128, space.0);
 
         // Ownership carries a region and an epoch, and neither is the entity's identity: the
         // entity outlives every owner it has.
