@@ -19,6 +19,67 @@ Never reuse a completed ID in the active roadmap.
 
 ## Closed tasks
 
+### Completed Task W-0105 — Validated exit destinations
+
+Closed: 2026-08-22 (`5a24d737`)
+
+`Arena.Map.Movement.check_tile_exit/5` transferred a character to whatever tile an exit
+named, consulting neither the arrival tile, nor the character's locomotion, nor whether the
+destination was part of a map at all. Measured across the corpus: **2,877 exits point at
+solid ground, 48 at a tile the destination does not draw, 4 put a walker on water** —
+reachable today, **168 / 24 / 4**, with one arrival both solid and undrawn counted once as
+void. Plus 2,444 void tiles across 47 maps reading as walkable floor, because the blocked
+layer says nothing about whether a tile exists.
+
+**The rule.** `Arena.World.Arrival`: solid refused for everyone, undrawn refused for
+everyone, water refused to a walker and carried for a navigator, walkable accepted for
+either — which preserves boat beaching, since whether a ship may run aground is a content
+decision and must not ride along inside a defect fix. Beaching has two units and both are
+pinned: **865 boundary pairs, 856 of which carry an exit.**
+
+**How the source knows.** Fixed exits do not change, so the topology compiler resolves every
+destination once and writes it per map — `ao-topology <pack> --exit-annotations <dir>`, 842
+files, 157,353 exits annotated with their destination's class and whether it is drawn. Each
+MapServer merges its own file into its own exits at load, so validation is a field read on a
+record the source already holds: no cross-process call, no shared table. An earlier attempt
+used an ETS table owned by whichever MapServer created it first, which would have vanished
+with that process.
+
+**Failing closed.** An exit with no annotation, one from a different world, or one naming a
+destination the map disagrees with is refused as `arrival_unknown`. An unrecognised class
+reads as solid. The 1,196 exits naming a map that does not exist are unannotated on purpose.
+The first wiring allowed a transfer whenever the destination could not be judged, which made
+the promise — the source validates before releasing authority — false exactly where it
+mattered.
+
+**One world identity.** Annotations are versioned by the map pack's content hash,
+`sha256(pack)[0..16]`, the same identity already in every `maps.<hash>.pack` filename. A
+first attempt hashed the same bytes with FNV-1a and gave the pack a second name. SHA-256 is
+hand-written here because the tree builds offline, and its correctness is confirmed
+independently: over the real pack it produces `17afc00c9c7e0b4c`, which is the filename it
+was never told. The server compares the annotations' claim against the pack it actually
+built — an artefact agreeing with itself proves nothing — and boots in that order: build the
+pack, check the annotations, then start the MapServers that will trust them.
+
+**Ownership.** Refusal happens before the step onto the transition band, so a rejection
+begins no handoff at all. Counted rather than assumed: solid, void and water-on-foot each
+leave exactly one owner and zero transfer effects, with position untouched; valid walking,
+sailing and beaching each produce exactly one. The client is corrected immediately with an
+authoritative `pos_update` for the position it never left, asserted at handler level —
+exactly one, carrying the unchanged tile, with no transfer.
+
+Evidence: `mix test` 823 tests, 0 failures, including 17 in `arrival_ownership_test.exs`
+(rule, fail-closed, world identity, ownership counts), 10 in `world_arrival_test.exs`
+(the corpus gate over 3,049 generated cases), and the handler-level correction test in
+`movement_collision_drift_test.exs`; `./build.sh check` 0, including a new gate that
+regenerates all 842 annotation files and compares them byte for byte — verified to fail by
+tampering with one line of `map-330.txt`.
+
+Deliberately out of scope, and W-0096's: the typed `arrival_blocked` receipt, destination
+preparation for dynamic conditions such as capacity, and deduplication of a repeated
+transfer. The repeated-call test here proves classification is deterministic and is named
+for that; nothing in this task would stop a duplicated message from starting two handoffs.
+
 ### Completed Task W-0097 — Versioned world-topology compiler
 
 Closed: 2026-08-22 (`5633b9ae`)

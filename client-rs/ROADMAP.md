@@ -1273,57 +1273,6 @@ curates the full production topology, expands the proven composition path and
 adds gameplay that genuinely spans invisible simulation partitions. It does not
 replace one loaded MapServer per legacy map with a global bottleneck.
 
-### Task W-0105 — Validated exit destinations
-
-- **State:** planned
-- **Phase:** 3
-- **Depends on:** none
-
-`Arena.Map.Movement.check_tile_exit/5` transfers a character to whatever tile an exit
-names, without consulting the arrival tile, the character's locomotion or whether the
-destination is part of the map at all. `W-0097` measured what that admits, and the count
-depends on which question is asked — both are recorded because both matter:
-
-- **classified by destination**, every exit in the corpus: **2,877 point at solid ground,
-  48 at a tile the destination does not draw, 4 put a walker on water**;
-- **reachable today**, the subset a character can actually get to because the way out is
-  open: **168 solid, 24 void, 4 water**. The 169th reachable solid arrival is also undrawn,
-  so it is counted once, as void.
-
-The rule refuses all of them: an arrival is not valid for being unreachable, and a rule
-scoped to the reachable ones would pass its gate and admit the rest the moment a wall
-moved. 2,444 void tiles across 47 maps read as walkable floor, because the blocked layer
-says nothing about whether a tile exists.
-
-Boat beaching has two units and they are not the same number: **865 boundary *pairs* where
-a sailor's path arrives on dry land, of which 856 carry an exit**. The first counts
-opportunities in the tile geometry, the second counts exits that actually do it, and both
-are pinned so a change to either is visible.
-
-This is a defect, not a decision. Nobody has to judge whether a player should end up
-inside rock, so it is engineering work: validate the destination on the server, decide
-explicitly what happens when it fails — refuse the transfer, or relocate to the nearest
-valid tile, with the choice tested either way — and cover every one of the four classes
-with a test that names a real map and tile from the measured list.
-
-The client must not anticipate the fix. `mappack::Tile::enterable` and
-`ao_core::mask` deliberately reproduce today's server behaviour, including its
-asymmetry (water needs a boat; nothing stops a boat on dry land), because a client that
-predicts a refusal the server does not make desynchronises exactly where a player is
-most likely to be lost. When the server changes, `Arena.Map.TileSemantics`,
-`fixtures/tile_semantics.txt` and the client's reading move in the same commit.
-
-Re-run `ao-topology --check` afterwards: the four counts are pinned in `BASELINE`, so
-the fix shows up as drift with the numbers that moved.
-
-The annotations are versioned by the **map pack's content hash** — `sha256(pack)[0..16]`,
-the identity already in every `maps.<hash>.pack` filename — and never by a second hash of
-the same bytes. It is deliberately not the topology manifest hash, which versions a
-different artefact and belongs to `W-0096`'s contract. The server compares the
-annotations' claim against the pack it actually loaded, in that order at boot: build the
-pack, check the annotations against its hash, then start the MapServers that will trust
-them.
-
 ### Task W-0101 — Production topology classification and activation
 
 - **State:** planned
