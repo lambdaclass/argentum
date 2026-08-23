@@ -4,6 +4,34 @@ This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
 ## Recently Completed
 
+- **One canonical repository roadmap (2026-08-23):** merged the active
+  Rust/Bevy sequence and the root server plan into `ROADMAP.md`, preserving
+  stable `W-NNNN` identities and inserting server-only obligations at their
+  dependency-ordered positions. Moved the structural validator to
+  `scripts/check_roadmap.sh`, retained `client-rs/CHANGELOG.md` as read-only
+  closure history and removed the nested client roadmap so there is one active
+  execution and priority source.
+
+- **Source-data parity tail closed (`83d7dac7`, `ebf44fd2`, `e04320af`):**
+  added real per-instance `elemental_tags` source fixtures, parsed and enforced
+  faction-exclusive item flags/strip rules, and expanded crafting recipes with
+  validation against the canonical `.dat` sources. These completed obligations
+  moved from the former server roadmap into history during consolidation rather
+  than being reopened as active work.
+
+- **Idle MapServer timer lifecycle and heap control (2026-08-20,
+  `719536ce`, `af8ec36e`):** all logical maps remain loaded, but empty maps take
+  allocation-free tick paths and stop rearming the high-frequency NPC-AI,
+  buff and regen timers. The first player rearms each timer exactly once after
+  one full interval; generation tokens prevent interleaved timer chains and
+  avoid the free-regeneration exploit an immediate tick introduced. Autosave
+  remains available for bounded compaction and expired respawns reconcile on
+  entry. Across the 842-map development world, MapServer heaps fell from about
+  1,962 MB to about 787 MB with no reclaimable old-generation residue, map
+  reductions fell 87% and the map processes' share of idle reductions fell
+  from 94.6% to zero. The timer-chain and transfer tests cover rapid leave/
+  re-entry and duplicate arming.
+
 - **Phase 1 packet byte fixtures — carry-forward families closed
   (2026-06-05):** extended byte-level packet assertions to the last three
   high-risk families, closing Phase 1 item 4.

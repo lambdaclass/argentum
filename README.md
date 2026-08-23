@@ -1,6 +1,10 @@
 # Argentum Online
 
-Rewrite of the Argentum Online VB6 MMORPG in Elixir (server) and TypeScript (web client). The original server is ~93,000 lines of VB6 across 50+ modules; the current Elixir backend app source is ~16,000 lines.
+Rewrite of the Argentum Online VB6 MMORPG in Elixir (server) and Rust/Bevy
+(browser-WASM and native client). The original server is ~93,000 lines of VB6
+across 50+ modules; the current Elixir backend app source is ~16,000 lines. The
+older TypeScript/Pixi client is frozen reference material, not the production
+client or a release gate.
 
 ## Design Improvements over the VB6 Original
 
@@ -17,12 +21,24 @@ Rewrite of the Argentum Online VB6 MMORPG in Elixir (server) and TypeScript (web
 
 ### Client
 
-- **Runs in a browser.** TypeScript + React + Pixi.js replaces the VB6 desktop client. No install, no Wine, no compatibility hacks. Supports both desktop and mobile viewports.
-- **Imperative fast path for movement.** Predicted movement updates Pixi sprites directly on the same frame as the keypress, before React state catches up. The Pixi ticker is the sole animation loop — no duplicate requestAnimationFrame.
-- **React is not the render loop.** React owns panels, forms, overlays, and product-shell state. Frame-critical canvas/Pixi work stays on the imperative renderer path; React may host the canvas node, but it must not own per-frame drawing, animation, camera updates, or other fast-path rendering.
-- **Client-side prediction with server reconciliation.** The client predicts walk outcomes using the local tile blockmap, sends the intent to the server, and tracks pending steps. Server corrections snap the sprite back. This eliminates the perceived input lag that the VB6 client had over network.
-- **WebSocket + TCP dual transport.** The web client connects via WebSocket; legacy clients can still use raw TCP. Both speak the same AO20 binary protocol.
-- **Asset pipeline from VB6 resources.** A build script converts the original VB6 .grh/.ind/.csm assets into sprite sheets and map packs served as static files. The 1.3GB raw asset repo is a git submodule — the client downloads only the processed data it needs.
+- **One Rust/Bevy application on web and desktop.** The production client uses
+  the same authoritative models, Bevy UI and gameplay systems in browser-WASM
+  and native builds.
+- **Bevy owns application UI and rendering.** JavaScript/CSS is limited to the
+  canvas host and thin browser-capability adapters; it does not implement a
+  second HUD, workflow or authority model.
+- **Prediction reconciles to server authority.** Movement may be predicted for
+  responsiveness, but position, combat, inventory, economy and visibility are
+  accepted only from the owning MapServer and its authority epoch.
+- **Canonical global world, local simulation partitions.** The player and
+  camera use one signed global coordinate space while each existing MapServer
+  can retain its compact local collision, spawn and occupancy indexes.
+- **WebSocket + TCP compatibility boundary.** Rust/WASM uses the governed modern
+  WebSocket protocol; retained VB6 clients use the explicitly tested legacy
+  adapter rather than constraining the modern model.
+- **Asset pipeline from VB6 resources.** Build tooling converts original
+  `.grh`/`.ind`/`.csm` assets into validated content-addressed sheets and world
+  packs.
 
 ## Repository Structure
 
@@ -36,7 +52,8 @@ argentum/
 │   │   └── game_backend/    # Ecto schemas, DB persistence
 │   ├── scripts/
 │   └── Makefile
-├── client/              # Vite + TypeScript + React + Pixi.js web client
+├── client-rs/           # Production Rust/Bevy browser-WASM + native client
+├── client/              # Frozen TypeScript/Pixi reference client
 ├── resources/
 │   ├── raw/             # VB6 assets (git submodule → ao-org/Recursos.git)
 │   ├── indices/         # Generated sprite index JSONs
@@ -64,7 +81,12 @@ Start with [ROADMAP.md](ROADMAP.md) for the phased plan.
 
 ## Current State
 
-**Phase status snapshot:** backend gameplay is close to VB6 compatibility; web gameplay client is playable; modern web account/login + character lobby is still missing. The next major milestone is the deterministic parity harness described in [ROADMAP.md](ROADMAP.md).
+**Phase status snapshot:** the topology compiler and validated destination rule
+are closed, and the shared Elixir/Rust canonical-position and stable-identity
+contract is active as W-0098. The shortest milestone path is protocol/bootstrap
+and atomic handoff, then W-0099: a real four-region slice where the player and
+camera cross MapServers without a visible transition. See the single canonical
+[ROADMAP.md](ROADMAP.md).
 
 **Implemented so far:**
 - TCP + WebSocket networking with full AO20 binary protocol coverage
@@ -82,13 +104,19 @@ Start with [ROADMAP.md](ROADMAP.md) for the phased plan.
 - GM/admin commands in chat, chat moderation, mute/ban/report, audit logging
 - Session registry, online directory, flood protection, speed-hack detection
 - Static game data loading from VB6 .dat files (Balance.dat, Ciudades.Dat)
-- Web client with map, sprite, NPC, object, inventory, HUD, chat, party, clan, trade, bank, spell, weather/rain, and MIDI/music support
+- Frozen TypeScript reference client with broad gameplay coverage, plus the
+  Rust/Bevy production client's real map/art rendering, responsive Bevy shell,
+  input, world-map evidence and shared protocol/coordinate foundations
 
 **Main remaining gaps:**
-- Build and run the automated parity gate: VB6 packet replay, formula fixtures, property/fuzz, AO smoke bot, browser E2E, load/soak.
-- Close the backend compatibility tail: real per-instance item `elemental_tags`, faction-exclusive item flags/strip, recipe data expansion, operations/deploy.
-- Close the web client tail: account/login/Google + character lobby, authoritative party/clan state, settings/audio polish, browser-side proof, and UX/error polish.
-- Keep the original VB6 client as the release smoke oracle until compatibility is formally closed.
+
+- Finish W-0098's binary cross-language identity/position contract.
+- Deliver governed authentication/bootstrap, authority epochs and atomic
+  prepare/commit handoff on the same session.
+- Prove the compiler-confirmed 2×2 seamless-world slice before widening world,
+  HUD and gameplay coverage.
+- Complete the Rust/Bevy workflow, gameplay, fidelity, accessibility,
+  operations and release gates in roadmap order.
 
 ## Scaling
 

@@ -8,7 +8,7 @@ then translate them into a fair, practical feature direction for this project.
 
 This is a product research note, not an implementation commitment. It should be
 used together with [Post-Parity Game Mechanics Research](post-parity-game-mechanics.md)
-and `ROADMAP.md`.
+and the root [`ROADMAP.md`](../ROADMAP.md).
 
 ## Executive Recommendation
 

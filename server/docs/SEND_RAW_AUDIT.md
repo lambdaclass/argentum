@@ -9,9 +9,9 @@ code, classified into three buckets:
    issued from singletons that don't go through a `MapServer`. Need
    their own structured contract; not part of the map-layer effects
    migration.
-3. **Still-legacy map handlers** — `Arena.Map.*` modules whose handlers
-   are not yet on the `{:ok, state, [Effect.t()]}` contract. Will
-   migrate as part of Phase 1 / Item 6.
+3. **Still-legacy map handlers** — retained as an empty audited category: all
+   `Arena.Map.*` handlers now use the `{:ok, state, [Effect.t()]}` contract.
+   The completed migration is recorded in the root `CHANGELOG.md`.
 
 The grep guard test (`test/effects_send_raw_guard_test.exs`) reads from
 this file's allowlists. Adding a new `{:send_raw, _}` site requires
