@@ -13,6 +13,10 @@
 #   step   <space> <gx>,<gy> by <dx>,<dy> -> inside <gx>,<gy> | leaves
 #   render <space> <gx>,<gy> near <nx>,<ny> -> <rx>,<ry>
 #   legacy <space> <gx>,<gy> -> <map> <x>,<y> | unrepresentable
+#   region <space> <region-id> <map>
+#   region-at <space> <gx>,<gy> -> <region-id> | none
+#   compare <space> <version> <gx>,<gy> with <space> <version> <gx>,<gy>
+#       -> <dx>,<dy> | different-space | different-version
 #
 # The core is x=14..87, y=11..90 and the pitch is 74x80, so a map's local (14,11) is its
 # origin and local (87,90) is origin + (73,79).
@@ -160,3 +164,36 @@ local 199 148,239 -> 330 14,90
 global 199 287 87,90 -> 295,319
 legacy 199 295,319 -> 287 87,90
 render 199 295,319 near 0,0 -> 295,319
+
+# ---------------------------------------------------------------------------------------
+# Regions: authority inside a space. Two regions of space 199, one per map, so a seam
+# crossing changes the region while the space does not -- the event the whole contract
+# exists to describe.
+# ---------------------------------------------------------------------------------------
+region 199 330 330
+region 199 269 269
+region 199 274 274
+region 199 287 287
+
+# The east seam of the acceptance square, region by region.
+region-at 199 221,214 -> 330
+region-at 199 222,214 -> 269
+# The south seam.
+region-at 199 148,239 -> 330
+region-at 199 148,240 -> 274
+# The far corner, and a tile no region covers.
+region-at 199 295,319 -> 287
+region-at 199 100000,0 -> none
+
+# ---------------------------------------------------------------------------------------
+# Comparing positions. A difference is only meaningful inside one space and one topology
+# version: the same tile has different global coordinates under two releases, and two
+# positions in different spaces have no distance between them at all.
+# ---------------------------------------------------------------------------------------
+compare 199 1 221,214 with 199 1 222,214 -> 1,0
+compare 199 1 222,214 with 199 1 221,214 -> -1,0
+compare 199 1 148,239 with 199 1 148,240 -> 0,1
+compare 199 1 0,0 with 199 1 0,0 -> 0,0
+compare 199 1 221,214 with 37 1 221,214 -> different-space
+compare 199 1 221,214 with 199 2 222,214 -> different-version
+compare 199 2 221,214 with 199 1 221,214 -> different-version

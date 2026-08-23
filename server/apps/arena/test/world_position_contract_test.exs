@@ -24,6 +24,18 @@ defmodule Arena.World.PositionContractTest do
               "position_contract.txt"
             ])
 
+  defp regions_of(lines) do
+    for ["region", space, region, map] <- lines, reduce: %{} do
+      acc ->
+        Map.update(
+          acc,
+          String.to_integer(space),
+          %{String.to_integer(map) => String.to_integer(region)},
+          &Map.put(&1, String.to_integer(map), String.to_integer(region))
+        )
+    end
+  end
+
   defp parse do
     @contract
     |> File.read!()
@@ -41,10 +53,22 @@ defmodule Arena.World.PositionContractTest do
           updated = put_in(spaces[space].placements[String.to_integer(map)], pair(at))
           {updated, cases}
 
+        ["region", _space, _region, _map] ->
+          {spaces, cases}
+
         other ->
           {spaces, cases ++ [other]}
       end
     end)
+  end
+
+  defp all_lines do
+    @contract
+    |> File.read!()
+    |> String.split("\n")
+    |> Enum.map(fn line -> line |> String.split("#") |> hd() |> String.trim() end)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.map(&String.split(&1, ~r/\s+/))
   end
 
   defp geometry("plane"), do: :plane
@@ -124,6 +148,34 @@ defmodule Arena.World.PositionContractTest do
 
           assert Position.to_legacy(space, pair(at)) == {:ok, local(map, tile)},
                  "legacy #{at}"
+
+        ["region-at", space, at, "->", "none"] ->
+          space = spaces[String.to_integer(space)]
+          regions = regions_of(all_lines())[space.id] || %{}
+          assert Position.region_at(space, pair(at), regions) == :none, "region-at #{at}"
+
+        ["region-at", space, at, "->", region] ->
+          space = spaces[String.to_integer(space)]
+          regions = regions_of(all_lines())[space.id] || %{}
+
+          assert Position.region_at(space, pair(at), regions) ==
+                   {:ok, String.to_integer(region)},
+                 "region-at #{at}"
+
+        ["compare", left_space, left_version, left_at, "with", right_space, right_version,
+         right_at | verdict] ->
+          left = {spaces[String.to_integer(left_space)], String.to_integer(left_version), pair(left_at)}
+          right = {spaces[String.to_integer(right_space)], String.to_integer(right_version), pair(right_at)}
+
+          want =
+            case verdict do
+              ["->", "different-space"] -> :different_space
+              ["->", "different-version"] -> :different_version
+              ["->", tiles] -> {:tiles, pair(tiles)}
+            end
+
+          assert Position.compare(left, right) == want,
+                 "compare #{left_at} with #{right_at}"
 
         other ->
           flunk("cannot read contract line: #{inspect(other)}")

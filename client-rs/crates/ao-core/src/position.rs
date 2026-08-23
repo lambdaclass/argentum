@@ -199,6 +199,40 @@ fn nearest_on_axis(value: i32, near: i32, period: i64) -> i32 {
         .unwrap_or(value)
 }
 
+/// The difference between two positions, or why there is none.
+///
+/// Not `Sub`, because subtraction has no failure case and this does. Two positions are only
+/// comparable inside one space *and* one topology version: the same tile has different global
+/// coordinates under two releases, so subtracting across them yields a number that looks like
+/// a distance and is not one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Difference {
+    Tiles {
+        dx: i32,
+        dy: i32,
+    },
+    /// Different spaces have no distance between them at all.
+    DifferentSpace,
+    /// One of the positions was computed against another topology release.
+    DifferentVersion,
+}
+
+/// Compare two positions, each carrying the version it was computed against.
+pub fn compare(
+    left: (WorldPosition, TopologyVersion),
+    right: (WorldPosition, TopologyVersion),
+) -> Difference {
+    let ((left_at, left_version), (right_at, right_version)) = (left, right);
+
+    if left_at.space != right_at.space {
+        return Difference::DifferentSpace;
+    }
+    if left_version != right_version {
+        return Difference::DifferentVersion;
+    }
+    Difference::Tiles { dx: right_at.x - left_at.x, dy: right_at.y - left_at.y }
+}
+
 /// Project a global position to legacy `map_id + u8 x/y`, or say why it cannot be.
 ///
 /// The retained adapter for content and old protocol paths. It refuses rather than
@@ -443,6 +477,8 @@ pub mod contract {
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum Case {
+        RegionAt { space: u32, at: (i32, i32), expect: Option<u32> },
+        Compare { left: (u32, u32, (i32, i32)), right: (u32, u32, (i32, i32)), expect: Difference },
         Global { space: u32, local: LocalPosition, expect: Option<(i32, i32)> },
         Local { space: u32, at: (i32, i32), expect: Option<LocalPosition> },
         Step { space: u32, at: (i32, i32), by: (i32, i32), expect: Option<(i32, i32)> },
@@ -450,10 +486,25 @@ pub mod contract {
         Legacy { space: u32, at: (i32, i32), expect: Option<LocalPosition> },
     }
 
+    /// The spaces and cases the contract file declares, plus which region owns each map.
+    pub fn parse_with_regions(
+        text: &str,
+    ) -> (BTreeMap<u32, Space>, Vec<Case>, BTreeMap<(u32, u16), u32>) {
+        let (spaces, cases, regions) = parse_inner(text);
+        (spaces, cases, regions)
+    }
+
     /// The spaces and cases the contract file declares.
     pub fn parse(text: &str) -> (BTreeMap<u32, Space>, Vec<Case>) {
+        let (spaces, cases, _) = parse_inner(text);
+        (spaces, cases)
+    }
+
+    fn parse_inner(text: &str) -> (BTreeMap<u32, Space>, Vec<Case>, BTreeMap<(u32, u16), u32>) {
         let mut spaces: BTreeMap<u32, Space> = BTreeMap::new();
         let mut cases = Vec::new();
+        // Which region owns which map, keyed by (space, map).
+        let mut regions: BTreeMap<(u32, u16), u32> = BTreeMap::new();
 
         let coords = |text: &str| -> Option<(i64, i64)> {
             let (x, y) = text.split_once(',')?;
@@ -562,11 +613,52 @@ pub mod contract {
                     at: pair(at),
                     expect: Some(local_at(map, tile)),
                 }),
+                ["region", space, region, map] => {
+                    regions.insert(
+                        (space.parse().expect("space"), map.parse().expect("map")),
+                        region.parse().expect("region"),
+                    );
+                }
+                ["region-at", space, at, "->", "none"] => cases.push(Case::RegionAt {
+                    space: space.parse().expect("space"),
+                    at: pair(at),
+                    expect: None,
+                }),
+                ["region-at", space, at, "->", region] => cases.push(Case::RegionAt {
+                    space: space.parse().expect("space"),
+                    at: pair(at),
+                    expect: Some(region.parse().expect("region")),
+                }),
+                ["compare", left_space, left_version, left_at, "with", right_space, right_version, right_at, "->", verdict @ ..] =>
+                {
+                    let expect = match verdict {
+                        ["different-space"] => Difference::DifferentSpace,
+                        ["different-version"] => Difference::DifferentVersion,
+                        [tiles] => {
+                            let (dx, dy) = pair(tiles);
+                            Difference::Tiles { dx, dy }
+                        }
+                        other => panic!("unknown comparison result {other:?}"),
+                    };
+                    cases.push(Case::Compare {
+                        left: (
+                            left_space.parse().expect("space"),
+                            left_version.parse().expect("version"),
+                            pair(left_at),
+                        ),
+                        right: (
+                            right_space.parse().expect("space"),
+                            right_version.parse().expect("version"),
+                            pair(right_at),
+                        ),
+                        expect,
+                    });
+                }
                 other => panic!("cannot read contract line {other:?}"),
             }
         }
 
-        (spaces, cases)
+        (spaces, cases, regions)
     }
 
     fn pair(text: &str) -> (i32, i32) {
@@ -623,6 +715,27 @@ mod contract_tests {
                     let space = &spaces[space];
                     let position = WorldPosition { space: space.id, x: at.0, y: at.1 };
                     assert_eq!(space.nearest_unwrapped(position, *near), *expect, "render {at:?}");
+                }
+                Case::RegionAt { space, at, expect } => {
+                    let (_, _, regions) = contract::parse_with_regions(contract::text());
+                    let space = &spaces[space];
+                    let position = WorldPosition { space: space.id, x: at.0, y: at.1 };
+                    let found = space
+                        .to_local(position)
+                        .and_then(|local| regions.get(&(space.id.0, local.map.0)).copied());
+                    assert_eq!(found, *expect, "region at {at:?}");
+                }
+                Case::Compare { left, right, expect } => {
+                    let position = |(space, _version, at): &(u32, u32, (i32, i32))| WorldPosition {
+                        space: WorldSpaceId(*space),
+                        x: at.0,
+                        y: at.1,
+                    };
+                    let found = compare(
+                        (position(left), TopologyVersion(left.1)),
+                        (position(right), TopologyVersion(right.1)),
+                    );
+                    assert_eq!(found, *expect, "compare {left:?} with {right:?}");
                 }
                 Case::Legacy { space, at, expect } => {
                     let space = &spaces[space];

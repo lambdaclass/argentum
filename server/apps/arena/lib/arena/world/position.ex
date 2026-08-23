@@ -151,6 +151,48 @@ defmodule Arena.World.Position do
   end
 
   @doc """
+  The difference between two positions, or why there is none.
+
+  Not subtraction, because subtraction has no failure case and this does. Two positions are
+  comparable only inside one space *and* one topology version: the same tile has different
+  global coordinates under two releases, so a difference taken across them looks like a
+  distance and is not one.
+  """
+  @spec compare({space :: map(), version :: integer(), {integer(), integer()}},
+                {space :: map(), version :: integer(), {integer(), integer()}}) ::
+          {:tiles, {integer(), integer()}} | :different_space | :different_version
+  def compare({left_space, left_version, {lx, ly}}, {right_space, right_version, {rx, ry}}) do
+    cond do
+      left_space.id != right_space.id -> :different_space
+      left_version != right_version -> :different_version
+      true -> {:tiles, {rx - lx, ry - ly}}
+    end
+  end
+
+  @doc """
+  Which region owns a global position, given which region owns which map.
+
+  Authority is per region, not per space: two regions of one space meet at a seam, and this is
+  the question that crossing it answers differently on either side.
+
+  `regions` maps a map id to a region id.
+  """
+  @spec region_at(map(), {integer(), integer()}, %{integer() => integer()}) ::
+          {:ok, integer()} | :none
+  def region_at(space, position, regions) do
+    case to_local(space, position) do
+      {:ok, {map, _x, _y}} ->
+        case Map.fetch(regions, map) do
+          {:ok, region} -> {:ok, region}
+          :error -> :none
+        end
+
+      :none ->
+        :none
+    end
+  end
+
+  @doc """
   Project a global position to legacy `map_id + x/y`, or refuse.
 
   Refuses rather than approximates: an uncovered or ambiguous position has no legacy address,
