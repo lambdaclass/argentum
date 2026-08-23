@@ -53,6 +53,59 @@ pub struct RegionPlacement {
     pub origin: Origin,
 }
 
+/// Why a set of region placements does not describe the space it claims to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlacementFault {
+    /// A placement names a space other than the one being checked.
+    WrongSpace { region: RegionId, space: WorldSpaceId },
+    /// A placement's map is not in the space at all.
+    MapNotInSpace { region: RegionId, map: MapId },
+    /// A placement's origin disagrees with where the space puts that map.
+    OriginDisagrees { region: RegionId, map: MapId, placement: Origin, space: Origin },
+    /// Two regions claim the same map, so a position in it has two owners.
+    MapSharedByRegions { map: MapId },
+}
+
+/// Check that region placements agree with the space they claim to place regions in.
+///
+/// The origin is carried on a placement so a caller can do its own arithmetic without asking
+/// anything, which means it is a second copy of a fact the space already states — and a second
+/// copy that nothing compares is a fact waiting to disagree. A region whose origin drifts from
+/// its space's layout would put authority at coordinates the space does not agree with, which
+/// is worse than having no placement at all: every conversion still succeeds, and every answer
+/// is wrong by a fixed offset.
+pub fn check_placements(space: &Space, regions: &[RegionPlacement]) -> Result<(), PlacementFault> {
+    let mut claimed: std::collections::BTreeSet<MapId> = std::collections::BTreeSet::new();
+
+    for placement in regions {
+        if placement.space != space.id {
+            return Err(PlacementFault::WrongSpace {
+                region: placement.region,
+                space: placement.space,
+            });
+        }
+        let Some(origin) = space.placements.get(&placement.map) else {
+            return Err(PlacementFault::MapNotInSpace {
+                region: placement.region,
+                map: placement.map,
+            });
+        };
+        if *origin != placement.origin {
+            return Err(PlacementFault::OriginDisagrees {
+                region: placement.region,
+                map: placement.map,
+                placement: placement.origin,
+                space: *origin,
+            });
+        }
+        if !claimed.insert(placement.map) {
+            return Err(PlacementFault::MapSharedByRegions { map: placement.map });
+        }
+    }
+
+    Ok(())
+}
+
 /// How a boundary is crossed.
 ///
 /// The same vocabulary `W-0097`'s manifest reviews, carried into the position contract so the
@@ -700,5 +753,86 @@ mod contract_tests {
         }
 
         assert!(checked >= 24, "the contract should be worth checking: {checked}");
+    }
+}
+
+#[cfg(test)]
+mod placement_tests {
+    use super::*;
+    use crate::topology::{Geometry, PITCH_X};
+    use std::collections::BTreeMap;
+
+    fn space() -> Space {
+        Space {
+            id: WorldSpaceId(199),
+            version: TopologyVersion(1),
+            geometry: Geometry::Plane,
+            placements: BTreeMap::from([
+                (MapId(330), Origin { x: 0, y: 0 }),
+                (MapId(269), Origin { x: PITCH_X, y: 0 }),
+            ]),
+        }
+    }
+
+    fn placement(region: u32, map: u16, x: i64) -> RegionPlacement {
+        RegionPlacement {
+            region: RegionId(region),
+            space: WorldSpaceId(199),
+            map: MapId(map),
+            origin: Origin { x, y: 0 },
+        }
+    }
+
+    #[test]
+    fn placements_that_match_the_space_are_accepted() {
+        let regions = [placement(330, 330, 0), placement(269, 269, PITCH_X)];
+        assert_eq!(check_placements(&space(), &regions), Ok(()));
+    }
+
+    #[test]
+    fn an_origin_that_drifts_from_the_space_is_a_fault() {
+        // The dangerous case: every conversion still succeeds and every answer is wrong by a
+        // fixed offset, so nothing fails until a player is somewhere nobody expects.
+        let regions = [placement(330, 330, 0), placement(269, 269, PITCH_X + 1)];
+        assert_eq!(
+            check_placements(&space(), &regions),
+            Err(PlacementFault::OriginDisagrees {
+                region: RegionId(269),
+                map: MapId(269),
+                placement: Origin { x: PITCH_X + 1, y: 0 },
+                space: Origin { x: PITCH_X, y: 0 },
+            })
+        );
+    }
+
+    #[test]
+    fn a_placement_for_another_space_is_refused_rather_than_ignored() {
+        let stray = RegionPlacement {
+            region: RegionId(37),
+            space: WorldSpaceId(37),
+            map: MapId(330),
+            origin: Origin { x: 0, y: 0 },
+        };
+        assert_eq!(
+            check_placements(&space(), &[stray]),
+            Err(PlacementFault::WrongSpace { region: RegionId(37), space: WorldSpaceId(37) })
+        );
+    }
+
+    #[test]
+    fn a_map_the_space_does_not_contain_has_no_placement() {
+        assert_eq!(
+            check_placements(&space(), &[placement(1, 999, 0)]),
+            Err(PlacementFault::MapNotInSpace { region: RegionId(1), map: MapId(999) })
+        );
+    }
+
+    #[test]
+    fn two_regions_claiming_one_map_would_give_a_position_two_owners() {
+        let regions = [placement(330, 330, 0), placement(331, 330, 0)];
+        assert_eq!(
+            check_placements(&space(), &regions),
+            Err(PlacementFault::MapSharedByRegions { map: MapId(330) })
+        );
     }
 }
