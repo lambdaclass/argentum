@@ -102,6 +102,14 @@ defmodule Arena.World.Position do
   location.
   """
   @spec to_local(space(), {integer(), integer()}) :: {:ok, local()} | :none
+  def to_local(_space, {x, y}) when x not in @i32_min..@i32_max or y not in @i32_min..@i32_max do
+    # A global coordinate is an i32 on the wire and in Rust, so a value outside that range is
+    # not a position and has no tile. Only `to_global` checked this, so `to_local`, `step` and
+    # `region_at` all happily assigned a tile -- and an owner -- to coordinates the other side
+    # could not even hold.
+    :none
+  end
+
   def to_local(space, position) do
     {gx, gy} = reduce(space.geometry, position)
 
@@ -147,13 +155,14 @@ defmodule Arena.World.Position do
   stored value would snap the camera across the map. The two must never be confused: one is
   where the character is, the other is where to draw them this frame.
   """
-  @spec nearest_unwrapped(space(), {integer(), integer()}, {integer(), integer()}) ::
+  @spec nearest_unwrapped(space(), {integer(), integer()}, {:render, integer(), integer()}) ::
           {:render, integer(), integer()}
-  def nearest_unwrapped(space, {x, y}, {near_x, near_y}) do
+  def nearest_unwrapped(space, {x, y}, {:render, near_x, near_y}) do
     {px, py} = periods(space.geometry)
-    # Tagged `:render` so it cannot be passed where a canonical `{x, y}` is expected. On a
-    # 148-wide torus, canonical 0 and render-only 148 are both plausible-looking pairs, and the
-    # contract requires that the two never be confused.
+    # Tagged `:render` so it cannot be passed where a canonical `{x, y}` is expected -- and the
+    # camera is tagged too, because a canonical position passed as the camera would have made
+    # the two kinds interchangeable at the one call site that must not confuse them. On a
+    # 148-wide torus, canonical 0 and render-only 148 are both plausible-looking pairs.
     {:render, nearest_on_axis(x, near_x, px), nearest_on_axis(y, near_y, py)}
   end
 
@@ -172,8 +181,12 @@ defmodule Arena.World.Position do
   defp nearest_on_axis(value, _near, 0), do: value
 
   defp nearest_on_axis(value, near, period) do
-    [value - period, value, value + period]
-    |> Enum.min_by(fn candidate -> abs(candidate - near) end)
+    # The congruent value nearest the camera, whatever the distance. Checking only one period
+    # either side assumed the camera was never more than a single wrap away, which is false the
+    # moment anything follows a character around a torus twice: for period 148, canonical 0 near
+    # 295 answered 148 when 296 is one tile away.
+    periods = Integer.floor_div(near - value + div(period, 2), period)
+    value + periods * period
   end
 
   @doc """

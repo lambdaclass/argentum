@@ -142,8 +142,31 @@ defmodule Arena.World.PositionContractTest do
 
           {rx, ry} = pair(expected)
 
-          assert Position.nearest_unwrapped(space, pair(at), pair(near)) == {:render, rx, ry},
+          {nx, ny} = pair(near)
+
+          assert Position.nearest_unwrapped(space, pair(at), {:render, nx, ny}) ==
+                   {:render, rx, ry},
                  "render #{at} near #{near}"
+
+        ["unrepresentable", space, at] ->
+          space = spaces[String.to_integer(space)]
+          position = pair(at)
+
+          # Rust satisfies this case by construction -- no `WorldPosition` holds these
+          # coordinates. Elixir's integers are unbounded, so it has to refuse them explicitly:
+          # `to_local` accepted them and named a tile, and `region_at` named an owner, for a
+          # position the other side cannot represent at all.
+          #
+          # Asserted out of range first, exactly as Rust does. Otherwise any coordinate no map
+          # happens to cover would satisfy this case, and it would stop testing the guard.
+          {x, y} = position
+
+          assert x not in Position.coordinate_range() or y not in Position.coordinate_range(),
+                 "#{at} is representable, so it is not this case"
+
+          assert Position.to_local(space, position) == :none, "local #{at}"
+          assert Position.step(space, position, {0, 0}) == :leaves, "step #{at}"
+          assert Position.to_legacy(space, position) == :unrepresentable, "legacy #{at}"
 
         ["legacy", space, at, "->", "unrepresentable"] ->
           space = spaces[String.to_integer(space)]
@@ -255,7 +278,7 @@ defmodule Arena.World.PositionContractTest do
   test "a render position is tagged so it cannot be stored as a position" do
     torus = %{id: 37, geometry: {:torus, 148, 160}, placements: %{168 => {0, 0}}}
 
-    assert {:render, 148, 39} = Position.nearest_unwrapped(torus, {0, 39}, {147, 39})
+    assert {:render, 148, 39} = Position.nearest_unwrapped(torus, {0, 39}, {:render, 147, 39})
     refute Position.canonical?(torus, {148, 39}), "148 is a render value on a 148-wide torus"
     assert Position.canonical?(torus, {0, 39})
   end

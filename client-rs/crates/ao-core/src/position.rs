@@ -210,7 +210,15 @@ impl Space {
         let moved = (position.x as i64 + dx as i64, position.y as i64 + dy as i64);
         let reduced = self.geometry.reduce(moved);
 
-        let landed = WorldPosition { space: self.id, x: reduced.0 as i32, y: reduced.1 as i32 };
+        // A reduced coordinate that does not fit `i32` cannot be a position in this space, so
+        // the step leaves rather than truncating. `as i32` here wrapped `i32::MAX + 1` to
+        // `i32::MIN`, which could land on an unrelated placement at the far edge of the space --
+        // a plausible-looking tile in entirely the wrong place. `0ee98a1e` claimed to have
+        // removed this and did not; the edit never applied and the commit message was wrong.
+        let (Ok(x), Ok(y)) = (i32::try_from(reduced.0), i32::try_from(reduced.1)) else {
+            return Step::Leaves;
+        };
+        let landed = WorldPosition { space: self.id, x, y };
         // Inside means some map of this space actually covers the tile. On a plane the edge of
         // the outermost map is the edge of the space; on a torus the coordinate wrapped and
         // the tile on the far side is a real neighbour.
@@ -228,13 +236,23 @@ impl Space {
     /// camera snaps across the map and the player is told they teleported. With it, the two
     /// disagree by exactly one period, which is why they must never be confused in a fixture:
     /// one is where the character is, the other is where to draw them this frame.
-    pub fn nearest_unwrapped(&self, position: WorldPosition, near: (i32, i32)) -> RenderPosition {
-        let (px, py) = self.geometry.periods();
-        RenderPosition {
-            space: position.space,
-            x: nearest_on_axis(position.x as i64, near.0 as i64, px),
-            y: nearest_on_axis(position.y as i64, near.1 as i64, py),
+    pub fn nearest_unwrapped(
+        &self,
+        position: WorldPosition,
+        near: RenderPosition,
+    ) -> Option<RenderPosition> {
+        // The camera's last position is itself a render position, so it is typed as one. It was
+        // a bare `(i32, i32)`, which let a canonical position be passed as the camera and made
+        // the two kinds interchangeable again at the one call site that must not confuse them.
+        if position.space != self.id || near.space != self.id {
+            return None;
         }
+        let (px, py) = self.geometry.periods();
+        Some(RenderPosition {
+            space: position.space,
+            x: nearest_on_axis(position.x as i64, near.x, px),
+            y: nearest_on_axis(position.y as i64, near.y, py),
+        })
     }
 
     /// Whether a position is in this space's canonical range.
@@ -253,13 +271,13 @@ fn nearest_on_axis(value: i64, near: i64, period: i64) -> i64 {
     if period == 0 {
         return value;
     }
-    // Candidates one period either side; the wrap is never more than one period away from a
-    // camera that was following the character. Computed in `i64` so adding a period to a
-    // coordinate near `i32::MAX` cannot overflow.
-    [value - period, value, value + period]
-        .into_iter()
-        .min_by_key(|candidate| (candidate - near).abs())
-        .unwrap_or(value)
+    // The congruent value nearest `near`, whatever the distance. Checking only one period
+    // either side assumed the camera was never more than a single wrap away, which is false the
+    // moment anything follows a character around a torus twice: for period 148, canonical 0
+    // near 295 answered 148 when 296 is one tile away. Computed in `i64` so a coordinate near
+    // `i32::MAX` plus a period cannot overflow.
+    let periods = (near - value + period / 2).div_euclid(period);
+    value + periods * period
 }
 
 /// The difference between two positions, or why there is none.
@@ -489,7 +507,9 @@ mod tests {
         let Step::Inside(wrapped) = space.step(east_edge, 1, 0) else { panic!() };
 
         assert_eq!(wrapped.x - east_edge.x, -(2 * PITCH_X as i32) + 1, "the stored jump");
-        let drawn = space.nearest_unwrapped(wrapped, (east_edge.x, east_edge.y));
+        let camera =
+            RenderPosition { space: space.id, x: east_edge.x as i64, y: east_edge.y as i64 };
+        let drawn = space.nearest_unwrapped(wrapped, camera).expect("same space");
         assert_eq!(drawn.x - east_edge.x as i64, 1, "the camera moves one tile");
         assert_eq!(drawn.y, east_edge.y as i64);
         // The drawn value is not a position: on this torus x = 148 is outside the canonical
@@ -503,10 +523,63 @@ mod tests {
     }
 
     #[test]
+    fn a_camera_two_circuits_away_still_gets_the_nearest_unwrapped_value() {
+        // Codex re-review, 2026-08-23: only one period either side was considered, which
+        // assumed the camera was never more than a single wrap away. Anything that follows a
+        // character twice around a torus breaks that.
+        let space = torus();
+        let at = WorldPosition { space: space.id, x: 0, y: 39 };
+
+        for (camera_x, expected) in [(147, 148), (295, 296), (443, 444), (-147, -148), (0, 0)] {
+            let camera = RenderPosition { space: space.id, x: camera_x, y: 39 };
+            let drawn = space.nearest_unwrapped(at, camera).expect("same space");
+            assert_eq!(drawn.x, expected, "camera at {camera_x}");
+            // Whatever it draws is congruent to the stored position: the same tile, unwrapped.
+            assert_eq!(drawn.x.rem_euclid(2 * PITCH_X), at.x as i64);
+            assert!((drawn.x - camera_x).abs() <= PITCH_X, "and it is the nearest one");
+        }
+    }
+
+    #[test]
+    fn a_render_position_from_another_space_is_refused_rather_than_reduced() {
+        // Applying this space's geometry to a camera in another space would return a render
+        // position labelled with one space after using a different space's period.
+        let torus = torus();
+        let plane = plane();
+        let at = WorldPosition { space: torus.id, x: 0, y: 39 };
+        let foreign = RenderPosition { space: plane.id, x: 295, y: 39 };
+
+        assert_eq!(torus.nearest_unwrapped(at, foreign), None);
+        assert_eq!(
+            plane.nearest_unwrapped(at, RenderPosition { space: plane.id, x: 0, y: 0 }),
+            None,
+            "and a position from another space has no render value here either"
+        );
+    }
+
+    #[test]
+    fn a_step_that_leaves_i32_leaves_the_space_instead_of_wrapping_to_the_far_edge() {
+        // `as i32` turned `i32::MAX + 1` into `i32::MIN`, which on a wide space could land on a
+        // real placement at the opposite edge -- a plausible tile in the wrong place.
+        let space = Space {
+            id: WorldSpaceId(700),
+            version: TopologyVersion(1),
+            geometry: Geometry::Plane,
+            placements: BTreeMap::from([(MapId(700), Origin { x: i32::MAX as i64 - 73, y: 0 })]),
+        };
+        let edge = space
+            .to_global(LocalPosition { map: MapId(700), x: CORE_X.1, y: 50 })
+            .expect("the last column");
+        assert_eq!(edge.x, i32::MAX);
+        assert_eq!(space.step(edge, 1, 0), Step::Leaves);
+    }
+
+    #[test]
     fn a_plane_never_unwraps_anything() {
         let space = plane();
         let at = space.to_global(LocalPosition { map: MapId(1), x: 40, y: 40 }).unwrap();
-        let drawn = space.nearest_unwrapped(at, (10_000, -10_000));
+        let far_away = RenderPosition { space: space.id, x: 10_000, y: -10_000 };
+        let drawn = space.nearest_unwrapped(at, far_away).expect("same space");
         assert_eq!((drawn.x, drawn.y), (at.x as i64, at.y as i64));
         assert!(space.is_canonical(at), "a plane's positions are always canonical");
     }
@@ -630,8 +703,14 @@ pub mod contract {
         Render {
             space: u128,
             at: (i32, i32),
-            near: (i32, i32),
-            expect: (i32, i32),
+            // The camera and the answer are i64: a render position accumulates circuits and
+            // may sit past i32, while the stored position it is drawn from cannot.
+            near: (i64, i64),
+            expect: (i64, i64),
+        },
+        Unrepresentable {
+            space: u128,
+            at: (i64, i64),
         },
         Legacy {
             space: u128,
@@ -754,8 +833,12 @@ pub mod contract {
                 ["render", space, at, "near", near, "->", expect] => cases.push(Case::Render {
                     space: space.parse().expect("space"),
                     at: pair(at),
-                    near: pair(near),
-                    expect: pair(expect),
+                    near: wide(near),
+                    expect: wide(expect),
+                }),
+                ["unrepresentable", space, at] => cases.push(Case::Unrepresentable {
+                    space: space.parse().expect("space"),
+                    at: wide(at),
                 }),
                 ["legacy", space, at, "->", "unrepresentable"] => cases.push(Case::Legacy {
                     space: space.parse().expect("space"),
@@ -840,6 +923,12 @@ pub mod contract {
         (x.trim().parse().expect("x"), y.trim().parse().expect("y"))
     }
 
+    /// A pair that may exceed `i32`: a camera, or a coordinate the contract says is not one.
+    fn wide(text: &str) -> (i64, i64) {
+        let (x, y) = text.split_once(',').expect("a pair");
+        (x.trim().parse().expect("x"), y.trim().parse().expect("y"))
+    }
+
     fn local_at(map: &str, at: &str) -> LocalPosition {
         let (x, y) = at.split_once(',').expect("a tile");
         LocalPosition {
@@ -888,12 +977,10 @@ mod contract_tests {
                 Case::Render { space, at, near, expect } => {
                     let space = &spaces[space];
                     let position = WorldPosition { space: space.id, x: at.0, y: at.1 };
-                    let drawn = space.nearest_unwrapped(position, *near);
-                    assert_eq!(
-                        (drawn.x, drawn.y),
-                        (expect.0 as i64, expect.1 as i64),
-                        "render {at:?}"
-                    );
+                    let camera = RenderPosition { space: space.id, x: near.0, y: near.1 };
+                    let drawn =
+                        space.nearest_unwrapped(position, camera).expect("the contract's space");
+                    assert_eq!((drawn.x, drawn.y), *expect, "render {at:?} near {near:?}");
                     assert_eq!(drawn.space, position.space, "a render position keeps its space");
                 }
                 Case::RegionAt { space, at, expect } => {
@@ -914,6 +1001,16 @@ mod contract_tests {
                         (position(right), TopologyVersion(right.1)),
                     );
                     assert_eq!(found, *expect, "compare {left:?} with {right:?}");
+                }
+                Case::Unrepresentable { space, at } => {
+                    // Rust satisfies this by construction: there is no `WorldPosition` holding
+                    // these coordinates, so nothing can ask for their tile or their owner. The
+                    // case exists because Elixir's integers are unbounded and it *could* ask.
+                    assert!(
+                        i32::try_from(at.0).is_err() || i32::try_from(at.1).is_err(),
+                        "{at:?} is representable, so it is not this case"
+                    );
+                    assert!(spaces.contains_key(space), "space {space} is declared");
                 }
                 Case::Legacy { space, at, expect } => {
                     let space = &spaces[space];

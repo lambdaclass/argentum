@@ -12,11 +12,17 @@
 #   local  <space> <gx>,<gy> -> <map> <x>,<y> | none
 #   step   <space> <gx>,<gy> by <dx>,<dy> -> inside <gx>,<gy> | leaves
 #   render <space> <gx>,<gy> near <nx>,<ny> -> <rx>,<ry>
+#   unrepresentable <space> <gx>,<gy>
 #   legacy <space> <gx>,<gy> -> <map> <x>,<y> | unrepresentable
 #   region <space> <region-id> <map> <ox>,<oy>
 #   region-at <space> <gx>,<gy> -> <region-id> | none
 #   compare <space> <version> <gx>,<gy> with <space> <version> <gx>,<gy>
 #       -> <dx>,<dy> | different-space | different-version
+#
+# In a `render` line the camera is itself a render position, not a stored one: it may sit any
+# number of periods away from canonical, and past i32, because that is what following a
+# character around a torus produces. `unrepresentable` names a pair that is not a coordinate
+# at all -- Rust cannot construct it, and Elixir must refuse it rather than assign it a tile.
 #
 # The core is x=14..87, y=11..90 and the pitch is 74x80, so a map's local (14,11) is its
 # origin and local (87,90) is origin + (73,79).
@@ -93,6 +99,25 @@ step 37 40,0 by 0,-1 -> inside 40,159
 render 37 0,39 near 147,39 -> 148,39
 render 37 147,39 near 0,39 -> -1,39
 render 37 40,0 near 40,159 -> 40,160
+
+# More than one circuit. Both implementations compared only `value - period`, `value` and
+# `value + period`, which assumes the camera is never more than one wrap from canonical --
+# false the moment anything follows a character twice around. For period 148, canonical 0 near
+# 295 answered 148: a period wrong, so the sprite is drawn a whole map away from the camera.
+render 37 0,39 near 295,39 -> 296,39
+render 37 0,39 near -295,39 -> -296,39
+render 37 0,39 near 1000,39 -> 1036,39
+render 37 40,0 near 40,479 -> 40,480
+render 37 40,0 near 40,-479 -> 40,-480
+
+# A camera past i32. A render coordinate is i64 for this reason: it accumulates circuits, while
+# the stored position it is derived from stays a canonical i32.
+render 37 0,39 near 4294967296,39 -> 4294967252,39
+
+# Exactly halfway between two congruent values, where both are equally near. The rule has to be
+# stated rather than left to whichever comparison each language happens to make first.
+render 37 0,39 near 74,39 -> 148,39
+render 37 0,39 near -74,39 -> 0,39
 
 # ---------------------------------------------------------------------------------------
 # A cylinder: one axis wraps and the other does not.
@@ -219,3 +244,25 @@ place 701 701 2147483575,0
 # One tile further out and the last column has no global position at all.
 global 701 701 87,11 -> none
 global 701 701 86,11 -> 2147483647,0
+
+# ---------------------------------------------------------------------------------------
+# The exact shape of the truncation danger. This space's eastern map ends at `i32::MAX` and
+# its western map begins at `i32::MIN`, so a step that truncates off the east edge does not
+# fail -- it lands on a real tile of a real map four billion tiles away, which is the one
+# failure mode indistinguishable from a correct answer downstream. Rust's `step` did this
+# with `as i32`; Elixir did the mirror of it by accepting the untruncated coordinate and
+# naming a tile and an owner for it.
+# ---------------------------------------------------------------------------------------
+space 703 plane
+place 703 703 2147483574,0
+place 703 704 -2147483648,0
+
+local 703 2147483647,0 -> 703 87,11
+local 703 -2147483648,0 -> 704 14,11
+step 703 2147483646,0 by 1,0 -> inside 2147483647,0
+step 703 2147483647,0 by 1,0 -> leaves
+step 703 -2147483648,0 by -1,0 -> leaves
+
+unrepresentable 703 2147483648,0
+unrepresentable 703 -2147483649,0
+unrepresentable 703 4294967296,0
