@@ -24,6 +24,7 @@ pub mod tiles;
 pub mod topology;
 pub mod view;
 pub mod walk;
+pub mod wire;
 
 pub use mappack::{decode_map, PackedMap};
 pub use movement::{WalkGate, WalkGateConfig, WalkOutcome};

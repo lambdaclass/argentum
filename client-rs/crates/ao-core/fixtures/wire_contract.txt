@@ -1,0 +1,75 @@
+# The wire contract, as semantic values and the exact bytes they must become.
+#
+# Hand-authored: the hexadecimal was produced by a third implementation (Python `struct`),
+# not by either codec under test, so neither Rust nor Elixir can pass by reproducing its own
+# mistake. A fixture generated from the code it validates proves only that the code is
+# consistent with itself.
+#
+# Little-endian throughout. Every record begins with a u8 discriminant, and the field order,
+# widths and signedness below are the contract:
+#
+#   1 position  : topology_version u32, space u32, x i32, y i32          (17 bytes)
+#   2 ownership : entity u64, region u32, epoch u64                      (21 bytes)
+#   3 transfer  : transfer u64, transition u8, from_region u32, to u32    (18 bytes)
+#
+# Transition discriminants: 1 seam, 2 door, 3 portal, 4 teleport, 5 instance. 0 is not a
+# kind -- a zero byte is what an uninitialised field looks like, and it must not decode as
+# "geographic seam", the one kind that means a player crosses without noticing.
+#
+# Identities are distinguishable even at equal numeric value: the `1 2 3 4` cases exist so an
+# implementation with two same-width fields transposed fails instead of round-tripping.
+#
+# Both languages must, for every line: encode the semantic value and match the bytes, decode
+# the bytes and recover the value, and refuse every `reject` line for the stated reason.
+#
+# columns: <record> <fields...> = <hex bytes>
+#          reject <hex bytes> <truncated|oversized|unknown-record|unknown-transition>
+# zero everywhere: a valid record, and the one a lazy encoder gets right by accident
+position 0 0 0 0 = 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+ownership 0 0 0 = 02 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+transfer 0 seam 0 0 = 03 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 00
+
+# ordinary values from the acceptance square's east seam
+position 1 199 221 214 = 01 01 00 00 00 c7 00 00 00 dd 00 00 00 d6 00 00 00
+position 1 199 222 214 = 01 01 00 00 00 c7 00 00 00 de 00 00 00 d6 00 00 00
+ownership 7 330 3 = 02 07 00 00 00 00 00 00 00 4a 01 00 00 03 00 00 00 00 00 00 00
+transfer 9 seam 330 269 = 03 09 00 00 00 00 00 00 00 01 4a 01 00 00 0d 01 00 00
+
+# every transition kind, so an unknown discriminant is the only invalid one
+transfer 1 door 2 3 = 03 01 00 00 00 00 00 00 00 02 02 00 00 00 03 00 00 00
+transfer 1 portal 2 3 = 03 01 00 00 00 00 00 00 00 03 02 00 00 00 03 00 00 00
+transfer 1 teleport 2 3 = 03 01 00 00 00 00 00 00 00 04 02 00 00 00 03 00 00 00
+transfer 1 instance 2 3 = 03 01 00 00 00 00 00 00 00 05 02 00 00 00 03 00 00 00
+
+# negative global coordinates: the world has them, and i32 is signed
+position 3 199 -1 -1406 = 01 03 00 00 00 c7 00 00 00 ff ff ff ff 82 fa ff ff
+position 3 199 -1406 -1 = 01 03 00 00 00 c7 00 00 00 82 fa ff ff ff ff ff ff
+
+# i32 and u32 boundaries
+position 0 0 2147483647 -2147483648 = 01 00 00 00 00 00 00 00 00 ff ff ff 7f 00 00 00 80
+position 4294967295 4294967295 -2147483648 2147483647 = 01 ff ff ff ff ff ff ff ff 00 00 00 80 ff ff ff 7f
+
+# u64 boundaries, including an epoch that can no longer advance
+ownership 18446744073709551615 4294967295 18446744073709551615 = 02 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+ownership 1 0 18446744073709551614 = 02 01 00 00 00 00 00 00 00 00 00 00 00 fe ff ff ff ff ff ff ff
+transfer 18446744073709551615 seam 0 4294967295 = 03 ff ff ff ff ff ff ff ff 01 00 00 00 00 ff ff ff ff
+
+# swapped fields would still be valid widths, so every field differs from every
+# other: an implementation with version and space transposed, or entity and epoch,
+# or from and to, fails here rather than round-tripping its own mistake
+position 1 2 3 4 = 01 01 00 00 00 02 00 00 00 03 00 00 00 04 00 00 00
+ownership 1 2 3 = 02 01 00 00 00 00 00 00 00 02 00 00 00 03 00 00 00 00 00 00 00
+transfer 1 seam 2 3 = 03 01 00 00 00 00 00 00 00 01 02 00 00 00 03 00 00 00
+
+# rejections. Each is the shortest edit to a valid record that must not decode.
+reject 01 01 00 00 00 c7 00 00 00 dd 00 00 00 d6 00 00 truncated
+reject 01 truncated
+reject  truncated
+reject 01 01 00 00 00 c7 00 00 00 dd 00 00 00 d6 00 00 00 5c 78 30 30 oversized
+reject 5c 78 30 39 01 00 00 00 c7 00 00 00 dd 00 00 00 d6 00 00 00 unknown-record
+reject 5c 78 30 30 01 00 00 00 c7 00 00 00 dd 00 00 00 d6 00 00 00 unknown-record
+reject 02 07 00 00 00 00 00 00 00 4a 01 00 00 03 00 00 00 00 00 truncated
+reject 02 07 00 00 00 00 00 00 00 4a 01 00 00 03 00 00 00 00 00 00 00 5c 78 66 66 oversized
+reject 03 09 00 00 00 00 00 00 00 63 4a 01 00 00 0d 01 00 00 unknown-transition
+reject 03 09 00 00 00 00 00 00 00 00 4a 01 00 00 0d 01 00 00 unknown-transition
+reject 03 09 00 00 00 00 00 00 00 01 4a 01 00 00 0d truncated
