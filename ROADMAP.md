@@ -514,12 +514,21 @@ that shape and differ only in where they sit. A per-region geometry would let tw
 regions of one space disagree about whether a step wraps, which is not a thing the
 corpus can express and not a thing a player could be told coherently.
 
+The type is spelled `topology::Geometry` in Rust and `Arena.World.Position.geometry` in
+Elixir, not `WorldSpaceGeometry`. It is reached through the module that holds the world's
+topology and it is a field of `Space`, so the qualifier is already in the path and the
+longer name would only stutter. Named here so a reader looking for `WorldSpaceGeometry`
+finds it rather than concluding it was never built.
+
 **Also corrected 2026-08-23:** `WorldSpaceId` is 128 bits, not 32. `W-0104` mints a
 world space per live dungeon instance, at runtime, from whichever region is asked — a
 narrower id would need a central allocator or hand-managed ranges to stay unique, and
-the failure mode is two parties sharing a space. `RegionId` stays 32 bits: regions are
-allocated by the topology manifest and never reused, so they need no independent
-minting.
+the failure mode is two parties sharing a space. `RegionId` stays 32 bits: a region is a
+unit of authority over compiled content, not something minted per player action, so it
+needs no runtime allocator. It has no allocator at all yet — `W-0097`'s manifest emits
+spaces, geometry, maps and origins and no regions — and `W-0125` owes the one that makes
+the ids stable. Nothing in this task's contract depends on that allocator existing: the
+type is opaque, and the fixtures hand-author the ids.
 
 Global coordinates are per-space and exact, because W-0097 found the world is an atlas
 of several geometries rather than one plane: most spaces are planes, the Newbie Dungeon
@@ -551,8 +560,14 @@ authoritative owner per entity; read-only cross-region observations; commands
 routed to that owner; instance templates separate from runtime space IDs; and a
 versioned topology lookup rather than a central per-movement coordinate
 service. Property tests cover local/global round trips, negative/global-large
-coordinates, boundaries/corners, disconnected spaces, stale versions and
-stable IDs across reshard/restart.
+coordinates, boundaries/corners, disconnected spaces and stale versions.
+
+**Corrected 2026-08-23.** The list above ended with "stable IDs across reshard/restart",
+which this task cannot deliver and does not: with no allocator, a fixture asserting
+stability would only be repeating an id it wrote itself two lines earlier. `W-0125` owns
+that evidence and describes the release-pair it needs. What is delivered here is that the
+ids are *opaque and separable* — four identity kinds no conversion joins — which is the
+precondition for stability rather than a demonstration of it.
 
 ### Task W-0015 — Platform-service traits and capabilities
 
