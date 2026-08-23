@@ -251,6 +251,55 @@ defmodule Arena.World.ArrivalOwnershipTest do
       assert String.length(expected) == 16
     end
 
+    test "a matching configuration pin is accepted and changes nothing" do
+      # The pin is an assertion about the pack. When it agrees, it is redundant, and the pack
+      # is still what everything is compared against.
+      actual = ExitAnnotations.expected_version()
+      previous = Application.get_env(:arena, :map_pack_hash)
+      Application.put_env(:arena, :map_pack_hash, actual)
+
+      try do
+        assert ExitAnnotations.configured_pin() == actual
+        assert ExitAnnotations.expected_version() == actual
+        assert :ok == ExitAnnotations.verify!()
+      after
+        if previous do
+          Application.put_env(:arena, :map_pack_hash, previous)
+        else
+          Application.delete_env(:arena, :map_pack_hash)
+        end
+      end
+    end
+
+    test "a mismatching configuration pin fails the boot and never wins" do
+      # The hole this closes: if configuration could answer "which world is this", a stale pin
+      # and stale annotations would validate each other while both described a world nobody is
+      # serving.
+      actual = ExitAnnotations.expected_version()
+      previous = Application.get_env(:arena, :map_pack_hash)
+      Application.put_env(:arena, :map_pack_hash, "0000000000000000")
+
+      try do
+        assert ExitAnnotations.expected_version() == actual,
+               "the pack, not the pin, is the source of truth"
+
+        error =
+          assert_raise RuntimeError, ~r/Configuration pins a different world/, fn ->
+            ExitAnnotations.verify!()
+          end
+
+        # Both values are named, because "mismatch" alone sends nobody anywhere.
+        assert error.message =~ actual
+        assert error.message =~ "0000000000000000"
+      after
+        if previous do
+          Application.put_env(:arena, :map_pack_hash, previous)
+        else
+          Application.delete_env(:arena, :map_pack_hash)
+        end
+      end
+    end
+
     test "a version mismatch is a boot failure, not a warning" do
       in_a_temp_dir(fn dir ->
         File.write!(Path.join(dir, "version.txt"), "some-other-world\n")

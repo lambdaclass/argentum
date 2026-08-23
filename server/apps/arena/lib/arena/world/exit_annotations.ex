@@ -109,32 +109,38 @@ defmodule Arena.World.ExitAnnotations do
   end
 
   @doc """
-  The content hash of the map pack this server actually loaded.
+  The content hash of the map pack this server actually built.
 
-  This is the value annotations must match. Configuration overrides it — `:map_pack_hash`, for
-  a deployment pinning a version deliberately — and otherwise it comes from
-  `Arena.ClientMapPack.manifest/0`, which computes `sha256(pack)[0..16]` from the bytes it
-  built.
+  The only source of truth. `:map_pack_hash` in configuration is an *assertion* about this
+  value, never a replacement for it: letting configuration answer would allow a stale pin and
+  stale annotations to agree with each other while both disagree with the world the server is
+  serving, which is the same failing-open shape as trusting an artefact's claim about itself.
+  `verify!/0` checks the pin against this and refuses to boot if they differ.
 
   Returns `nil` only when the pack cannot be built at all, and `nil` is not a wildcard:
-  `verify!/0` turns it into a boot failure and `annotate/3` refuses every exit. An earlier
-  version accepted any annotation when the expected value was unset, which is the same
-  failing-open mistake as allowing a transfer whose destination could not be judged.
+  `verify!/0` turns it into a boot failure and `annotate/3` refuses every exit.
   """
   @spec expected_version() :: String.t() | nil
   def expected_version do
-    case Application.get_env(:arena, :map_pack_hash) do
-      hash when is_binary(hash) ->
-        hash
+    try do
+      Arena.ClientMapPack.manifest().hash
+    rescue
+      error ->
+        Logger.error("Cannot determine the map pack hash: #{inspect(error)}")
+        nil
+    end
+  end
 
-      _ ->
-        try do
-          Arena.ClientMapPack.manifest().hash
-        rescue
-          error ->
-            Logger.error("Cannot determine the map pack hash: #{inspect(error)}")
-            nil
-        end
+  @doc """
+  What configuration asserts the world is, if anything.
+
+  An assertion to be checked, not a value to be used.
+  """
+  @spec configured_pin() :: String.t() | nil
+  def configured_pin do
+    case Application.get_env(:arena, :map_pack_hash) do
+      hash when is_binary(hash) -> hash
+      _ -> nil
     end
   end
 
@@ -188,6 +194,18 @@ defmodule Arena.World.ExitAnnotations do
         #{Path.join(dir, "version.txt")} is missing. Regenerate the annotations:
 
             cargo run --release -p ao-topology -- <pack> --exit-annotations #{dir}
+        """
+
+      configured_pin() != nil and configured_pin() != expected ->
+        raise """
+        Configuration pins a different world than this server built.
+
+          map pack:      #{expected}
+          :map_pack_hash #{configured_pin()}
+
+        The pin is an assertion about the pack, not a substitute for it. If it were allowed to
+        win, a stale pin and stale annotations would validate each other while both described a
+        world nobody is serving. Either update the pin or find out why the pack changed.
         """
 
       claimed != expected ->

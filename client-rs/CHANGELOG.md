@@ -21,7 +21,9 @@ Never reuse a completed ID in the active roadmap.
 
 ### Completed Task W-0105 — Validated exit destinations
 
-Closed: 2026-08-22 (`5a24d737`)
+Closed: 2026-08-22 (`5a24d737`, plus the configuration-pin correction committed
+immediately after: the closure was pushed before that hole was reported, and does not stand
+without it)
 
 `Arena.Map.Movement.check_tile_exit/5` transferred a character to whatever tile an exit
 named, consulting neither the arrival tile, nor the character's locomotion, nor whether the
@@ -52,7 +54,8 @@ The first wiring allowed a transfer whenever the destination could not be judged
 the promise — the source validates before releasing authority — false exactly where it
 mattered.
 
-**One world identity.** Annotations are versioned by the map pack's content hash,
+**One world identity, and one source of truth for it.** Annotations are versioned by the map
+pack's content hash,
 `sha256(pack)[0..16]`, the same identity already in every `maps.<hash>.pack` filename. A
 first attempt hashed the same bytes with FNV-1a and gave the pack a second name. SHA-256 is
 hand-written here because the tree builds offline, and its correctness is confirmed
@@ -60,6 +63,12 @@ independently: over the real pack it produces `17afc00c9c7e0b4c`, which is the f
 was never told. The server compares the annotations' claim against the pack it actually
 built — an artefact agreeing with itself proves nothing — and boots in that order: build the
 pack, check the annotations, then start the MapServers that will trust them.
+
+`:map_pack_hash` in configuration is an *assertion* about that hash and never a substitute
+for it. An intermediate version let configuration answer "which world is this", which would
+have allowed a stale pin and stale annotations to validate each other while both described a
+world nobody was serving. A pin that disagrees with the built pack now fails the boot,
+naming both values.
 
 **Ownership.** Refusal happens before the step onto the transition band, so a rejection
 begins no handoff at all. Counted rather than assumed: solid, void and water-on-foot each
