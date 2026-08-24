@@ -153,10 +153,17 @@ pub enum Step {
 }
 
 /// A space's shape and extent: everything needed to move inside it and to convert positions.
+/// A coordinate space: its shape and where each map's core sits in it.
+///
+/// It carries no version. It used to, and that field was written at every construction site and
+/// read at none, so a `Space` could claim one release while the [`crate::identity::LoadedTopology`]
+/// holding it claimed another -- two answers to "which release is this?" with nothing to reconcile
+/// them, and the unused one free to drift. The release owns the version; a space belongs to
+/// exactly one release, which is the one that loaded it. Elixir's space never had the field, so
+/// this also removes a divergence between the two.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Space {
     pub id: WorldSpaceId,
-    pub version: TopologyVersion,
     pub geometry: Geometry,
     /// Where each map's core sits in this space's coordinates.
     pub placements: BTreeMap<MapId, Origin>,
@@ -354,7 +361,6 @@ mod tests {
         // Two maps side by side: 1 at the origin, 2 one core-width east.
         Space {
             id: WorldSpaceId(1),
-            version: TopologyVersion(1),
             geometry: Geometry::Plane,
             placements: BTreeMap::from([
                 (MapId(1), Origin { x: 0, y: 0 }),
@@ -367,7 +373,6 @@ mod tests {
         // The Newbie Dungeon's shape: 2x2 maps, wrapping both ways.
         Space {
             id: WorldSpaceId(37),
-            version: TopologyVersion(1),
             geometry: Geometry::Torus { width: 2 * PITCH_X, height: 2 * PITCH_Y },
             placements: BTreeMap::from([
                 (MapId(168), Origin { x: 0, y: 0 }),
@@ -571,7 +576,6 @@ mod tests {
         // real placement at the opposite edge -- a plausible tile in the wrong place.
         let space = Space {
             id: WorldSpaceId(700),
-            version: TopologyVersion(1),
             geometry: Geometry::Plane,
             placements: BTreeMap::from([(MapId(700), Origin { x: i32::MAX as i64 - 73, y: 0 })]),
         };
@@ -596,7 +600,6 @@ mod tests {
     fn a_cylinder_wraps_one_axis_and_not_the_other() {
         let space = Space {
             id: WorldSpaceId(5),
-            version: TopologyVersion(1),
             geometry: Geometry::Cylinder { axis: Axis::X, period: 2 * PITCH_X },
             placements: BTreeMap::from([
                 (MapId(1), Origin { x: 0, y: 0 }),
@@ -807,12 +810,7 @@ pub mod contract {
                     };
                     spaces.insert(
                         id,
-                        Space {
-                            id: WorldSpaceId(id),
-                            version: TopologyVersion(1),
-                            geometry,
-                            placements: BTreeMap::new(),
-                        },
+                        Space { id: WorldSpaceId(id), geometry, placements: BTreeMap::new() },
                     );
                 }
                 ["place", space, map, at] => {

@@ -502,7 +502,6 @@ mod tests {
     fn two_regions() -> (Space, Vec<RegionPlacement>) {
         let space = Space {
             id: WorldSpaceId(199),
-            version: TopologyVersion(1),
             geometry: Geometry::Plane,
             placements: BTreeMap::from([
                 (MapId(330), Origin { x: 0, y: 0 }),
@@ -734,7 +733,6 @@ mod tests {
     fn one_map_space(id: u128, map: u16) -> Space {
         Space {
             id: WorldSpaceId(id),
-            version: TopologyVersion(1),
             geometry: Geometry::Plane,
             placements: BTreeMap::from([(MapId(map), Origin { x: 0, y: 0 })]),
         }
@@ -917,7 +915,6 @@ mod contract_tests {
                     // 269 at 74,0.
                     let checked = Space {
                         id: WorldSpaceId(199),
-                        version: TopologyVersion(1),
                         geometry: crate::topology::Geometry::Plane,
                         placements: std::collections::BTreeMap::from([
                             (MapId(330), Origin { x: 0, y: 0 }),
@@ -1009,7 +1006,6 @@ mod placement_tests {
     fn space() -> Space {
         Space {
             id: WorldSpaceId(199),
-            version: TopologyVersion(1),
             geometry: Geometry::Plane,
             placements: BTreeMap::from([
                 (MapId(330), Origin { x: 0, y: 0 }),
