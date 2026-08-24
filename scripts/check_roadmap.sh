@@ -68,6 +68,28 @@ if [ "$state_count" -ne "$active_count" ] \
   fail=$((fail + 1))
 fi
 
+# A task's metadata must agree with the section that controls its exit gate. Merely
+# counting Phase fields allowed a Phase-1 prerequisite to sit under Phase 8, after
+# the gate and consumers that needed it, while the roadmap still reported PASS.
+phase_mismatches="$(awk '
+  /^## Phase / { section=$3; next }
+  /^### Task W-[0-9][0-9][0-9][0-9] — / { id=$3; task_section=section; next }
+  /^- \*\*Phase:\*\* / {
+    declared=$0
+    sub(/^- \*\*Phase:\*\* /, "", declared)
+    if (task_section == "") {
+      printf "%s declares phase %s before any Phase section\n", id, declared
+    } else if (declared != task_section) {
+      printf "%s is inside Phase %s but declares Phase %s\n", id, task_section, declared
+    }
+  }
+' "$roadmap")"
+if [ -n "$phase_mismatches" ]; then
+  echo "FAIL task phase metadata disagrees with its containing section:"
+  printf '%s\n' "$phase_mismatches"
+  fail=$((fail + 1))
+fi
+
 if grep -nE '^### Task (W-[0-9]{1,3}|[0-9]+)([^0-9]|$)' "$roadmap"; then
   echo "FAIL malformed or positional task heading"
   fail=$((fail + 1))

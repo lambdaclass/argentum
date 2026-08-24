@@ -23,8 +23,8 @@ Canonical supporting documents:
 - [`client-rs/CHANGELOG.md`](client-rs/CHANGELOG.md) remains the historical archive for
   Rust/Bevy tasks closed before the roadmaps were consolidated; it receives no new closures.
 - This roadmap owns active tasks, execution order and phase exit gates.
-- `scripts/check_roadmap.sh` enforces stable task identities, one sequence and
-  one exit gate per phase.
+- `scripts/check_roadmap.sh` enforces stable task identities, one sequence,
+  task metadata matching its containing phase and one exit gate per phase.
 
 Task ownership follows the behavior being delivered, not the directory being edited.
 An optional `[client]`, `[server]` or `[shared]` label disambiguates work whose owner
@@ -562,12 +562,96 @@ versioned topology lookup rather than a central per-movement coordinate
 service. Property tests cover local/global round trips, negative/global-large
 coordinates, boundaries/corners, disconnected spaces and stale versions.
 
+One loaded topology release has exactly one version owner. In Rust,
+`LoadedTopology` owns the manifest version; `Space` must not carry a second,
+independently constructible version that can disagree with it. Prefer removing
+`Space.version`, matching the Elixir representation. If a retained field proves
+necessary, loading must reject every space whose version differs from the
+release, and the shared fixture must contain a deliberately mixed release that
+both languages refuse. A fixture that constructs spaces as version `1` and then
+loads them under a content-hash version is a failing contract, even when no
+current caller happens to read the stale field.
+
+The binary fixture's independent checker must classify bytes rather than compare
+only with the finite set of valid examples. For each `reject` line, derive the
+actual result from discriminant, exact record length and transition-kind byte,
+then require the named `truncated`, `oversized`, `unknown-record` or
+`unknown-transition` reason. A different but valid ownership, position or
+transfer record must make the gate fail even when those exact bytes do not occur
+in another fixture line.
+
 **Corrected 2026-08-23.** The list above ended with "stable IDs across reshard/restart",
 which this task cannot deliver and does not: with no allocator, a fixture asserting
 stability would only be repeating an id it wrote itself two lines earlier. `W-0125` owns
 that evidence and describes the release-pair it needs. What is delivered here is that the
 ids are *opaque and separable* — four identity kinds no conversion joins — which is the
 precondition for stability rather than a demonstration of it.
+
+### Task W-0125 — Stable region identity in the compiled topology
+
+- **State:** planned
+- **Phase:** 1
+- **Depends on:** W-0097, W-0098
+
+`W-0098` defines `RegionId` as a unit of runtime authority stable across process
+restarts and topology releases, and `RegionPlacement` as where that authority
+sits. It does not allocate an ID: `W-0097`'s manifest emits spaces, geometry,
+maps and origins but no regions, so every current contract ID is hand-authored.
+Protocol bootstrap and the four-region MVP may not promote those fixture numbers
+into production identity by accident.
+
+Use one version-controlled allocation ledger at
+`client-rs/assets/world-topology/regions.txt`. It is compiler input, never a
+runtime service, ETS table, PID registry or database sequence. The line-oriented
+format records:
+
+- one monotonic `next_region_id` high-water mark;
+- each active `RegionId`, its current `WorldSpaceId` and sorted owned map IDs;
+- every retired `RegionId` as a tombstone, with the topology hash that retired
+  it; and
+- an explicit disposition for a split or merge. A split retires the old ID and
+  allocates new IDs for every resulting authority; a merge retires every input
+  and allocates one new ID. Unrelated regions never change.
+
+The initial grammar is deliberately small and reviewable:
+
+```text
+format 1
+next_region_id <u32>
+active <region_id> space <world_space_id> maps <sorted-comma-separated-map-ids>
+tombstone <region_id> retired_in <topology-hash> reason <removed|split|merge>
+split <old-region-id> into <sorted-new-region-ids> in <topology-hash>
+merge <sorted-old-region-ids> into <new-region-id> in <topology-hash>
+```
+
+The compiler is deterministic over `(corpus, reviews, region ledger)`, includes
+the ledger in the topology content hash, refuses duplicate IDs/maps, an ID below
+the high-water mark that is neither active nor tombstoned, reuse of a tombstone,
+and membership changes without an explicit split/merge disposition. New IDs are
+allocated from the recorded high-water mark and written only by an explicit
+review command; a normal compile/check never mutates the ledger. This retained
+history—not graph traversal order, a map number or the current corpus—is what
+makes identity survive releases. There is no central runtime allocator and no
+movement-time lookup. Exhausting `u32` fails the allocation command explicitly;
+it cannot wrap, scan for a hole or reuse a tombstone.
+
+Review topology may be incomplete, but authority may not be. Every map in an
+**active** space has exactly one `RegionId`; a missing or duplicate owner keeps
+the entire space non-active and the runtime loader refuses it. An entity cannot
+enter, spawn, persist or hand off into an unowned map. The Phase-3 acceptance
+quad therefore contains exactly four assigned maps and four resolvable owners.
+If partial region placements remain useful for compiler reports, name that type
+`CandidatePlacements` (or equivalent); it must not construct `ResolvedSpace` or
+an authoritative `LoadedTopology`.
+
+Close with a checked-in release pair and mutation tests. Starting from release
+A, release B adds and removes maps, moves origins and performs one explicit
+split: every unaffected authority keeps its ID, removed/split IDs remain
+tombstoned, new authorities use never-issued IDs, no active map lacks an owner,
+and both Elixir and Rust resolve the same positions to the same manifest-emitted
+IDs. Recompiling either release produces identical bytes, while deleting a
+tombstone, lowering the high-water mark, reusing an ID or omitting one active
+map makes the gate fail by name.
 
 ### Task W-0015 — Platform-service traits and capabilities
 
@@ -649,6 +733,13 @@ permission to introduce a global simulation tick.
 - [ ] Shared Elixir/Rust fixtures prove canonical position, stable identity,
       topology-version and local/global conversion semantics; transition bands
       cannot become durable locations.
+- [ ] The tracked region ledger and a two-release fixture prove IDs survive
+      ordinary topology changes, retired IDs are never reused and every map in
+      an active space has exactly one owner; candidate/partial placements cannot
+      enter the authoritative loaded topology.
+- [ ] A loaded release has one topology-version source, and an independently
+      implemented wire check derives the exact result of every accepted and
+      rejected record rather than comparing only with listed examples.
 - [ ] Standard cardinal seams advance one global tile, while doors, portals,
       teleports, disconnected components and instances never acquire invented
       spatial adjacency.
@@ -682,7 +773,7 @@ why the divergence is necessary and how it is disabled or rolled back.
 
 - **State:** planned
 - **Phase:** 2
-- **Depends on:** W-0021, W-0098
+- **Depends on:** W-0021, W-0098, W-0125
 
 Classify `map_handoff_begin/end/failed` as intentional divergences, assign
 fixtures and capability negotiation, and state the behavior of retained
@@ -794,7 +885,7 @@ on the flush and no empty map wakes because of it.
 
 - **State:** planned
 - **Phase:** 2
-- **Depends on:** W-0062
+- **Depends on:** W-0062, W-0125
 
 Refactor `MapServer.enter/3` to return a structured snapshot rather than send
 NPC bytes out of band. The snapshot carries canonical position, stable entity
@@ -823,7 +914,19 @@ transfer install new authority and replication epochs with complete baselines.
 A same-owner resnapshot replaces only the replication epoch/baseline. Key any
 remaining map-local IDs by authority epoch while preserving stable entity
 identity. A source authority revision never continues into or gets translated
-to a destination epoch. The source owns
+to a destination epoch.
+
+The per-session authority lifecycle owns epoch allocation; a MapServer process
+does not mint an epoch, restore a cached one or reset it to zero. Reinstalling
+authority after a MapServer crash advances `AuthorityEpoch` exactly once before
+the replacement owner accepts a command. If the session/lifecycle owner cannot
+prove the next epoch—for example because its own state was also lost—it fails
+closed: invalidate `SessionEpoch`, disconnect and perform a fresh authenticated
+bootstrap that installs new session, authority and replication epochs. It never
+guesses or resumes the pre-crash epoch. A same-process resnapshot is not a
+restart and preserves authority epoch as stated above.
+
+The source owns
 the player through prepare; the destination validates capacity, topology
 version, entry collision and snapshot readiness without publishing authority.
 Commit once, or abort idempotently and retain/correct the complete source world.
@@ -838,7 +941,12 @@ Pin the sequence byte-for-byte in Elixir and Rust and force egress pressure in
 the test. Prove login, reconnect and handoff all use the same writer and that a
 late source-epoch envelope is rejected rather than applied to the destination.
 Duplicate prepare/commit/abort is idempotent; revision exhaustion fails closed
-in a deterministic test rather than wrapping.
+in a deterministic test rather than wrapping. Crash a MapServer while a session
+remains connected, delay a command stamped immediately before the crash, restore
+the same stable `RegionId`, and prove the replacement authority has a new epoch
+and refuses that command. Repeat with a crash during prepare and during commit;
+recovery must produce one owner and one epoch transition, or terminate the
+session explicitly.
 
 ### Task W-0024 — Login bootstrap decoding
 
@@ -944,6 +1052,10 @@ baseline and suppresses duplicate resnapshot requests until that attempt ends.
 - [ ] Forced backpressure proves `begin < every member < end`, and a stale world
       authority epoch cannot mutate the current world; prepare/commit/abort remains
       single-owner under timeout, duplicate, crash, overload and topology race.
+- [ ] Restarting a MapServer while its session survives retains the stable region
+      ID but installs exactly one new authority epoch before accepting commands;
+      a delayed pre-crash command is refused. If the epoch owner is also lost,
+      the session is invalidated and reboots instead of guessing an epoch.
 - [ ] No global/protocol tick or cross-MapServer barrier exists. Session epoch,
       authority epoch/revision and replication epoch/revision have distinct
       paired fixtures; accepted transactions advance authority once, rejections
@@ -1099,7 +1211,7 @@ atomic no-blank replacement before W-0099 proves camera-continuous geography.
 
 - **State:** planned
 - **Phase:** 3
-- **Depends on:** W-0096, W-0098
+- **Depends on:** W-0096, W-0098, W-0125
 
 Select one compiler-confirmed 2x2 geographic group with clean cardinal seams;
 maps 1/2/11/14 are candidates only if W-0097's generated evidence confirms
@@ -1320,37 +1432,6 @@ slice; Phase 7 makes likely regions ready within byte/time budgets. This phase
 curates the full production topology, expands the proven composition path and
 adds gameplay that genuinely spans invisible simulation partitions. It does not
 replace one loaded MapServer per legacy map with a global bottleneck.
-
-### Task W-0125 — Stable region identity in the compiled topology
-
-- **State:** planned
-- **Phase:** 1
-- **Depends on:** W-0097, W-0098
-
-`W-0098` defines `RegionId` as a unit of runtime authority that is stable across process
-restarts and topology releases, and defines `RegionPlacement` as where a region sits. Nothing
-allocates either. `W-0097`'s manifest emits spaces, geometry, maps and origins and contains no
-regions at all, so the region ids in the contract fixtures are hand-authored, and the claim in
-an earlier draft of the wire documentation that they "come from the topology manifest" was
-false when it was written.
-
-What is already true, and does not need this task: the type cannot be a PID, an array index or
-a boot-order position, and it cannot be derived from a map id. What is *not* established is
-stability — that region 330 in one topology release is the same authority as region 330 in the
-next, and that resharding a crowded space into two regions does not renumber the rest.
-
-So the manifest must allocate them. Emit a region section beside the spaces: a stable id per
-region, the space it belongs to, the maps it owns and the origin of each, with the same
-determinism the rest of the manifest has — same corpus, identical bytes. Allocation must
-survive a corpus change that adds or removes maps: an id, once issued, names that authority
-forever, and a removed region's id is retired rather than reused. A reshard that splits one
-region into two issues new ids for the new parts and does not disturb any other.
-
-The evidence this needs is a topology release *pair*, not a single manifest: compile two
-corpora that differ, and show that every region present in both kept its id, that new regions
-got unused ids, and that a position's owner is unchanged where the geometry is unchanged.
-`W-0098`'s cross-language fixtures then stop hand-authoring region ids and read them from the
-manifest instead.
 
 ### Task W-0101 — Production topology classification and activation
 
@@ -2654,7 +2735,7 @@ which reference artifacts were retained and why.
 ### Task W-0092 — Render the world and interface at physical device resolution
 
 - **State:** planned
-- **Phase:** 11
+- **Phase:** 10
 - **Depends on:** W-0003
 
 Deferred from W-0003 by decision on 2026-08-18, then largely delivered during
@@ -2812,7 +2893,7 @@ history rather than being reopened.
 | Failure-reproduction bundles | W-0028, W-0114 |
 | Protocol governance, framing, schema and queues | W-0021, W-0022, W-0023, W-0029 |
 | Secure launch, bootstrap, receipts and reconnect | W-0024, W-0026, W-0027, W-0030, W-0032, W-0033, W-0063, W-0064 |
-| Canonical world, handoff, four-region MVP and persistence | W-0098, W-0062, W-0065, W-0066, W-0096, W-0099, W-0100 |
+| Canonical world, stable region allocation, handoff, four-region MVP and persistence | W-0098, W-0125, W-0062, W-0065, W-0066, W-0096, W-0099, W-0100 |
 | Telemetry, dashboards, alerts, admin, audit, runbooks and SLOs | W-0115, W-0116, W-0117 |
 | Exploit/anti-cheat and account/launch security | W-0075, W-0118, W-0119 |
 | NPC/pet spatial queries, guild modularity, data resolution and tuning | W-0120, W-0121, W-0122 |
