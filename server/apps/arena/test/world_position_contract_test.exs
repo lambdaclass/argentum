@@ -407,6 +407,14 @@ defmodule Arena.World.PositionContractTest do
     stray = [%{region: 37, space: 37, map: 330, origin: {148, 160}}]
     assert {:error, {:wrong_space, 37, 37}} = Position.region_at(space, {221, 214}, stray)
 
+    # And a *consistent* set that does not cover the space is refused too. Rust can only ask
+    # this question through `ResolvedSpace`, which requires complete ownership, so validating
+    # less here would let the server name an owner for a tile the client says has none -- the
+    # two sides disagreeing about who is responsible for a position.
+    partial = Enum.reject(good, &(&1.map == 287))
+    assert Identity.check_placements(space, partial) == :ok, "partial is consistent"
+    assert {:error, {:map_without_region, 287}} = Position.region_at(space, {221, 214}, partial)
+
     shared = good ++ [%{region: 331, space: 199, map: 330, origin: {148, 160}}]
     assert {:error, {:map_shared, 330}} = Position.region_at(space, {221, 214}, shared)
   end

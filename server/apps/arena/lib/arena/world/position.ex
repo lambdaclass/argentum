@@ -217,14 +217,21 @@ defmodule Arena.World.Position do
   the question that crossing it answers differently on either side.
 
   `placements` is a list of `%{region:, space:, map:, origin:}`, checked by
-  `Arena.World.Identity.check_placements/2` before it is used. Refuses rather than guessing if
+  `Arena.World.Identity.check_authority/2` before it is used. Refuses rather than guessing if
   the placements do not describe this space: a drifted origin would otherwise assign authority
   at coordinates the space does not agree with.
+
+  It is the *authority* check, not the weaker consistency one, because Rust can only ask this
+  question through `ResolvedSpace`, which requires complete ownership. Validating less here
+  would have made a partially placed space name an owner on the server and refuse to on the
+  client — the two sides disagreeing about who is responsible for a tile, which is the exact
+  class of divergence these contracts exist to prevent. A caller that genuinely wants the
+  weaker question calls `Identity.check_placements/2` and does its own lookup.
   """
   @spec region_at(map(), {integer(), integer()}, [map()]) ::
           {:ok, integer()} | :none | {:error, tuple()}
   def region_at(space, position, placements) do
-    case Arena.World.Identity.check_placements(space, placements) do
+    case Arena.World.Identity.check_authority(space, placements) do
       :ok ->
         case to_local(space, position) do
           {:ok, {map, _x, _y}} ->
