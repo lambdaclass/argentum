@@ -39,18 +39,23 @@ defmodule Arena.World.Topology do
           | :no_such_space
 
   @doc """
-  Load a release: a version, and spaces whose region placements have already been checked.
+  Load a release: a version, and spaces whose every map is owned by exactly one region.
 
   Refuses two spaces claiming one id. The resolver would answer with whichever it found first,
   and every tile of the other would silently be somewhere else — a world that loads cleanly and
   puts half its players in the wrong place.
+
+  Refuses a space with an unowned map, via `Identity.check_authority/2` rather than the weaker
+  `check_placements/2`. A partially placed space is a legitimate compiler artefact and not a
+  loadable one: it resolves, and then reports every tile of the unowned map as having no owner in
+  the same words it uses for a tile no map covers.
   """
   @spec load(non_neg_integer(), [{space(), [placement()]}]) ::
           {:ok, t()} | {:error, {:duplicate_space, non_neg_integer()}} | {:error, term()}
   def load(version, spaces) do
     Enum.reduce_while(spaces, {:ok, %{version: version, spaces: %{}}}, fn {space, regions}, {:ok, loaded} ->
       with false <- Map.has_key?(loaded.spaces, space.id),
-           :ok <- Identity.check_placements(space, regions) do
+           :ok <- Identity.check_authority(space, regions) do
         entry = %{space: space, regions: regions}
         {:cont, {:ok, put_in(loaded.spaces[space.id], entry)}}
       else

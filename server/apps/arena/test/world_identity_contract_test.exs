@@ -37,8 +37,8 @@ defmodule Arena.World.IdentityContractTest do
 
   test "the contract covers every rule and is worth checking" do
     kinds = cases() |> Enum.map(fn {_, [kind | _], _} -> kind end) |> Enum.uniq() |> Enum.sort()
-    assert kinds == ["advance", "execute", "instances", "placements", "seamless"]
-    assert length(cases()) >= 24
+    assert kinds == ["advance", "authority", "execute", "instances", "placements", "seamless"]
+    assert length(cases()) >= 31
   end
 
   test "elixir satisfies every case in the identity contract" do
@@ -110,7 +110,7 @@ defmodule Arena.World.IdentityContractTest do
 
           assert got == want, "#{line} gave #{inspect(got)}"
 
-        ["placements", space | entries] ->
+        [verb, space | entries] when verb in ["placements", "authority"] ->
           checked = %{id: 199, placements: %{330 => {0, 0}, 269 => {74, 0}}}
           claimed_space = String.to_integer(space)
 
@@ -127,12 +127,20 @@ defmodule Arena.World.IdentityContractTest do
               }
             end)
 
-          got = Identity.check_placements(checked, placements)
+          got =
+            case verb do
+              "placements" -> Identity.check_placements(checked, placements)
+              "authority" -> Identity.check_authority(checked, placements)
+            end
 
           want =
             case expected do
               ["ok"] ->
                 :ok
+
+              ["map-without-region", map] ->
+                assert verb == "authority", "only `authority` can report an unowned map"
+                {:error, {:map_without_region, String.to_integer(map)}}
 
               ["wrong-space", region] ->
                 {:error, {:wrong_space, String.to_integer(region), claimed_space}}
@@ -153,6 +161,17 @@ defmodule Arena.World.IdentityContractTest do
             end
 
           assert got == want, "#{line} gave #{inspect(got)}"
+
+          # The weaker question must not be answered by the stronger check. A consistent but
+          # partial set is `:ok` for `placements` and refused for `authority`, and a suite that
+          # ran only one of them could not tell the two checks apart at all.
+          if verb == "placements" and want == :ok do
+            assert Identity.check_authority(checked, placements) in [
+                     :ok,
+                     {:error, {:map_without_region, 269}},
+                     {:error, {:map_without_region, 330}}
+                   ]
+          end
 
         ["seamless", kind] ->
           want = expected == ["yes"]

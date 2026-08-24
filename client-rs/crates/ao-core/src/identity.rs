@@ -69,6 +69,14 @@ pub enum PlacementFault {
     OriginDisagrees { region: RegionId, map: MapId, placement: Origin, space: Origin },
     /// Two regions claim the same map, so a position in it has two owners.
     MapSharedByRegions { map: MapId },
+    /// A map of the space has no region, so positions in it have no owner.
+    ///
+    /// Consistency and completeness are different questions, and only the second one blocks
+    /// authority: a compiler report on a half-reviewed corpus is legitimately partial, while an
+    /// entity standing in an unowned map cannot be commanded, persisted or handed off. `W-0125`
+    /// states the rule -- every map in an active space has exactly one `RegionId` -- and this is
+    /// where it is enforced.
+    MapWithoutRegion { map: MapId },
 }
 
 /// Check that region placements agree with the space they claim to place regions in.
@@ -79,6 +87,11 @@ pub enum PlacementFault {
 /// its space's layout would put authority at coordinates the space does not agree with, which
 /// is worse than having no placement at all: every conversion still succeeds, and every answer
 /// is wrong by a fixed offset.
+/// Consistency: every placement describes the space it claims to, and no map has two owners.
+///
+/// Deliberately silent about maps with *no* owner. That is completeness, which
+/// [`check_authority`] asks, and the two questions have different right answers: a compiler
+/// report on a partly reviewed corpus is legitimately incomplete.
 pub fn check_placements(space: &Space, regions: &[RegionPlacement]) -> Result<(), PlacementFault> {
     let mut claimed: std::collections::BTreeSet<MapId> = std::collections::BTreeSet::new();
 
@@ -105,6 +118,25 @@ pub fn check_placements(space: &Space, regions: &[RegionPlacement]) -> Result<()
         }
         if !claimed.insert(placement.map) {
             return Err(PlacementFault::MapSharedByRegions { map: placement.map });
+        }
+    }
+
+    Ok(())
+}
+
+/// Authority: consistent, *and* every map of the space has exactly one owner.
+///
+/// This is what a space must satisfy to be resolvable. `W-0125`: "Review topology may be
+/// incomplete, but authority may not be." An entity cannot enter, spawn, persist or hand off
+/// into an unowned map, and a lookup that answered "no owner" for a whole map would report that
+/// as though it were an ordinary uncovered tile — the same answer for "nothing is there" and
+/// "something is there and nobody is responsible for it".
+pub fn check_authority(space: &Space, regions: &[RegionPlacement]) -> Result<(), PlacementFault> {
+    check_placements(space, regions)?;
+
+    for map in space.placements.keys() {
+        if !regions.iter().any(|placement| placement.map == *map) {
+            return Err(PlacementFault::MapWithoutRegion { map: *map });
         }
     }
 
@@ -347,13 +379,19 @@ pub struct TopologyRequest {
     pub version: TopologyVersion,
 }
 
-/// A space whose region placements have been checked against it.
+/// A space whose regions cover it completely and consistently.
 ///
 /// The fields are private and the only way in is [`ResolvedSpace::new`], which runs
-/// [`check_placements`]. That is deliberate: an earlier version let a caller build a
-/// "resolved" answer from any placements at all, and `region_at` then assigned authority from
-/// a placement naming another space or carrying a drifted origin. Making the invalid value
-/// unconstructible is stronger than remembering to validate it.
+/// [`check_authority`]. That is deliberate: an earlier version let a caller build a "resolved"
+/// answer from any placements at all, and `region_at` then assigned authority from a placement
+/// naming another space or carrying a drifted origin. Making the invalid value unconstructible
+/// is stronger than remembering to validate it.
+///
+/// It also requires *complete* coverage, which it did not. `W-0125` says every map in an active
+/// space has exactly one region, and a partially placed space could previously be resolved and
+/// then answer "no owner" for an entire map — indistinguishable, to a caller, from a tile no map
+/// covers. Partial placements are a legitimate compiler artefact and must stay out of this type;
+/// [`check_placements`] is the check they satisfy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedSpace {
     space: Space,
@@ -365,7 +403,7 @@ impl ResolvedSpace {
         space: Space,
         regions: Vec<RegionPlacement>,
     ) -> Result<ResolvedSpace, PlacementFault> {
-        check_placements(&space, &regions)?;
+        check_authority(&space, &regions)?;
         Ok(ResolvedSpace { space, regions })
     }
 
@@ -729,6 +767,17 @@ mod tests {
         assert_ne!(moved.region, owner().region, "its owner did");
     }
 
+    /// The one region owning the one map of a [`one_map_space`]. A resolvable space has every
+    /// map owned, so there is no such thing as a loadable space with no placements.
+    fn owning(region: u32, space: u128, map: u16) -> RegionPlacement {
+        RegionPlacement {
+            region: RegionId(region),
+            space: WorldSpaceId(space),
+            map: MapId(map),
+            origin: Origin { x: 0, y: 0 },
+        }
+    }
+
     /// A space of one map, so two of them can be given the same id.
     fn one_map_space(id: u128, map: u16) -> Space {
         Space {
@@ -743,8 +792,10 @@ mod tests {
         // The resolver would answer with whichever it found first, and every tile of the other
         // would silently be somewhere else -- a world that loads cleanly and puts half its
         // players in the wrong place.
-        let one = ResolvedSpace::new(one_map_space(199, 330), vec![]).expect("no placements");
-        let other = ResolvedSpace::new(one_map_space(199, 269), vec![]).expect("no placements");
+        let one = ResolvedSpace::new(one_map_space(199, 330), vec![owning(1, 199, 330)])
+            .expect("one map, one region");
+        let other = ResolvedSpace::new(one_map_space(199, 269), vec![owning(2, 199, 269)])
+            .expect("one map, one region");
 
         assert_eq!(
             LoadedTopology::new(TopologyVersion(7), vec![one.clone(), other]),
@@ -759,7 +810,8 @@ mod tests {
         // shape. This is the only thing that can tell a compiled release from a well-formed
         // number, and before it existed nothing did: the answers below were values the tests
         // wrote by hand.
-        let space = ResolvedSpace::new(one_map_space(199, 330), vec![]).expect("no placements");
+        let space = ResolvedSpace::new(one_map_space(199, 330), vec![owning(1, 199, 330)])
+            .expect("one map, one region");
         let compiled =
             TopologyVersion::from_manifest_hash("3e6df36b27c82aab").expect("a manifest hash");
         let loaded = LoadedTopology::new(compiled, vec![space]).expect("one space");
@@ -910,7 +962,8 @@ mod contract_tests {
                     assert_eq!(check_instances(&live), want, "{line}");
                 }
 
-                ["placements", space, entries @ ..] => {
+                ["placements" | "authority", space, entries @ ..] => {
+                    let complete = line.split_whitespace().next() == Some("authority");
                     // The checking space the contract fixes: 199 with map 330 at 0,0 and map
                     // 269 at 74,0.
                     let checked = Space {
@@ -966,14 +1019,42 @@ mod contract_tests {
                         ["map-shared", map] => Err(PlacementFault::MapSharedByRegions {
                             map: MapId(map.parse().expect("map")),
                         }),
+                        ["map-without-region", map] => {
+                            assert!(complete, "only `authority` can report an unowned map");
+                            Err(PlacementFault::MapWithoutRegion {
+                                map: MapId(map.parse().expect("map")),
+                            })
+                        }
                         other => panic!("unknown placement result {other:?}"),
                     };
 
-                    assert_eq!(check_placements(&checked, &placements), want, "{line}");
+                    if complete {
+                        assert_eq!(check_authority(&checked, &placements), want, "{line}");
+                    } else {
+                        assert_eq!(check_placements(&checked, &placements), want, "{line}");
+                        // The weaker question must not be answered by the stronger check: a
+                        // consistent-but-partial set is `ok` here and refused below, and a test
+                        // that ran only one of them could not tell the two apart.
+                        if want.is_ok() {
+                            assert!(
+                                check_authority(&checked, &placements).is_ok() || {
+                                    matches!(
+                                        check_authority(&checked, &placements),
+                                        Err(PlacementFault::MapWithoutRegion { .. })
+                                    )
+                                }
+                            );
+                        }
+                    }
 
-                    // And the resolved value cannot exist when the placements are bad.
-                    let resolved = ResolvedSpace::new(checked.clone(), placements);
-                    assert_eq!(resolved.is_ok(), want.is_ok(), "{line}");
+                    // The resolved value requires authority, so it cannot exist for a partial
+                    // set either -- that is the whole reason the type is unconstructible.
+                    let resolved = ResolvedSpace::new(checked.clone(), placements.clone());
+                    assert_eq!(
+                        resolved.is_ok(),
+                        check_authority(&checked, &placements).is_ok(),
+                        "{line}"
+                    );
                 }
 
                 ["seamless", kind] => {

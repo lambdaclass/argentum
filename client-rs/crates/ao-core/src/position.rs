@@ -734,6 +734,11 @@ pub mod contract {
         BadVersion {
             text: String,
         },
+        /// A space with a map no region owns: consistent, and not authoritative.
+        Unowned {
+            space: u128,
+            map: u16,
+        },
         Legacy {
             space: u128,
             at: (i32, i32),
@@ -897,6 +902,10 @@ pub mod contract {
                 }
                 ["bad-version", text] => cases.push(Case::BadVersion { text: (*text).to_string() }),
                 ["bad-version"] => cases.push(Case::BadVersion { text: String::new() }),
+                ["unowned", space, map] => cases.push(Case::Unowned {
+                    space: space.parse().expect("space"),
+                    map: map.parse().expect("map"),
+                }),
                 ["unrepresentable", space, at] => cases.push(Case::Unrepresentable {
                     space: space.parse().expect("space"),
                     at: wide(at),
@@ -1040,11 +1049,31 @@ mod contract_tests {
     /// `region-at` cases used to read the parsed region map directly, which tested the fixture
     /// against itself and left `ResolvedSpace::region_at` uncovered by the contract.
     fn release(contract: &contract::Contract) -> crate::identity::LoadedTopology {
-        let resolved = contract
+        // Spaces the fixture declares no regions for are not in the release at all: a release
+        // holds authority, and they have none to hold.
+        let placed: Vec<&Space> = contract
             .spaces
             .values()
-            .map(|space| {
-                let placements = space
+            .filter(|space| contract.regions.keys().any(|(id, _)| *id == space.id.0))
+            .collect();
+
+        // Every space with regions must either cover itself completely or be declared `unowned`
+        // by the fixture. Without this the filter below would quietly drop a space whose
+        // ownership had broken, and the release would look complete because the broken member
+        // had simply vanished from it.
+        let unowned: Vec<u128> = contract
+            .cases
+            .iter()
+            .filter_map(|case| match case {
+                Case::Unowned { space, .. } => Some(*space),
+                _ => None,
+            })
+            .collect();
+
+        let resolved = placed
+            .iter()
+            .filter_map(|space| {
+                let placements: Vec<_> = space
                     .placements
                     .iter()
                     .filter_map(|(map, origin)| {
@@ -1058,8 +1087,26 @@ mod contract_tests {
                         })
                     })
                     .collect();
-                crate::identity::ResolvedSpace::new(space.clone(), placements)
-                    .expect("the contract's placements are consistent")
+
+                match crate::identity::ResolvedSpace::new((*space).clone(), placements) {
+                    Ok(resolved) => {
+                        assert!(
+                            !unowned.contains(&space.id.0),
+                            "space {} is declared unowned and resolved anyway",
+                            space.id.0
+                        );
+                        Some(resolved)
+                    }
+                    Err(fault) => {
+                        assert!(
+                            unowned.contains(&space.id.0),
+                            "space {} has regions but does not resolve, and the contract does \
+                             not say so: {fault:?}",
+                            space.id.0
+                        );
+                        None
+                    }
+                }
             })
             .collect();
         crate::identity::LoadedTopology::new(contract.loaded, resolved)
@@ -1134,6 +1181,43 @@ mod contract_tests {
                         }
                     };
                     assert_eq!(found, *expect, "resolve {space} at {at:?}");
+                }
+                Case::Unowned { space, map } => {
+                    let space = &spaces[space];
+                    let placements: Vec<_> = space
+                        .placements
+                        .iter()
+                        .filter_map(|(declared, origin)| {
+                            contract.regions.get(&(space.id.0, declared.0)).map(|region| {
+                                crate::identity::RegionPlacement {
+                                    region: crate::identity::RegionId(*region),
+                                    space: space.id,
+                                    map: *declared,
+                                    origin: *origin,
+                                }
+                            })
+                        })
+                        .collect();
+
+                    // Consistent: nothing here names another space, a missing map or a drifted
+                    // origin. That is exactly why the weaker check is not enough.
+                    assert!(
+                        crate::identity::check_placements(space, &placements).is_ok(),
+                        "space {} should be consistent",
+                        space.id.0
+                    );
+                    assert_eq!(
+                        crate::identity::check_authority(space, &placements),
+                        Err(crate::identity::PlacementFault::MapWithoutRegion {
+                            map: crate::position::MapId(*map)
+                        }),
+                        "space {} map {map}",
+                        space.id.0
+                    );
+                    assert!(
+                        crate::identity::ResolvedSpace::new(space.clone(), placements).is_err(),
+                        "a space with an unowned map must not resolve"
+                    );
                 }
                 Case::BadVersion { text } => {
                     assert_eq!(

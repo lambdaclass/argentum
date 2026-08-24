@@ -71,6 +71,7 @@ defmodule Arena.World.Identity do
   """
   @spec advance(epoch()) :: {:ok, epoch()} | {:error, :exhausted}
   def advance(@max_epoch), do: {:error, :exhausted}
+
   def advance(epoch) when is_integer(epoch) and epoch >= 0 and epoch < @max_epoch,
     do: {:ok, epoch + 1}
 
@@ -138,6 +139,38 @@ defmodule Arena.World.Identity do
   `%{region: r, space: s, map: m, origin: {ox, oy}}`.
   """
   @spec check_placements(map(), [map()]) :: :ok | {:error, tuple()}
+  @doc """
+  Authority: consistent, *and* every map of the space owned by exactly one region.
+
+  This is what a space must satisfy to be resolvable. `W-0125`: "Review topology may be
+  incomplete, but authority may not be." An entity cannot enter, spawn, persist or hand off into
+  a map no region owns, and a lookup that answered "no owner" for a whole map would report it in
+  exactly the words it uses for a tile no map covers — the same answer for "nothing is there" and
+  "something is there and nobody is responsible for it".
+
+  `check_placements/2` deliberately does not ask this. A compiler report on a partly reviewed
+  corpus is legitimately incomplete, and the two questions have different right answers.
+  """
+  @spec check_authority(map(), [map()]) :: :ok | {:error, tuple()}
+  def check_authority(space, placements) do
+    with :ok <- check_placements(space, placements) do
+      owned = MapSet.new(placements, & &1.map)
+
+      # Sorted, so the map named is the lowest-numbered unowned one. Rust's placements are a
+      # `BTreeMap` and iterate in key order; without sorting here the two languages would name
+      # different maps for the same broken space, and a reader comparing their errors would
+      # think they disagreed about the rule.
+      space.placements
+      |> Map.keys()
+      |> Enum.sort()
+      |> Enum.find(&(not MapSet.member?(owned, &1)))
+      |> case do
+        nil -> :ok
+        map -> {:error, {:map_without_region, map}}
+      end
+    end
+  end
+
   def check_placements(space, placements) do
     Enum.reduce_while(placements, MapSet.new(), fn placement, claimed ->
       cond do

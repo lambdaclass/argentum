@@ -14,6 +14,8 @@
 #   placements <space> <region>:<map>:<ox>,<oy> ...
 #       -> ok | wrong-space <region> | map-not-in-space <region> <map>
 #        | origin-disagrees <region> <map> | map-shared <map>
+#   authority  <space> <region>:<map>:<ox>,<oy> ...
+#       -> ok | map-without-region <map> | <any placements answer>
 #
 # The `placements` cases use a fixed space for checking: space 199 contains map 330 at 0,0 and
 # map 269 at 74,0. A placement is only usable if it names that space, names a map the space
@@ -78,3 +80,27 @@ placements 199 330:330:1,0 -> origin-disagrees 330 330
 placements 199 330:999:0,0 -> map-not-in-space 330 999
 placements 199 330:330:0,0 331:330:0,0 -> map-shared 330
 placements 37 330:330:0,0 -> wrong-space 330
+
+# Consistency and completeness are different questions, and `placements` above asks only the
+# first: a placement set covering half the space is consistent, and W-0097's corpus produces
+# exactly that while a space is still being reviewed. `authority` asks both, and it is what a
+# space must satisfy to be resolvable at all.
+#
+# W-0125: "Review topology may be incomplete, but authority may not be." An entity in a map no
+# region owns cannot be commanded, persisted or handed off, and a lookup answering "no owner"
+# for a whole map reports it exactly as it reports a tile no map covers -- the same answer for
+# "nothing is there" and "something is there and nobody is responsible".
+authority 199 330:330:0,0 269:269:74,0 -> ok
+authority 199 330:330:0,0 -> map-without-region 269
+authority 199 269:269:74,0 -> map-without-region 330
+# With nothing placed at all, every map is unowned, so which one gets named has to be decided
+# rather than left to whichever collection each language iterates first. The lowest map id wins:
+# Rust's placements are a `BTreeMap` and Elixir's are sorted for this, so a caller comparing two
+# implementations' error messages sees the same map.
+authority 199 -> map-without-region 269
+
+# The stricter check still refuses everything the weaker one does, in the same terms, so a
+# caller cannot get a laxer answer by asking the stronger question.
+authority 199 330:330:0,0 269:269:75,0 -> origin-disagrees 269 269
+authority 199 330:330:0,0 269:330:0,0 -> map-shared 330
+authority 199 330:330:0,0 269:999:0,0 -> map-not-in-space 269 999

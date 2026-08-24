@@ -14,6 +14,7 @@
 #   render <space> <gx>,<gy> near <nx>,<ny> -> <rx>,<ry>
 #   unrepresentable <space> <gx>,<gy>
 #   load <manifest-hash>
+#   unowned <space> <map>
 #   resolve <space> <manifest-hash> at <gx>,<gy> -> <region-id> | none | no-such-space
 #                                              -> wrong-version <loaded-hash>
 #   bad-version <string>
@@ -283,18 +284,28 @@ unrepresentable 703 4294967296,0
 # on the wire. The comparison below is the only thing that can tell a real release from a
 # well-formed number.
 # ---------------------------------------------------------------------------------------
+# Every map of every space in the release is owned by exactly one region. `W-0125`: "Review
+# topology may be incomplete, but authority may not be." A space with an unowned map is not
+# loadable at all, so the release below is built only from spaces whose ownership is complete.
+region 1 100 1 0,0
+region 1 101 2 74,0
+region 900 910 901 0,0
+region 900 911 902 0,0
+
 load 3e6df36b27c82aab
 
 # The acceptance square's east seam, resolved and owned.
 resolve 199 3e6df36b27c82aab at 221,214 -> 330
 resolve 199 3e6df36b27c82aab at 222,214 -> 269
+resolve 1 3e6df36b27c82aab at 40,40 -> 100
+resolve 1 3e6df36b27c82aab at 100,40 -> 101
 
-# Resolved, and no owner: four different reasons that must not be one answer. A tile no map
-# covers, a tile two maps claim, and a space that declares no regions at all are each `none`
-# from a lookup that *succeeded*; a space this release does not contain is not.
+# Resolved, and no owner: three reasons that must not collapse into one answer, and a fourth
+# that is not the same kind of thing at all. A tile no map covers and a tile two maps claim are
+# both `none` from a lookup that *succeeded* -- and a space with a map nobody owns is not `none`,
+# it is unloadable, which is what `unowned` below states.
 resolve 199 3e6df36b27c82aab at 100000,0 -> none
 resolve 900 3e6df36b27c82aab at 10,10 -> none
-resolve 1 3e6df36b27c82aab at 40,40 -> none
 resolve 42 3e6df36b27c82aab at 0,0 -> no-such-space
 
 # A version that was never loaded is refused, and the answer names the release that was, so a
@@ -313,3 +324,20 @@ bad-version 3e6df36b27c82aabb
 bad-version 3e6df36b27c82aaz
 bad-version 3E6DF36B27C82AAB
 bad-version
+
+# ---------------------------------------------------------------------------------------
+# A space whose ownership is incomplete. Consistent -- region 920 names this space, a map it
+# contains, and the right origin -- and still not authoritative, because map 801 has no owner.
+#
+# It cannot be resolved, so no position in it can be owned, entered, persisted or handed off.
+# The dangerous alternative is the one that used to happen: the space resolves, and `region_at`
+# answers "no owner" for every tile of map 801 in exactly the words it uses for a tile no map
+# covers -- the same answer for "nothing is there" and "something is there and nobody is
+# responsible for it".
+# ---------------------------------------------------------------------------------------
+space 902 plane
+place 902 800 0,0
+place 902 801 74,0
+region 902 920 800 0,0
+
+unowned 902 801

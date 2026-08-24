@@ -9,6 +9,7 @@ defmodule Arena.World.PositionContractTest do
   """
   use ExUnit.Case, async: true
 
+  alias Arena.World.Identity
   alias Arena.World.Position
   alias Arena.World.Topology
 
@@ -51,10 +52,20 @@ defmodule Arena.World.PositionContractTest do
     {:ok, version} = Topology.from_manifest_hash(hash)
     {spaces, _} = parse()
     placements = placements_of(lines)
+    unowned = for ["unowned", space, _map] <- lines, do: String.to_integer(space)
 
-    {:ok, loaded} =
-      Topology.load(version, for({id, space} <- spaces, do: {space, placements[id] || []}))
+    # A release holds authority, so a space the contract declares no regions for is not in it at
+    # all. A space that *has* regions and still does not cover itself must be declared `unowned`,
+    # or this would quietly drop a space whose ownership had broken and the release would look
+    # complete because the broken member had vanished from it.
+    members =
+      for {id, space} <- spaces,
+          regions = placements[id],
+          regions != nil,
+          id not in unowned,
+          do: {space, regions}
 
+    {:ok, loaded} = Topology.load(version, members)
     {loaded, version}
   end
 
@@ -253,6 +264,24 @@ defmodule Arena.World.PositionContractTest do
           assert Topology.region_at(loaded, space_id, asked, pair(at)) ==
                    {:ok, String.to_integer(region)},
                  "resolve #{space} at #{at}"
+
+        ["unowned", space, map] ->
+          {spaces, _} = parse()
+          space_id = String.to_integer(space)
+          space = spaces[space_id]
+          regions = placements_of(all_lines())[space_id] || []
+
+          # Consistent: nothing here names another space, a missing map or a drifted origin.
+          # That is exactly why the weaker check is not enough on its own.
+          assert Identity.check_placements(space, regions) == :ok,
+                 "space #{space_id} should be consistent"
+
+          assert Identity.check_authority(space, regions) ==
+                   {:error, {:map_without_region, String.to_integer(map)}},
+                 "space #{space_id} map #{map}"
+
+          # And it cannot be loaded, so no position in it can be owned.
+          assert {:error, {:map_without_region, _}} = Topology.load(1, [{space, regions}])
 
         ["bad-version", text] ->
           assert Topology.from_manifest_hash(text) == :error, "#{text} parsed as a version"
