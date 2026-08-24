@@ -37,6 +37,28 @@ execute owner 7 330 3 command 7 0 reach authoritative -> stale-epoch
 # An epoch from the future is equally refused. It did not come from this installation.
 execute owner 7 330 3 command 7 4 reach authoritative -> stale-epoch
 
+# MapServer crash recovery, which is the same rule with a different cause and the case most
+# likely to be got wrong. `W-0064`: reinstalling authority after a crash advances
+# `AuthorityEpoch` exactly once before the replacement owner accepts a command, and never
+# guesses or resumes the pre-crash epoch.
+#
+# The three lines below are why "never resumes" is not a stylistic preference. A command formed
+# before the crash and delivered after it -- an in-flight packet, a retried send, a queued
+# intention -- carries epoch 3. If recovery advances to 4 it is refused, which is correct: the
+# world it was formed under no longer holds. If recovery *resumed* 3, the identical command is
+# accepted, and it is accepted by design rather than by mistake, so nothing downstream can
+# notice. That is the accepted-and-wrong shape this whole contract exists to prevent.
+execute owner 7 330 4 command 7 3 reach authoritative -> stale-epoch
+execute owner 7 330 3 command 7 3 reach authoritative -> ok
+execute owner 7 330 5 command 7 3 reach authoritative -> stale-epoch
+
+# And if the lifecycle owner cannot prove the next epoch, `W-0064` has it fail closed: a fresh
+# authenticated bootstrap installs a new region and a new epoch. The pre-crash command is then
+# refused as somebody else's -- checked before the epoch, because after a session replacement
+# "you do not own this" is the honest answer.
+execute owner 7 269 4 command 7 3 reach authoritative -> stale-epoch
+execute owner 9 269 4 command 7 3 reach authoritative -> not-owner
+
 # Somebody else's entity. Checked before the epoch, because "you do not own this" is the
 # honest answer and a stale-epoch report would send a reader to the wrong problem.
 execute owner 7 330 3 command 9 3 reach authoritative -> not-owner
