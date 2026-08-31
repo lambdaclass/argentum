@@ -20,7 +20,13 @@
 #   3 transfer  : transfer u64, transition u8, from_region u32, to u32    (18 bytes)
 #
 # The topology version is the manifest's content hash -- sixteen hex characters, exactly u64 --
-# so a position can only claim a release that was actually compiled.
+# so a position can *name* a release rather than a bare counter. It was a freely constructed u32
+# with no relationship to any artifact.
+#
+# Naming is not proving. Any u64 encodes here and any sixteen lowercase hex characters parse, and
+# neither can tell whether the release was ever compiled: only resolving against the loaded one
+# can, and that is `LoadedTopology::resolve` / `Arena.World.Topology.resolve/3`. A version on the
+# wire is a claim to be checked, not a checked claim.
 #
 # A space id is 128 bits because not every space is compiled: `W-0104` mints one per live
 # dungeon instance at runtime, from whichever region is asked, and a narrower id would need a

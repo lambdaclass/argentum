@@ -15,8 +15,13 @@ defmodule Arena.World.Wire do
       3 transfer  : transfer u64, transition u8, from_region u32, to u32   18 bytes
 
   The topology version is the manifest's content hash — sixteen hex characters, exactly u64 —
-  so a position can only claim a release that was actually compiled. It was a freely
+  so a position can *name* a release rather than carry a bare counter. It was a freely
   constructed u32 with no relationship to any artifact.
+
+  Naming is not proving. `encode/1` accepts any u64 and `Arena.World.Topology.from_manifest_hash/1`
+  accepts any sixteen lowercase hex characters; neither can tell whether the release was ever
+  compiled. Only `Arena.World.Topology.resolve/3` can, by comparing against the release actually
+  loaded. A version on the wire is a claim to be checked, not a checked claim.
 
   A space id is 128 bits because not every space is compiled: `W-0104` mints one per live
   dungeon instance at runtime, from whichever region is asked, and a narrower id would need a
@@ -67,12 +72,9 @@ defmodule Arena.World.Wire do
   @type transition :: :seam | :door | :portal | :teleport | :instance
 
   @type record ::
-          {:position, version :: non_neg_integer(), space :: non_neg_integer(), x :: integer(),
-           y :: integer()}
-          | {:ownership, entity :: non_neg_integer(), region :: non_neg_integer(),
-             epoch :: non_neg_integer()}
-          | {:transfer, transfer :: non_neg_integer(), transition(), from :: non_neg_integer(),
-             to :: non_neg_integer()}
+          {:position, version :: non_neg_integer(), space :: non_neg_integer(), x :: integer(), y :: integer()}
+          | {:ownership, entity :: non_neg_integer(), region :: non_neg_integer(), epoch :: non_neg_integer()}
+          | {:transfer, transfer :: non_neg_integer(), transition(), from :: non_neg_integer(), to :: non_neg_integer()}
 
   @type error ::
           {:truncated, needed :: non_neg_integer(), found :: non_neg_integer()}
@@ -97,14 +99,13 @@ defmodule Arena.World.Wire do
   def encode({:position, version, space, x, y})
       when version in 0..@u64 and space in 0..@u128 and x in @i32_min..@i32_max and
              y in @i32_min..@i32_max do
-    <<@position::unsigned-8, version::little-unsigned-64, space::little-unsigned-128,
-      x::little-signed-32, y::little-signed-32>>
+    <<@position::unsigned-8, version::little-unsigned-64, space::little-unsigned-128, x::little-signed-32,
+      y::little-signed-32>>
   end
 
   def encode({:ownership, entity, region, epoch})
       when entity in 0..@u64 and region in 0..@u32 and epoch in 0..@u64 do
-    <<@ownership::unsigned-8, entity::little-unsigned-64, region::little-unsigned-32,
-      epoch::little-unsigned-64>>
+    <<@ownership::unsigned-8, entity::little-unsigned-64, region::little-unsigned-32, epoch::little-unsigned-64>>
   end
 
   def encode({:transfer, transfer, transition, from, to})
@@ -122,8 +123,8 @@ defmodule Arena.World.Wire do
 
     Elixir integers are unbounded and bit syntax keeps only the low bits, so encoding this
     would have produced the bytes of a different record. The bounds are the wire contract's:
-    u32 for a topology version and a region, u128 for a world space, u64 for an entity, epoch
-    and transfer id, and signed i32 for a coordinate.
+    u64 for a topology version, an entity, an epoch and a transfer id, u32 for a region, u128
+    for a world space, and signed i32 for a coordinate.
     """
   end
 
@@ -201,18 +202,26 @@ defmodule Arena.World.Wire do
     end
   end
 
-  defp decode_body(@position, <<_::unsigned-8, version::little-unsigned-64,
-         space::little-unsigned-128, x::little-signed-32, y::little-signed-32>>) do
+  defp decode_body(
+         @position,
+         <<_::unsigned-8, version::little-unsigned-64, space::little-unsigned-128, x::little-signed-32,
+           y::little-signed-32>>
+       ) do
     {:ok, {:position, version, space, x, y}}
   end
 
-  defp decode_body(@ownership, <<_::unsigned-8, entity::little-unsigned-64,
-         region::little-unsigned-32, epoch::little-unsigned-64>>) do
+  defp decode_body(
+         @ownership,
+         <<_::unsigned-8, entity::little-unsigned-64, region::little-unsigned-32, epoch::little-unsigned-64>>
+       ) do
     {:ok, {:ownership, entity, region, epoch}}
   end
 
-  defp decode_body(@transfer, <<_::unsigned-8, transfer::little-unsigned-64,
-         transition::unsigned-8, from::little-unsigned-32, to::little-unsigned-32>>) do
+  defp decode_body(
+         @transfer,
+         <<_::unsigned-8, transfer::little-unsigned-64, transition::unsigned-8, from::little-unsigned-32,
+           to::little-unsigned-32>>
+       ) do
     case transition_name(transition) do
       {:ok, name} -> {:ok, {:transfer, transfer, name, from, to}}
       :error -> {:error, {:unknown_transition, transition}}

@@ -14,8 +14,14 @@
 //! 3 transfer  : transfer u64, transition u8, from_region u32, to u32   18 bytes
 //! ```
 //!
-//! The topology version is the manifest's content hash, so a position can only claim a release
-//! that was compiled. It was a freely constructed `u32` with no relationship to any artifact.
+//! The topology version is the manifest's content hash, so a position can *name* a release
+//! rather than carry a bare counter. It was a freely constructed `u32` with no relationship to
+//! any artifact.
+//!
+//! Naming is not proving. This codec accepts any `u64`, and `TopologyVersion::from_manifest_hash`
+//! accepts any sixteen lowercase hex characters; neither can tell whether the release was ever
+//! compiled. Only [`crate::identity::LoadedTopology::resolve`] can, by comparing against the
+//! release actually loaded. A version on the wire is a claim to be checked, not a checked claim.
 //!
 //! A space id is 128 bits because not every space is compiled: `W-0104` mints one per live
 //! dungeon instance, at runtime, from whichever region is asked. A narrower id would need a

@@ -56,16 +56,15 @@ defmodule Arena.World.WireContractTest do
       record =
         case fields do
           ["position", version, space, x, y] ->
-            {:position, String.to_integer(version), String.to_integer(space),
-             String.to_integer(x), String.to_integer(y)}
+            {:position, String.to_integer(version), String.to_integer(space), String.to_integer(x),
+             String.to_integer(y)}
 
           ["ownership", entity, region, epoch] ->
-            {:ownership, String.to_integer(entity), String.to_integer(region),
-             String.to_integer(epoch)}
+            {:ownership, String.to_integer(entity), String.to_integer(region), String.to_integer(epoch)}
 
           ["transfer", transfer, transition, from, to] ->
-            {:transfer, String.to_integer(transfer), transition_named(transition),
-             String.to_integer(from), String.to_integer(to)}
+            {:transfer, String.to_integer(transfer), transition_named(transition), String.to_integer(from),
+             String.to_integer(to)}
         end
 
       {line, record, bytes_of(hex)}
@@ -154,6 +153,7 @@ defmodule Arena.World.WireContractTest do
       # 0x3e6df36b27c82aab is the manifest hash W-0097 pinned for this corpus. A position
       # naming it can be checked against a release that exists; a bare counter could not.
       hash = 0x3E6DF36B27C82AAB
+
       assert {:ok, {:position, ^hash, 199, 221, 214}} =
                Wire.decode(Wire.encode({:position, hash, 199, 221, 214}))
     end
@@ -225,6 +225,19 @@ defmodule Arena.World.WireContractTest do
 
       assert Wire.decode(Wire.encode({:ownership, u64 - 1, u32 - 1, u64 - 1})) ==
                {:ok, {:ownership, u64 - 1, u32 - 1, u64 - 1}}
+    end
+
+    test "the refusal message names the widths the encoder actually enforces" do
+      # Codex review, 2026-08-31: the message said "u32 for a topology version" while the guard
+      # required u64. A reader hitting the error would have gone looking for a 32-bit field that
+      # does not exist, and nothing checked the message against the bounds beside it.
+      message =
+        assert_raise ArgumentError, fn ->
+          Wire.encode({:position, 18_446_744_073_709_551_616, 1, 0, 0})
+        end
+
+      assert message.message =~ "u64 for a topology version"
+      refute message.message =~ "u32 for a topology version"
     end
 
     test "the declared bounds are the ones the encoder enforces" do
