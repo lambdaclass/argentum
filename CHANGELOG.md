@@ -2,6 +2,108 @@
 
 This file tracks completed work. `ROADMAP.md` tracks remaining work only.
 
+## Closed tasks
+
+Closures use the form introduced with stable `W-NNNN` identities: a heading the
+roadmap validator reads, the closing date and commit, and the evidence. Never
+reuse a completed ID in the active roadmap.
+
+### Completed Task W-0098 — Canonical world-position and stable-identity contract
+
+Closed: 2026-08-31 (`5f5a8276`..`0bedeb70`)
+
+Three hand-authored fixture files under `client-rs/crates/ao-core/fixtures/` are the
+specification for coordinates and identity, and Rust and Elixir each parse and execute
+all of them. Nothing generates them from either implementation, which is the point: a
+fixture derived from one codec proves that codec is consistent with itself, and that is
+exactly how two languages come to hold different beliefs about one field while both test
+suites stay green. Every disagreement below was found that way rather than in production.
+
+- **Position** — 126 cases over 41 declarations: 25 render positions, 24 local→global,
+  22 steps, 14 global→local, 10 versioned resolves, 10 comparisons, 6 region lookups, 5
+  malformed versions, 4 legacy projections, 3 coordinates that are not coordinates, 2
+  cameras that are not cameras and 1 space that cannot be loaded — declared by 10 spaces,
+  21 map placements, 9 region placements and one loaded release. The spaces are a plane,
+  the Newbie Dungeon's real 148×160 torus, a cylinder, a transition-only space, a cell two
+  maps claim, the real acceptance square at its compiled origins, and four built at the
+  `i32` boundaries.
+- **Identity** — 45 cases: 16 authority decisions, 7 placement-consistency checks, 7
+  authority-completeness checks, 5 instance checks, 5 epoch advances, 5 transition kinds.
+- **Wire** — 25 records and 11 rejections: position 33 bytes, ownership 21, transfer 18,
+  little-endian, exact-length decode. Zero, ordinary values, negative global coordinates,
+  `i32`/`u64`/`u128` boundaries, every transition kind, and records whose fields transposed
+  would still have valid widths, so an implementation with two same-width fields swapped
+  fails here instead of round-tripping its own mistake.
+
+What the contract settled, each item because the two languages disagreed and the fixture
+said which was right:
+
+- **A global coordinate is an `i32` on both sides, everywhere.** Rust truncated with
+  `as i32`; Elixir accepted unbounded integers and named a tile — and an *owner* — for
+  them. Contract space 703 shows why this is not a rounding concern: its eastern map ends
+  at `i32::MAX` and its western begins at `i32::MIN`, so a truncating step off the east
+  edge does not fail, it lands on a real tile of a real map four billion tiles away.
+- **A render position is not a stored position** and cannot be mistaken for one:
+  `RenderPosition` in Rust, `{:render, x, y}` in Elixir, `i64` because it accumulates
+  circuits. It is the congruent value nearest the camera at any distance — both sides had
+  checked only one period either side, so a camera two laps around a 148-wide torus was
+  answered a whole period wrong. At the end of `i64` the nearest congruent value is itself
+  unrepresentable (for period 148 and canonical 0, `i64::MAX + 69`), and the answer is
+  `None` rather than the closest representable neighbour: a neighbour sits a full period
+  from where the sprite belongs, which is the same defect in a different disguise.
+- **Four kinds of identity that no conversion joins:** content (`InstanceTemplateId`),
+  release (`TopologyVersion`, the manifest's content hash), runtime authority (`RegionId`,
+  `EntityId`, `AuthorityEpoch`, `TransferId`) and dynamic instance (`WorldSpaceId`).
+  `WorldSpaceId` is 128 bits, decided before the bytes froze, because `W-0104` mints one
+  per live dungeon instance at runtime and a narrower id would need a central allocator to
+  stay unique.
+- **An epoch cannot wrap silently.** Advancing `u64::MAX` is an explicit exhaustion error
+  on both sides and one past any maximum is refused rather than truncated. Elixir's bit
+  syntax had silently kept the low bits, so `space = 2^128` encoded as `space = 0` — an
+  identity collision no test caught, because the tests stopped at each maximum and never
+  tried maximum-plus-one.
+- **Authority requires complete ownership.** `check_placements` asks consistency, which a
+  partly reviewed corpus legitimately satisfies; `check_authority` also requires every map
+  of the space owned by exactly one region, and only it builds a `ResolvedSpace` or loads a
+  release. A partially placed space used to resolve and then report "no owner" for a whole
+  map in the same words it uses for a tile no map covers — one answer for "nothing is
+  there" and "something is there and nobody is responsible for it".
+- **The versioned lookup is performed, not described.** `LoadedTopology` and
+  `Arena.World.Topology` are the only things that answer one; before them the three answers
+  were enum values the tests wrote by hand. A version identifies a release exactly when it
+  is the one loaded — encoding a `u64` or parsing sixteen hex characters checks shape, and
+  the documentation that claimed otherwise was corrected in all four places it appeared.
+- **A pre-crash command is refused only because the epoch moved.** `W-0064` requires crash
+  recovery to advance `AuthorityEpoch` or replace the session; the contract now shows the
+  consequence, including the case where recovery *resumed* the epoch and the delayed
+  command is accepted verbatim — accepted by design, so nothing downstream can notice.
+
+Two independent corroborations, because two implementations agreeing with a fixture one of
+them could have shaped is not evidence. `check_wire_bytes.py` re-derives all 25 records with
+Python `struct`, decodes each back, and refuses every rejection *for the stated reason* with
+its own decoder, on every gate. And `ao-topology`, which reads the real map pack and never
+reads a fixture, prints `east walking from 330 87,65 ... global 221,214 -> 222,214 authority
+330 -> 269` — the same coordinates, origins and authority handoff the position fixture
+hand-authored for space 199.
+
+Every fixture case added during the task was mutation-checked: the fixture was edited to
+state a wrong answer, and both languages were confirmed to fail with a named line before the
+fixture was restored byte-identical. A case that parses and is silently ignored is
+indistinguishable from one that passes.
+
+Not delivered, and reassigned rather than claimed: nothing allocates region ids — `W-0097`'s
+manifest emits spaces, geometry, maps and origins and no regions — so stability across
+reshard and restart is `W-0125`'s, which now sits directly after this task and owns the
+allocation ledger and its tombstones. The task's own body was corrected six times where it
+claimed more than the code did.
+
+Evidence at closure: `./build.sh check` exit 0 through all ten stages (589 client, 205
+`ao-core`, 6 topology tests, and the wire checker reporting 25 records and 11 rejections
+refused for the stated reason); umbrella `mix test` exit 0 with 4,336 property cases and 823
+tests, 0 failures; `scripts/check_roadmap.sh` PASS. Four rounds of independent read-only
+review over the full commit range, with every material finding fixed in its own commit and
+re-reviewed; the last round's three findings are `dfb27177`, `26443f8c` and `0bedeb70`.
+
 ## Recently Completed
 
 - **One canonical repository roadmap (2026-08-23):** merged the active
