@@ -139,6 +139,34 @@ defmodule Arena.World.Identity do
   `%{region: r, space: s, map: m, origin: {ox, oy}}`.
   """
   @spec check_placements(map(), [map()]) :: :ok | {:error, tuple()}
+  def check_placements(space, placements) do
+    Enum.reduce_while(placements, MapSet.new(), fn placement, claimed ->
+      cond do
+        placement.space != space.id ->
+          {:halt, {:error, {:wrong_space, placement.region, placement.space}}}
+
+        not Map.has_key?(space.placements, placement.map) ->
+          {:halt, {:error, {:map_not_in_space, placement.region, placement.map}}}
+
+        Map.fetch!(space.placements, placement.map) != placement.origin ->
+          {:halt,
+           {:error,
+            {:origin_disagrees, placement.region, placement.map, placement.origin,
+             Map.fetch!(space.placements, placement.map)}}}
+
+        MapSet.member?(claimed, placement.map) ->
+          {:halt, {:error, {:map_shared, placement.map}}}
+
+        true ->
+          {:cont, MapSet.put(claimed, placement.map)}
+      end
+    end)
+    |> case do
+      {:error, _} = error -> error
+      %MapSet{} -> :ok
+    end
+  end
+
   @doc """
   Authority: consistent, *and* every map of the space owned by exactly one region.
 
@@ -168,34 +196,6 @@ defmodule Arena.World.Identity do
         nil -> :ok
         map -> {:error, {:map_without_region, map}}
       end
-    end
-  end
-
-  def check_placements(space, placements) do
-    Enum.reduce_while(placements, MapSet.new(), fn placement, claimed ->
-      cond do
-        placement.space != space.id ->
-          {:halt, {:error, {:wrong_space, placement.region, placement.space}}}
-
-        not Map.has_key?(space.placements, placement.map) ->
-          {:halt, {:error, {:map_not_in_space, placement.region, placement.map}}}
-
-        Map.fetch!(space.placements, placement.map) != placement.origin ->
-          {:halt,
-           {:error,
-            {:origin_disagrees, placement.region, placement.map, placement.origin,
-             Map.fetch!(space.placements, placement.map)}}}
-
-        MapSet.member?(claimed, placement.map) ->
-          {:halt, {:error, {:map_shared, placement.map}}}
-
-        true ->
-          {:cont, MapSet.put(claimed, placement.map)}
-      end
-    end)
-    |> case do
-      {:error, _} = error -> error
-      %MapSet{} -> :ok
     end
   end
 
