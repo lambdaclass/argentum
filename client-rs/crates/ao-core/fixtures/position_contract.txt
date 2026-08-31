@@ -11,7 +11,8 @@
 #   global <space> <map> <x>,<y> -> <gx>,<gy> | none
 #   local  <space> <gx>,<gy> -> <map> <x>,<y> | none
 #   step   <space> <gx>,<gy> by <dx>,<dy> -> inside <gx>,<gy> | leaves
-#   render <space> <gx>,<gy> near <nx>,<ny> -> <rx>,<ry>
+#   render <space> <gx>,<gy> near <nx>,<ny> -> <rx>,<ry> | unrepresentable
+#   camera <space> <nx>,<ny>
 #   unrepresentable <space> <gx>,<gy>
 #   load <manifest-hash>
 #   unowned <space> <map>
@@ -74,8 +75,10 @@ local 1 0,80 -> none
 legacy 1 74,39 -> 2 14,50
 legacy 1 148,0 -> unrepresentable
 
-# A plane never unwraps: the render position is the position, however far the camera is.
+# A plane never unwraps: the render position is the position, however far the camera is -- and
+# never fails to be representable, because the answer is the stored i32 whatever the camera says.
 render 1 40,40 near 10000,-10000 -> 40,40
+render 1 40,40 near 9223372036854775807,-9223372036854775808 -> 40,40
 
 # ---------------------------------------------------------------------------------------
 # The Newbie Dungeon's shape: 2x2 maps wrapping both ways, 148x160 tiles.
@@ -119,6 +122,36 @@ render 37 40,0 near 40,-479 -> 40,-480
 # the stored position it is derived from stays a canonical i32.
 render 37 0,39 near 4294967296,39 -> 4294967252,39
 
+# The i64 boundary, where "any wrap distance" stops being true. The nearest congruent value to a
+# camera at the end of the type is *past* the end of the type: for period 148 and canonical 0,
+# the nearest value to i64::MAX is i64::MAX + 69, and for period 160 on the other axis it is
+# i64::MAX + 33. There is no render position to return, so none is returned.
+#
+# The alternative was the closest *representable* congruent value, and it is the wrong answer:
+# it sits a whole period from where the sprite belongs, which is the exact defect the cases
+# above exist to catch. A caller that cannot place something must not draw it, and an entity
+# nine quintillion tiles from the camera is not on screen at any zoom.
+#
+# Rust computes this in i128 because `near - value + period / 2` overflows i64 on its own -- the
+# rounding term alone pushes a camera at i64::MAX past the end -- so it panicked in debug and
+# wrapped in release, while Elixir's unbounded integers carried on and answered with a number
+# Rust cannot hold.
+render 37 0,0 near 9223372036854775807,0 -> unrepresentable
+render 37 0,0 near 0,9223372036854775807 -> unrepresentable
+render 37 0,0 near -9223372036854775808,0 -> unrepresentable
+render 37 0,0 near -9223372036854775808,-9223372036854775808 -> unrepresentable
+
+# Just inside, where the nearest congruent value does fit. The boundary is not refused wholesale:
+# the question is whether the answer is representable, not whether the camera is extreme.
+render 37 0,0 near 9223372036854775700,0 -> 9223372036854775728,0
+render 37 0,0 near -9223372036854775701,0 -> -9223372036854775728,0
+render 37 0,0 near 0,9223372036854775700 -> 0,9223372036854775680
+
+# A camera outside i64 is not a camera. Rust's render coordinates cannot hold one; Elixir's
+# integers can, and did.
+camera 37 9223372036854775808,0
+camera 37 0,-9223372036854775809
+
 # Exactly halfway between two congruent values, where both are equally near. The rule has to be
 # stated rather than left to whichever comparison each language happens to make first.
 render 37 0,39 near 74,39 -> 148,39
@@ -136,6 +169,11 @@ step 5 40,0 by 0,-1 -> leaves
 step 5 40,79 by 0,1 -> leaves
 render 5 0,39 near 147,39 -> 148,39
 render 5 40,39 near 40,39 -> 40,39
+
+# One axis wraps and one does not, so only the wrapping one can fail to be representable. The
+# non-wrapping axis returns the stored coordinate, which is an i32 and always fits.
+render 5 0,39 near 9223372036854775807,39 -> unrepresentable
+render 5 0,39 near 0,9223372036854775807 -> 0,39
 
 # ---------------------------------------------------------------------------------------
 # A space of one map, reached only by transition. 199 of the corpus's spaces are these.

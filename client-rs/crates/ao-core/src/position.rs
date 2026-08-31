@@ -251,6 +251,10 @@ impl Space {
     /// camera snaps across the map and the player is told they teleported. With it, the two
     /// disagree by exactly one period, which is why they must never be confused in a fixture:
     /// one is where the character is, the other is where to draw them this frame.
+    ///
+    /// `None` for a camera in another space, and also when the nearest congruent value on either
+    /// axis does not fit `i64` — see [`nearest_on_axis`]. Both axes or neither: half a render
+    /// position is not one.
     pub fn nearest_unwrapped(
         &self,
         position: WorldPosition,
@@ -265,8 +269,8 @@ impl Space {
         let (px, py) = self.geometry.periods();
         Some(RenderPosition {
             space: position.space,
-            x: nearest_on_axis(position.x as i64, near.x, px),
-            y: nearest_on_axis(position.y as i64, near.y, py),
+            x: nearest_on_axis(position.x as i64, near.x, px)?,
+            y: nearest_on_axis(position.y as i64, near.y, py)?,
         })
     }
 
@@ -282,17 +286,33 @@ impl Space {
     }
 }
 
-fn nearest_on_axis(value: i64, near: i64, period: i64) -> i64 {
+/// The congruent value nearest `near`, or `None` if that value does not fit `i64`.
+///
+/// Checking only one period either side assumed the camera was never more than a single wrap
+/// away, which is false the moment anything follows a character around a torus twice: for period
+/// 148, canonical 0 near 295 answered 148 when 296 is one tile away.
+///
+/// The arithmetic is in `i128` because `near - value + period / 2` overflows `i64` on its own:
+/// with `near = i64::MAX` and any period, the rounding term alone pushes it past the end of the
+/// type. Rust panicked in debug and wrapped in release, while Elixir's unbounded integers carried
+/// on and returned a value Rust cannot hold — the two sides disagreeing at exactly the boundary
+/// the "any wrap distance" claim covers.
+///
+/// `None` rather than the closest *representable* congruent value, which was the other option.
+/// A representable neighbour is a whole period from where the answer belongs, and drawing a
+/// sprite a period from the camera is the defect this function was just fixed for: it would
+/// return a plausible-looking render position that is a full map out. `None` says the entity has
+/// no representable position relative to this camera, and a caller that cannot place something
+/// must not draw it. Nothing is lost in practice — an entity that far from the camera is not on
+/// screen at any zoom.
+fn nearest_on_axis(value: i64, near: i64, period: i64) -> Option<i64> {
     if period == 0 {
-        return value;
+        return Some(value);
     }
-    // The congruent value nearest `near`, whatever the distance. Checking only one period
-    // either side assumed the camera was never more than a single wrap away, which is false the
-    // moment anything follows a character around a torus twice: for period 148, canonical 0
-    // near 295 answered 148 when 296 is one tile away. Computed in `i64` so a coordinate near
-    // `i32::MAX` plus a period cannot overflow.
+
+    let (value, near, period) = (value as i128, near as i128, period as i128);
     let periods = (near - value + period / 2).div_euclid(period);
-    value + periods * period
+    i64::try_from(value + periods * period).ok()
 }
 
 /// The difference between two positions, or why there is none.
@@ -717,7 +737,13 @@ pub mod contract {
             // The camera and the answer are i64: a render position accumulates circuits and
             // may sit past i32, while the stored position it is drawn from cannot.
             near: (i64, i64),
-            expect: (i64, i64),
+            /// `None` when the nearest congruent value does not fit `i64`.
+            expect: Option<(i64, i64)>,
+        },
+        /// A camera that is not representable as a render position at all.
+        Camera {
+            space: u128,
+            near: (i128, i128),
         },
         Unrepresentable {
             space: u128,
@@ -859,11 +885,23 @@ pub mod contract {
                     by: pair(by),
                     expect: Some(pair(expect)),
                 }),
+                ["render", space, at, "near", near, "->", "unrepresentable"] => {
+                    cases.push(Case::Render {
+                        space: space.parse().expect("space"),
+                        at: pair(at),
+                        near: wide(near),
+                        expect: None,
+                    })
+                }
                 ["render", space, at, "near", near, "->", expect] => cases.push(Case::Render {
                     space: space.parse().expect("space"),
                     at: pair(at),
                     near: wide(near),
-                    expect: wide(expect),
+                    expect: Some(wide(expect)),
+                }),
+                ["camera", space, near] => cases.push(Case::Camera {
+                    space: space.parse().expect("space"),
+                    near: widest(near),
                 }),
                 ["load", hash] => {
                     assert!(loaded.is_none(), "the contract declares one loaded release");
@@ -1023,6 +1061,12 @@ pub mod contract {
         (x.trim().parse().expect("x"), y.trim().parse().expect("y"))
     }
 
+    /// A pair that may exceed `i64`, for a camera the contract says is not one.
+    fn widest(text: &str) -> (i128, i128) {
+        let (x, y) = text.split_once(',').expect("a pair");
+        (x.trim().parse().expect("x"), y.trim().parse().expect("y"))
+    }
+
     fn local_at(map: &str, at: &str) -> LocalPosition {
         let (x, y) = at.split_once(',').expect("a tile");
         LocalPosition {
@@ -1146,9 +1190,11 @@ mod contract_tests {
                     let space = &spaces[space];
                     let position = WorldPosition { space: space.id, x: at.0, y: at.1 };
                     let camera = RenderPosition { space: space.id, x: near.0, y: near.1 };
-                    let drawn =
-                        space.nearest_unwrapped(position, camera).expect("the contract's space");
-                    assert_eq!((drawn.x, drawn.y), *expect, "render {at:?} near {near:?}");
+                    let Some(drawn) = space.nearest_unwrapped(position, camera) else {
+                        assert_eq!(*expect, None, "render {at:?} near {near:?} was refused");
+                        continue;
+                    };
+                    assert_eq!(Some((drawn.x, drawn.y)), *expect, "render {at:?} near {near:?}");
                     assert_eq!(drawn.space, position.space, "a render position keeps its space");
                 }
                 Case::RegionAt { space, at, expect } => {
@@ -1235,6 +1281,16 @@ mod contract_tests {
                         (position(right), TopologyVersion(right.1)),
                     );
                     assert_eq!(found, *expect, "compare {left:?} with {right:?}");
+                }
+                Case::Camera { space, near } => {
+                    // Rust satisfies this by construction: `RenderPosition` holds `i64`, so
+                    // there is no such camera to pass. Elixir's integers are unbounded and
+                    // could, so the case is here to bind both sides to the same answer.
+                    assert!(
+                        i64::try_from(near.0).is_err() || i64::try_from(near.1).is_err(),
+                        "{near:?} is a representable camera, so it is not this case"
+                    );
+                    assert!(spaces.contains_key(space), "space {space} is declared");
                 }
                 Case::Unrepresentable { space, at } => {
                     // Rust satisfies this by construction: there is no `WorldPosition` holding

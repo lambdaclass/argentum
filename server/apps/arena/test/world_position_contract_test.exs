@@ -166,6 +166,26 @@ defmodule Arena.World.PositionContractTest do
           assert Position.step(space, pair(at), pair(by)) == {:inside, pair(expected)},
                  "step #{at} by #{by}"
 
+        ["render", space, at, "near", near, "->", "unrepresentable"] ->
+          space = spaces[String.to_integer(space)]
+          {nx, ny} = pair(near)
+
+          assert Position.nearest_unwrapped(space, pair(at), {:render, nx, ny}) == :none,
+                 "render #{at} near #{near} should have no representable answer"
+
+        ["camera", space, near] ->
+          space = spaces[String.to_integer(space)]
+          {nx, ny} = pair(near)
+
+          # Rust satisfies this by construction -- `RenderPosition` holds i64, so there is no
+          # such camera to pass. Asserted out of range first, exactly as Rust does, or any
+          # ordinary camera would satisfy the case and it would stop testing the guard.
+          assert nx not in Position.render_range() or ny not in Position.render_range(),
+                 "#{near} is a representable camera, so it is not this case"
+
+          assert Position.nearest_unwrapped(space, {0, 0}, {:render, nx, ny}) == :none,
+                 "camera #{near}"
+
         ["render", space, at, "near", near, "->", expected] ->
           space = spaces[String.to_integer(space)]
 

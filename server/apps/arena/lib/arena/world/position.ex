@@ -27,6 +27,12 @@ defmodule Arena.World.Position do
   @i32_min -2_147_483_648
   @i32_max 2_147_483_647
 
+  # A render coordinate is an i64 in Rust: it accumulates circuits and so is wider than the
+  # canonical i32, but it is not unbounded. Elixir's integers are, which is how the two sides
+  # came to disagree about a camera at the end of the type.
+  @i64_min -9_223_372_036_854_775_808
+  @i64_max 9_223_372_036_854_775_807
+
   @typedoc "A coordinate space's shape. Periods are in tiles; 0 means the axis does not wrap."
   @type geometry ::
           :plane
@@ -94,6 +100,9 @@ defmodule Arena.World.Position do
   @doc "The inclusive range a global coordinate must lie in."
   def coordinate_range, do: @i32_min..@i32_max
 
+  @doc "The inclusive range a render coordinate may take: i64, wider than a stored position."
+  def render_range, do: @i64_min..@i64_max
+
   @doc """
   The local tile a global position falls on, or `:none`.
 
@@ -156,14 +165,26 @@ defmodule Arena.World.Position do
   where the character is, the other is where to draw them this frame.
   """
   @spec nearest_unwrapped(space(), {integer(), integer()}, {:render, integer(), integer()}) ::
-          {:render, integer(), integer()}
+          {:render, integer(), integer()} | :none
+  def nearest_unwrapped(_space, _position, {:render, near_x, near_y})
+      when near_x not in @i64_min..@i64_max or near_y not in @i64_min..@i64_max do
+    # A camera outside i64 is not a camera. Rust's `RenderPosition` cannot hold one, so there is
+    # no question for it to answer; here there is, and answering it would produce a render
+    # position the client could not receive.
+    :none
+  end
+
   def nearest_unwrapped(space, {x, y}, {:render, near_x, near_y}) do
     {px, py} = periods(space.geometry)
     # Tagged `:render` so it cannot be passed where a canonical `{x, y}` is expected -- and the
     # camera is tagged too, because a canonical position passed as the camera would have made
     # the two kinds interchangeable at the one call site that must not confuse them. On a
     # 148-wide torus, canonical 0 and render-only 148 are both plausible-looking pairs.
-    {:render, nearest_on_axis(x, near_x, px), nearest_on_axis(y, near_y, py)}
+    # Both axes or neither: half a render position is not one.
+    with {:ok, rx} <- nearest_on_axis(x, near_x, px),
+         {:ok, ry} <- nearest_on_axis(y, near_y, py) do
+      {:render, rx, ry}
+    end
   end
 
   @doc """
@@ -178,7 +199,7 @@ defmodule Arena.World.Position do
       y in @i32_min..@i32_max
   end
 
-  defp nearest_on_axis(value, _near, 0), do: value
+  defp nearest_on_axis(value, _near, 0), do: {:ok, value}
 
   defp nearest_on_axis(value, near, period) do
     # The congruent value nearest the camera, whatever the distance. Checking only one period
@@ -186,7 +207,14 @@ defmodule Arena.World.Position do
     # moment anything follows a character around a torus twice: for period 148, canonical 0 near
     # 295 answered 148 when 296 is one tile away.
     periods = Integer.floor_div(near - value + div(period, 2), period)
-    value + periods * period
+    candidate = value + periods * period
+
+    # And the nearest congruent value to a camera at the end of i64 is *past* the end of it: for
+    # period 148 and canonical 0, the nearest value to i64::MAX is i64::MAX + 69. Rust has no
+    # render position to return there, and returning the closest representable one instead would
+    # put the sprite a whole period from where it belongs -- the defect this function exists to
+    # prevent, reintroduced at the boundary.
+    if candidate in @i64_min..@i64_max, do: {:ok, candidate}, else: :none
   end
 
   @doc """
