@@ -497,7 +497,7 @@ deterministic adapters until this phase.
 
 ### Task W-0125 — Stable region identity in the compiled topology
 
-- **State:** planned
+- **State:** active
 - **Phase:** 1
 - **Depends on:** W-0097, W-0098
 
