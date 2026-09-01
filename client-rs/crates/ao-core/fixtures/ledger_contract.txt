@@ -1,0 +1,164 @@
+# The region allocation ledger, as cases both languages must satisfy.
+#
+# Hand-authored, like the position, identity and wire contracts, so neither implementation
+# defines the answers by having been written first. A `RegionId` is the name of a unit of
+# runtime authority, and `W-0098` established that it must survive process restarts and
+# topology releases. Nothing made it survive anything: the manifest emitted no regions, so
+# every id in those contracts is a number a person typed into a fixture.
+#
+# This ledger is the retained history that makes identity durable. Not graph traversal order,
+# not a map number, not the current corpus — a file under version control that records which
+# ids were issued, which are live, and which are permanently spent.
+#
+# Directives:
+#   ledger      <name> = <ledger line> | <ledger line> | ...
+#   valid       <name> -> ok | <fault>
+#   owner       <name> <space> <map> -> <region> | none
+#   allocate    <name> space <space> maps <m,m,...> -> <region>
+#   exhausted-at <high-water-mark>
+#
+# A broken ledger usually breaks in more than one way at once, so the order the checks run in
+# is part of the contract -- otherwise the two languages would report different faults for the
+# same file and each would look wrong to the other. The order is:
+#
+#   1. the format line
+#   2. per-line faults, in the order a reader meets them: not-a-region, duplicate-region,
+#      past-high-water, reused, duplicate-map, unsorted, empty
+#   3. split and merge dispositions
+#   4. accounting -- every id below the high-water mark is live or spent
+#
+# Dispositions before accounting, because a split naming an id that was never issued is a
+# statement about *that* line, and reporting it as a hole in the numbering would send a reader
+# to the high-water mark instead of to the disposition that is wrong.
+#
+# The ledger grammar itself, which the `ledger` lines above carry:
+#
+#   format 1
+#   next_region_id <u32>
+#   active <region-id> space <world-space-id> maps <sorted-comma-separated-map-ids>
+#   tombstone <region-id> retired_in <topology-hash> reason <removed|split|merge>
+#   split <old-region-id> into <sorted-new-region-ids> in <topology-hash>
+#   merge <sorted-old-region-ids> into <new-region-id> in <topology-hash>
+#
+# ---------------------------------------------------------------------------------------
+# The ordinary ledger: two live authorities, one spent id, and the split that spent it.
+# ---------------------------------------------------------------------------------------
+ledger ordinary = format 1 | next_region_id 4 | active 2 space 199 maps 330 | active 3 space 199 maps 269 | tombstone 1 retired_in 3e6df36b27c82aab reason split | split 1 into 2,3 in 3e6df36b27c82aab
+
+valid ordinary -> ok
+owner ordinary 199 330 -> 2
+owner ordinary 199 269 -> 3
+owner ordinary 199 274 -> none
+owner ordinary 37 330 -> none
+
+# The next id comes from the recorded high-water mark, never from counting the live regions.
+# Counting would hand out 3 here — an id already spent by the split — and two different
+# authorities would answer to one name across two releases.
+allocate ordinary space 199 maps 274 -> 4
+allocate ordinary space 37 maps 168,264 -> 4
+
+# ---------------------------------------------------------------------------------------
+# An empty ledger is a valid ledger. The corpus starts with no regions allocated, and a
+# compiler that refused to read that would have to be bypassed exactly once, at the moment
+# there is no history to protect.
+# ---------------------------------------------------------------------------------------
+ledger empty = format 1 | next_region_id 1
+
+valid empty -> ok
+owner empty 199 330 -> none
+allocate empty space 199 maps 330 -> 1
+
+# ---------------------------------------------------------------------------------------
+# Zero is not a region. An uninitialised field reads as zero, and a record nobody filled in
+# must not name a live authority -- the same rule the wire contract applies to transition
+# kind 0. Ids are issued from 1.
+# ---------------------------------------------------------------------------------------
+ledger zero = format 1 | next_region_id 2 | active 0 space 199 maps 330
+
+valid zero -> not-a-region 0
+
+# ---------------------------------------------------------------------------------------
+# The faults the compiler must refuse. Each is one edit away from a ledger that reads
+# correctly, because that is the shape a mistake actually takes.
+# ---------------------------------------------------------------------------------------
+
+# One id, two authorities. Whichever the loader read second would win, and every position in
+# the other's maps would answer to an owner that is somewhere else.
+ledger twice = format 1 | next_region_id 3 | active 1 space 199 maps 330 | active 1 space 199 maps 269
+valid twice -> duplicate-region 1
+
+# One map, two owners. `W-0098` refuses this at load; refusing it here names the line.
+ledger shared = format 1 | next_region_id 3 | active 1 space 199 maps 330 | active 2 space 199 maps 330
+valid shared -> duplicate-map 330
+
+# A map claimed twice by one region. Sorted-and-unique is the canonical form, so this is a
+# duplicate rather than a sorting complaint.
+ledger repeated = format 1 | next_region_id 2 | active 1 space 199 maps 330,330
+valid repeated -> duplicate-map 330
+
+# Below the high-water mark and neither live nor spent. An id was issued and then lost from
+# the record, which is the one thing a durable-identity ledger cannot allow: the next release
+# has no way to know whether 2 is free or was somebody's authority last month.
+ledger gap = format 1 | next_region_id 4 | active 1 space 199 maps 330 | active 3 space 199 maps 269
+valid gap -> unaccounted 2
+
+# Past the high-water mark: an id that was never issued is already in use.
+ledger ahead = format 1 | next_region_id 2 | active 1 space 199 maps 330 | active 5 space 199 maps 269
+valid ahead -> past-high-water 5
+
+# A tombstone is permanent. Reusing the id gives one name to two authorities separated only
+# by time, which is precisely what "stable across topology releases" forbids.
+ledger revived = format 1 | next_region_id 2 | active 1 space 199 maps 330 | tombstone 1 retired_in 3e6df36b27c82aab reason removed
+valid revived -> reused 1
+
+# Maps out of order. The ledger is compared byte for byte across releases, so it has exactly
+# one spelling per state; two orderings of one region would look like a change.
+ledger unsorted = format 1 | next_region_id 2 | active 1 space 199 maps 330,269
+valid unsorted -> unsorted 1
+
+# An authority over nothing. A region is a unit of authority *over maps*, and one with none
+# is a name with no referent that still consumes an id.
+ledger nothing = format 1 | next_region_id 2 | active 1 space 199 maps
+valid nothing -> empty 1
+
+# A split whose old id is still live. The disposition says 1 became 2 and 3; if 1 is also
+# active then the ledger records both that it ended and that it did not.
+ledger halfsplit = format 1 | next_region_id 4 | active 1 space 199 maps 330 | active 2 space 199 maps 269 | active 3 space 199 maps 274 | split 1 into 2,3 in 3e6df36b27c82aab
+valid halfsplit -> dangling-split 1
+
+# A split whose old id was retired for a different reason. The tombstone and the disposition
+# must tell the same story, or the history explains a change that never happened.
+ledger mislabelled = format 1 | next_region_id 4 | active 2 space 199 maps 330 | active 3 space 199 maps 269 | tombstone 1 retired_in 3e6df36b27c82aab reason removed | split 1 into 2,3 in 3e6df36b27c82aab
+valid mislabelled -> dangling-split 1
+
+# A split into an id that does not exist. The new authority is named and never allocated.
+ledger nowhere = format 1 | next_region_id 4 | active 2 space 199 maps 330 | tombstone 1 retired_in 3e6df36b27c82aab reason split | split 1 into 2,3 in 3e6df36b27c82aab
+valid nowhere -> dangling-split 3
+
+# A merge with an input still live. Region 1 owns a map the merged authority does not, so this
+# case fails for the disposition alone -- giving 1 and 3 a map in common would have made it a
+# duplicate-map case instead, and it would have passed while testing the wrong rule.
+ledger halfmerge = format 1 | next_region_id 4 | active 1 space 199 maps 274 | active 3 space 199 maps 269,330 | tombstone 2 retired_in 3e6df36b27c82aab reason merge | merge 1,2 into 3 in 3e6df36b27c82aab
+valid halfmerge -> dangling-merge 1
+
+# And a merge into an id that does not exist.
+
+ledger mergenowhere = format 1 | next_region_id 3 | tombstone 1 retired_in 3e6df36b27c82aab reason merge | tombstone 2 retired_in 3e6df36b27c82aab reason merge | merge 1,2 into 3 in 3e6df36b27c82aab
+valid mergenowhere -> dangling-merge 3
+
+# A format this compiler does not know. Reading a newer ledger with older rules is how a
+# tombstone gets silently dropped.
+ledger future = format 2 | next_region_id 1
+valid future -> unknown-format 2
+
+# ---------------------------------------------------------------------------------------
+# Exhaustion. `u32` is 4,294,967,295 ids and the corpus has 842 maps, so this is unreachable
+# in practice and stated anyway: the failure must be an explicit refusal rather than a wrap,
+# a scan for a hole, or a reused tombstone. A wrapped high-water mark hands out id 1 again,
+# and id 1 belonged to somebody.
+#
+# Stated against the mark rather than through a `ledger` line, because accounting requires
+# every id below the mark to be live or spent, so a *valid* ledger at the boundary would need
+# four billion entries. The refusal is a property of the allocator and is tested as one.
+# ---------------------------------------------------------------------------------------
+exhausted-at 4294967295
