@@ -387,22 +387,71 @@ defmodule Arena.World.RegionLedger do
   @doc """
   Issue an id to a new authority. The only thing that moves the high-water mark.
 
-  Called by the explicit review command, never by a compile or a check: a build that can renumber
-  the world when the corpus changes is a build that decides identity, and identity is what this
-  file exists to keep out of the build's hands.
+  Called by the explicit review command, never by a compile or a check: a build that can
+  renumber the world when the corpus changes is a build that decides identity, and identity is
+  what this file exists to keep out of the build's hands.
+
+  Everything is checked *before* anything is written, so success always leaves another valid
+  ledger and a refusal leaves this one untouched. It used to accept an empty map list or a map
+  another region already owned, return success, and hand back a ledger its own parser would
+  reject — a function whose success value is invalid is worse than one that fails, because the
+  failure surfaces at the next read and blames whoever read it.
+
+  Maps are deduplicated and sorted rather than refused for being unsorted: a caller passing a
+  set has no order to get wrong, and the canonical spelling is this function's job. A map
+  repeated *within* the request is still a duplicate, because it means the caller believes it is
+  allocating two things.
   """
   @spec allocate(t(), non_neg_integer(), [integer()]) ::
-          {:ok, region_id(), t()} | {:error, :exhausted}
+          {:ok, region_id(), t()} | {:error, fault()}
   def allocate(ledger, space, maps) do
-    case next_available(ledger) do
-      :exhausted ->
-        {:error, :exhausted}
+    with {:ok, id} <- next_or_fault(ledger),
+         :ok <- check_request(ledger, id, maps) do
+      region = %{space: space, maps: Enum.sort(maps)}
 
-      {:ok, id} ->
-        region = %{space: space, maps: maps |> Enum.uniq() |> Enum.sort()}
-
-        {:ok, id, %{ledger | active: Map.put(ledger.active, id, region), next_region_id: id + 1}}
+      {:ok, id, %{ledger | active: Map.put(ledger.active, id, region), next_region_id: id + 1}}
     end
+  end
+
+  defp next_or_fault(ledger) do
+    case next_available(ledger) do
+      {:ok, id} -> {:ok, id}
+      # Its own fault rather than `past_high_water`, which is a statement about a line in the
+      # file: this one is about the allocator having nothing left to give, and a reader shown
+      # "past high water" would go looking for an id that is not there.
+      :exhausted -> {:error, {:exhausted, @u32_max}}
+    end
+  end
+
+  defp check_request(ledger, id, maps) do
+    owned =
+      ledger.active
+      |> Enum.flat_map(fn {_, region} -> region.maps end)
+      |> MapSet.new()
+
+    cond do
+      maps == [] ->
+        {:error, {:empty, id}}
+
+      (repeat = first_repeated(maps)) != nil ->
+        {:error, {:duplicate_map, repeat}}
+
+      # Any space, not just this one: a map belongs to one space, so a second claim is the
+      # corpus contradiction `W-0097` measured rather than a fact to allocate around.
+      (taken = Enum.find(maps, &MapSet.member?(owned, &1))) != nil ->
+        {:error, {:duplicate_map, taken}}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp first_repeated(maps) do
+    maps
+    |> Enum.frequencies()
+    |> Enum.filter(fn {_, count} -> count > 1 end)
+    |> Enum.map(&elem(&1, 0))
+    |> Enum.min(fn -> nil end)
   end
 
   @doc """

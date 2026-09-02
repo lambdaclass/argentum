@@ -86,23 +86,33 @@ defmodule Arena.World.RegionLedgerTest do
                    {:ok, String.to_integer(region)},
                  line
 
-        ["allocate", name, "space", space, "maps", maps, "->", expected] ->
+        ["allocate", name, "space", space | rest] ->
+          # `maps` may be absent entirely (an empty list), so the tail is split on the arrow
+          # rather than positionally.
+          {maps, ["->" | expected]} = Enum.split_while(rest, &(&1 != "->"))
+          expected = Enum.join(expected, " ")
+
+          maps =
+            maps
+            |> Enum.drop(1)
+            |> Enum.flat_map(&String.split(&1, ",", trim: true))
+            |> Enum.map(&String.to_integer/1)
+
           {:ok, ledger} = RegionLedger.parse(ledgers[name])
           before = ledger.next_region_id
 
-          maps =
-            maps |> String.split(",", trim: true) |> Enum.map(&String.to_integer/1)
+          case RegionLedger.allocate(ledger, String.to_integer(space), maps) do
+            {:ok, issued, after_ledger} ->
+              assert Integer.to_string(issued) == expected, line
+              assert issued == before, "an id comes from the mark, not from a count"
+              assert after_ledger.next_region_id == before + 1, "the mark moves exactly once"
 
-          assert {:ok, issued, after_ledger} =
-                   RegionLedger.allocate(ledger, String.to_integer(space), maps)
+              # Success always leaves another valid ledger.
+              assert {:ok, _} = RegionLedger.parse(RegionLedger.encode(after_ledger)), line
 
-          assert issued == String.to_integer(expected), line
-          assert issued == before, "an id comes from the mark, not from a count"
-          assert after_ledger.next_region_id == before + 1, "the mark moves exactly once"
-
-          # And the result is still a ledger: allocating must not create the very faults the
-          # file exists to prevent.
-          assert {:ok, _} = RegionLedger.parse(RegionLedger.encode(after_ledger)), line
+            {:error, fault} ->
+              assert RegionLedger.fault_name(fault) == expected, line
+          end
 
         ["exhausted-at", mark] ->
           mark = String.to_integer(mark)
@@ -120,7 +130,7 @@ defmodule Arena.World.RegionLedgerTest do
           }
 
           assert RegionLedger.next_available(ledger) == :exhausted
-          assert RegionLedger.allocate(ledger, 199, [330]) == {:error, :exhausted}
+          assert RegionLedger.allocate(ledger, 199, [330]) == {:error, {:exhausted, mark}}
       end
     end
   end

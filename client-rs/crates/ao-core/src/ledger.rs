@@ -145,6 +145,10 @@ pub enum LedgerFault {
     NotAMerge(RegionId),
     /// A disposition's ids are not strictly ascending, so one history has two spellings.
     UnsortedDisposition(RegionId),
+    /// `u32` is spent. Its own fault rather than `PastHighWater`, which is a statement about a
+    /// line in the file: this one is about the allocator having nothing left to give, and a
+    /// reader shown "past high water" would go looking for an id that is not there.
+    Exhausted(u32),
     /// Below the high-water mark and neither live nor spent. An id was issued and then lost from
     /// the record, so the next release cannot tell whether it is free or was somebody's authority.
     Unaccounted(RegionId),
@@ -172,6 +176,7 @@ impl LedgerFault {
             LedgerFault::NotASplit(id) => format!("not-a-split {}", id.0),
             LedgerFault::NotAMerge(id) => format!("not-a-merge {}", id.0),
             LedgerFault::UnsortedDisposition(id) => format!("unsorted-disposition {}", id.0),
+            LedgerFault::Exhausted(mark) => format!("exhausted {mark}"),
             LedgerFault::Unaccounted(id) => format!("unaccounted {}", id.0),
         }
     }
@@ -469,15 +474,40 @@ impl RegionLedger {
     /// Called by the explicit review command, never by a compile or a check: a build that can
     /// renumber the world when the corpus changes is a build that decides identity, and identity
     /// is what this file exists to keep out of the build's hands.
+    ///
+    /// Everything is checked *before* anything is written, so success always leaves another
+    /// valid ledger and a refusal leaves this one untouched. It used to accept an empty map list
+    /// or a map another region already owned, return success, and hand back an object its own
+    /// parser would reject — a function whose success value is invalid is worse than one that
+    /// fails, because the failure surfaces at the next read and blames whoever read it.
+    ///
+    /// Maps are deduplicated and sorted rather than refused for being unsorted: a caller passing
+    /// a set has no order to get wrong, and the canonical spelling is this function's job. A map
+    /// repeated *within* the request is still a duplicate, because it means the caller believes
+    /// it is allocating two things.
     pub fn allocate(
         &mut self,
         space: WorldSpaceId,
         maps: Vec<MapId>,
     ) -> Result<RegionId, LedgerFault> {
-        let id = self.next_available().ok_or(LedgerFault::PastHighWater(RegionId(u32::MAX)))?;
+        let id = self.next_available().ok_or(LedgerFault::Exhausted(u32::MAX))?;
+
+        if maps.is_empty() {
+            return Err(LedgerFault::Empty(id));
+        }
+        for (index, map) in maps.iter().enumerate() {
+            if maps[..index].contains(map) {
+                return Err(LedgerFault::DuplicateMap(*map));
+            }
+            // Any space, not just this one: a map belongs to one space, so a second claim is the
+            // corpus contradiction `W-0097` measured rather than a fact to allocate around.
+            if self.active.values().any(|region| region.maps.contains(map)) {
+                return Err(LedgerFault::DuplicateMap(*map));
+            }
+        }
+
         let mut maps = maps;
         maps.sort_unstable();
-        maps.dedup();
         self.active.insert(id, Active { space, maps });
         self.next_region_id += 1;
         Ok(id)
@@ -633,27 +663,51 @@ mod contract_tests {
                         .unwrap_or_else(|| "none".to_string());
                     assert_eq!(&found, expect, "owner {name} {space} {map}");
                 }
-                ["allocate", name, "space", space, "maps", maps, "->", expect] => {
+                ["allocate", name, "space", space, "maps", rest @ ..] => {
+                    // `maps` may be absent entirely (an empty list), so the tail is split on the
+                    // arrow rather than positionally.
+                    let arrow = rest.iter().position(|word| *word == "->").expect("an arrow");
+                    let maps: Vec<MapId> = rest[..arrow]
+                        .first()
+                        .map(|list| {
+                            list.split(',')
+                                .filter(|part| !part.is_empty())
+                                .map(|m| MapId(m.parse().expect("map")))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let expect = rest[arrow + 1..].join(" ");
+
                     let mut ledger = RegionLedger::parse(&ledgers[*name]).expect("a valid ledger");
                     let before = ledger.next_region_id();
-                    let issued = ledger
-                        .allocate(
-                            WorldSpaceId(space.parse().expect("space")),
-                            maps.split(',')
-                                .map(|m| MapId(m.parse().expect("map")))
-                                .collect::<Vec<_>>(),
-                        )
-                        .expect("an id");
-                    assert_eq!(issued.0.to_string(), *expect, "allocate {name}");
-                    assert_eq!(issued.0, before, "an id comes from the mark, not from a count");
-                    assert_eq!(
-                        ledger.next_region_id(),
-                        before + 1,
-                        "allocation moves the mark exactly once"
-                    );
-                    // And the result is still a ledger: allocating must not create the very
-                    // faults the file exists to prevent.
-                    RegionLedger::parse(&ledger.encode()).expect("still valid after allocation");
+                    let space = WorldSpaceId(space.parse().expect("space"));
+
+                    match ledger.allocate(space, maps) {
+                        Ok(issued) => {
+                            assert_eq!(issued.0.to_string(), expect, "allocate {name}");
+                            assert_eq!(
+                                issued.0, before,
+                                "an id comes from the mark, not from a count"
+                            );
+                            assert_eq!(
+                                ledger.next_region_id(),
+                                before + 1,
+                                "allocation moves the mark exactly once"
+                            );
+                            // Success always leaves another valid ledger.
+                            RegionLedger::parse(&ledger.encode())
+                                .expect("still valid after allocation");
+                        }
+                        Err(fault) => {
+                            assert_eq!(fault.name(), expect, "allocate {name}");
+                            // A refusal leaves this one untouched.
+                            assert_eq!(
+                                ledger,
+                                RegionLedger::parse(&ledgers[*name]).expect("a valid ledger"),
+                                "a refused allocation must change nothing"
+                            );
+                        }
+                    }
                 }
                 ["exhausted-at", mark] => {
                     let mark: u32 = mark.parse().expect("a mark");

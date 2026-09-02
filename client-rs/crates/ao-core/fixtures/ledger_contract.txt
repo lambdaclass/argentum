@@ -14,7 +14,7 @@
 #   ledger      <name> = <ledger line> | <ledger line> | ...
 #   valid       <name> -> ok | <fault>
 #   owner       <name> <space> <map> -> <region> | none
-#   allocate    <name> space <space> maps <m,m,...> -> <region>
+#   allocate    <name> space <space> maps <m,m,...> -> <region> | <fault>
 #   exhausted-at <high-water-mark>
 #
 # A broken ledger usually breaks in more than one way at once, so the order the checks run in
@@ -66,6 +66,20 @@ owner ordinary 37 330 -> none
 # authorities would answer to one name across two releases.
 allocate ordinary space 199 maps 274 -> 4
 allocate ordinary space 37 maps 168,264 -> 4
+
+# Allocation refuses anything that would produce a ledger its own parser rejects. It used to
+# return success and leave the caller holding an object that could not be read back: an
+# authority over no maps, or a second owner for a map somebody already has. A function whose
+# success value is invalid is worse than one that fails, because the failure surfaces at the
+# next read and blames whoever read it.
+allocate ordinary space 199 maps -> empty 4
+allocate ordinary space 199 maps 330 -> duplicate-map 330
+allocate ordinary space 37 maps 269 -> duplicate-map 269
+allocate ordinary space 199 maps 274,274 -> duplicate-map 274
+
+# A map owned in another space is still owned. A map belongs to one space, so two spaces
+# claiming it is the corpus contradiction `W-0097` measured, not a fact to allocate around.
+allocate empty space 199 maps 330 -> 1
 
 # ---------------------------------------------------------------------------------------
 # An empty ledger is a valid ledger. The corpus starts with no regions allocated, and a
@@ -223,5 +237,8 @@ valid future -> unknown-format 2
 # Stated against the mark rather than through a `ledger` line, because accounting requires
 # every id below the mark to be live or spent, so a *valid* ledger at the boundary would need
 # four billion entries. The refusal is a property of the allocator and is tested as one.
+#
+# The fault is `exhausted <mark>`, not `past-high-water`: that one is a statement about a line
+# in the file, and a reader shown it would go looking for an id that is not there.
 # ---------------------------------------------------------------------------------------
 exhausted-at 4294967295
