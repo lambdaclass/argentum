@@ -156,6 +156,59 @@ valid halfmerge -> dangling-merge 1
 ledger mergenowhere = format 1 | next_region_id 3 | tombstone 1 retired_after 3e6df36b27c82aab reason merge | tombstone 2 retired_after 3e6df36b27c82aab reason merge | merge 1,2 into 3 after 3e6df36b27c82aab
 valid mergenowhere -> dangling-merge 3
 
+# ---------------------------------------------------------------------------------------
+# History that does not add up. A ledger can be internally consistent about *ids* and still
+# record two incompatible stories about what happened, which is worse than recording nothing:
+# the next reviewer trusts it.
+# ---------------------------------------------------------------------------------------
+
+# A tombstone and its disposition naming different parent releases. One of them is wrong about
+# when the change happened, and nothing else in the file can say which.
+ledger disagree = format 1 | next_region_id 4 | active 2 space 199 maps 330 | active 3 space 199 maps 269 | tombstone 1 retired_after 3e6df36b27c82aab reason split | split 1 into 2,3 after 0011223344556677
+valid disagree -> release-mismatch 1
+
+# A tombstone retired as a split with no split line. The id is spent and the file does not say
+# what replaced it, so the authority's history ends mid-sentence.
+ledger undisposed = format 1 | next_region_id 3 | active 2 space 199 maps 330 | tombstone 1 retired_after 3e6df36b27c82aab reason split
+valid undisposed -> undisposed 1
+
+ledger undisposedmerge = format 1 | next_region_id 3 | active 2 space 199 maps 330 | tombstone 1 retired_after 3e6df36b27c82aab reason merge
+valid undisposedmerge -> undisposed 1
+
+# `removed` is the one reason that needs no disposition: nothing replaced it, and that is the
+# whole content of the statement.
+ledger removed = format 1 | next_region_id 3 | active 2 space 199 maps 330 | tombstone 1 retired_after 3e6df36b27c82aab reason removed
+valid removed -> ok
+
+# Two dispositions for one retired id. Each is plausible alone; together they say the authority
+# became 2,3 and also became 4,5, and a reader has no way to choose.
+ledger twostories = format 1 | next_region_id 6 | active 2 space 199 maps 330 | active 3 space 199 maps 269 | active 4 space 199 maps 274 | active 5 space 199 maps 287 | tombstone 1 retired_after 3e6df36b27c82aab reason split | split 1 into 2,3 after 3e6df36b27c82aab | split 1 into 4,5 after 3e6df36b27c82aab
+valid twostories -> repeated-disposition 1
+
+# A release token that is not a topology hash. Sixteen lowercase hex characters, the same form
+# `from_manifest_hash` accepts -- a history whose dates are unparseable is not a history.
+ledger notahash = format 1 | next_region_id 3 | active 2 space 199 maps 330 | tombstone 1 retired_after release-b reason removed
+valid notahash -> not-a-release release-b
+
+ledger shorthash = format 1 | next_region_id 3 | active 2 space 199 maps 330 | tombstone 1 retired_after 3e6df36b27c82aa reason removed
+valid shorthash -> not-a-release 3e6df36b27c82aa
+
+ledger uppercasehash = format 1 | next_region_id 3 | active 2 space 199 maps 330 | tombstone 1 retired_after 3E6DF36B27C82AAB reason removed
+valid uppercasehash -> not-a-release 3E6DF36B27C82AAB
+
+# A split into one id is not a split, it is a rename -- and a rename is exactly the silent
+# identity change this ledger exists to make impossible. Same for a merge of one.
+ledger rename = format 1 | next_region_id 3 | active 2 space 199 maps 330 | tombstone 1 retired_after 3e6df36b27c82aab reason split | split 1 into 2 after 3e6df36b27c82aab
+valid rename -> not-a-split 1
+
+ledger lonemerge = format 1 | next_region_id 3 | active 2 space 199 maps 330 | tombstone 1 retired_after 3e6df36b27c82aab reason merge | merge 1 into 2 after 3e6df36b27c82aab
+valid lonemerge -> not-a-merge 2
+
+# Disposition ids out of order. The grammar says sorted, and the ledger is compared byte for
+# byte across releases, so one history has one spelling.
+ledger unsortedsplit = format 1 | next_region_id 4 | active 2 space 199 maps 330 | active 3 space 199 maps 269 | tombstone 1 retired_after 3e6df36b27c82aab reason split | split 1 into 3,2 after 3e6df36b27c82aab
+valid unsortedsplit -> unsorted-disposition 1
+
 # A format this compiler does not know. Reading a newer ledger with older rules is how a
 # tombstone gets silently dropped.
 ledger future = format 2 | next_region_id 1

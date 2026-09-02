@@ -219,42 +219,123 @@ defmodule Arena.World.RegionLedger do
     |> Enum.min()
   end
 
-  # A split's old id must be spent *as a split*, and each new id must have been issued. Same for
-  # a merge. The tombstone and the disposition must tell the same story, or the history explains
-  # a change that never happened.
+  # The history has to add up, not merely reference live ids.
+  #
+  # A ledger can be internally consistent about *ids* and still record two incompatible stories
+  # about what happened, which is worse than recording nothing: the next reviewer trusts it. So
+  # every retired-by-change id has exactly one disposition, every disposition agrees with its
+  # tombstone about the parent release, and every release token is a topology hash.
   defp check_dispositions(ledger) do
-    with :ok <- check_splits(ledger) do
-      check_merges(ledger)
+    with :ok <- check_releases(ledger),
+         {:ok, disposed} <- check_splits(ledger, MapSet.new()),
+         {:ok, disposed} <- check_merges(ledger, disposed) do
+      check_disposed(ledger, disposed)
     end
   end
 
-  defp check_splits(ledger) do
-    Enum.reduce_while(ledger.splits, :ok, fn split, :ok ->
+  # Release tokens first: a fault reported against an unparseable release would name a token
+  # that means nothing, and the reader needs to know *that* is the problem.
+  defp check_releases(ledger) do
+    tokens =
+      Enum.map(ledger.tombstones, fn {_, stone} -> stone.retired_after end) ++
+        Enum.map(ledger.splits, & &1.after) ++ Enum.map(ledger.merges, & &1.after)
+
+    case Enum.find(tokens, &(not release?(&1))) do
+      nil -> :ok
+      token -> {:error, {:not_a_release, token}}
+    end
+  end
+
+  # Sixteen lowercase hex characters, checked through `Arena.World.Topology.from_manifest_hash/1`
+  # rather than re-implemented, so the ledger and the wire cannot disagree about what a release
+  # is called.
+  defp release?(token), do: Arena.World.Topology.from_manifest_hash(token) != :error
+
+  defp check_splits(ledger, disposed) do
+    Enum.reduce_while(ledger.splits, {:ok, disposed}, fn split, {:ok, disposed} ->
+      stone = Map.get(ledger.tombstones, split.from)
+
       cond do
-        not retired_as?(ledger, split.from, :split) ->
+        stone == nil or stone.reason != :split ->
           {:halt, {:error, {:dangling_split, split.from}}}
+
+        stone.retired_after != split.after ->
+          {:halt, {:error, {:release_mismatch, split.from}}}
+
+        MapSet.member?(disposed, split.from) ->
+          {:halt, {:error, {:repeated_disposition, split.from}}}
+
+        length(split.into) < 2 ->
+          {:halt, {:error, {:not_a_split, split.from}}}
+
+        split.into != Enum.sort(Enum.uniq(split.into)) ->
+          {:halt, {:error, {:unsorted_disposition, split.from}}}
 
         true ->
           case Enum.find(split.into, &(not issued?(ledger, &1) or &1 == split.from)) do
-            nil -> {:cont, :ok}
+            nil -> {:cont, {:ok, MapSet.put(disposed, split.from)}}
             id -> {:halt, {:error, {:dangling_split, id}}}
           end
       end
     end)
   end
 
-  defp check_merges(ledger) do
-    Enum.reduce_while(ledger.merges, :ok, fn merge, :ok ->
-      case Enum.find(merge.from, &(not retired_as?(ledger, &1, :merge))) do
-        nil ->
-          if issued?(ledger, merge.into) and merge.into not in merge.from,
-            do: {:cont, :ok},
-            else: {:halt, {:error, {:dangling_merge, merge.into}}}
+  defp check_merges(ledger, disposed) do
+    Enum.reduce_while(ledger.merges, {:ok, disposed}, fn merge, {:ok, disposed} ->
+      cond do
+        length(merge.from) < 2 ->
+          {:halt, {:error, {:not_a_merge, merge.into}}}
 
-        id ->
-          {:halt, {:error, {:dangling_merge, id}}}
+        merge.from != Enum.sort(Enum.uniq(merge.from)) ->
+          {:halt, {:error, {:unsorted_disposition, merge.into}}}
+
+        true ->
+          case merge_sources(ledger, merge, disposed) do
+            {:ok, disposed} ->
+              if issued?(ledger, merge.into) and merge.into not in merge.from,
+                do: {:cont, {:ok, disposed}},
+                else: {:halt, {:error, {:dangling_merge, merge.into}}}
+
+            {:error, _} = fault ->
+              {:halt, fault}
+          end
       end
     end)
+  end
+
+  defp merge_sources(ledger, merge, disposed) do
+    Enum.reduce_while(merge.from, {:ok, disposed}, fn id, {:ok, disposed} ->
+      stone = Map.get(ledger.tombstones, id)
+
+      cond do
+        stone == nil or stone.reason != :merge ->
+          {:halt, {:error, {:dangling_merge, id}}}
+
+        stone.retired_after != merge.after ->
+          {:halt, {:error, {:release_mismatch, id}}}
+
+        MapSet.member?(disposed, id) ->
+          {:halt, {:error, {:repeated_disposition, id}}}
+
+        true ->
+          {:cont, {:ok, MapSet.put(disposed, id)}}
+      end
+    end)
+  end
+
+  # Every id retired *by a change* must have that change on record. `:removed` is the one reason
+  # that needs no disposition: nothing replaced it, and that is the whole content of the
+  # statement.
+  defp check_disposed(ledger, disposed) do
+    ledger.tombstones
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.find(fn {id, stone} ->
+      stone.reason in [:split, :merge] and not MapSet.member?(disposed, id)
+    end)
+    |> case do
+      nil -> :ok
+      {id, _} -> {:error, {:undisposed, id}}
+    end
   end
 
   # Every id below the high-water mark is live or spent. This is what makes "never reused"

@@ -126,6 +126,25 @@ pub enum LedgerFault {
     DanglingSplit(RegionId),
     /// A `merge` line that disagrees with the tombstones around it.
     DanglingMerge(RegionId),
+    /// A tombstone and its disposition name different parent releases. One of them is wrong
+    /// about when the change happened, and nothing else in the file can say which.
+    ReleaseMismatch(RegionId),
+    /// An id retired as a split or a merge with no disposition saying what replaced it. The
+    /// authority's history ends mid-sentence, and the next reviewer trusts it anyway.
+    Undisposed(RegionId),
+    /// Two dispositions for one retired id. Each is plausible alone; together they record two
+    /// incompatible histories and a reader has no way to choose.
+    RepeatedDisposition(RegionId),
+    /// A release token that is not a topology hash. A history whose dates are unparseable is
+    /// not a history.
+    NotARelease(String),
+    /// A split into fewer than two ids, which is a rename — the silent identity change this
+    /// file exists to make impossible.
+    NotASplit(RegionId),
+    /// A merge of fewer than two ids, for the same reason.
+    NotAMerge(RegionId),
+    /// A disposition's ids are not strictly ascending, so one history has two spellings.
+    UnsortedDisposition(RegionId),
     /// Below the high-water mark and neither live nor spent. An id was issued and then lost from
     /// the record, so the next release cannot tell whether it is free or was somebody's authority.
     Unaccounted(RegionId),
@@ -146,6 +165,13 @@ impl LedgerFault {
             LedgerFault::Empty(id) => format!("empty {}", id.0),
             LedgerFault::DanglingSplit(id) => format!("dangling-split {}", id.0),
             LedgerFault::DanglingMerge(id) => format!("dangling-merge {}", id.0),
+            LedgerFault::ReleaseMismatch(id) => format!("release-mismatch {}", id.0),
+            LedgerFault::Undisposed(id) => format!("undisposed {}", id.0),
+            LedgerFault::RepeatedDisposition(id) => format!("repeated-disposition {}", id.0),
+            LedgerFault::NotARelease(token) => format!("not-a-release {token}"),
+            LedgerFault::NotASplit(id) => format!("not-a-split {}", id.0),
+            LedgerFault::NotAMerge(id) => format!("not-a-merge {}", id.0),
+            LedgerFault::UnsortedDisposition(id) => format!("unsorted-disposition {}", id.0),
             LedgerFault::Unaccounted(id) => format!("unaccounted {}", id.0),
         }
     }
@@ -290,14 +316,53 @@ impl RegionLedger {
         Ok(())
     }
 
-    /// A split's old id must be spent *as a split*, and each new id must have been issued. Same
-    /// for a merge. The tombstone and the disposition must tell the same story, or the history
-    /// explains a change that never happened.
+    /// The history has to add up, not merely reference live ids.
+    ///
+    /// A ledger can be internally consistent about *ids* and still record two incompatible
+    /// stories about what happened, which is worse than recording nothing: the next reviewer
+    /// trusts it. So every retired-by-change id has exactly one disposition, every disposition
+    /// agrees with its tombstone about the parent release, and every release token is a
+    /// topology hash.
     fn check_dispositions(&self) -> Result<(), LedgerFault> {
+        // Release tokens first: a fault reported against an unparseable release would name a
+        // token that means nothing, and the reader needs to know *that* is the problem.
+        for (id, stone) in &self.tombstones {
+            if !is_release(&stone.retired_after) {
+                return Err(LedgerFault::NotARelease(stone.retired_after.clone()));
+            }
+            let _ = id;
+        }
         for split in &self.splits {
-            match self.tombstones.get(&split.from) {
-                Some(stone) if stone.reason == Retirement::Split => {}
-                _ => return Err(LedgerFault::DanglingSplit(split.from)),
+            if !is_release(&split.after) {
+                return Err(LedgerFault::NotARelease(split.after.clone()));
+            }
+        }
+        for merge in &self.merges {
+            if !is_release(&merge.after) {
+                return Err(LedgerFault::NotARelease(merge.after.clone()));
+            }
+        }
+
+        let mut disposed: BTreeSet<RegionId> = BTreeSet::new();
+
+        for split in &self.splits {
+            let Some(stone) = self.tombstones.get(&split.from) else {
+                return Err(LedgerFault::DanglingSplit(split.from));
+            };
+            if stone.reason != Retirement::Split {
+                return Err(LedgerFault::DanglingSplit(split.from));
+            }
+            if stone.retired_after != split.after {
+                return Err(LedgerFault::ReleaseMismatch(split.from));
+            }
+            if !disposed.insert(split.from) {
+                return Err(LedgerFault::RepeatedDisposition(split.from));
+            }
+            if split.into.len() < 2 {
+                return Err(LedgerFault::NotASplit(split.from));
+            }
+            if split.into.windows(2).any(|pair| pair[0] >= pair[1]) {
+                return Err(LedgerFault::UnsortedDisposition(split.from));
             }
             for id in &split.into {
                 if !self.issued(*id) || *id == split.from {
@@ -307,14 +372,38 @@ impl RegionLedger {
         }
 
         for merge in &self.merges {
+            if merge.from.len() < 2 {
+                return Err(LedgerFault::NotAMerge(merge.into));
+            }
+            if merge.from.windows(2).any(|pair| pair[0] >= pair[1]) {
+                return Err(LedgerFault::UnsortedDisposition(merge.into));
+            }
             for id in &merge.from {
-                match self.tombstones.get(id) {
-                    Some(stone) if stone.reason == Retirement::Merge => {}
-                    _ => return Err(LedgerFault::DanglingMerge(*id)),
+                let Some(stone) = self.tombstones.get(id) else {
+                    return Err(LedgerFault::DanglingMerge(*id));
+                };
+                if stone.reason != Retirement::Merge {
+                    return Err(LedgerFault::DanglingMerge(*id));
+                }
+                if stone.retired_after != merge.after {
+                    return Err(LedgerFault::ReleaseMismatch(*id));
+                }
+                if !disposed.insert(*id) {
+                    return Err(LedgerFault::RepeatedDisposition(*id));
                 }
             }
             if !self.issued(merge.into) || merge.from.contains(&merge.into) {
                 return Err(LedgerFault::DanglingMerge(merge.into));
+            }
+        }
+
+        // Every id retired *by a change* must have that change on record. `Removed` is the one
+        // reason that needs no disposition: nothing replaced it, and that is the whole content
+        // of the statement.
+        for (id, stone) in &self.tombstones {
+            let needs_one = matches!(stone.reason, Retirement::Split | Retirement::Merge);
+            if needs_one && !disposed.contains(id) {
+                return Err(LedgerFault::Undisposed(*id));
             }
         }
 
@@ -444,6 +533,14 @@ impl RegionLedger {
 
         out
     }
+}
+
+/// Whether a release token is a topology hash: sixteen lowercase hex characters, the same form
+/// [`crate::position::TopologyVersion::from_manifest_hash`] accepts. Checked through that
+/// function rather than re-implemented, so the ledger and the wire cannot disagree about what a
+/// release is called.
+fn is_release(token: &str) -> bool {
+    crate::position::TopologyVersion::from_manifest_hash(token).is_some()
 }
 
 fn number_at(text: &str, at: usize, what: &str) -> Result<u32, LedgerFault> {
