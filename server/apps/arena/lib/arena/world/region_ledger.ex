@@ -14,6 +14,10 @@ defmodule Arena.World.RegionLedger do
   registry, no database sequence and no movement-time lookup: by the time anything is moving,
   every region already has its name.
 
+  A release token names the release a change came *after*, never the release being built. The
+  ledger is an input to the topology content hash, so a tombstone naming the hash it is part of
+  would make that hash depend on itself — there is no order in which such a file can be written.
+
   The counterpart is `ao_core::ledger`, and
   `client-rs/crates/ao-core/fixtures/ledger_contract.txt` is the specification both satisfy. It
   fixes the order the checks run in, because two implementations reporting different faults for
@@ -28,9 +32,9 @@ defmodule Arena.World.RegionLedger do
   @type t :: %{
           next_region_id: non_neg_integer(),
           active: %{optional(region_id()) => %{space: non_neg_integer(), maps: [integer()]}},
-          tombstones: %{optional(region_id()) => %{retired_in: String.t(), reason: atom()}},
-          splits: [%{from: region_id(), into: [region_id()], in_release: String.t()}],
-          merges: [%{from: [region_id()], into: region_id(), in_release: String.t()}]
+          tombstones: %{optional(region_id()) => %{retired_after: String.t(), reason: atom()}},
+          splits: [%{from: region_id(), into: [region_id()], after: String.t()}],
+          merges: [%{from: [region_id()], into: region_id(), after: String.t()}]
         }
 
   @doc "The one format this compiler understands."
@@ -105,30 +109,30 @@ defmodule Arena.World.RegionLedger do
     end
   end
 
-  defp read_line(["tombstone", id, "retired_in", release, "reason", reason], at, ledger) do
+  defp read_line(["tombstone", id, "retired_after", release, "reason", reason], at, ledger) do
     with {:ok, id} <- number(id, at, "region"),
          {:ok, reason} <- retirement(reason, at) do
       {:ok,
        %{
          ledger
-         | tombstones: Map.put(ledger.tombstones, id, %{retired_in: release, reason: reason}),
+         | tombstones: Map.put(ledger.tombstones, id, %{retired_after: release, reason: reason}),
            order: ledger.order ++ [id]
        }}
     end
   end
 
-  defp read_line(["split", from, "into", into, "in", release], at, ledger) do
+  defp read_line(["split", from, "into", into, "after", release], at, ledger) do
     with {:ok, from} <- number(from, at, "region"),
          {:ok, into} <- number_list(into, at, "region") do
-      split = %{from: from, into: into, in_release: release}
+      split = %{from: from, into: into, after: release}
       {:ok, %{ledger | splits: ledger.splits ++ [split]}}
     end
   end
 
-  defp read_line(["merge", from, "into", into, "in", release], at, ledger) do
+  defp read_line(["merge", from, "into", into, "after", release], at, ledger) do
     with {:ok, from} <- number_list(from, at, "region"),
          {:ok, into} <- number(into, at, "region") do
-      merge = %{from: from, into: into, in_release: release}
+      merge = %{from: from, into: into, after: release}
       {:ok, %{ledger | merges: ledger.merges ++ [merge]}}
     end
   end
@@ -337,17 +341,17 @@ defmodule Arena.World.RegionLedger do
 
     stones =
       for {id, stone} <- Enum.sort_by(ledger.tombstones, &elem(&1, 0)) do
-        "tombstone #{id} retired_in #{stone.retired_in} reason #{stone.reason}"
+        "tombstone #{id} retired_after #{stone.retired_after} reason #{stone.reason}"
       end
 
     splits =
       for split <- ledger.splits do
-        "split #{split.from} into #{Enum.join(split.into, ",")} in #{split.in_release}"
+        "split #{split.from} into #{Enum.join(split.into, ",")} after #{split.after}"
       end
 
     merges =
       for merge <- ledger.merges do
-        "merge #{Enum.join(merge.from, ",")} into #{merge.into} in #{merge.in_release}"
+        "merge #{Enum.join(merge.from, ",")} into #{merge.into} after #{merge.after}"
       end
 
     Enum.join(header ++ actives ++ stones ++ splits ++ merges, "\n") <> "\n"

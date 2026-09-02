@@ -65,10 +65,15 @@ pub struct Active {
     pub maps: Vec<MapId>,
 }
 
-/// A spent id, and the release that spent it.
+/// A spent id, and the release *after* which it was spent.
+///
+/// The parent's hash, never this release's. The ledger is an input to the topology content hash,
+/// so a tombstone naming the hash it is part of would make that hash depend on itself — there is
+/// no order in which such a file can be written. "Retired after A" is a fact about the past, is
+/// known while B is still compiling, and lets B compute its own hash the ordinary way.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tombstone {
-    pub retired_in: String,
+    pub retired_after: String,
     pub reason: Retirement,
 }
 
@@ -77,7 +82,8 @@ pub struct Tombstone {
 pub struct Split {
     pub from: RegionId,
     pub into: Vec<RegionId>,
-    pub in_release: String,
+    /// The parent release, for the reason [`Tombstone::retired_after`] gives.
+    pub after: String,
 }
 
 /// Several authorities becoming one.
@@ -85,7 +91,8 @@ pub struct Split {
 pub struct Merge {
     pub from: Vec<RegionId>,
     pub into: RegionId,
-    pub in_release: String,
+    /// The parent release, for the reason [`Tombstone::retired_after`] gives.
+    pub after: String,
 }
 
 /// Why a ledger is not one.
@@ -201,7 +208,7 @@ impl RegionLedger {
                     order.push(RegionId(id));
                     ledger.active.insert(RegionId(id), Active { space: WorldSpaceId(space), maps });
                 }
-                ["tombstone", id, "retired_in", release, "reason", reason] => {
+                ["tombstone", id, "retired_after", release, "reason", reason] => {
                     let id = number_at(id, at, "region")?;
                     let reason = Retirement::parse(reason).ok_or_else(|| {
                         LedgerFault::Unreadable(format!("line {at}: reason {reason:?}"))
@@ -209,23 +216,23 @@ impl RegionLedger {
                     order.push(RegionId(id));
                     ledger.tombstones.insert(
                         RegionId(id),
-                        Tombstone { retired_in: (*release).to_string(), reason },
+                        Tombstone { retired_after: (*release).to_string(), reason },
                     );
                 }
-                ["split", from, "into", into, "in", release] => {
+                ["split", from, "into", into, "after", release] => {
                     let from = number_at(from, at, "region")?;
                     ledger.splits.push(Split {
                         from: RegionId(from),
                         into: region_list(into, at)?,
-                        in_release: (*release).to_string(),
+                        after: (*release).to_string(),
                     });
                 }
-                ["merge", from, "into", into, "in", release] => {
+                ["merge", from, "into", into, "after", release] => {
                     let into = number_at(into, at, "region")?;
                     ledger.merges.push(Merge {
                         from: region_list(from, at)?,
                         into: RegionId(into),
-                        in_release: (*release).to_string(),
+                        after: (*release).to_string(),
                     });
                 }
                 _ => return Err(LedgerFault::Unreadable(format!("line {at}: {line:?}"))),
@@ -408,9 +415,9 @@ impl RegionLedger {
 
         for (id, stone) in &self.tombstones {
             out.push_str(&format!(
-                "tombstone {} retired_in {} reason {}\n",
+                "tombstone {} retired_after {} reason {}\n",
                 id.0,
-                stone.retired_in,
+                stone.retired_after,
                 stone.reason.name()
             ));
         }
@@ -418,20 +425,20 @@ impl RegionLedger {
         for split in &self.splits {
             let into: Vec<String> = split.into.iter().map(|id| id.0.to_string()).collect();
             out.push_str(&format!(
-                "split {} into {} in {}\n",
+                "split {} into {} after {}\n",
                 split.from.0,
                 into.join(","),
-                split.in_release
+                split.after
             ));
         }
 
         for merge in &self.merges {
             let from: Vec<String> = merge.from.iter().map(|id| id.0.to_string()).collect();
             out.push_str(&format!(
-                "merge {} into {} in {}\n",
+                "merge {} into {} after {}\n",
                 from.join(","),
                 merge.into.0,
-                merge.in_release
+                merge.after
             ));
         }
 

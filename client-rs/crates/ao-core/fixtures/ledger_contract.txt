@@ -36,14 +36,24 @@
 #   format 1
 #   next_region_id <u32>
 #   active <region-id> space <world-space-id> maps <sorted-comma-separated-map-ids>
-#   tombstone <region-id> retired_in <topology-hash> reason <removed|split|merge>
-#   split <old-region-id> into <sorted-new-region-ids> in <topology-hash>
-#   merge <sorted-old-region-ids> into <new-region-id> in <topology-hash>
+#   tombstone <region-id> retired_after <parent-topology-hash> reason <removed|split|merge>
+#   split <old-region-id> into <sorted-new-region-ids> after <parent-topology-hash>
+#   merge <sorted-old-region-ids> into <new-region-id> after <parent-topology-hash>
+#
+# A release token names the release a change came *after*, never the release being built. The
+# ledger is an input to the topology content hash, so a tombstone naming the hash it is part of
+# would make that hash depend on itself -- there is no order in which such a file can be written.
+# "Retired after A" is a fact about the past, is known while B is still being compiled, and lets
+# B compute its own hash the ordinary way.
+#
+# The token must be a real topology hash: sixteen lowercase hex characters, the same form
+# `TopologyVersion::from_manifest_hash` accepts. A release token that is not one names no
+# release, and a history whose dates are unparseable is not a history.
 #
 # ---------------------------------------------------------------------------------------
 # The ordinary ledger: two live authorities, one spent id, and the split that spent it.
 # ---------------------------------------------------------------------------------------
-ledger ordinary = format 1 | next_region_id 4 | active 2 space 199 maps 330 | active 3 space 199 maps 269 | tombstone 1 retired_in 3e6df36b27c82aab reason split | split 1 into 2,3 in 3e6df36b27c82aab
+ledger ordinary = format 1 | next_region_id 4 | active 2 space 199 maps 330 | active 3 space 199 maps 269 | tombstone 1 retired_after 3e6df36b27c82aab reason split | split 1 into 2,3 after 3e6df36b27c82aab
 
 valid ordinary -> ok
 owner ordinary 199 330 -> 2
@@ -108,7 +118,7 @@ valid ahead -> past-high-water 5
 
 # A tombstone is permanent. Reusing the id gives one name to two authorities separated only
 # by time, which is precisely what "stable across topology releases" forbids.
-ledger revived = format 1 | next_region_id 2 | active 1 space 199 maps 330 | tombstone 1 retired_in 3e6df36b27c82aab reason removed
+ledger revived = format 1 | next_region_id 2 | active 1 space 199 maps 330 | tombstone 1 retired_after 3e6df36b27c82aab reason removed
 valid revived -> reused 1
 
 # Maps out of order. The ledger is compared byte for byte across releases, so it has exactly
@@ -123,27 +133,27 @@ valid nothing -> empty 1
 
 # A split whose old id is still live. The disposition says 1 became 2 and 3; if 1 is also
 # active then the ledger records both that it ended and that it did not.
-ledger halfsplit = format 1 | next_region_id 4 | active 1 space 199 maps 330 | active 2 space 199 maps 269 | active 3 space 199 maps 274 | split 1 into 2,3 in 3e6df36b27c82aab
+ledger halfsplit = format 1 | next_region_id 4 | active 1 space 199 maps 330 | active 2 space 199 maps 269 | active 3 space 199 maps 274 | split 1 into 2,3 after 3e6df36b27c82aab
 valid halfsplit -> dangling-split 1
 
 # A split whose old id was retired for a different reason. The tombstone and the disposition
 # must tell the same story, or the history explains a change that never happened.
-ledger mislabelled = format 1 | next_region_id 4 | active 2 space 199 maps 330 | active 3 space 199 maps 269 | tombstone 1 retired_in 3e6df36b27c82aab reason removed | split 1 into 2,3 in 3e6df36b27c82aab
+ledger mislabelled = format 1 | next_region_id 4 | active 2 space 199 maps 330 | active 3 space 199 maps 269 | tombstone 1 retired_after 3e6df36b27c82aab reason removed | split 1 into 2,3 after 3e6df36b27c82aab
 valid mislabelled -> dangling-split 1
 
 # A split into an id that does not exist. The new authority is named and never allocated.
-ledger nowhere = format 1 | next_region_id 4 | active 2 space 199 maps 330 | tombstone 1 retired_in 3e6df36b27c82aab reason split | split 1 into 2,3 in 3e6df36b27c82aab
+ledger nowhere = format 1 | next_region_id 4 | active 2 space 199 maps 330 | tombstone 1 retired_after 3e6df36b27c82aab reason split | split 1 into 2,3 after 3e6df36b27c82aab
 valid nowhere -> dangling-split 3
 
 # A merge with an input still live. Region 1 owns a map the merged authority does not, so this
 # case fails for the disposition alone -- giving 1 and 3 a map in common would have made it a
 # duplicate-map case instead, and it would have passed while testing the wrong rule.
-ledger halfmerge = format 1 | next_region_id 4 | active 1 space 199 maps 274 | active 3 space 199 maps 269,330 | tombstone 2 retired_in 3e6df36b27c82aab reason merge | merge 1,2 into 3 in 3e6df36b27c82aab
+ledger halfmerge = format 1 | next_region_id 4 | active 1 space 199 maps 274 | active 3 space 199 maps 269,330 | tombstone 2 retired_after 3e6df36b27c82aab reason merge | merge 1,2 into 3 after 3e6df36b27c82aab
 valid halfmerge -> dangling-merge 1
 
 # And a merge into an id that does not exist.
 
-ledger mergenowhere = format 1 | next_region_id 3 | tombstone 1 retired_in 3e6df36b27c82aab reason merge | tombstone 2 retired_in 3e6df36b27c82aab reason merge | merge 1,2 into 3 in 3e6df36b27c82aab
+ledger mergenowhere = format 1 | next_region_id 3 | tombstone 1 retired_after 3e6df36b27c82aab reason merge | tombstone 2 retired_after 3e6df36b27c82aab reason merge | merge 1,2 into 3 after 3e6df36b27c82aab
 valid mergenowhere -> dangling-merge 3
 
 # A format this compiler does not know. Reading a newer ledger with older rules is how a
